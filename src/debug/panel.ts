@@ -124,6 +124,8 @@ export class DebugPanel {
     set visible(v: boolean) {
         this._visible = v;
         this.el.style.display = v ? '' : 'none';
+        // the HUD and the bottom dock lay themselves out around an open panel (style.css)
+        document.body.classList.toggle('debug-open', v);
         if (v) this.sync();
     }
 }

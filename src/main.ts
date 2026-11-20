@@ -447,6 +447,11 @@ hud.innerHTML = `
   <div class="hud-help" id="hud-help"></div>
   <div class="hud-prompt" id="hud-prompt"></div>`;
 document.body.append(hud);
+// bottom dock: voxel-size box (left) and debug chip (right). Its measured height keeps the debug
+// panel above it on every screen, so the boxes never overlap (portrait phones included).
+const dock = document.createElement('div');
+dock.className = 'ui-dock';
+document.body.append(dock);
 // ---- voxel size: a per-player quality setting, applied by reloading (sizes derive from it at load)
 const cellUi = document.createElement('div');
 cellUi.className = 'cell-size';
@@ -454,7 +459,7 @@ cellUi.innerHTML = `
   <label>Voxel size <input type="range" min="${CELL_SIZE_MIN_CM}" max="${CELL_SIZE_MAX_CM}" step="0.5" value="${cellCm}"><output>${cellCm.toFixed(1)} cm</output></label>
   <button type="button" disabled>Apply</button>
   <small>finer = sharper, slower to load</small>`;
-document.body.append(cellUi);
+dock.append(cellUi);
 const cellRange = cellUi.querySelector('input')!;
 const cellOut = cellUi.querySelector('output')!;
 const cellApply = cellUi.querySelector('button')!;
@@ -487,14 +492,27 @@ chip.addEventListener('click', (e) => {
     e.stopPropagation();
     panel.visible = !panel.visible;
 });
-document.body.append(chip);
+dock.append(chip);
+
+// publish the HUD and dock sizes as CSS variables; the panel layout is computed from them
+const layoutVars = () => {
+    const root = document.documentElement.style;
+    root.setProperty('--hud-bottom', `${Math.ceil(hud.getBoundingClientRect().bottom)}px`);
+    root.setProperty('--dock-h', `${Math.ceil(dock.getBoundingClientRect().height)}px`);
+};
+new ResizeObserver(layoutVars).observe(hud);
+new ResizeObserver(layoutVars).observe(dock);
+window.addEventListener('resize', layoutVars);
 
 function updateHud(): void {
     const help = document.getElementById('hud-help')!;
-    help.innerHTML =
+    // long help for keyboard screens, short help for narrow / touch screens (chosen in CSS)
+    const long =
         state.mode === 'orbit'
             ? 'Drag to orbit · right-drag to pan · wheel to zoom · <kbd>V</kbd> first person · <kbd>H</kbd> hide UI'
             : 'Click to look · <kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>G</kbd> carry plank · <kbd>Esc</kbd> release mouse · <kbd>V</kbd> orbit';
+    const short = state.mode === 'orbit' ? 'Drag to orbit · two fingers to pan and zoom' : 'Click to look · WASD move · V orbit';
+    help.innerHTML = `<span class="help-long">${long}</span><span class="help-short">${short}</span>`;
     crosshair.style.display = state.mode === 'firstPerson' && !state.uiHidden ? '' : 'none';
 }
 
@@ -502,6 +520,7 @@ function setUiHidden(h: boolean): void {
     state.uiHidden = h;
     document.body.classList.toggle('ui-hidden', h);
     updateHud();
+    layoutVars();
 }
 
 document.addEventListener('pointerlockchange', () => {
