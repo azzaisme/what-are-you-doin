@@ -42,6 +42,7 @@ export interface GrabForceInput {
     anchor: Vec3Like;
     anchorVelocity: Vec3Like;
     target: Vec3Like;
+    /** Velocity of the hold point itself (moves with the eye and swings with the view). */
     targetVelocity: Vec3Like;
 }
 
@@ -68,17 +69,32 @@ export function grabForce(i: GrabForceInput, out: GrabForceResult, maxForce: num
     const vx = i.targetVelocity.x - i.anchorVelocity.x;
     const vy = i.targetVelocity.y - i.anchorVelocity.y;
     const vz = i.targetVelocity.z - i.anchorVelocity.z;
-    let fx = i.mass * (k * ex + c * vx);
-    let fy = i.mass * (k * ey + c * vy + i.gravity);
-    let fz = i.mass * (k * ez + c * vz);
+    // spring-damper part and gravity support, combined under the cap with support taking priority:
+    // a saturated grab still holds the object up instead of letting it sag while it catches up
+    const sx = i.mass * (k * ex + c * vx);
+    const sy = i.mass * (k * ey + c * vy);
+    const sz = i.mass * (k * ez + c * vz);
+    const g = i.mass * i.gravity;
+    let fx = sx;
+    let fy = sy + g;
+    let fz = sz;
     const mag = Math.hypot(fx, fy, fz);
     out.requested = mag;
     out.saturated = mag > maxForce;
     if (out.saturated) {
-        const s = maxForce / mag;
-        fx *= s;
-        fy *= s;
-        fz *= s;
+        if (g >= maxForce) {
+            fx = 0;
+            fy = maxForce;
+            fz = 0;
+        } else {
+            // largest s in [0, 1] with |G + s S| = maxForce
+            const ss = sx * sx + sy * sy + sz * sz;
+            const gs = g * sy;
+            const s = ss > 0 ? Math.max(0, Math.min(1, (-gs + Math.sqrt(Math.max(0, gs * gs - ss * (g * g - maxForce * maxForce)))) / ss)) : 0;
+            fx = s * sx;
+            fy = g + s * sy;
+            fz = s * sz;
+        }
     }
     if (!Number.isFinite(fx + fy + fz)) fx = fy = fz = 0;
     out.fx = fx;

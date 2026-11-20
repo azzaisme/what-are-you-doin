@@ -719,6 +719,7 @@ function collectStats() {
             linClamps: sim.physics.stats.linClamps,
             angClamps: sim.physics.stats.angClamps,
             recovered: sim.physics.stats.recovered,
+            releaseClamps: sim.physics.stats.releaseClamps,
             player: { x: sim.player.x, y: sim.player.y, z: sim.player.z, grounded: sim.player.grounded }
         },
         build: { workerBuildMs: build.buildMs, workerStaticMeshMs: build.staticMeshMs, staticUploadMs, columns: build.columns, trees: build.trees }
@@ -746,7 +747,7 @@ function statsText(): string {
         `  worker total ${f(v.totalMs)}   main-thread upload ${f(v.uploadMs)}`,
         `physics  ${s.physics.props}  tick ms avg ${f(s.physics.tickMsAvg)} p95 ${f(s.physics.tickMsP95)} max ${f(s.physics.tickMsMax)}`,
         `  bodies active ${s.physics.activeBodies}/${s.physics.enabledBodies}  held ${s.physics.holding < 0 ? '-' : s.physics.holding}  force ${f(s.physics.grabForce, 0)} N  err ${f(s.physics.grabError)} m`,
-        `  clamps lin ${s.physics.linClamps} ang ${s.physics.angClamps}  recovered ${s.physics.recovered}  grab breaks ${s.physics.grabBreaks}`,
+        `  clamps lin ${s.physics.linClamps} ang ${s.physics.angClamps}  release ${s.physics.releaseClamps}  recovered ${s.physics.recovered}  breaks ${s.physics.grabBreaks}`,
         `heap     ${s.heapMB === null ? 'n/a' : f(s.heapMB, 1) + ' MB'}  dropped ticks ${s.droppedTicks}`
     ].join('\n');
 }
@@ -794,6 +795,11 @@ window.__riverLab = {
     /** Merges fields into the next player command (grab / throw / move edges for tests). */
     input: (c: Record<string, unknown>) => fpInput.inject(c),
     player: () => ({ ...sim.player, holding: sim.physics.heldId }),
+    /** Sets the first-person look angles (as mouse look would). */
+    look(yaw: number, pitch: number) {
+        fpInput.yaw = yaw;
+        fpInput.pitch = pitch;
+    },
     hideUi: (h: boolean) => setUiHidden(h),
     showPanel: (v: boolean) => (panel.visible = v),
     get state() {

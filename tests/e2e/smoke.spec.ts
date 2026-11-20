@@ -17,7 +17,11 @@ type Lab = {
     dynamicHash(): Promise<number>;
     voxelIdle(): boolean;
     setFirstPerson(x: number, z: number, yaw: number, pitch: number): void;
-    entities(): Record<string, { visible: boolean }>;
+    entities(): Record<string, { visible: boolean; x: number; y: number; z: number }>;
+    input(c: Record<string, unknown>): void;
+    action(id: string): void;
+    player(): { x: number; y: number; z: number; holding: number; grounded: boolean };
+    look(yaw: number, pitch: number): void;
 };
 
 const IGNORED = [/GPU stall due to ReadPixels/, /GL Driver Message/, /Powered by PlayCanvas/, /favicon/i, /status of 404/];
@@ -68,8 +72,11 @@ test('boots the River Lab with no console errors and a non-blank frame', async (
     expect(s.voxel.objects).toBe(7);
     expect(s.voxel.rejected).toBe(0);
     // feet and wheels may dip a cell into the ground at fine cell sizes; the dynamic cell wins and
-    // the static cell reappears afterwards (compositor policy). Large counts would mean a sinking prop.
-    expect(s.voxel.dynStaticOverlaps).toBeLessThan(50);
+    // the static cell reappears afterwards (compositor policy). Physics props rest on the analytic
+    // terrain, which lies 0-1 cell below the voxel ground surface, so resting props share at most one
+    // layer of cells with the ground (measured 123 at 5 cm; the plank's footprint alone is ~190).
+    // Several layers (a sinking prop) would be well over this bound.
+    expect(s.voxel.dynStaticOverlaps).toBeLessThan(400);
     expect(problems).toEqual([]);
 });
 
@@ -211,5 +218,49 @@ test('UI boxes never overlap: portrait phone, portrait tablet, desktop and lands
     expect(await page.locator('.hud').isVisible()).toBe(false);
     await page.keyboard.press('KeyH');
     expect(await page.locator('.cell-size').isVisible()).toBe(true);
+    expect(problems).toEqual([]);
+});
+
+test('physics sandbox: grab and carry the plank, launch the ragdoll, switch to scripted props', async ({ page }) => {
+    const problems = await boot(page, '?t=0.01&quality=low&noui#cell100');
+    await lab(page, (l) => l.action('pause')); // resume: the sandbox runs live from here
+    await page.waitForTimeout(3000); // props settle
+    const plank = (await lab(page, (l) => l.entities())).plank;
+    // stand 1.6 m behind the plank (towards +Z) facing it, and aim the crosshair at it
+    await page.evaluate(([x, z]) => (window as unknown as { __riverLab: Lab }).__riverLab.setFirstPerson(x, z + 1.6, 0, -0.3), [plank.x, plank.z]);
+    await lab(page, (l) => l.set('carry', false));
+    await page.waitForTimeout(1500);
+    const p = await lab(page, (l) => l.player());
+    expect(p.grounded).toBe(true);
+    const pitch = -Math.atan2(p.y + 1.22 - plank.y, Math.hypot(plank.x - p.x, plank.z - p.z));
+    await page.evaluate(([x, z, pitch]) => (window as unknown as { __riverLab: Lab }).__riverLab.setFirstPerson(x, z + 1.6, 0, pitch), [plank.x, plank.z, pitch]);
+    await page.waitForTimeout(500);
+    await lab(page, (l) => l.input({ grab: true }));
+    await page.waitForTimeout(3000);
+    expect((await lab(page, (l) => l.player())).holding).toBe(4);
+    // look ahead: the hold point follows the view, so the plank is lifted to chest height
+    await lab(page, (l) => l.look(0, 0));
+    // lifted off the ground (software GL runs ~1 fps, so wait on sim progress, not wall time)
+    await page.waitForFunction((y0) => (window as unknown as { __riverLab: Lab }).__riverLab.entities().plank.y > y0 + 0.3, plank.y, { timeout: 120_000 });
+    expect((await lab(page, (l) => l.player())).holding).toBe(4);
+    await lab(page, (l) => l.input({ throw: true }));
+    await page.waitForTimeout(500);
+    expect((await lab(page, (l) => l.player())).holding).toBe(-1);
+
+    await lab(page, (l) => l.action('ragdoll'));
+    await page.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.entities()['dummy-body'].visible, null, { timeout: 60_000 });
+    await page.waitForTimeout(3000);
+    const e = await lab(page, (l) => l.entities());
+    expect(e['dummy-body'].visible).toBe(true);
+    let s = await lab(page, (l) => l.stats());
+    expect(s.voxel.objects).toBeGreaterThanOrEqual(14);
+    expect(s.voxel.rejected).toBe(0);
+
+    await lab(page, (l) => l.set('props', 'scripted'));
+    await lab(page, (l) => l.seek(5));
+    await idle(page);
+    s = await lab(page, (l) => l.stats());
+    expect((await lab(page, (l) => l.entities())).plank.y).toBeGreaterThan(1.2); // the hovering specimen
+    expect(s.voxel.objects).toBeGreaterThanOrEqual(7); // Epic 1 props (plus the comfort plank if carried)
     expect(problems).toEqual([]);
 });

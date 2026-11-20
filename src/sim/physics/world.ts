@@ -87,6 +87,14 @@ export interface PhysBody {
     enabled: boolean;
 }
 
+/**
+ * After a release, the body's speed is bounded for this many ticks to max(RELEASE_MIN_CAP, 1.2 x its
+ * speed at release, plus any throw). A grab that snags can leave a body pressed into a tree or rock;
+ * without this, Rapier's penetration recovery could fling it (measured: a plank at 21 m/s).
+ */
+export const RELEASE_GUARD_TICKS = 30;
+export const RELEASE_MIN_CAP = 8;
+
 export interface PhysicsStats {
     /** Wall time of the last Rapier step and of everything this adapter does around it (ms). */
     stepMs: number;
@@ -98,6 +106,8 @@ export interface PhysicsStats {
     angClamps: number;
     /** Bodies put back after falling out of the world (cumulative). */
     recovered: number;
+    /** Post-release speed bounds applied (cumulative; see RELEASE_GUARD_TICKS). */
+    releaseClamps: number;
     /** Grab telemetry. */
     holding: number;
     grabError: number;
@@ -145,7 +155,7 @@ export class PhysicsWorld {
     readonly world: RAPIER.World;
     readonly bodies = new Map<number, PhysBody>();
     private readonly byCollider = new Map<number, PhysBody>();
-    readonly stats: PhysicsStats = { stepMs: 0, tickMs: 0, activeBodies: 0, enabledBodies: 0, linClamps: 0, angClamps: 0, recovered: 0, holding: -1, grabError: 0, grabForce: 0, grabSaturated: false, maxHeldSpeed: 0, grabBreaks: 0 };
+    readonly stats: PhysicsStats = { stepMs: 0, tickMs: 0, activeBodies: 0, enabledBodies: 0, linClamps: 0, angClamps: 0, recovered: 0, releaseClamps: 0, holding: -1, grabError: 0, grabForce: 0, grabSaturated: false, maxHeldSpeed: 0, grabBreaks: 0 };
     readonly character: CharacterState = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, grounded: false };
 
     private player: RAPIER.RigidBody | null = null;
@@ -158,6 +168,12 @@ export class PhysicsWorld {
     private heldLocal = { x: 0, y: 0, z: 0 };
     private holdDist = 1.5;
     private stretchTime = 0;
+    // a just-released body may be pressed into geometry (a snag); bound the energy it can pick up
+    private released: PhysBody | null = null;
+    private releasedTicks = 0;
+    private releasedCap = 0;
+    private prevTarget = { x: 0, y: 0, z: 0 };
+    private hasPrevTarget = false;
 
     constructor() {
         this.world = new RAPIER.World({ x: 0, y: -GRAVITY, z: 0 });
@@ -437,6 +453,7 @@ export class PhysicsWorld {
         this.held = pb;
         this.holdDist = clampHold(holdDistance);
         this.stretchTime = 0;
+        this.hasPrevTarget = false;
         pb.body.setAngularDamping(GRAB.heldAngularDamping);
         for (const c of pb.colliders) c.setCollisionGroups(groups(LAYER.held, ALL & ~LAYER.player));
         pb.body.wakeUp();
@@ -454,6 +471,10 @@ export class PhysicsWorld {
         pb.body.setAngularDamping(pb.baseAngularDamping);
         for (const c of pb.colliders) c.setCollisionGroups(groups(LAYER.prop, ALL));
         this.held = null;
+        const v = pb.body.linvel();
+        this.released = pb;
+        this.releasedTicks = RELEASE_GUARD_TICKS;
+        this.releasedCap = Math.max(RELEASE_MIN_CAP, 1.2 * Math.hypot(v.x, v.y, v.z));
         this.stats.holding = -1;
         this.stats.grabError = 0;
         this.stats.grabForce = 0;
@@ -468,6 +489,8 @@ export class PhysicsWorld {
         const d = viewDir(yaw, pitch, _dir);
         const j = throwImpulse(pb.body.mass());
         pb.body.applyImpulse({ x: d.x * j, y: d.y * j + j * 0.15, z: d.z * j }, true);
+        // the throw itself is allowed: raise the post-release cap by the throw speed
+        this.releasedCap += j / Math.max(pb.body.mass(), 1e-3);
     }
 
     adjustHold(delta: number): void {
@@ -475,7 +498,7 @@ export class PhysicsWorld {
     }
 
     /** Applies this tick's bounded grab force. Call once per tick before step(). */
-    applyGrab(eye: Vec3Like, yaw: number, pitch: number, eyeVel: Vec3Like): void {
+    applyGrab(eye: Vec3Like, yaw: number, pitch: number): void {
         const pb = this.held;
         if (!pb) return;
         const d = viewDir(yaw, pitch, _dir);
@@ -488,9 +511,18 @@ export class PhysicsWorld {
         rotate(q, this.heldLocal.x, this.heldLocal.y, this.heldLocal.z, _v);
         const anchor = { x: t.x + _v.x, y: t.y + _v.y, z: t.z + _v.z };
         const av = b.velocityAtPoint(anchor);
-        _tv.x = eyeVel.x;
-        _tv.y = eyeVel.y;
-        _tv.z = eyeVel.z;
+        // the hold point's own velocity: walking plus swinging round with the view
+        if (this.hasPrevTarget) {
+            _tv.x = (_target.x - this.prevTarget.x) / SIM_DT;
+            _tv.y = (_target.y - this.prevTarget.y) / SIM_DT;
+            _tv.z = (_target.z - this.prevTarget.z) / SIM_DT;
+        } else {
+            _tv.x = _tv.y = _tv.z = 0;
+        }
+        this.prevTarget.x = _target.x;
+        this.prevTarget.y = _target.y;
+        this.prevTarget.z = _target.z;
+        this.hasPrevTarget = true;
         const f = grabForce({ mass: b.mass(), gravity: GRAVITY, anchor, anchorVelocity: av, target: _target, targetVelocity: _tv }, _force);
         b.applyImpulseAtPoint({ x: f.fx * SIM_DT, y: f.fy * SIM_DT, z: f.fz * SIM_DT }, anchor, true);
         const s = this.stats;
@@ -543,6 +575,18 @@ export class PhysicsWorld {
                 this.place(pb.id, pb.spawn);
                 s.recovered++;
             }
+        }
+        if (this.released && this.releasedTicks > 0) {
+            this.releasedTicks--;
+            const b = this.released.body;
+            const lv = b.linvel();
+            const ls = Math.hypot(lv.x, lv.y, lv.z);
+            if (ls > this.releasedCap) {
+                const k = this.releasedCap / ls;
+                b.setLinvel({ x: lv.x * k, y: lv.y * k, z: lv.z * k }, true);
+                s.releaseClamps++;
+            }
+            if (this.releasedTicks === 0) this.released = null;
         }
         s.activeBodies = active;
         s.enabledBodies = enabled;

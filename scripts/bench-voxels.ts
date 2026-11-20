@@ -1,7 +1,7 @@
 /**
  * Headless CPU benchmark of the voxel reconstruction path (no GPU upload): fixed-step sim ->
  * interpolated sample at voxel time -> pose evaluation -> rasterize -> resolve -> mesh dirty units.
- * Usage: node scripts/bench-voxels.ts [minutes=10] [hz=20]
+ * Usage: node scripts/bench-voxels.ts [minutes=10] [hz=20]   (PROPS=scripted for the Epic 1 motion)
  * Runs every policy and stress level briefly, then one long run for memory/allocation stability.
  */
 import os from 'node:os';
@@ -9,6 +9,7 @@ import os from 'node:os';
 import { buildRiverLab } from '../src/levels/river-lab.ts';
 import { SIM_DT } from '../src/sim/clock.ts';
 import { LabSim } from '../src/sim/lab-sim.ts';
+import { initPhysics } from '../src/sim/physics/world.ts';
 import { ANIM_MAX } from '../src/sim/snapshots.ts';
 import { DYNAMIC_REGION, STATIC_REGION, collectDirty, unpackRegion } from '../src/voxels/dirty.ts';
 import type { DirtyWork } from '../src/voxels/dirty.ts';
@@ -20,6 +21,8 @@ import type { SamplingPolicy } from '../src/voxels/rasterizer.ts';
 import { VoxelWorld  } from '../src/voxels/world.ts';
 import type { PartInstance } from '../src/voxels/world.ts';
 
+await initPhysics();
+const PROPS = process.env.PROPS === 'scripted' ? 'scripted' : 'physics';
 const minutes = Number(process.argv[2] ?? 10);
 const hz = Number(process.argv[3] ?? 20);
 
@@ -46,7 +49,7 @@ function setup() {
         return { quads, staticRegions: work.staticRegions.length, dynChunks: work.dynamicRegions.length };
     };
     meshAll(); // initial static meshing
-    const sim = new LabSim();
+    const sim = new LabSim({ props: PROPS });
     const tracked = sim.entities
         .filter((e) => e.asset.parts.length > 0)
         .map((e) => {
@@ -108,6 +111,7 @@ function run(policy: SamplingPolicy, stress: number, frames: number, sampleMemor
         }
         if (f === 200) chunksAt = world.chunkCount;
     }
+    sim.physics.free();
     const n = total.length;
     return {
         policy,
@@ -125,7 +129,7 @@ function run(policy: SamplingPolicy, stress: number, frames: number, sampleMemor
     };
 }
 
-console.log(`CPU: ${os.cpus()[0].model} x${os.cpus().length}, node ${process.version}, voxel ${hz} Hz`);
+console.log(`CPU: ${os.cpus()[0].model} x${os.cpus().length}, node ${process.version}, voxel ${hz} Hz, props ${PROPS}`);
 const results = [];
 for (const policy of process.env.QUICK ? ['coverage50' as SamplingPolicy] : SAMPLING_POLICIES) results.push(run(policy, 0, 300));
 for (const stress of process.env.QUICK ? [] : [10, 25]) results.push(run('coverage50', stress, 300));

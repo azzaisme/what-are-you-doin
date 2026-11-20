@@ -214,9 +214,6 @@ export class LabSim {
             this.prevFp = this.fpActive;
         }
 
-        const eyeX = p.x;
-        const eyeY = p.y + EYE_HEIGHT;
-        const eyeZ = p.z;
         if (this.fpActive) {
             const run = cmd.sprint ? CHARACTER.run : CHARACTER.walk;
             let mx = cmd.moveX;
@@ -257,8 +254,7 @@ export class LabSim {
                     if (pw.heldId >= 0) pw.release();
                     else pw.tryGrab(eye, cmd.yaw, cmd.pitch);
                 }
-                const ev = { x: (eye.x - eyeX) / SIM_DT, y: (eye.y - eyeY) / SIM_DT, z: (eye.z - eyeZ) / SIM_DT };
-                pw.applyGrab(eye, cmd.yaw, cmd.pitch, ev);
+                pw.applyGrab(eye, cmd.yaw, cmd.pitch);
             }
         }
 

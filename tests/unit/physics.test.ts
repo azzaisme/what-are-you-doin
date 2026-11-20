@@ -8,7 +8,7 @@ import { PLAY_AREA, buildLabPhysics } from '../../src/sim/lab-physics.ts';
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
 import { GRAB, clampHold, grabForce, throwImpulse, viewDir } from '../../src/sim/physics/grab.ts';
 import type { GrabForceResult } from '../../src/sim/physics/grab.ts';
-import { PhysicsWorld, initPhysics } from '../../src/sim/physics/world.ts';
+import { PhysicsWorld, RELEASE_MIN_CAP, initPhysics } from '../../src/sim/physics/world.ts';
 
 beforeAll(() => initPhysics());
 
@@ -238,6 +238,20 @@ describe('physics adapter', () => {
         expect(s.physics.heldId).toBe(s.cube.id);
         s.step(cmd(311, { action: ACTION_DROP, pitch: p2 }));
         expect(s.physics.heldId).toBe(-1);
+    });
+
+    it('a just-released body cannot be flung by penetration recovery (bounded release speed)', () => {
+        const s = fpSim(0, 8, 0);
+        s.step(cmd(100, { carry: true }));
+        for (let n = 0; n < 30; n++) s.step(cmd(101 + n, { carry: true }));
+        s.step(cmd(200, { carry: false }));
+        // simulate an ejection impulse right after release
+        const b = s.physics.bodies.get(s.held.id)!.body;
+        b.setLinvel({ x: 0, y: 0, z: -40 }, true);
+        s.step(cmd(201));
+        const v = b.linvel();
+        expect(Math.hypot(v.x, v.y, v.z)).toBeLessThanOrEqual(RELEASE_MIN_CAP * 1.5 + 1e-6);
+        expect(s.physics.stats.releaseClamps).toBeGreaterThan(0);
     });
 
     it('G puts the carry plank in your grip in front of you; releasing G drops it', () => {
