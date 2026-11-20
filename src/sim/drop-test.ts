@@ -7,15 +7,16 @@
  * exactly as the voxel worker would; nothing flows back.
  */
 
-import { ACTION_DROP_TEST, neutralCommand } from './commands.ts';
-import { LabSim } from './lab-sim.ts';
+import { CHUNK_BITS, CHUNK_MASK, CHUNK_VOLUME } from '../voxels/grid.ts';
 import { pose } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
 import { createRasterStats } from '../voxels/rasterizer.ts';
 import type { SamplingPolicy } from '../voxels/rasterizer.ts';
 import { VoxelWorld } from '../voxels/world.ts';
 
-import { CHUNK_BITS, CHUNK_MASK, CHUNK_VOLUME } from '../voxels/grid.ts';
+import { ACTION_DROP_TEST, neutralCommand } from './commands.ts';
+import { LabSim } from './lab-sim.ts';
+
 
 export interface DropFrame {
     tick: number;
