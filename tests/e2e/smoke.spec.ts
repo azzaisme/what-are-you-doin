@@ -22,11 +22,14 @@ type Lab = {
     action(id: string): void;
     player(): { x: number; y: number; z: number; holding: number; grounded: boolean };
     look(yaw: number, pitch: number): void;
+    level: string;
+    progress(): { goalReached: boolean; falls: number; recoveries: number; events: string[] };
+    placeProp(name: string, x: number, y: number, z: number, yaw?: number): boolean;
 };
 
 const IGNORED = [/GPU stall due to ReadPixels/, /GL Driver Message/, /Powered by PlayCanvas/, /favicon/i, /status of 404/];
 
-async function boot(page: Page, query = '?t=4&noui'): Promise<string[]> {
+async function boot(page: Page, query = '?level=lab&t=4&noui'): Promise<string[]> {
     const problems: string[] = [];
     page.on('console', (m) => {
         if ((m.type() === 'error' || m.type() === 'warning') && !IGNORED.some((r) => r.test(m.text()))) problems.push(`${m.type()}: ${m.text()}`);
@@ -133,7 +136,7 @@ test('first-person mode carries a voxelized plank', async ({ page }) => {
 });
 
 test('voxel size is a quality setting: #cell100 loads the 10 cm world', async ({ page }) => {
-    const problems = await boot(page, '?t=4&noui#cell100');
+    const problems = await boot(page, '?level=lab&t=4&noui#cell100');
     const s = await lab(page, (l) => l.stats());
     expect(s.cellCm).toBe(10);
     expect(s.staticCells).toBeGreaterThan(1_000_000);
@@ -222,7 +225,7 @@ test('UI boxes never overlap: portrait phone, portrait tablet, desktop and lands
 });
 
 test('physics sandbox: grab and carry the plank, launch the ragdoll, switch to scripted props', async ({ page }) => {
-    const problems = await boot(page, '?t=0.01&quality=low&noui#cell100');
+    const problems = await boot(page, '?level=lab&t=0.01&quality=low&noui#cell100');
     await lab(page, (l) => l.action('pause')); // resume: the sandbox runs live from here
     await page.waitForTimeout(3000); // props settle
     const plank = (await lab(page, (l) => l.entities())).plank;
@@ -262,5 +265,26 @@ test('physics sandbox: grab and carry the plank, launch the ragdoll, switch to s
     s = await lab(page, (l) => l.stats());
     expect((await lab(page, (l) => l.entities())).plank.y).toBeGreaterThan(1.2); // the hovering specimen
     expect(s.voxel.objects).toBeGreaterThanOrEqual(7); // Epic 1 props (plus the comfort plank if carried)
+    expect(problems).toEqual([]);
+});
+
+test('level 1, the Timber Yard: starts in first person with the objective, and the bucket delivery completes it', async ({ page }) => {
+    const problems = await boot(page, '?t=0.01&quality=low#cell100');
+    expect(await lab(page, (l) => l.level)).toBe('yard');
+    const st = await lab(page, (l) => l.state as unknown as { mode: string });
+    expect(st.mode).toBe('firstPerson');
+    await expect(page.locator('#hud-objective')).toContainText('bucket across the creek');
+    const s = await lab(page, (l) => l.stats());
+    // beaver, ute, bucket, six planks, two beams, three logs, the crate
+    expect(s.voxel.objects).toBe(15);
+    expect(s.voxel.rejected).toBe(0);
+    const g = await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid());
+    expect(g.misaligned).toBe(0);
+    // deliver the bucket by hand (teleport) and let the sim run
+    await lab(page, (l) => l.action('pause'));
+    await lab(page, (l) => l.placeProp('bucket', -1, 1.2, -7));
+    await page.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.progress().goalReached, null, { timeout: 120_000 });
+    await expect(page.locator('#hud-objective')).toHaveClass(/done/);
+    await expect(page.locator('.toast')).toContainText('delivered');
     expect(problems).toEqual([]);
 });

@@ -7,7 +7,9 @@
 This repository contains the project described in [`docs/GAME_DESIGN.md`](docs/GAME_DESIGN.md) up
 to its third gate: the project foundation (Epic 0), the River Lab visual technology demo (Epic 1)
 and the offline physical sandbox (Epic 2: Rapier physics, a first-person character, grab / carry /
-throw, a ragdoll dummy). No networking, construction or game loop yet; those are later epics.
+throw, a ragdoll dummy) — plus **level 1, the Timber Yard**: carry beams across a creek whose
+footbridge has collapsed and get the bucket to the far bank. No networking, fastening or driving
+yet; those are later epics.
 
 What the demo proves:
 
@@ -47,7 +49,9 @@ Query parameters (handy for comparisons and screenshots):
 | `?t=4.5` | start paused at an exact simulation time |
 | `?view=fp` | start in first person |
 | `?noui` | hide all UI |
-| `?props=scripted` | Epic 1 scripted prop motion instead of physics props (also in the debug panel) |
+| `?level=lab` | the River Lab test scene instead of level 1, the Timber Yard |
+| `?view=orbit` | start the Timber Yard in the orbit view instead of first person |
+| `?props=scripted` | River Lab only: Epic 1 scripted prop motion instead of physics props (also in the debug panel) |
 
 ## Controls
 
@@ -110,7 +114,8 @@ src/
   voxels/     engine-free core: grid contract, math, palette, volumes, rasterizer, world/compositor,
               mesher, dirty tracking
   assets/     beaver, ute, plank, log, bucket, test props (analytic volumes on small rigs)
-  levels/     River Lab terrain, trees, rocks, reeds (rasterized once into the static layer)
+  levels/     level descriptions (level.ts), the Timber Yard (level 1), the River Lab (test scene),
+              shared terrain rasterizer, pines and rocks
   sim/        fixed-step clock, voxel clock, snapshot ring, commands, lab simulation, entity catalogue,
               drop test; sim/physics: Rapier adapter (world, character, grab force law)
   workers/    voxel worker: owns the voxel world; static build, rasterize, composite, mesh

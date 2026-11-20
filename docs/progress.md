@@ -1,5 +1,44 @@
 # Progress log
 
+## Level 1 — the Timber Yard (2026-11-20, owner request after gate 2)
+
+Owner, after trying the gate 2 build ("this works"): set up the very first level, in first person.
+The design doc's first area is the **timber yard and shallow creek** (§3.1). Built ahead of the
+roadmap's Epic 3 (co-op networking) at the owner's request; uses only the systems that exist
+(physics, carry, throw, ragdoll). Sawmill, fastening, driving and co-op are later epics.
+
+- **Default level** (`?level=lab` for the River Lab test scene). Starts in first person at sunrise
+  in the yard, facing the creek; the objective is in the HUD.
+- **Layout:** gravel yard with a timber shed, a six-plank stack, two 3.2 m beams (36 kg, liftable
+  alone), a three-log pile (113 kg each, drag only), a crate, a saw bench (decoration until Epic 6),
+  the parked ute, a co-worker beaver, and the bucket on a stump. North: a steep-walled creek (water
+  0.85 m below the banks, 0.6 m deep) across the whole valley; the old footbridge has collapsed,
+  leaving stone abutments **2.6 m** apart. Beyond: a forest road climbing to the terraced ridge,
+  where the flower stands on the summit as the journey's landmark.
+- **Objective:** get the bucket to the flag on the far bank (it must rest there 0.5 s). The intended
+  solution is to carry the beams (and planks) across the gap and walk over. Throwing the bucket
+  across (it weighs 1.5 kg) is likely possible and not forbidden (freeform, §2.1), but untested.
+- **Recovery (§2.10):** falling into the creek puts you back on the last safe ground after 0.75 s;
+  a bucket lost in the creek returns to its stump after 1.5 s. Both show a message.
+- **Code:** levels are now data (`src/levels/level.ts`: terrain, layout, pieces, water, sun, spawn,
+  actors, prop placements, rules); the River Lab is one (identical static output: 1,140,431 cells
+  and 233,066 quads at 10 cm, as before). Shared terrain rasterizer, pines and rocks in
+  `levels/common.ts`. Static scenery pieces are both voxels and colliders. The character's autostep
+  now includes dynamic bodies, so laid beams can be walked onto.
+- **Tests:** 79 unit tests × 2 cell sizes = 158 pass (8 new for the level: build, gap geometry,
+  props at rest, creek fall recovery, walking across two laid beams, lifting a beam, objective once,
+  bucket recovery). Browser tests: existing ones pinned to `?level=lab`; new yard test (first
+  person, objective, 15 objects, grid invariant, delivery completes the objective with the toast).
+- **Cost (sandbox CPU, Node):** static build at 5 cm 5.1 s, 6.8 M cells, **1.79 M triangles**
+  (River Lab 1.49 M) after trimming trees and terracing the ridge and the upper forest (from 2.8 M).
+  At 10 cm: 0.57 M triangles, 348 drawables in the browser.
+- **Please try on the phone:** frame time at 5 cm in the yard (it has ~20 % more triangles than the
+  River Lab that ran at 60 fps).
+
+Known for this level: the sign board's lettering is abstract dots; the near abutment can look
+very bright in the low sun; resting props still sit up to one cell into the voxel ground (gate 2
+known issue 1); no fastening, so a beam bridge is only held by friction.
+
 ## Gate 2 — Epic 2 "Physical sandbox (offline)" (2026-11-20)
 
 **Status: built and verified to the extent this environment allows. Waiting on the owner to try it

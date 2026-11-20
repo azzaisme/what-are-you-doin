@@ -383,7 +383,7 @@ export const timberYardLevel: LevelDef = {
     build: buildTimberYard,
     // early sunrise over the creek
     sun: { elevation: 7, azimuth: 105 },
-    spawn: { x: 2.2, z: 8.2, yaw: 0.22, pitch: -0.06 },
+    spawn: { x: 1.2, z: 6.2, yaw: 0.12, pitch: -0.1 },
     orbitHome: { pos: [9, 4.2, 12], focus: [-1, 0.5, 0] },
     startFirstPerson: true,
     actors: { beaver: { mode: 'idle', pose: at(-6.3, YARD_Y, 7.4, 2.4) }, ute: { mode: 'parked', pose: at(-10.5, YARD_Y + 0.002, 4.6, Math.PI / 2 + 0.15) } },
