@@ -116,6 +116,16 @@ kbd {
     background: #0008;
 }
 
+/* with the debug panel open the prompt moves back into the HUD block, which stays clear of it */
+body.debug-open .hud-prompt:not(:empty) {
+    position: static;
+    transform: none;
+    margin-top: 10px;
+    padding: 0;
+    text-align: left;
+    background: none;
+}
+
 .debug-chip {
     margin-left: auto;
     padding: 6px 10px;
@@ -344,6 +354,11 @@ body.ui-hidden .inspector-hint {
         width: auto;
         max-width: none;
         top: max(calc(var(--hud-bottom) + 8px), 38vh);
+    }
+
+    /* the debug bottom sheet covers the screen centre, and the crosshair with it */
+    body.debug-open .crosshair {
+        display: none !important;
     }
 
     .debug-stats {

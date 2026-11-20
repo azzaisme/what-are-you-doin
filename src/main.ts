@@ -137,7 +137,8 @@ orbit.pitchRange = new Vec2(-85, 5);
 orbit.zoomRange = new Vec2(1.5, 60);
 orbit.rotateSpeed = 0.25;
 
-function setMode(mode: State['mode']): void {
+/** `lock`: request pointer lock (only from a user gesture; the level start waits for a click). */
+function setMode(mode: State['mode'], lock = true): void {
     state.mode = mode;
     if (mode === 'firstPerson') {
         orbit.enabled = false;
@@ -150,7 +151,7 @@ function setMode(mode: State['mode']): void {
         fpInput.pitch = -0.12;
         fpInput.active = true;
         sim.fpActive = true;
-        fpInput.lock();
+        if (lock) fpInput.lock();
     } else {
         fpInput.active = false;
         sim.fpActive = false;
@@ -870,7 +871,8 @@ if (import.meta.env.DEV || params.has('debug') || location.hash === '#debug') pa
 const startAt = Number(params.get('t'));
 if (Number.isFinite(startAt) && params.has('t')) seek(startAt);
 if (params.get('view') === 'fp' || (level.startFirstPerson && params.get('view') !== 'orbit')) {
-    setMode('firstPerson');
+    // no pointer lock without a user gesture (design doc §9): the first click on the canvas takes it
+    setMode('firstPerson', false);
     toSpawn();
 }
 updateObjective();
