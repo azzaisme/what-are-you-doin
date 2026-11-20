@@ -1,0 +1,147 @@
+import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
+import pngjs from 'pngjs';
+
+const { PNG } = pngjs;
+
+// Browser smoke and invariants. Runs against the production build (vite preview) in headless
+// Chrome with SwiftShader. Visual quality is judged from captured screenshots by a human; these
+// tests check boot, absence of errors, grid invariants and deterministic reconstruction.
+
+type Lab = {
+    ready: boolean;
+    seek(t: number): void;
+    set(id: string, v: unknown): void;
+    stats(): Record<string, unknown> & { voxel: Record<string, number>; staticCells: number; dynamicCells: number };
+    verifyGrid(): Promise<{ vertices: number; misaligned: number }>;
+    dynamicHash(): Promise<number>;
+    voxelIdle(): boolean;
+    setFirstPerson(x: number, z: number, yaw: number, pitch: number): void;
+    entities(): Record<string, { visible: boolean }>;
+};
+
+const IGNORED = [/GPU stall due to ReadPixels/, /GL Driver Message/, /Powered by PlayCanvas/, /favicon/i, /status of 404/];
+
+async function boot(page: Page, query = '?t=4&noui'): Promise<string[]> {
+    const problems: string[] = [];
+    page.on('console', (m) => {
+        if ((m.type() === 'error' || m.type() === 'warning') && !IGNORED.some((r) => r.test(m.text()))) problems.push(`${m.type()}: ${m.text()}`);
+    });
+    page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
+    await page.goto(`/${query}`);
+    await page.waitForFunction(() => (window as unknown as { __riverLab?: Lab }).__riverLab?.ready === true, null, { timeout: 150_000 });
+    await idle(page);
+    await page.waitForTimeout(1500);
+    return problems;
+}
+
+/** Voxel frames are built in a worker: wait until none is in flight. */
+async function idle(page: Page): Promise<void> {
+    await page.waitForTimeout(150);
+    await page.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.voxelIdle(), null, { timeout: 60_000 });
+}
+
+const lab = <T>(page: Page, fn: (l: Lab) => T) => page.evaluate((src) => new Function('l', `return (${src})(l)`)((window as unknown as { __riverLab: Lab }).__riverLab), fn.toString()) as Promise<T>;
+
+test('boots the River Lab with no console errors and a non-blank frame', async ({ page }) => {
+    const problems = await boot(page);
+    const shot = await page.screenshot();
+    expect(shot.byteLength).toBeGreaterThan(50_000); // a blank canvas compresses to a few kB
+    // colour sanity: vertex colours must reach the screen (a lost colour stream renders white)
+    const png = PNG.sync.read(shot);
+    let green = 0;
+    let saturated = 0;
+    const n = png.width * png.height;
+    for (let i = 0; i < n; i++) {
+        const r = png.data[i * 4];
+        const g = png.data[i * 4 + 1];
+        const b = png.data[i * 4 + 2];
+        const max = Math.max(r, g, b);
+        const min = Math.min(r, g, b);
+        if (max > 40 && (max - min) / max > 0.35) saturated++;
+        if (g > r * 1.15 && g > b * 1.15) green++;
+    }
+    expect(saturated / n).toBeGreaterThan(0.3);
+    expect(green / n).toBeGreaterThan(0.12); // measured 0.19 at 5 cm, about 0.3 at 10 cm; a white-out is ~0
+    const s = await lab(page, (l) => l.stats());
+    expect(s.staticCells).toBeGreaterThan(1_000_000);
+    expect(s.voxel.objects).toBe(7);
+    expect(s.voxel.rejected).toBe(0);
+    // feet and wheels may dip a cell into the ground at fine cell sizes; the dynamic cell wins and
+    // the static cell reappears afterwards (compositor policy). Large counts would mean a sinking prop.
+    expect(s.voxel.dynStaticOverlaps).toBeLessThan(50);
+    expect(problems).toEqual([]);
+});
+
+test('every uploaded vertex lies on the global 10 cm grid and render units never move', async ({ page }) => {
+    await boot(page);
+    const r = await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid());
+    expect(r.vertices).toBeGreaterThan(10_000);
+    expect(r.misaligned).toBe(0);
+});
+
+test('reconstruction is deterministic for a time and changes as objects move', async ({ page }) => {
+    await boot(page);
+    const at = async (t: number) => {
+        await lab(page, (l) => l.seek(0));
+        await page.evaluate((t) => (window as unknown as { __riverLab: Lab }).__riverLab.seek(t), t);
+        await idle(page);
+        return page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.dynamicHash());
+    };
+    const a1 = await at(6.25);
+    const b = await at(7.0);
+    const a2 = await at(6.25);
+    expect(a2).toBe(a1);
+    expect(b).not.toBe(a1);
+});
+
+test('debug controls: reference mode, voxel rates, sampling policies and stress objects', async ({ page }) => {
+    const problems = await boot(page);
+    await lab(page, (l) => l.set('reference', true));
+    await idle(page);
+    expect((await lab(page, (l) => l.stats())).dynamicCells).toBe(0);
+    await lab(page, (l) => l.set('reference', false));
+    for (const hz of ['12', '30', '60', '20']) await page.evaluate((hz) => (window as unknown as { __riverLab: Lab }).__riverLab.set('hz', hz), hz);
+    for (const p of ['center', 'coverage25', 'conservative', 'coverage50']) {
+        await page.evaluate((p) => (window as unknown as { __riverLab: Lab }).__riverLab.set('policy', p), p);
+        await page.waitForTimeout(300);
+    }
+    await lab(page, (l) => l.set('stress', '25'));
+    await lab(page, (l) => l.seek(5));
+    await idle(page);
+    const s = await lab(page, (l) => l.stats());
+    expect(s.voxel.objects).toBe(32);
+    expect(s.voxel.rejected).toBe(0);
+    expect(problems).toEqual([]);
+});
+
+test('first-person mode carries a voxelized plank', async ({ page }) => {
+    const problems = await boot(page);
+    await lab(page, (l) => l.setFirstPerson(0, 6, 0, -0.1));
+    await lab(page, (l) => l.set('carry', true));
+    await page.waitForTimeout(1500);
+    const e = await lab(page, (l) => l.entities());
+    expect(e['held-plank'].visible).toBe(true);
+    expect(problems).toEqual([]);
+});
+
+test('voxel size is a quality setting: #cell100 loads the 10 cm world', async ({ page }) => {
+    const problems = await boot(page, '?t=4&noui#cell100');
+    const s = await lab(page, (l) => l.stats());
+    expect(s.cellCm).toBe(10);
+    expect(s.staticCells).toBeGreaterThan(1_000_000);
+    expect(s.staticCells).toBeLessThan(2_000_000);
+    const g = await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid());
+    expect(g.misaligned).toBe(0);
+    expect(problems).toEqual([]);
+});
+
+test('default voxel size is 5 cm with the slider range 5-10 cm', async ({ page }) => {
+    await boot(page);
+    const s = await lab(page, (l) => l.stats());
+    expect(s.cellCm).toBe(5);
+    expect(s.staticCells).toBeGreaterThan(5_000_000);
+    const range = page.locator('.cell-size input[type=range]');
+    await expect(range).toHaveAttribute('min', '5');
+    await expect(range).toHaveAttribute('max', '10');
+});

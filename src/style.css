@@ -1,0 +1,260 @@
+* {
+    box-sizing: border-box;
+}
+
+html,
+body,
+canvas {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+}
+
+body {
+    background: #1a2026;
+    color: #f4f1ea;
+    font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+canvas {
+    display: block;
+}
+
+#loading {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    font-size: 15px;
+    letter-spacing: 0.02em;
+    color: #d9cfb8;
+    background: #1a2026;
+    z-index: 30;
+}
+
+.hud {
+    position: fixed;
+    left: 18px;
+    top: 16px;
+    z-index: 10;
+    pointer-events: none;
+    text-shadow: 0 1px 3px #0009;
+}
+
+.hud-title {
+    font-size: 16px;
+}
+
+.hud-title span {
+    color: #e9dcc0b0;
+    font-size: 13px;
+    margin-left: 6px;
+}
+
+.hud-help {
+    margin-top: 6px;
+    font-size: 12.5px;
+    color: #f1ead9cc;
+}
+
+.hud-prompt {
+    margin-top: 10px;
+    font-size: 13px;
+    color: #ffd27a;
+}
+
+kbd {
+    font: 11px ui-monospace, monospace;
+    padding: 1px 5px;
+    border: 1px solid #ffffff40;
+    border-radius: 4px;
+    background: #00000040;
+}
+
+.crosshair {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    width: 6px;
+    height: 6px;
+    margin: -3px 0 0 -3px;
+    border-radius: 50%;
+    background: #fffc;
+    box-shadow: 0 0 0 1.5px #0006;
+    pointer-events: none;
+    z-index: 10;
+}
+
+.debug-chip {
+    position: fixed;
+    right: 14px;
+    bottom: 14px;
+    z-index: 20;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: #f4f1ea;
+    border: 1px solid #ffffff30;
+    border-radius: 8px;
+    background: #10161cc0;
+    cursor: pointer;
+}
+
+.debug-panel {
+    position: fixed;
+    right: 12px;
+    top: 12px;
+    bottom: 54px;
+    width: 318px;
+    overflow-y: auto;
+    z-index: 20;
+    padding: 12px;
+    font-size: 12px;
+    border: 1px solid #ffffff22;
+    border-radius: 12px;
+    background: #0e1418e6;
+    backdrop-filter: blur(8px);
+}
+
+.debug-title {
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 8px;
+}
+
+.debug-hint {
+    font-weight: 400;
+    color: #9aa7b0;
+    font-size: 11px;
+    margin-left: 6px;
+}
+
+.debug-section {
+    margin-bottom: 10px;
+}
+
+.debug-heading {
+    color: #f2b65a;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 5px;
+}
+
+.debug-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px 8px;
+}
+
+.debug-grid button {
+    padding: 4px 8px;
+    font-size: 11.5px;
+    color: inherit;
+    border: 1px solid #ffffff2a;
+    border-radius: 6px;
+    background: #24303a;
+    cursor: pointer;
+}
+
+.debug-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+}
+
+.debug-toggle {
+    width: auto;
+    min-width: 46%;
+}
+
+.debug-control select,
+.debug-control input[type='range'] {
+    flex: 1;
+    min-width: 0;
+}
+
+.debug-control select {
+    background: #24303a;
+    color: inherit;
+    border: 1px solid #ffffff2a;
+    border-radius: 5px;
+    padding: 2px 4px;
+}
+
+.debug-control em {
+    font-style: normal;
+    width: 32px;
+    text-align: right;
+    color: #9aa7b0;
+}
+
+.debug-stats {
+    margin: 8px 0 0;
+    font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre-wrap;
+    color: #cfe3da;
+}
+
+body.ui-hidden .cell-size,
+body.ui-hidden .hud,
+body.ui-hidden .debug-panel,
+body.ui-hidden .debug-chip,
+body.ui-hidden .crosshair,
+body.ui-hidden #pc-inspector,
+body.ui-hidden .inspector-hint {
+    display: none !important;
+}
+
+.cell-size {
+    position: fixed;
+    left: 14px;
+    bottom: 14px;
+    z-index: 20;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+    max-width: calc(100vw - 190px);
+    padding: 7px 10px;
+    font-size: 12px;
+    border: 1px solid #ffffff30;
+    border-radius: 8px;
+    background: #10161cc0;
+}
+
+.cell-size label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.cell-size input {
+    width: 120px;
+}
+
+.cell-size output {
+    min-width: 44px;
+    font-variant-numeric: tabular-nums;
+}
+
+.cell-size button {
+    padding: 3px 9px;
+    font-size: 12px;
+    color: inherit;
+    border: 1px solid #ffffff40;
+    border-radius: 6px;
+    background: #2a5a3a;
+    cursor: pointer;
+}
+
+.cell-size button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.cell-size small {
+    color: #ffffff90;
+    font-size: 11px;
+}
