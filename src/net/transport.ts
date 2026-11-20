@@ -116,6 +116,8 @@ export async function roomTransport(): Promise<NetTransport | null> {
 
 // ------------------------------------------------------------------------------------- local
 
+const PEER_TIMEOUT_MS = 10_000;
+
 type LocalMsg = { t: 'state'; id: string; state: NetState } | { t: 'bye'; id: string } | { t: 'hello'; id: string };
 
 class LocalChannel implements NetChannel {
@@ -133,13 +135,14 @@ class LocalChannel implements NetChannel {
         this.bc = new BroadcastChannel(`ue-net-${name}`);
         this.bc.onmessage = (e: MessageEvent<LocalMsg>) => this.receive(e.data);
         this.bc.postMessage({ t: 'hello', id: me } satisfies LocalMsg);
-        // heartbeat, and forget peers that went quiet (a closed tab may not say bye)
+        // heartbeat, and forget peers that went quiet (a closed tab may not say bye). Generous: a
+        // tab busy rendering (software GL in tests: 2 s frames) must not be mistaken for gone.
         this.timer = setInterval(() => {
             this.send();
             const now = Date.now();
             let changed = false;
             for (const [id, p] of this.others) {
-                if (now - p.seen > 3000) {
+                if (now - p.seen > PEER_TIMEOUT_MS) {
                     this.others.delete(id);
                     changed = true;
                 }
