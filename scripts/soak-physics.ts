@@ -10,9 +10,9 @@
  */
 import os from 'node:os';
 
-import { EYE_HEIGHT, LabSim } from '../src/sim/lab-sim.ts';
 import { ACTION_DROP, ACTION_DROP_TEST, ACTION_NONE, ACTION_RAGDOLL, neutralCommand } from '../src/sim/commands.ts';
 import type { PlayerCommand } from '../src/sim/commands.ts';
+import { EYE_HEIGHT, LabSim } from '../src/sim/lab-sim.ts';
 import { GRAB } from '../src/sim/physics/grab.ts';
 import { initPhysics } from '../src/sim/physics/world.ts';
 
