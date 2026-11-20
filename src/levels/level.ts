@@ -13,8 +13,9 @@ import type { VoxelWorld } from '../voxels/world.ts';
 
 
 import type { RockSpot, TreeSpot } from './common.ts';
+import type { LevelData } from './data.ts';
 
-export type LevelId = 'yard' | 'lab';
+export type LevelId = string;
 
 export interface Rect {
     minX: number;
@@ -62,6 +63,16 @@ export interface PropPlacement {
     pose: Pose;
 }
 
+/** One tutorial step; the steps are done in order. */
+export type TutorialStep =
+    | { kind: 'look'; text: string }
+    | { kind: 'reach'; text: string; rect: Rect }
+    | { kind: 'jump'; text: string }
+    | { kind: 'grab'; text: string; entity?: string }
+    /** A prop (by entity name) resting inside a rect. */
+    | { kind: 'place'; text: string; entity: string; rect: Rect }
+    | { kind: 'goal'; text: string };
+
 export interface LevelRules {
     /** The objective, shown in the HUD. */
     objective: string;
@@ -73,6 +84,8 @@ export interface LevelRules {
     isSafe(x: number, z: number): boolean;
     /** Below this height essential items (the bucket) are returned to their start. */
     lostY: number;
+    /** Tutorial steps, done in order (the last is usually the goal). */
+    steps?: TutorialStep[];
 }
 
 export interface LevelDef {
@@ -97,13 +110,15 @@ export interface LevelDef {
     orbitHome: { pos: [number, number, number]; focus: [number, number, number] };
     startFirstPerson: boolean;
     /** Scripted actors: the beaver walks its loop or stands idle, the ute laps or is parked. */
-    actors: { beaver: { mode: 'loop' } | { mode: 'idle'; pose: Pose }; ute: { mode: 'track' } | { mode: 'parked'; pose: Pose } };
+    actors: { beaver: { mode: 'loop' } | { mode: 'idle'; pose: Pose } | { mode: 'none' }; ute: { mode: 'track' } | { mode: 'parked'; pose: Pose } | { mode: 'none' } };
     /** Dynamic props present in this level and where they start (physics props mode). */
     props: PropPlacement[];
     /** Objective and recovery rules; absent for the test lab. */
     rules?: LevelRules;
     /** Whether the Epic 1 scripted-props comparison mode applies. */
     scriptedProps: boolean;
+    /** The data this level was made from (data levels and designer levels), sent to the worker. */
+    data?: LevelData;
 }
 
 export function pieceVolume(p: StaticPiece): Volume {

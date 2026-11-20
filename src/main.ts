@@ -17,7 +17,7 @@ import { CALM, windAt } from './fx/wind.ts';
 import { FirstPersonInput } from './input/first-person.ts';
 import { PadManager } from './input/gamepad.ts';
 import { TouchControls, isTouchDevice } from './input/touch.ts';
-import { getLevel } from './levels/index.ts';
+import { LEVEL_MENU, getLevel } from './levels/index.ts';
 import { GuestSession, HostSession, listGames } from './net/session.ts';
 import type { GameAd } from './net/session.ts';
 import { localTransport, roomTransport } from './net/transport.ts';
@@ -52,8 +52,36 @@ const setLoading = (t: string) => {
 };
 
 const initialQuality: Quality = QUALITY[params.get('quality') === 'low' ? 'low' : 'high'];
-// ?level=lab for the River Lab test scene; the Timber Yard (level 1) by default
-const level = getLevel(params.get('level'));
+// ?level=tutorial|yard|lab; otherwise the last level played; a first visit starts with the tutorial
+const LEVEL_KEY = 'uncivil.level';
+const storedLevel = (() => {
+    try {
+        return localStorage.getItem(LEVEL_KEY);
+    } catch {
+        return null;
+    }
+})();
+const level = getLevel(params.get('level') ?? storedLevel ?? 'tutorial');
+try {
+    localStorage.setItem(LEVEL_KEY, level.id);
+} catch {
+    // storage blocked: the default applies next time
+}
+
+/** Loads another level (a reload: the voxel world is built per level). */
+function goToLevel(id: string, extra: Record<string, string> = {}): void {
+    try {
+        localStorage.setItem(LEVEL_KEY, id);
+    } catch {
+        // storage blocked: the URL carries the choice
+    }
+    const q = new URLSearchParams({ level: id, ...extra });
+    for (const k of ['quality', 'net', 'debug']) {
+        const v = params.get(k);
+        if (v !== null) q.set(k, v);
+    }
+    location.search = `?${q.toString()}`;
+}
 const terrainHeight = level.terrainHeight;
 const scene = await createLabScene(canvas, initialQuality, level);
 const { app, camera } = scene;
@@ -756,7 +784,7 @@ const panel = new DebugPanel(host, [
 const hud = document.createElement('div');
 hud.className = 'hud';
 hud.innerHTML = `
-  <div class="hud-title"><b>(Un)civil Engineers</b> <span>${level.id === 'lab' ? 'River Lab · voxel tech demo' : `Level 1 · ${level.name}`}</span></div>
+  <div class="hud-title"><b>(Un)civil Engineers</b> <span>${level.id === 'lab' ? 'River Lab · voxel tech demo' : level.id === 'yard' ? `Level 1 · ${level.name}` : level.name}</span></div>
   <div class="hud-objective" id="hud-objective"></div>
   <div class="hud-help" id="hud-help"></div>
   <div class="hud-prompt" id="hud-prompt"></div>`;
@@ -884,6 +912,14 @@ function updateObjective(): void {
     const el = document.getElementById('hud-objective');
     if (!el) return;
     const r = level.rules;
+    const steps = r?.steps;
+    if (steps) {
+        const k = guestSession ? guestSession.step : sim.progress.step;
+        const done = k >= steps.length;
+        el.textContent = done ? '✓ Tutorial complete — pick a level from Levels' : `Step ${k + 1}/${steps.length} · ${steps[k].text}`;
+        el.classList.toggle('done', done);
+        return;
+    }
     const done = guestSession ? guestSession.goal : sim.progress.goalReached;
     el.textContent = r ? `${done ? '✓' : '○'} ${r.objective}` : '';
     el.classList.toggle('done', done);
@@ -1097,9 +1133,21 @@ async function startTransport(): Promise<void> {
         transport = await roomTransport();
     }
     transportKind = transport ? (transport.kind === 'room' ? 'room' : 'local') : 'none';
-    transport?.lobby.onChange(() => online.render());
+    transport?.lobby.onChange(() => {
+        online.render();
+        // arrived with ?join=CODE (switched level to join a game): join as soon as it is listed
+        const code = params.get('join');
+        if (code && !guestSession && !hostSession && !autoJoinTried) {
+            const g = listGames(transport!.lobby).find((x) => x.code === code);
+            if (g) {
+                autoJoinTried = true;
+                void joinOnline(g);
+            }
+        }
+    });
     online.render();
 }
+let autoJoinTried = false;
 
 async function hostOnline(): Promise<void> {
     if (!transport || hostSession || guestSession) return;
@@ -1120,6 +1168,11 @@ async function hostOnline(): Promise<void> {
 
 async function joinOnline(ad: GameAd): Promise<void> {
     if (!transport || hostSession || guestSession) return;
+    if (ad.level !== level.id && LEVEL_MENU.some((l) => l.id === ad.level)) {
+        // the voxel world is built per level: reload into the host's level and join from there
+        goToLevel(ad.level, { join: ad.code });
+        return;
+    }
     setPlayers(1);
     if (state.paused) setPaused(false);
     guestSession = await GuestSession.join(transport, sim, ad);
@@ -1167,6 +1220,49 @@ const online = new OnlinePanel(
     dock
 );
 void startTransport();
+
+// ---- Levels: a small chooser in the dock
+const levelsBtn = document.createElement('button');
+levelsBtn.type = 'button';
+levelsBtn.className = 'online-chip levels-chip';
+levelsBtn.textContent = 'Levels';
+dock.insertBefore(levelsBtn, online.button);
+const levelsPanel = document.createElement('div');
+levelsPanel.className = 'online-panel levels-panel';
+levelsPanel.style.display = 'none';
+for (const ev of ['pointerdown', 'mousedown', 'wheel', 'click', 'touchstart']) levelsPanel.addEventListener(ev, (e) => e.stopPropagation());
+document.body.append(levelsPanel);
+function renderLevels(): void {
+    levelsPanel.replaceChildren();
+    const t = document.createElement('div');
+    t.className = 'online-title';
+    t.textContent = 'Levels';
+    levelsPanel.append(t);
+    for (const l of LEVEL_MENU) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = l.id === level.id ? 'online-primary' : '';
+        b.textContent = l.id === level.id ? `${l.name} (playing)` : l.name;
+        b.title = l.note;
+        b.addEventListener('click', () => (l.id === level.id ? (levelsPanel.style.display = 'none') : goToLevel(l.id)));
+        levelsPanel.append(b);
+        const n = document.createElement('p');
+        n.className = 'online-note';
+        n.textContent = l.note;
+        levelsPanel.append(n);
+    }
+    const c = document.createElement('button');
+    c.type = 'button';
+    c.textContent = 'Close';
+    c.addEventListener('click', () => (levelsPanel.style.display = 'none'));
+    levelsPanel.append(c);
+}
+levelsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = levelsPanel.style.display === 'none';
+    if (open) renderLevels();
+    levelsPanel.style.display = open ? '' : 'none';
+});
 
 // ------------------------------------------------------------------------------------- test API
 
@@ -1239,7 +1335,7 @@ window.__riverLab = {
     input: (c: Record<string, unknown>) => fpInput.inject(c),
     player: () => ({ ...sim.player, holding: sim.physics.heldId }),
     level: level.id,
-    progress: () => ({ ...sim.progress, events: sim.events.map((e) => e.kind) }),
+    progress: () => ({ ...sim.progress, events: sim.events.map((e) => e.kind), stepText: sim.stepText }),
     /** Places a named prop at a pose (tests and the evidence capture), as a teleport. */
     placeProp(name: string, x: number, y: number, z: number, yaw = 0) {
         const e = sim.entities.find((n) => n.name === name);

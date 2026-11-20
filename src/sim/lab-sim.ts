@@ -49,7 +49,7 @@ export interface LabSimOptions {
 /** Something the player should be told (objective reached, fell in the creek, ...). */
 export interface SimEvent {
     tick: number;
-    kind: 'goal' | 'fell' | 'recovered';
+    kind: 'goal' | 'fell' | 'recovered' | 'step';
     text: string;
 }
 
@@ -107,7 +107,10 @@ export class LabSim {
     readonly eyes: SimEntity[];
     readonly level: LevelDef;
     /** Level progress (rules): the objective, once reached, stays reached until reset. */
-    readonly progress = { goalReached: false, goalTick: -1, falls: 0, recoveries: 0 };
+    readonly progress = { goalReached: false, goalTick: -1, falls: 0, recoveries: 0, step: 0 };
+    private lookAccum = 0;
+    private lastLookYaw: number | null = null;
+    private jumped = false;
     /** Events since reset, newest last (the client shows them as toasts). */
     readonly events: SimEvent[] = [];
     private lostTicks = 0;
@@ -162,7 +165,10 @@ export class LabSim {
         this.heldInit = false;
         this.player.prevCarry = false;
         this.stressEnabled.fill(-1);
-        Object.assign(this.progress, { goalReached: false, goalTick: -1, falls: 0, recoveries: 0 });
+        Object.assign(this.progress, { goalReached: false, goalTick: -1, falls: 0, recoveries: 0, step: 0 });
+        this.lookAccum = 0;
+        this.lastLookYaw = null;
+        this.jumped = false;
         this.events.length = 0;
         this.lostTicks = this.goalTicks = 0;
         for (const pl of this.players) {
@@ -434,7 +440,10 @@ export class LabSim {
         }
         const bk = this.bucket;
         const body = pw.bodies.get(bk.id);
-        if (!body) return;
+        if (!body) {
+            this.applySteps(rules);
+            return;
+        }
         // essential item: lost in the creek for 1.5 s -> back on its stump
         this.lostTicks = bk.pose.p.y < rules.lostY && pw.holders(bk.id) === 0 ? this.lostTicks + 1 : 0;
         if (this.lostTicks > 90) {
@@ -452,9 +461,70 @@ export class LabSim {
             if (this.goalTicks > 30) {
                 this.progress.goalReached = true;
                 this.progress.goalTick = this.tick;
-                this.events.push({ tick: this.tick, kind: 'goal', text: 'Bucket delivered across the creek!' });
+                const steps = rules.steps;
+                this.events.push({ tick: this.tick, kind: 'goal', text: steps ? 'Bucket delivered!' : 'Bucket delivered across the creek!' });
             }
         }
+        this.applySteps(rules);
+    }
+
+    /** The current tutorial step's text ("" when the level has none or all are done). */
+    get stepText(): string {
+        const steps = this.level.rules?.steps;
+        if (!steps || this.progress.step >= steps.length) return '';
+        return steps[this.progress.step].text;
+    }
+
+    /** Tutorial steps, in order, judged on player 1 (and any player for reach/jump/grab). */
+    private applySteps(rules: NonNullable<LevelDef['rules']>): void {
+        const steps = rules.steps;
+        if (!steps || this.progress.step >= steps.length) return;
+        const p = this.player;
+        if (this.fpActive) {
+            if (this.lastLookYaw !== null) this.lookAccum += Math.abs(p.yaw - this.lastLookYaw) + 0;
+            this.lastLookYaw = p.yaw;
+            if (!p.grounded && p.y > this.level.terrainHeight(p.x, p.z) + 0.35) this.jumped = true;
+        }
+        const st = steps[this.progress.step];
+        const inRect = (r: { minX: number; maxX: number; minZ: number; maxZ: number }, x: number, z: number) => x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ;
+        const anyPlayer = (f: (i: number) => boolean) => this.players.some((_, i) => this.playerActive(i) && f(i));
+        let done = false;
+        switch (st.kind) {
+            case 'look':
+                done = this.lookAccum > 1.2;
+                break;
+            case 'reach':
+                done = anyPlayer((i) => inRect(st.rect, this.players[i].x, this.players[i].z));
+                break;
+            case 'jump':
+                done = this.jumped;
+                break;
+            case 'grab': {
+                const want = st.entity ? this.entities.find((e) => e.name === st.entity)?.id : undefined;
+                done = anyPlayer((i) => {
+                    const h = this.physics.heldIdOf(i);
+                    return h >= 0 && (want === undefined || h === want);
+                });
+                break;
+            }
+            case 'place': {
+                const e = this.entities.find((x) => x.name === st.entity);
+                const b = e ? this.physics.bodies.get(e.id) : undefined;
+                if (e && b) {
+                    const v = b.body.linvel();
+                    done = inRect(st.rect, e.pose.p.x, e.pose.p.z) && Math.hypot(v.x, v.y, v.z) < 0.5 && this.physics.holders(e.id) === 0;
+                }
+                break;
+            }
+            case 'goal':
+                done = this.progress.goalReached;
+                break;
+        }
+        if (!done) return;
+        this.progress.step++;
+        const last = this.progress.step >= steps.length;
+        this.events.push({ tick: this.tick, kind: last ? 'goal' : 'step', text: last ? 'Tutorial complete! Now try the Timber Yard.' : `✓ ${st.text.replace(/\.$/, '')}` });
+        this.jumped = false;
     }
 
     /** Copies dynamic body poses into their entities (physics props mode). */
@@ -542,6 +612,13 @@ export class LabSim {
         const t = this.tick * SIM_DT;
 
         const actors = this.level.actors;
+        if (actors.beaver.mode === 'none') {
+            const b = this.beaver;
+            b.visible = false;
+            b.pose.p.x = 0;
+            b.pose.p.y = -100;
+            b.pose.p.z = 0;
+        }
         if (actors.beaver.mode === 'idle') {
             // a co-worker standing about, looking around
             const b = this.beaver;
@@ -628,6 +705,13 @@ export class LabSim {
 
     private evaluateUte(t: number): void {
         const ute = this.level.actors.ute;
+        if (ute.mode === 'none') {
+            this.ute.visible = false;
+            this.ute.pose.p.x = 0;
+            this.ute.pose.p.y = -100;
+            this.ute.pose.p.z = 0;
+            return;
+        }
         if (ute.mode === 'parked') {
             const u = this.ute;
             u.pose.p.x = ute.pose.p.x;

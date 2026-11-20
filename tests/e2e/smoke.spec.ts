@@ -157,7 +157,7 @@ test('default voxel size is 5 cm with the slider range 5-10 cm', async ({ page }
 });
 
 test('UI boxes never overlap: portrait phone, portrait tablet, desktop and landscape phone', async ({ page }) => {
-    const problems = await boot(page, '?t=4&debug&quality=low#cell100');
+    const problems = await boot(page, '?level=yard&t=4&debug&quality=low#cell100');
     type Rect = { l: number; t: number; r: number; b: number };
     const rects = () =>
         page.evaluate(() => {
@@ -269,7 +269,7 @@ test('physics sandbox: grab and carry the plank, launch the ragdoll, switch to s
 });
 
 test('level 1, the Timber Yard: starts in first person with the objective, and the bucket delivery completes it', async ({ page }) => {
-    const problems = await boot(page, '?t=0.01&quality=low#cell100');
+    const problems = await boot(page, '?level=yard&t=0.01&quality=low#cell100');
     expect(await lab(page, (l) => l.level)).toBe('yard');
     const st = await lab(page, (l) => l.state as unknown as { mode: string });
     expect(st.mode).toBe('firstPerson');
@@ -290,7 +290,7 @@ test('level 1, the Timber Yard: starts in first person with the objective, and t
 });
 
 test('local co-op: split screen renders both views, player 2 moves with their own commands', async ({ page }) => {
-    const problems = await boot(page, '?t=0.01&quality=low&noui#cell100');
+    const problems = await boot(page, '?level=yard&t=0.01&quality=low&noui#cell100');
     await lab(page, (l) => l.action('pause'));
     await lab(page, (l) => (l as unknown as { setPlayers(n: number): void }).setPlayers(2));
     // face different ways: player 1 north to the creek, player 2 west towards the shed
@@ -333,7 +333,7 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
 test('online co-op: a second device joins the host, plays as player 2 and renders the host world', async ({ page, context }) => {
     // ?net=local links pages of one browser with BroadcastChannel; the same sessions run over the
     // claude.ai room in the published artifact
-    const query = '?t=0.01&quality=low&net=local#cell100';
+    const query = '?level=yard&t=0.01&quality=low&net=local#cell100';
     const problems = await boot(page, query);
     const guest = await context.newPage();
     const guestProblems: string[] = [];
@@ -376,4 +376,16 @@ test('online co-op: a second device joins the host, plays as player 2 and render
     await page.waitForFunction(() => (window as unknown as { __riverLab: Net }).__riverLab.net.status().guests === 0, null, { timeout: 30_000 });
     expect(problems).toEqual([]);
     expect(guestProblems).toEqual([]);
+});
+
+test('a first visit starts the tutorial: step-by-step objective, the Levels menu lists the rest', async ({ page }) => {
+    const problems = await boot(page, '?t=0.01&quality=low#cell100');
+    expect(await lab(page, (l) => (l as unknown as { level: string }).level)).toBe('tutorial');
+    await expect(page.locator('#hud-objective')).toContainText('Step 1/8');
+    const s = await lab(page, (l) => l.stats());
+    expect(s.voxel.rejected).toBe(0);
+    await page.locator('.levels-chip').click();
+    await expect(page.locator('.levels-panel')).toContainText('Timber Yard');
+    await expect(page.locator('.levels-panel')).toContainText('Tutorial (playing)');
+    expect(problems).toEqual([]);
 });

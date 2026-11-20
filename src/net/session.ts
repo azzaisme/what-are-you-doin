@@ -195,7 +195,7 @@ export class HostSession {
             const h = hud(s);
             huds.push([h.held, h.target, h.shared ? 1 : 0]);
         }
-        this.ch.setState({ s: toBase64Chunks(bytes), hud: huds, goal: sim.progress.goalReached, ev: this.recent });
+        this.ch.setState({ s: toBase64Chunks(bytes), hud: huds, goal: sim.progress.goalReached, step: sim.progress.step, ev: this.recent });
     }
 
     get guestCount(): number {
@@ -240,6 +240,8 @@ export class GuestSession {
     slot = -1;
     hud: HudSlot[] = [];
     goal = false;
+    /** The host's tutorial step. */
+    step = 0;
     events: NetEvent[] = [];
     hostGone = false;
     /** Snapshots applied (for the debug panel). */
@@ -280,6 +282,7 @@ export class GuestSession {
         const mine = slots[this.ch.me];
         this.slot = typeof mine === 'number' && mine >= 1 && mine < this.sim.players.length ? mine : -1;
         this.goal = st.goal === true;
+        this.step = num(st.step);
         if (Array.isArray(st.hud)) {
             this.hud = (st.hud as unknown[]).map((x) => {
                 const a = Array.isArray(x) ? x : [];
