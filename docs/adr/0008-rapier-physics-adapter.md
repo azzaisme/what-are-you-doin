@@ -3,6 +3,7 @@
 Status: accepted (Epic 2) · Date: 2026-11-20
 
 ## Context
+
 Epic 2 needs a physical sandbox: a controllable character, grab / release / throw with bounded
 forces, dynamic logs and planks, a bucket proxy, a ragdoll experiment, static terrain collision.
 The brief (§4.1, §6.1) recommends Rapier and forbids running the engine's Ammo bodies alongside
@@ -10,6 +11,7 @@ it. The scaffold has no physics skill, and PlayCanvas' built-in physics is Ammo,
 not involved at all.
 
 ## Decision
+
 - **Package:** `@dimforge/rapier3d-compat` pinned to exactly **0.21.0** (`--save-exact`). The compat
   build inlines its WASM, so it loads the same way in the browser, in Vitest and in Node scripts
   with one `await RAPIER.init()` (`initPhysics()`). APIs were taken from the installed
@@ -40,7 +42,7 @@ not involved at all.
   for 0.75 s, or > 2.2 m at once). While held, the body's colliders leave the player's collision
   layer and the controller ignores it, so you cannot stand on or shove what you hold (no feedback
   loop). Throw: impulse `min(m · 9 m/s, 45 N·s)`. The 113 kg log cannot be lifted alone (needs
-  > 1,100 N) but can be dragged — deliberate, for Epic 3's two-player carry.
+    > 1,100 N) but can be dragged — deliberate, for Epic 3's two-player carry.
 - **Safety bounds:** after each step |v| ≤ 30 m/s and |ω| ≤ 30 rad/s (counted when applied); bodies
   that leave the world or go non-finite are put back at their spawn pose (counted).
 - **Commands** (`src/sim/commands.ts`) are plain sequenced data with edge-triggered requests (grab,
@@ -53,12 +55,14 @@ not involved at all.
   `npm run build:publish` loads it from jsDelivr through the import map, like PlayCanvas.
 
 ## Rapier quirk found
+
 Rapier 0.21 heightfield ray casts miss when the ray lands exactly on a cell boundary (seen with
 0.2 m cells at x = 0.6). The cell count is therefore chosen so the spacing is not a round number.
 `ColliderDesc.heightfield(rows, cols, …)` needs `(rows + 1) × (cols + 1)` heights, column-major,
 rows along Z; a shorter array aborts the WASM module.
 
 ## Consequences
+
 Measured on the sandbox CPU (progress.md, gate 2): physics 0.47 ms p50 / 0.83 ms p95 per tick in
 the default scene and 1.6 / 2.5 ms with 25 moving bodies; no tick over the 16.7 ms budget in a
 10-minute soak. A post-release speed bound was added after the soak caught a snag-released plank

@@ -87,7 +87,8 @@ export function yardHeight(x: number, z: number): number {
         // the road is graded flat across, following the hill
         const r = onRoad(x, z);
         if (r < 3) {
-            const roadY = FAR_BANK_Y + 1.4 * smoothstep(-7, -20, z) * (0.6 + 0.7 * fbm(roadCenterX(z) * 0.07, z * 0.07, 9));
+            const roadY =
+                FAR_BANK_Y + 1.4 * smoothstep(-7, -20, z) * (0.6 + 0.7 * fbm(roadCenterX(z) * 0.07, z * 0.07, 9));
             bank = lerp(roadY, bank, smoothstep(1.6, 3, r));
         }
     }
@@ -117,7 +118,9 @@ function surfaceMaterial(x: number, z: number, top: number): number {
     const ad = Math.abs(z - creekCenterZ(x));
     const hw = creekHalfWidth(x);
     if (z < -23) {
-        const slope = Math.abs(yardHeight(x + 0.3, z) - yardHeight(x - 0.3, z)) + Math.abs(yardHeight(x, z + 0.3) - yardHeight(x, z - 0.3));
+        const slope =
+            Math.abs(yardHeight(x + 0.3, z) - yardHeight(x - 0.3, z)) +
+            Math.abs(yardHeight(x, z + 0.3) - yardHeight(x, z - 0.3));
         if (slope > 0.9) return voxel(M.HillRock, patchShade(x, z, 3, 13) & 1);
         return voxel(M.HillGrass, patchShade(x, z, 4.5, 9));
     }
@@ -145,12 +148,30 @@ function sideMaterial(depthBelowTop: number, j: number, z: number): number {
 
 // ------------------------------------------------------------------------------------- pieces
 
-const stone = (seed: number): MaterialField => (x, y, z) => voxel(M.Rock, latticeShade(x, y, z, 0.2, seed));
+const stone =
+    (seed: number): MaterialField =>
+    (x, y, z) =>
+        voxel(M.Rock, latticeShade(x, y, z, 0.2, seed));
 const oldTimber: MaterialField = (x, y, z) => voxel(M.Timber, 1 + (latticeShade(x, y, z, 0.15, 4) & 1) * 2);
 const darkTimber: MaterialField = (x, y, z) => voxel(M.LogBark, latticeShade(x, y, z, 0.2, 6) & 1);
 
-function piece(name: string, shape: StaticPiece['shape'], x: number, y: number, z: number, field: MaterialField, opts: { yaw?: number; pitch?: number; roll?: number; collide?: boolean; priority?: number } = {}): StaticPiece {
-    return { name, shape, pose: pose(x, y, z, quatFromYawPitchRoll(opts.yaw ?? 0, opts.pitch ?? 0, opts.roll ?? 0)), field, collide: opts.collide ?? true, priority: opts.priority ?? 2 };
+function piece(
+    name: string,
+    shape: StaticPiece['shape'],
+    x: number,
+    y: number,
+    z: number,
+    field: MaterialField,
+    opts: { yaw?: number; pitch?: number; roll?: number; collide?: boolean; priority?: number } = {}
+): StaticPiece {
+    return {
+        name,
+        shape,
+        pose: pose(x, y, z, quatFromYawPitchRoll(opts.yaw ?? 0, opts.pitch ?? 0, opts.roll ?? 0)),
+        field,
+        collide: opts.collide ?? true,
+        priority: opts.priority ?? 2
+    };
 }
 
 const boxS = (hx: number, hy: number, hz: number) => ({ type: 'box' as const, hx, hy, hz });
@@ -182,19 +203,77 @@ function yardPieces(): StaticPiece[] {
     const farTop = yardHeight(BRIDGE_X, B.farEdge - 0.6);
     const nearLen = B.nearEdge - B.nearFace + 0.5;
     const farLen = B.farFace - B.farEdge + 0.5;
-    P.push(piece('abutment-near', boxS(B.halfWidth, (nearTop - CREEK_BED_Y) / 2, nearLen / 2), BRIDGE_X, (nearTop + CREEK_BED_Y) / 2, B.nearFace + nearLen / 2, stone(3), { priority: 3 }));
-    P.push(piece('abutment-far', boxS(B.halfWidth, (farTop - CREEK_BED_Y) / 2, farLen / 2), BRIDGE_X, (farTop + CREEK_BED_Y) / 2, B.farFace - farLen / 2, stone(5), { priority: 3 }));
+    P.push(
+        piece(
+            'abutment-near',
+            boxS(B.halfWidth, (nearTop - CREEK_BED_Y) / 2, nearLen / 2),
+            BRIDGE_X,
+            (nearTop + CREEK_BED_Y) / 2,
+            B.nearFace + nearLen / 2,
+            stone(3),
+            { priority: 3 }
+        )
+    );
+    P.push(
+        piece(
+            'abutment-far',
+            boxS(B.halfWidth, (farTop - CREEK_BED_Y) / 2, farLen / 2),
+            BRIDGE_X,
+            (farTop + CREEK_BED_Y) / 2,
+            B.farFace - farLen / 2,
+            stone(5),
+            { priority: 3 }
+        )
+    );
     // capstones, slightly proud
-    P.push(piece('cap-near', boxS(B.halfWidth + 0.05, 0.05, 0.25), BRIDGE_X, nearTop + 0.05, B.nearFace + 0.25, stone(7), { priority: 3 }));
-    P.push(piece('cap-far', boxS(B.halfWidth + 0.05, 0.05, 0.25), BRIDGE_X, farTop + 0.05, B.farFace - 0.25, stone(9), { priority: 3 }));
+    P.push(
+        piece('cap-near', boxS(B.halfWidth + 0.05, 0.05, 0.25), BRIDGE_X, nearTop + 0.05, B.nearFace + 0.25, stone(7), {
+            priority: 3
+        })
+    );
+    P.push(
+        piece('cap-far', boxS(B.halfWidth + 0.05, 0.05, 0.25), BRIDGE_X, farTop + 0.05, B.farFace - 0.25, stone(9), {
+            priority: 3
+        })
+    );
     // the snapped stringer hanging off the near abutment into the water
-    P.push(piece('stringer-snapped', boxS(0.09, 0.09, 0.8), BRIDGE_X - 0.8, nearTop - 0.45, B.nearFace - 0.6, darkTimber, { pitch: -0.7 }));
+    P.push(
+        piece('stringer-snapped', boxS(0.09, 0.09, 0.8), BRIDGE_X - 0.8, nearTop - 0.45, B.nearFace - 0.6, darkTimber, {
+            pitch: -0.7
+        })
+    );
     // old deck boards lying on the creek bed
-    P.push(piece('board-1', boxS(1.0, 0.04, 0.12), BRIDGE_X + 0.3, CREEK_BED_Y + 0.2, B.zc + 0.3, oldTimber, { yaw: 0.5 }));
-    P.push(piece('board-2', boxS(0.9, 0.04, 0.12), BRIDGE_X - 0.6, CREEK_BED_Y + 0.22, B.zc - 0.5, oldTimber, { yaw: -0.3, roll: 0.2 }));
+    P.push(
+        piece('board-1', boxS(1.0, 0.04, 0.12), BRIDGE_X + 0.3, CREEK_BED_Y + 0.2, B.zc + 0.3, oldTimber, { yaw: 0.5 })
+    );
+    P.push(
+        piece('board-2', boxS(0.9, 0.04, 0.12), BRIDGE_X - 0.6, CREEK_BED_Y + 0.22, B.zc - 0.5, oldTimber, {
+            yaw: -0.3,
+            roll: 0.2
+        })
+    );
     // a warning post by the gap
-    P.push(piece('warning-post', boxS(0.05, 0.6, 0.05), BRIDGE_X + B.halfWidth + 0.3, nearTop + 0.6, B.nearFace + 0.4, solid(M.Timber, 1)));
-    P.push(piece('warning-sign', boxS(0.32, 0.18, 0.025), BRIDGE_X + B.halfWidth + 0.3, nearTop + 1.15, B.nearFace + 0.4, (_x, y) => voxel(Math.abs(y) < 0.06 ? M.HiVisStripe : M.HiVis, 0), { priority: 3 }));
+    P.push(
+        piece(
+            'warning-post',
+            boxS(0.05, 0.6, 0.05),
+            BRIDGE_X + B.halfWidth + 0.3,
+            nearTop + 0.6,
+            B.nearFace + 0.4,
+            solid(M.Timber, 1)
+        )
+    );
+    P.push(
+        piece(
+            'warning-sign',
+            boxS(0.32, 0.18, 0.025),
+            BRIDGE_X + B.halfWidth + 0.3,
+            nearTop + 1.15,
+            B.nearFace + 0.4,
+            (_x, y) => voxel(Math.abs(y) < 0.06 ? M.HiVisStripe : M.HiVis, 0),
+            { priority: 3 }
+        )
+    );
 
     // ---- the far-bank goal flag
     const goal = YARD_GOAL;
@@ -202,7 +281,18 @@ function yardPieces(): StaticPiece[] {
     const gz = goal.minZ + 0.3;
     const gy = yardHeight(gx, gz);
     P.push(piece('flag-pole', boxS(0.04, 1.2, 0.04), gx, gy + 1.2, gz, solid(M.Steel, 1)));
-    P.push(piece('flag', boxS(0.35, 0.2, 0.02), gx + 0.39, gy + 2.15, gz, (x, y) => voxel((Math.floor((x + 0.35) / 0.1) + Math.floor((y + 0.2) / 0.1)) & 1 ? M.HiVis : M.TestOrange, 0), { priority: 3 }));
+    P.push(
+        piece(
+            'flag',
+            boxS(0.35, 0.2, 0.02),
+            gx + 0.39,
+            gy + 2.15,
+            gz,
+            (x, y) =>
+                voxel((Math.floor((x + 0.35) / 0.1) + Math.floor((y + 0.2) / 0.1)) & 1 ? M.HiVis : M.TestOrange, 0),
+            { priority: 3 }
+        )
+    );
 
     // ---- timber shed: four posts, a pitched roof, a back wall of boards
     const sx0 = -13;
@@ -218,10 +308,22 @@ function yardPieces(): StaticPiece[] {
         P.push(piece('shed-post', boxS(0.08, 1.25, 0.08), px, YARD_Y + 1.25, pz, darkTimber));
     }
     const sc = (sx0 + sx1) / 2;
-    P.push(piece('shed-roof', boxS(3.4, 0.05, 1.85), sc, YARD_Y + 2.62, (sz0 + sz1) / 2, (x, y, z) => voxel(M.Galvanised, Math.floor((x + 3.4) / 0.3) & 1 ? 0 : 2 + (latticeShade(x, y, z, 0.3, 2) & 1)), { pitch: 0.1, priority: 3 }));
+    P.push(
+        piece(
+            'shed-roof',
+            boxS(3.4, 0.05, 1.85),
+            sc,
+            YARD_Y + 2.62,
+            (sz0 + sz1) / 2,
+            (x, y, z) =>
+                voxel(M.Galvanised, Math.floor((x + 3.4) / 0.3) & 1 ? 0 : 2 + (latticeShade(x, y, z, 0.3, 2) & 1)),
+            { pitch: 0.1, priority: 3 }
+        )
+    );
     P.push(piece('shed-wall', boxS(3.0, 1.05, 0.04), sc, YARD_Y + 1.05, sz1 + 0.05, grain(M.Timber, 'y', 0.2, 8)));
     P.push(piece('shed-rack', boxS(2.6, 0.04, 0.6), sc, YARD_Y + 0.7, sz1 - 0.7, oldTimber));
-    for (const rx of [sc - 2.4, sc, sc + 2.4]) P.push(piece('shed-rack-leg', boxS(0.05, 0.33, 0.5), rx, YARD_Y + 0.33, sz1 - 0.7, darkTimber));
+    for (const rx of [sc - 2.4, sc, sc + 2.4])
+        P.push(piece('shed-rack-leg', boxS(0.05, 0.33, 0.5), rx, YARD_Y + 0.33, sz1 - 0.7, darkTimber));
 
     // ---- the sawmill bench (machinery arrives in Epic 6: this one is decoration)
     const mx = 3;
@@ -235,28 +337,128 @@ function yardPieces(): StaticPiece[] {
     ]) {
         P.push(piece('saw-leg', boxS(0.05, 0.4, 0.05), mx + lx, YARD_Y + 0.4, mz + lz, solid(M.UteTrim, 0)));
     }
-    P.push(piece('saw-blade', { type: 'cylinder', axis: 'z', r: 0.42, half: 0.02 }, mx + 0.4, YARD_Y + 1.0, mz, (x, y) => voxel(Math.hypot(x, y) > 0.36 ? M.Chrome : M.Steel, 0), { priority: 4 }));
-    P.push(piece('saw-motor', boxS(0.28, 0.22, 0.24), mx - 1.1, YARD_Y + 1.14, mz, (_x, y) => voxel(y > 0.12 ? M.HiVis : M.UteTrim, 0), { priority: 3 }));
+    P.push(
+        piece(
+            'saw-blade',
+            { type: 'cylinder', axis: 'z', r: 0.42, half: 0.02 },
+            mx + 0.4,
+            YARD_Y + 1.0,
+            mz,
+            (x, y) => voxel(Math.hypot(x, y) > 0.36 ? M.Chrome : M.Steel, 0),
+            { priority: 4 }
+        )
+    );
+    P.push(
+        piece(
+            'saw-motor',
+            boxS(0.28, 0.22, 0.24),
+            mx - 1.1,
+            YARD_Y + 1.14,
+            mz,
+            (_x, y) => voxel(y > 0.12 ? M.HiVis : M.UteTrim, 0),
+            { priority: 3 }
+        )
+    );
 
     // ---- the windsock pole (the sock itself is a moving object that follows the wind)
     const wsy = yardHeight(WINDSOCK.x, WINDSOCK.z);
-    P.push(piece('windsock-pole', boxS(0.05, WINDSOCK.height / 2, 0.05), WINDSOCK.x, wsy + WINDSOCK.height / 2, WINDSOCK.z, solid(M.Steel, 1)));
+    P.push(
+        piece(
+            'windsock-pole',
+            boxS(0.05, WINDSOCK.height / 2, 0.05),
+            WINDSOCK.x,
+            wsy + WINDSOCK.height / 2,
+            WINDSOCK.z,
+            solid(M.Steel, 1)
+        )
+    );
 
     // ---- the bucket stump and a yard sign
-    P.push(piece('stump', { type: 'cylinder', axis: 'y', r: 0.26, half: 0.22 }, BUCKET_STUMP.x, YARD_Y + 0.22, BUCKET_STUMP.z, (x, y, z) => voxel(y > 0.17 ? M.LogEnd : M.LogBark, y > 0.17 ? (Math.floor(Math.hypot(x, z) / 0.07) & 1 ? 1 : 2) : latticeShade(x, y, z, 0.15, 3))));
+    P.push(
+        piece(
+            'stump',
+            { type: 'cylinder', axis: 'y', r: 0.26, half: 0.22 },
+            BUCKET_STUMP.x,
+            YARD_Y + 0.22,
+            BUCKET_STUMP.z,
+            (x, y, z) =>
+                voxel(
+                    y > 0.17 ? M.LogEnd : M.LogBark,
+                    y > 0.17 ? (Math.floor(Math.hypot(x, z) / 0.07) & 1 ? 1 : 2) : latticeShade(x, y, z, 0.15, 3)
+                )
+        )
+    );
     P.push(piece('sign-post-l', boxS(0.05, 0.75, 0.05), 6.4, YARD_Y + 0.75, 2.6, darkTimber));
     P.push(piece('sign-post-r', boxS(0.05, 0.75, 0.05), 8.2, YARD_Y + 0.75, 2.6, darkTimber));
-    P.push(piece('sign-board', boxS(1.0, 0.25, 0.03), 7.3, YARD_Y + 1.35, 2.6, (x, y) => voxel(Math.abs(y) < 0.11 && Math.abs(x) < 0.85 && hash3(Math.floor((x + 1) / 0.1), Math.floor((y + 1) / 0.1), 0, 3) % 3 === 0 ? M.HiVis : M.Timber, 1), { priority: 3 }));
+    P.push(
+        piece(
+            'sign-board',
+            boxS(1.0, 0.25, 0.03),
+            7.3,
+            YARD_Y + 1.35,
+            2.6,
+            (x, y) =>
+                voxel(
+                    Math.abs(y) < 0.11 &&
+                        Math.abs(x) < 0.85 &&
+                        hash3(Math.floor((x + 1) / 0.1), Math.floor((y + 1) / 0.1), 0, 3) % 3 === 0
+                        ? M.HiVis
+                        : M.Timber,
+                    1
+                ),
+            { priority: 3 }
+        )
+    );
 
     // ---- the flower on the summit: the goal of the whole journey, silhouetted on the ridge
     const fy = yardHeight(SUMMIT.x, SUMMIT.z);
-    P.push(piece('flower-stem', { type: 'cylinder', axis: 'y', r: 0.22, half: 1.6 }, SUMMIT.x, fy + 1.5, SUMMIT.z, solid(M.Grass, 2), { collide: false }));
-    P.push(piece('flower-leaf', { type: 'ellipsoid', rx: 0.9, ry: 0.15, rz: 0.4 }, SUMMIT.x + 0.7, fy + 1.0, SUMMIT.z, solid(M.Grass, 0), { collide: false, yaw: 0.3, roll: 0.4 }));
+    P.push(
+        piece(
+            'flower-stem',
+            { type: 'cylinder', axis: 'y', r: 0.22, half: 1.6 },
+            SUMMIT.x,
+            fy + 1.5,
+            SUMMIT.z,
+            solid(M.Grass, 2),
+            { collide: false }
+        )
+    );
+    P.push(
+        piece(
+            'flower-leaf',
+            { type: 'ellipsoid', rx: 0.9, ry: 0.15, rz: 0.4 },
+            SUMMIT.x + 0.7,
+            fy + 1.0,
+            SUMMIT.z,
+            solid(M.Grass, 0),
+            { collide: false, yaw: 0.3, roll: 0.4 }
+        )
+    );
     for (let n = 0; n < 6; n++) {
         const a = (n / 6) * Math.PI * 2;
-        P.push(piece('flower-petal', { type: 'ellipsoid', rx: 0.95, ry: 0.5, rz: 0.22 }, SUMMIT.x + Math.cos(a) * 0.9, fy + 3.4 + Math.sin(a) * 0.9, SUMMIT.z + 0.1, solid(M.Flower, n & 1 ? 0 : 2), { collide: false, roll: a, priority: 2 }));
+        P.push(
+            piece(
+                'flower-petal',
+                { type: 'ellipsoid', rx: 0.95, ry: 0.5, rz: 0.22 },
+                SUMMIT.x + Math.cos(a) * 0.9,
+                fy + 3.4 + Math.sin(a) * 0.9,
+                SUMMIT.z + 0.1,
+                solid(M.Flower, n & 1 ? 0 : 2),
+                { collide: false, roll: a, priority: 2 }
+            )
+        );
     }
-    P.push(piece('flower-centre', { type: 'ellipsoid', rx: 0.55, ry: 0.55, rz: 0.4 }, SUMMIT.x, fy + 3.4, SUMMIT.z + 0.25, solid(M.HiVis, 1), { collide: false, priority: 4 }));
+    P.push(
+        piece(
+            'flower-centre',
+            { type: 'ellipsoid', rx: 0.55, ry: 0.55, rz: 0.4 },
+            SUMMIT.x,
+            fy + 3.4,
+            SUMMIT.z + 0.25,
+            solid(M.HiVis, 1),
+            { collide: false, priority: 4 }
+        )
+    );
     return P;
 }
 
@@ -276,7 +478,13 @@ export function yardLayout(seed = 1): LevelLayout {
         if (onRoad(x, z) < 2.6) return;
         if (Math.abs(z - creekCenterZ(x)) < creekHalfWidth(x) + 1.2) return;
         if (yardWeight(x, z) > 0.05) return;
-        if (x > YARD_GOAL.minX - 1.5 && x < YARD_GOAL.maxX + 1.5 && z > YARD_GOAL.minZ - 1.5 && z < YARD_GOAL.maxZ + 1.5) return;
+        if (
+            x > YARD_GOAL.minX - 1.5 &&
+            x < YARD_GOAL.maxX + 1.5 &&
+            z > YARD_GOAL.minZ - 1.5 &&
+            z < YARD_GOAL.maxZ + 1.5
+        )
+            return;
         trees.push({ x, z, scale: s, yaw: r() * Math.PI * 2, kind });
     };
     // the forest across the creek, thickening uphill
@@ -318,7 +526,14 @@ export function yardLayout(seed = 1): LevelLayout {
         [-14, 2.4, 0.5],
         [11.5, 1.9, 0.4]
     ] as const) {
-        rocks.push({ x, z, rx: s * (1.1 + r() * 0.3), ry: s * (0.65 + r() * 0.2), rz: s * (0.9 + r() * 0.3), yaw: r() * Math.PI });
+        rocks.push({
+            x,
+            z,
+            rx: s * (1.1 + r() * 0.3),
+            ry: s * (0.65 + r() * 0.2),
+            rz: s * (0.9 + r() * 0.3),
+            yaw: r() * Math.PI
+        });
     }
     return { trees, rocks, pieces: yardPieces() };
 }
@@ -327,7 +542,16 @@ export function buildTimberYard(world: VoxelWorld, seed = 1): LevelBuildResult {
     const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const stats = createRasterStats();
     const B = YARD_BOUNDS;
-    const columns = rasterizeTerrain(world, { minX: B.minX, maxX: B.maxX, minZ: B.minZ, maxZ: B.maxZ, cutBaseY: CUT_BASE_Y, topCell: yardTopCell, surface: surfaceMaterial, side: sideMaterial });
+    const columns = rasterizeTerrain(world, {
+        minX: B.minX,
+        maxX: B.maxX,
+        minZ: B.minZ,
+        maxZ: B.maxZ,
+        cutBaseY: CUT_BASE_Y,
+        topCell: yardTopCell,
+        surface: surfaceMaterial,
+        side: sideMaterial
+    });
     const layout = yardLayout(seed);
     let trees = 0;
     for (const t of layout.trees) {
@@ -371,7 +595,8 @@ export function buildTimberYard(world: VoxelWorld, seed = 1): LevelBuildResult {
     return { columns, staticCells: world.staticCellCount(), trees, rocks, reeds, stats, ms: t1 - t0 };
 }
 
-const at = (x: number, y: number, z: number, yaw = 0, pitch = 0, roll = 0): Pose => pose(x, y, z, quatFromYawPitchRoll(yaw, pitch, roll));
+const at = (x: number, y: number, z: number, yaw = 0, pitch = 0, roll = 0): Pose =>
+    pose(x, y, z, quatFromYawPitchRoll(yaw, pitch, roll));
 const FLAT = Math.PI / 2; // planks and beams lie on their wide face
 
 /** Where the yard's dynamic props start. */
@@ -379,7 +604,9 @@ function yardProps(): PropPlacement[] {
     const P: PropPlacement[] = [];
     // plank stack by the shed: six planks, long axis X, flat
     const plankNames = ['plank', 'extra-plank-0', 'extra-plank-1', 'extra-plank-2', 'extra-plank-3', 'extra-plank-4'];
-    plankNames.forEach((name, n) => P.push({ name, pose: at(-4.6, YARD_Y + 0.055 + n * 0.105, 6 + (n % 2) * 0.04, 0, FLAT) }));
+    plankNames.forEach((name, n) =>
+        P.push({ name, pose: at(-4.6, YARD_Y + 0.055 + n * 0.105, 6 + (n % 2) * 0.04, 0, FLAT) })
+    );
     // two beams near the creek
     P.push({ name: 'beam-0', pose: at(-2.2, YARD_Y + 0.08, 3.3, 0.06, FLAT) });
     P.push({ name: 'beam-1', pose: at(-2.2, YARD_Y + 0.08, 3.85, 0.06, FLAT) });
@@ -409,7 +636,10 @@ export const timberYardLevel: LevelDef = {
     spawn: { x: 1.2, z: 6.2, yaw: 0.12, pitch: -0.1 },
     orbitHome: { pos: [9, 4.2, 12], focus: [-1, 0.5, 0] },
     startFirstPerson: true,
-    actors: { beaver: { mode: 'idle', pose: at(-6.3, YARD_Y, 7.4, 2.4) }, ute: { mode: 'parked', pose: at(-10.5, YARD_Y + 0.002, 4.6, Math.PI / 2 + 0.15) } },
+    actors: {
+        beaver: { mode: 'idle', pose: at(-6.3, YARD_Y, 7.4, 2.4) },
+        ute: { mode: 'parked', pose: at(-10.5, YARD_Y + 0.002, 4.6, Math.PI / 2 + 0.15) }
+    },
     props: yardProps(),
     rules: {
         objective: 'Get the bucket across the creek to the flag',

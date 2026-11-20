@@ -18,7 +18,16 @@
  * by the material as ambient occlusion only. It is derived from the same occupancy grid.
  */
 
-import { CHUNK_BITS, CHUNK_MASK, GRID_ORIGIN_X, GRID_ORIGIN_Y, GRID_ORIGIN_Z, GRID_SIZE, localIndex, packChunkCoord } from './grid.ts';
+import {
+    CHUNK_BITS,
+    CHUNK_MASK,
+    GRID_ORIGIN_X,
+    GRID_ORIGIN_Y,
+    GRID_ORIGIN_Z,
+    GRID_SIZE,
+    localIndex,
+    packChunkCoord
+} from './grid.ts';
 import { SURFACE_CLASS_COUNT, VALUE_RGB, VALUE_SURFACE } from './palette.ts';
 import type { VoxelWorld } from './world.ts';
 
@@ -183,7 +192,14 @@ export function meshRegion(
                 if (sol === 0 && bedrock !== null) {
                     const bx = i - bedrock.minI;
                     const bz = k - bedrock.minK;
-                    if (bx >= 0 && bz >= 0 && bx < bedrock.width && bz < bedrock.depth && j < bedrock.bottom[bx + bz * bedrock.width]) sol = 1;
+                    if (
+                        bx >= 0 &&
+                        bz >= 0 &&
+                        bx < bedrock.width &&
+                        bz < bedrock.depth &&
+                        j < bedrock.bottom[bx + bz * bedrock.width]
+                    )
+                        sol = 1;
                 }
                 const isInner = inner && x > 0 && x < PX - 1;
                 emit[base] = isInner ? e : 0;
@@ -201,7 +217,11 @@ export function meshRegion(
 
     const S = [sx, sy, sz];
     const stride = [1, PX, PX * PY];
-    const origin = [GRID_ORIGIN_X + GRID_SIZE * minI, GRID_ORIGIN_Y + GRID_SIZE * minJ, GRID_ORIGIN_Z + GRID_SIZE * minK];
+    const origin = [
+        GRID_ORIGIN_X + GRID_SIZE * minI,
+        GRID_ORIGIN_Y + GRID_SIZE * minJ,
+        GRID_ORIGIN_Z + GRID_SIZE * minK
+    ];
     const greedy = opts.greedy;
     const useAo = opts.ao;
 
@@ -254,7 +274,7 @@ export function meshRegion(
                 // ---- greedy merge
                 const planeA = origin[a] + GRID_SIZE * (sign > 0 ? t + 1 : t);
                 for (let iv = 0; iv < Sv; iv++) {
-                    for (let iu = 0; iu < Su; ) {
+                    for (let iu = 0; iu < Su;) {
                         const key = mask[iu + iv * Su];
                         if (key === 0) {
                             iu++;
@@ -276,7 +296,19 @@ export function meshRegion(
                             const row = (iv + hh) * Su;
                             for (let q = 0; q < w; q++) mask[iu + q + row] = 0;
                         }
-                        emitQuad(out, a, u, v, sign, planeA, origin[u] + GRID_SIZE * iu, origin[v] + GRID_SIZE * iv, w * GRID_SIZE, h * GRID_SIZE, key);
+                        emitQuad(
+                            out,
+                            a,
+                            u,
+                            v,
+                            sign,
+                            planeA,
+                            origin[u] + GRID_SIZE * iu,
+                            origin[v] + GRID_SIZE * iv,
+                            w * GRID_SIZE,
+                            h * GRID_SIZE,
+                            key
+                        );
                         out.quads++;
                         out.faces += w * h;
                         iu += w;
@@ -294,7 +326,19 @@ function cornerAo(s1: number, s2: number, c: number): number {
 
 const _p = new Float64Array(12);
 
-function emitQuad(out: MeshOutput, a: number, u: number, v: number, sign: number, pa: number, pu: number, pv: number, wu: number, hv: number, key: number): void {
+function emitQuad(
+    out: MeshOutput,
+    a: number,
+    u: number,
+    v: number,
+    sign: number,
+    pa: number,
+    pu: number,
+    pv: number,
+    wu: number,
+    hv: number,
+    key: number
+): void {
     const value = key & 0xffff;
     const ao = (key >>> 16) & 0xff;
     const cls = out.classes[VALUE_SURFACE[value]];

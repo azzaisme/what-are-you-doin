@@ -84,7 +84,9 @@ describe('lab simulation', () => {
         s.stressCount = 25;
         for (let n = 0; n < 60 * 120; n++) {
             s.step(neutralCommand(n));
-            if (n % 97 === 0) for (const e of s.entities) expect(Number.isFinite(e.pose.p.x + e.pose.p.y + e.pose.p.z + e.pose.q.w)).toBe(true);
+            if (n % 97 === 0)
+                for (const e of s.entities)
+                    expect(Number.isFinite(e.pose.p.x + e.pose.p.y + e.pose.p.z + e.pose.q.w)).toBe(true);
         }
     }, 120_000);
 
@@ -115,7 +117,10 @@ function rasterAsset(asset: typeof beaverAsset, root: ReturnType<typeof pose>, a
     );
     world.resolve();
     expect(stats.rejected).toBe(0);
-    const cells = [...world.objectCells(1).entries()].map(([k, v]) => ({ ...keyToCell(world, k), m: voxelMaterial(v) }));
+    const cells = [...world.objectCells(1).entries()].map(([k, v]) => ({
+        ...keyToCell(world, k),
+        m: voxelMaterial(v)
+    }));
     return cells;
 }
 
@@ -149,7 +154,13 @@ describe('beaver asset (§2.2, §3.2)', () => {
                 let right = 0;
                 for (const c of cells) {
                     if (c.m !== M.Eye) continue;
-                    const exposed = !has(c.i + 1, c.j, c.k) || !has(c.i - 1, c.j, c.k) || !has(c.i, c.j + 1, c.k) || !has(c.i, c.j - 1, c.k) || !has(c.i, c.j, c.k + 1) || !has(c.i, c.j, c.k - 1);
+                    const exposed =
+                        !has(c.i + 1, c.j, c.k) ||
+                        !has(c.i - 1, c.j, c.k) ||
+                        !has(c.i, c.j + 1, c.k) ||
+                        !has(c.i, c.j - 1, c.k) ||
+                        !has(c.i, c.j, c.k + 1) ||
+                        !has(c.i, c.j, c.k - 1);
                     if (!exposed) continue;
                     const cx = (c.i + 0.5) * GRID_SIZE - ox;
                     const cz = (c.k + 0.5) * GRID_SIZE - oz;
@@ -189,7 +200,12 @@ describe('ute asset (§2.7)', () => {
         expect(tyreTop - groundJ + 1).toBeLessThanOrEqual(Math.ceil((2 * UTE_WHEEL_RADIUS) / GRID_SIZE) + 1);
         anim[0] = 0.4; // wheel spin
         const b = rasterAsset(uteAsset, pose(0.05, PLATEAU_Y, 0.05), anim);
-        const sig = (cells: typeof a) => cells.filter((c) => c.m === M.Chrome || c.m === M.Tyre).map((c) => `${c.i},${c.j},${c.k},${c.m}`).sort().join('|');
+        const sig = (cells: typeof a) =>
+            cells
+                .filter((c) => c.m === M.Chrome || c.m === M.Tyre)
+                .map((c) => `${c.i},${c.j},${c.k},${c.m}`)
+                .sort()
+                .join('|');
         expect(sig(b)).not.toBe(sig(a));
     });
 });

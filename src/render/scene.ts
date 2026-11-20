@@ -44,7 +44,6 @@ import {
     ASPECT_AUTO,
     ASPECT_MANUAL,
     createGraphicsDevice
-    
 } from 'playcanvas';
 import type { GraphicsDevice } from 'playcanvas';
 import { Water } from 'playcanvas/scripts/esm/water.mjs';
@@ -63,8 +62,24 @@ export interface Quality {
 }
 
 export const QUALITY: Record<Quality['name'], Quality> = {
-    high: { name: 'high', samples: 4, shadowResolution: 2048, cascades: 3, reflectionScale: 0.5, refraction: true, pixelRatio: 2 },
-    low: { name: 'low', samples: 1, shadowResolution: 1024, cascades: 2, reflectionScale: 0.25, refraction: false, pixelRatio: 1 }
+    high: {
+        name: 'high',
+        samples: 4,
+        shadowResolution: 2048,
+        cascades: 3,
+        reflectionScale: 0.5,
+        refraction: true,
+        pixelRatio: 2
+    },
+    low: {
+        name: 'low',
+        samples: 1,
+        shadowResolution: 1024,
+        cascades: 2,
+        reflectionScale: 0.25,
+        refraction: false,
+        pixelRatio: 1
+    }
 };
 
 export interface LabScene {
@@ -99,7 +114,12 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
 
     const options = new AppOptions();
     options.graphicsDevice = device;
-    options.componentSystems = [RenderComponentSystem, CameraComponentSystem, LightComponentSystem, ScriptComponentSystem];
+    options.componentSystems = [
+        RenderComponentSystem,
+        CameraComponentSystem,
+        LightComponentSystem,
+        ScriptComponentSystem
+    ];
     options.resourceHandlers = [TextureHandler];
 
     const app = new AppBase(canvas);
@@ -185,7 +205,10 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
 
     // ---- the river: one smooth surface exception (design doc §3.3 item 5)
     const W = level.water;
-    const waterMesh = Mesh.fromGeometry(device, new PlaneGeometry({ halfExtents: new Vec2(W.halfX, W.halfZ), widthSegments: 1, lengthSegments: 1 }));
+    const waterMesh = Mesh.fromGeometry(
+        device,
+        new PlaneGeometry({ halfExtents: new Vec2(W.halfX, W.halfZ), widthSegments: 1, lengthSegments: 1 })
+    );
     const waterEntity = new Entity('River');
     waterEntity.addComponent('render', {
         meshInstances: [new MeshInstance(waterMesh, new StandardMaterial())],
@@ -282,8 +305,16 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
     // half by viewport and scissor, with its clear off. The engine rebuilds these passes when settings
     // change, so this is re-applied every frame while split.
     type SplitPass = { scaleY: number } | null | undefined;
-    type ComposePass = { viewport?: Vec4; scissor?: Vec4; setClearColor(c?: Color): void; setClearDepth(d?: number): void; setClearStencil(s?: number): void };
-    type FrameInternals = { renderPassCamera?: { scenePass?: SplitPass; prePass?: SplitPass; composePass?: ComposePass } };
+    type ComposePass = {
+        viewport?: Vec4;
+        scissor?: Vec4;
+        setClearColor(c?: Color): void;
+        setClearDepth(d?: number): void;
+        setClearStencil(s?: number): void;
+    };
+    type FrameInternals = {
+        renderPassCamera?: { scenePass?: SplitPass; prePass?: SplitPass; composePass?: ComposePass };
+    };
     const topRect = new Vec4();
     const bottomRect = new Vec4();
     const applySplit = (f: CameraFrame | null, rect: Vec4) => {

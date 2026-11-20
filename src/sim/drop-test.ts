@@ -17,7 +17,6 @@ import { VoxelWorld } from '../voxels/world.ts';
 import { ACTION_DROP_TEST, neutralCommand } from './commands.ts';
 import { LabSim } from './lab-sim.ts';
 
-
 export interface DropFrame {
     tick: number;
     pose: Pose;

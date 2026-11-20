@@ -53,7 +53,13 @@ export function clonePose(src: Pose): Pose {
     return copyPose(src, pose());
 }
 
-export function quatFromAxisAngle(ax: number, ay: number, az: number, radians: number, out: Quat = quatIdentity()): Quat {
+export function quatFromAxisAngle(
+    ax: number,
+    ay: number,
+    az: number,
+    radians: number,
+    out: Quat = quatIdentity()
+): Quat {
     const len = Math.hypot(ax, ay, az);
     if (len === 0 || !Number.isFinite(len)) {
         out.x = 0;

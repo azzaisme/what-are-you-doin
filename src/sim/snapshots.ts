@@ -4,7 +4,7 @@
  * protocol-shaped: the same layout is what a network snapshot would carry (pose + animation).
  */
 
-import { lerpPose, pose  } from '../voxels/math.ts';
+import { lerpPose, pose } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
 
 import { SIM_DT } from './clock.ts';
@@ -105,7 +105,14 @@ export class SnapshotRing {
 const _a = pose();
 const _b = pose();
 
-export function writeEntity(buf: Float64Array, entity: number, p: Pose, visible: boolean, anim: ArrayLike<number>, animLen: number): void {
+export function writeEntity(
+    buf: Float64Array,
+    entity: number,
+    p: Pose,
+    visible: boolean,
+    anim: ArrayLike<number>,
+    animLen: number
+): void {
     const o = entity * STRIDE;
     buf[o] = p.p.x;
     buf[o + 1] = p.p.y;

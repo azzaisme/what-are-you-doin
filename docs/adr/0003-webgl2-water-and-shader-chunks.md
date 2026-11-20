@@ -3,6 +3,7 @@
 Status: accepted (Epic 1) · Date: 2026-11-19
 
 ## Decision
+
 - The device is pinned to WebGL2 (design doc §4.1). WebGPU is a later, measured option.
 - The river uses the engine's shipped `Water` script (playcanvas 2.24.2 `scripts/esm/water.mjs`):
   `PlanarRenderer` mirrors the main camera about the water plane, clips with an oblique projection,
@@ -16,5 +17,6 @@ Status: accepted (Epic 1) · Date: 2026-11-19
   `WATER_HEIGHT_FOG`, so ordinary distance fog is used and the dynamic sky's haze is not.
 
 ## Consequences
+
 Moving to WebGPU needs WGSL versions of the two chunks. The water is the one smooth surface
 exception, as listed in the design doc §3.3.

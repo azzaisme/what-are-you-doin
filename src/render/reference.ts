@@ -5,12 +5,12 @@
  * presentation. Also draws source bounds (oriented boxes) as debug lines.
  */
 
-import { Color, Entity, Quat, StandardMaterial, Vec3   } from 'playcanvas';
+import { Color, Entity, Quat, StandardMaterial, Vec3 } from 'playcanvas';
 import type { AppBase, Layer } from 'playcanvas';
 
 import type { LabSim } from '../sim/lab-sim.ts';
 import { ANIM_MAX } from '../sim/snapshots.ts';
-import { pose, quatRotate  } from '../voxels/math.ts';
+import { pose, quatRotate } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
 
 interface RefPart {
@@ -83,7 +83,13 @@ export class ReferenceRenderer {
                     child.setLocalScale(b.maxX - b.minX, b.maxY - b.minY, b.maxZ - b.minZ);
                     child.setLocalPosition((b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, (b.minZ + b.maxZ) / 2);
                 }
-                child.addComponent('render', { type, material: material(p.refColor), layers: [layer.id], castShadows: true, receiveShadows: true });
+                child.addComponent('render', {
+                    type,
+                    material: material(p.refColor),
+                    layers: [layer.id],
+                    castShadows: true,
+                    receiveShadows: true
+                });
                 holder.addChild(child);
                 this.root.addChild(holder);
                 parts.push({ holder });
@@ -131,7 +137,10 @@ export class ReferenceRenderer {
         }
     }
 
-    private drawBounds(p: Pose, b: { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number }): void {
+    private drawBounds(
+        p: Pose,
+        b: { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number }
+    ): void {
         const xs = [b.minX, b.maxX];
         const ys = [b.minY, b.maxY];
         const zs = [b.minZ, b.maxZ];

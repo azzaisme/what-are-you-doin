@@ -208,10 +208,17 @@ export class ParticleFX {
                 // landed hard: was falling fast, now (nearly) stopped, close to the ground
                 const g = this.level.terrainHeight(cellCentre(x), cellCentre(z));
                 const nearGround = y - w.bottom - g < 0.25;
-                if (prev.vy < -2.2 && vy > -0.6 && nearGround && !w.eyeHeight) this.spawn(t, x, restY(g), z, w.timber ? 'chips' : 'dust', w.timber ? 14 : 10);
+                if (prev.vy < -2.2 && vy > -0.6 && nearGround && !w.eyeHeight)
+                    this.spawn(t, x, restY(g), z, w.timber ? 'chips' : 'dust', w.timber ? 14 : 10);
                 // dropped into the water
-                const inWaterArea = Math.abs(x - water.cx) < water.halfX && Math.abs(z - water.cz) < water.halfZ && g < water.y;
-                if (inWaterArea && prev.y - (w.eyeHeight ? 0 : w.bottom) > water.y && y - (w.eyeHeight ? 0 : w.bottom) <= water.y && prev.vy < -0.8) {
+                const inWaterArea =
+                    Math.abs(x - water.cx) < water.halfX && Math.abs(z - water.cz) < water.halfZ && g < water.y;
+                if (
+                    inWaterArea &&
+                    prev.y - (w.eyeHeight ? 0 : w.bottom) > water.y &&
+                    y - (w.eyeHeight ? 0 : w.bottom) <= water.y &&
+                    prev.vy < -0.8
+                ) {
                     this.spawn(t, x, water.y, z, 'splash', w.eyeHeight ? 26 : 18);
                 }
                 this.prev.set(w.slot, { y, vy, vx: 0, vz: 0, visible: true });
@@ -245,7 +252,8 @@ export class ParticleFX {
                 const z = b.z + Math.sin(a) * sp * age * drag;
                 const y = b.y + up * age - 0.5 * g * age * age;
                 if (y < b.y - 0.05 && b.kind !== 'dust') continue;
-                const mat = b.kind === 'splash' ? M.Splash : b.kind === 'chips' ? (i % 3 ? M.TimberEnd : M.Dust) : M.Dust;
+                const mat =
+                    b.kind === 'splash' ? M.Splash : b.kind === 'chips' ? (i % 3 ? M.TimberEnd : M.Dust) : M.Dust;
                 this.push(x, y, z, voxel(mat, i & 3));
             }
         }

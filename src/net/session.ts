@@ -74,7 +74,14 @@ export function listGames(lobby: NetChannel): (GameAd & { full: boolean })[] {
         if (p.isMe) continue;
         const g = p.state.game as Partial<GameAd> | undefined;
         if (!g || typeof g.code !== 'string' || !/^[a-z0-9]{4}$/.test(g.code)) continue;
-        const ad: GameAd = { code: g.code, level: String(g.level ?? ''), host: p.id, players: num(g.players), max: num(g.max), v: num(g.v) };
+        const ad: GameAd = {
+            code: g.code,
+            level: String(g.level ?? ''),
+            host: p.id,
+            players: num(g.players),
+            max: num(g.max),
+            v: num(g.v)
+        };
         out.push({ ...ad, full: ad.players >= ad.max });
     }
     return out;
@@ -115,7 +122,14 @@ export class HostSession {
     }
 
     private advertise(): void {
-        const ad: GameAd = { code: this.code, level: this.levelId, host: this.ch.me, players: this.sim.playerCount, max: 4, v: NET_PROTOCOL };
+        const ad: GameAd = {
+            code: this.code,
+            level: this.levelId,
+            host: this.ch.me,
+            players: this.sim.playerCount,
+            max: 4,
+            v: NET_PROTOCOL
+        };
         this.lobby.setState({ game: ad });
     }
 
@@ -172,7 +186,10 @@ export class HostSession {
                 grab: input.g > prev.g,
                 throw: input.t > prev.t,
                 // guests may only drop or launch the dummy (no scene resets or drop tests)
-                action: input.an > prev.an && (input.a === ACTION_DROP || input.a === ACTION_RAGDOLL) ? input.a : ACTION_NONE
+                action:
+                    input.an > prev.an && (input.a === ACTION_DROP || input.a === ACTION_RAGDOLL)
+                        ? input.a
+                        : ACTION_NONE
             };
             return cmd;
         }
@@ -184,7 +201,9 @@ export class HostSession {
         const sim = this.sim;
         while (this.lastEventCount < sim.events.length) {
             const e = sim.events[this.lastEventCount++];
-            this.recent = [...this.recent, { n: this.lastEventCount, kind: e.kind, text: e.text.slice(0, 120) }].slice(-3);
+            this.recent = [...this.recent, { n: this.lastEventCount, kind: e.kind, text: e.text.slice(0, 120) }].slice(
+                -3
+            );
         }
         if (sim.events.length < this.lastEventCount) this.lastEventCount = sim.events.length; // reset
         if (sim.tick % SNAPSHOT_EVERY !== 0) return;
@@ -195,7 +214,13 @@ export class HostSession {
             const h = hud(s);
             huds.push([h.held, h.target, h.shared ? 1 : 0]);
         }
-        this.ch.setState({ s: toBase64Chunks(bytes), hud: huds, goal: sim.progress.goalReached, step: sim.progress.step, ev: this.recent });
+        this.ch.setState({
+            s: toBase64Chunks(bytes),
+            hud: huds,
+            goal: sim.progress.goalReached,
+            step: sim.progress.step,
+            ev: this.recent
+        });
     }
 
     get guestCount(): number {
@@ -219,7 +244,18 @@ function emptyInput(): GuestInput {
 export function readInput(v: unknown): GuestInput | null {
     if (!v || typeof v !== 'object') return null;
     const o = v as Record<string, unknown>;
-    return { mx: num(o.mx), mz: num(o.mz), sp: o.sp === true, y: num(o.y), p: num(o.p), j: num(o.j), g: num(o.g), t: num(o.t), a: num(o.a), an: num(o.an) };
+    return {
+        mx: num(o.mx),
+        mz: num(o.mz),
+        sp: o.sp === true,
+        y: num(o.y),
+        p: num(o.p),
+        j: num(o.j),
+        g: num(o.g),
+        t: num(o.t),
+        a: num(o.a),
+        an: num(o.an)
+    };
 }
 
 // ------------------------------------------------------------------------------------- guest
@@ -261,7 +297,12 @@ export class GuestSession {
         this.receive();
     }
 
-    static async join(transport: NetTransport, sim: LabSim, ad: GameAd, now: () => number = () => performance.now()): Promise<GuestSession> {
+    static async join(
+        transport: NetTransport,
+        sim: LabSim,
+        ad: GameAd,
+        now: () => number = () => performance.now()
+    ): Promise<GuestSession> {
         const ch = await transport.join(`ue-${ad.code}`);
         return new GuestSession(sim, ch, ad.code, ad.host, now);
     }

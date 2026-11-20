@@ -30,7 +30,10 @@ export interface PropDef {
     spawn: Pose;
 }
 
-const PLANK: { shape: ShapeSpec; opts: BodyOptions } = { shape: { type: 'box', hx: 1.2, hy: 0.1, hz: 0.05 }, opts: { density: 500, friction: 0.7, restitution: 0.1, ccd: true } };
+const PLANK: { shape: ShapeSpec; opts: BodyOptions } = {
+    shape: { type: 'box', hx: 1.2, hy: 0.1, hz: 0.05 },
+    opts: { density: 500, friction: 0.7, restitution: 0.1, ccd: true }
+};
 
 /**
  * Collision shape and material for a prop entity, by name (the entity catalogue's naming):
@@ -39,11 +42,31 @@ const PLANK: { shape: ShapeSpec; opts: BodyOptions } = { shape: { type: 'box', h
  */
 export function propBody(name: string): { shape: ShapeSpec; opts: BodyOptions } | null {
     if (name === 'plank' || name === 'held-plank' || name.startsWith('extra-plank')) return PLANK;
-    if (name.startsWith('beam')) return { shape: { type: 'box', hx: BEAM_HALF.x, hy: BEAM_HALF.y, hz: BEAM_HALF.z }, opts: { density: 380, friction: 0.75, restitution: 0.05, ccd: true } };
-    if (name === 'log' || name.startsWith('extra-log')) return { shape: { type: 'cylinder', axis: 'x', r: LOG_RADIUS, half: 1.0 }, opts: { density: 450, friction: 0.8, restitution: 0.05, angularDamping: 0.4 } };
-    if (name === 'cube') return { shape: { type: 'box', hx: 0.25, hy: 0.25, hz: 0.25 }, opts: { density: 200, friction: 0.7, restitution: 0.1 } };
-    if (name === 'sphere') return { shape: { type: 'ball', r: 0.3 }, opts: { density: 20, friction: 0.6, restitution: 0.78, angularDamping: 0.1, ccd: true } };
-    if (name === 'bucket') return { shape: { type: 'cylinder', axis: 'y', r: 0.15, half: BUCKET_HEIGHT / 2, offsetY: BUCKET_HEIGHT / 2 }, opts: { density: 70, friction: 0.6, restitution: 0.1, ccd: true } };
+    if (name.startsWith('beam'))
+        return {
+            shape: { type: 'box', hx: BEAM_HALF.x, hy: BEAM_HALF.y, hz: BEAM_HALF.z },
+            opts: { density: 380, friction: 0.75, restitution: 0.05, ccd: true }
+        };
+    if (name === 'log' || name.startsWith('extra-log'))
+        return {
+            shape: { type: 'cylinder', axis: 'x', r: LOG_RADIUS, half: 1.0 },
+            opts: { density: 450, friction: 0.8, restitution: 0.05, angularDamping: 0.4 }
+        };
+    if (name === 'cube')
+        return {
+            shape: { type: 'box', hx: 0.25, hy: 0.25, hz: 0.25 },
+            opts: { density: 200, friction: 0.7, restitution: 0.1 }
+        };
+    if (name === 'sphere')
+        return {
+            shape: { type: 'ball', r: 0.3 },
+            opts: { density: 20, friction: 0.6, restitution: 0.78, angularDamping: 0.1, ccd: true }
+        };
+    if (name === 'bucket')
+        return {
+            shape: { type: 'cylinder', axis: 'y', r: 0.15, half: BUCKET_HEIGHT / 2, offsetY: BUCKET_HEIGHT / 2 },
+            opts: { density: 70, friction: 0.6, restitution: 0.1, ccd: true }
+        };
     return null;
 }
 
@@ -60,7 +83,17 @@ export function stressDef(level: LevelDef, id: number, n: number): PropDef {
     const row = Math.floor(n / 5);
     const x = -4 + col * 2.1;
     const z = (level.id === 'yard' ? 4.5 : 1.5) + row * 1.1;
-    return { id, shape: k.shape, opts: k.opts, spawn: pose(x, Math.max(level.terrainHeight(x, z), 0) + 2.5 + (n % 3) * 0.8, z, quatFromYawPitchRoll(n * 0.7, n * 0.3, n * 1.1)) };
+    return {
+        id,
+        shape: k.shape,
+        opts: k.opts,
+        spawn: pose(
+            x,
+            Math.max(level.terrainHeight(x, z), 0) + 2.5 + (n % 3) * 0.8,
+            z,
+            quatFromYawPitchRoll(n * 0.7, n * 0.3, n * 1.1)
+        )
+    };
 }
 
 export function buildLabPhysics(level: LevelDef): PhysicsWorld {
@@ -77,15 +110,32 @@ export function buildLabPhysics(level: LevelDef): PhysicsWorld {
         const s = t.scale;
         if (t.kind === 'oak') {
             const th = OAK.trunkHeight * s;
-            pw.addStatic(RAPIER.ColliderDesc.cylinder(th / 2, OAK.trunkRadius * s + 0.02).setTranslation(t.x, base + th / 2 - 0.05, t.z).setFriction(0.8));
-            for (const b of oakCrown(t, base)) pw.addStatic(RAPIER.ColliderDesc.ball(b.r * 0.85).setTranslation(b.x, b.y, b.z).setFriction(0.5));
+            pw.addStatic(
+                RAPIER.ColliderDesc.cylinder(th / 2, OAK.trunkRadius * s + 0.02)
+                    .setTranslation(t.x, base + th / 2 - 0.05, t.z)
+                    .setFriction(0.8)
+            );
+            for (const b of oakCrown(t, base))
+                pw.addStatic(
+                    RAPIER.ColliderDesc.ball(b.r * 0.85)
+                        .setTranslation(b.x, b.y, b.z)
+                        .setFriction(0.5)
+                );
             continue;
         }
         const trunkH = PINE_TRUNK_HEIGHT * s;
-        pw.addStatic(RAPIER.ColliderDesc.cylinder(trunkH / 2, pineTrunkRadius(s)).setTranslation(t.x, base + trunkH / 2 - 0.05, t.z).setFriction(0.8));
+        pw.addStatic(
+            RAPIER.ColliderDesc.cylinder(trunkH / 2, pineTrunkRadius(s))
+                .setTranslation(t.x, base + trunkH / 2 - 0.05, t.z)
+                .setFriction(0.8)
+        );
         for (const tier of PINE_TIERS) {
             const h = tier.h * s;
-            pw.addStatic(RAPIER.ColliderDesc.cone(h / 2, tier.r * s).setTranslation(t.x, base + tier.y * s + h / 2, t.z).setFriction(0.6));
+            pw.addStatic(
+                RAPIER.ColliderDesc.cone(h / 2, tier.r * s)
+                    .setTranslation(t.x, base + tier.y * s + h / 2, t.z)
+                    .setFriction(0.6)
+            );
         }
     }
 
@@ -123,12 +173,22 @@ export function buildLabPhysics(level: LevelDef): PhysicsWorld {
         else {
             d = RAPIER.ColliderDesc.cylinder(sh.half, sh.r);
             const h = Math.SQRT1_2;
-            const axisRot = sh.axis === 'x' ? { x: 0, y: 0, z: h, w: h } : sh.axis === 'z' ? { x: h, y: 0, z: 0, w: h } : { x: 0, y: 0, z: 0, w: 1 };
+            const axisRot =
+                sh.axis === 'x'
+                    ? { x: 0, y: 0, z: h, w: h }
+                    : sh.axis === 'z'
+                      ? { x: h, y: 0, z: 0, w: h }
+                      : { x: 0, y: 0, z: 0, w: 1 };
             d.setRotation(quatMul(p.pose.q, axisRot));
             pw.addStatic(d.setTranslation(p.pose.p.x, p.pose.p.y, p.pose.p.z).setFriction(0.8));
             continue;
         }
-        pw.addStatic(d.setTranslation(p.pose.p.x, p.pose.p.y, p.pose.p.z).setRotation({ ...p.pose.q }).setFriction(0.8));
+        pw.addStatic(
+            d
+                .setTranslation(p.pose.p.x, p.pose.p.y, p.pose.p.z)
+                .setRotation({ ...p.pose.q })
+                .setFriction(0.8)
+        );
     }
 
     // invisible walls around the play area (the Epic 1 walker had the same limits as a clamp)
@@ -146,8 +206,25 @@ export function buildLabPhysics(level: LevelDef): PhysicsWorld {
 }
 
 /** Kinematic colliders for the scripted beaver (origin at its feet) and ute (origin at road level). */
-export function addLabKinematics(pw: PhysicsWorld, beaverId: number, uteId: number, beaverPose: Pose, utePose: Pose): void {
-    pw.addKinematic(beaverId, [{ shape: { type: 'capsule', half: CHARACTER.half, r: CHARACTER.radius }, x: 0, y: CHARACTER.half + CHARACTER.radius, z: 0 }], beaverPose);
+export function addLabKinematics(
+    pw: PhysicsWorld,
+    beaverId: number,
+    uteId: number,
+    beaverPose: Pose,
+    utePose: Pose
+): void {
+    pw.addKinematic(
+        beaverId,
+        [
+            {
+                shape: { type: 'capsule', half: CHARACTER.half, r: CHARACTER.radius },
+                x: 0,
+                y: CHARACTER.half + CHARACTER.radius,
+                z: 0
+            }
+        ],
+        beaverPose
+    );
     pw.addKinematic(
         uteId,
         [
@@ -164,21 +241,43 @@ export function addDummy(pw: PhysicsWorld, ids: readonly number[]): void {
     for (let n = 0; n < DUMMY_PARTS.length; n++) {
         const p = DUMMY_PARTS[n];
         dummyRestPose(n, -6, -3, 6, 0, rest);
-        pw.addDynamic(ids[n], { type: 'box', hx: p.hx, hy: p.hy, hz: p.hz }, rest, { density: 400, friction: 0.8, restitution: 0.05, angularDamping: 0.8, linearDamping: 0.1 });
+        pw.addDynamic(ids[n], { type: 'box', hx: p.hx, hy: p.hy, hz: p.hz }, rest, {
+            density: 400,
+            friction: 0.8,
+            restitution: 0.05,
+            angularDamping: 0.8,
+            linearDamping: 0.1
+        });
     }
     for (let n = 1; n < DUMMY_PARTS.length; n++) {
         const p = DUMMY_PARTS[n];
         const parent = DUMMY_PARTS[p.parent];
         const a = pw.bodies.get(ids[p.parent])!.body;
         const b = pw.bodies.get(ids[n])!.body;
-        const j = pw.world.createImpulseJoint(RAPIER.JointData.spherical({ x: p.jx - parent.x, y: p.jy - parent.y, z: p.jz - parent.z }, { x: p.jx - p.x, y: p.jy - p.y, z: p.jz - p.z }), a, b, true);
+        const j = pw.world.createImpulseJoint(
+            RAPIER.JointData.spherical(
+                { x: p.jx - parent.x, y: p.jy - parent.y, z: p.jz - parent.z },
+                { x: p.jx - p.x, y: p.jy - p.y, z: p.jz - p.z }
+            ),
+            a,
+            b,
+            true
+        );
         j.setContactsEnabled(false);
     }
     for (const id of ids) pw.setEnabled(id, false);
 }
 
 /** Places and launches the dummy: feet at (x, y, z), thrown along a yaw. */
-export function launchDummy(pw: PhysicsWorld, ids: readonly number[], x: number, y: number, z: number, yaw: number, speed: number): void {
+export function launchDummy(
+    pw: PhysicsWorld,
+    ids: readonly number[],
+    x: number,
+    y: number,
+    z: number,
+    yaw: number,
+    speed: number
+): void {
     const p = pose();
     const fx = -Math.sin(yaw);
     const fz = -Math.cos(yaw);

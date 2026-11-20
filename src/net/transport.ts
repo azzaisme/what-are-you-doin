@@ -236,7 +236,11 @@ export class MemoryHub {
     private readonly rooms = new Map<string, Map<string, { state: NetState; listeners: Set<() => void> }>>();
 
     transport(me: string): NetTransport {
-        return { kind: 'memory', lobby: this.channel('lobby', me), join: async (name) => this.channel(`room-${name}`, me) };
+        return {
+            kind: 'memory',
+            lobby: this.channel('lobby', me),
+            join: async (name) => this.channel(`room-${name}`, me)
+        };
     }
 
     channel(room: string, me: string): NetChannel {

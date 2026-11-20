@@ -19,8 +19,17 @@
  * clamped centre.
  */
 
-import { BOUNDARY_EPSILON, GRID_SIZE, candidateCells, cellCenterX, cellCenterY, cellCenterZ, createCellRange, rangeCellCount } from './grid.ts';
-import { aabb, invertRigidMat34, mat34, poseIsFinite, poseToMat34, transformAabb  } from './math.ts';
+import {
+    BOUNDARY_EPSILON,
+    GRID_SIZE,
+    candidateCells,
+    cellCenterX,
+    cellCenterY,
+    cellCenterZ,
+    createCellRange,
+    rangeCellCount
+} from './grid.ts';
+import { aabb, invertRigidMat34, mat34, poseIsFinite, poseToMat34, transformAabb } from './math.ts';
 import type { Pose } from './math.ts';
 import { VALUE_PRECEDENCE } from './palette.ts';
 import type { Volume } from './volumes.ts';
@@ -81,7 +90,14 @@ const SUB_OFFSETS = [
  * Rasterizes one volume at a world pose into the sink. Returns false when the input was rejected
  * (invalid pose, runaway bounds); nothing is written in that case.
  */
-export function rasterizeVolume(volume: Volume, worldPose: Pose, policy: SamplingPolicy, priority: number, sink: CellSink, stats: RasterStats): boolean {
+export function rasterizeVolume(
+    volume: Volume,
+    worldPose: Pose,
+    policy: SamplingPolicy,
+    priority: number,
+    sink: CellSink,
+    stats: RasterStats
+): boolean {
     stats.parts++;
     if (!poseIsFinite(worldPose)) {
         stats.rejected++;
@@ -216,7 +232,19 @@ export function rasterizeVolume(volume: Volume, worldPose: Pose, policy: Samplin
                 const kIn = k > minK && k < maxK;
                 for (let i = minI; i <= maxI; i++, idx++) {
                     const c = C[idx];
-                    if (c > 0 && jIn && kIn && i > minI && i < maxI && C[idx - sx] && C[idx + sx] && C[idx - sz] && C[idx + sz] && C[idx - sy] && C[idx + sy]) {
+                    if (
+                        c > 0 &&
+                        jIn &&
+                        kIn &&
+                        i > minI &&
+                        i < maxI &&
+                        C[idx - sx] &&
+                        C[idx + sx] &&
+                        C[idx - sz] &&
+                        C[idx + sz] &&
+                        C[idx - sy] &&
+                        C[idx + sy]
+                    ) {
                         sink.write(i, j, k, c, priority);
                         occupied++;
                         continue;
@@ -263,7 +291,8 @@ export function rasterizeVolume(volume: Volume, worldPose: Pose, policy: Samplin
                 const ly = r10 * wx + r11 * wy + r12 * wz + t1;
                 const lz = r20 * wx + r21 * wy + r22 * wz + t2;
                 let value = 0;
-                if (cull && (lx < bMinX || lx > bMaxX || ly < bMinY || ly > bMaxY || lz < bMinZ || lz > bMaxZ)) continue;
+                if (cull && (lx < bMinX || lx > bMaxX || ly < bMinY || ly > bMaxY || lz < bMinZ || lz > bMaxZ))
+                    continue;
 
                 if (satBox) {
                     // separating axis test, 3 local box axes then 3 world axes

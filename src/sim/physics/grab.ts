@@ -93,7 +93,13 @@ export function grabForce(i: GrabForceInput, out: GrabForceResult, maxForce: num
             // largest s in [0, 1] with |G + s S| = maxForce
             const ss = sx * sx + sy * sy + sz * sz;
             const gs = g * sy;
-            const s = ss > 0 ? Math.max(0, Math.min(1, (-gs + Math.sqrt(Math.max(0, gs * gs - ss * (g * g - maxForce * maxForce)))) / ss)) : 0;
+            const s =
+                ss > 0
+                    ? Math.max(
+                          0,
+                          Math.min(1, (-gs + Math.sqrt(Math.max(0, gs * gs - ss * (g * g - maxForce * maxForce)))) / ss)
+                      )
+                    : 0;
             fx = s * sx;
             fy = g + s * sy;
             fz = s * sz;

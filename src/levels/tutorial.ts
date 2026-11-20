@@ -26,23 +26,107 @@ export const TUTORIAL_DATA: LevelData = {
     ],
     pieces: [
         // the lane's fences (keep you on the course; the log must be jumped)
-        { shape: { type: 'box', hx: 0.06, hy: 0.45, hz: 16 }, x: -4.3, y: 0.45, z: -3.5, material: 'dark-timber', name: 'fence-l' },
-        { shape: { type: 'box', hx: 0.06, hy: 0.45, hz: 16 }, x: 4.3, y: 0.45, z: -3.5, material: 'dark-timber', name: 'fence-r' },
+        {
+            shape: { type: 'box', hx: 0.06, hy: 0.45, hz: 16 },
+            x: -4.3,
+            y: 0.45,
+            z: -3.5,
+            material: 'dark-timber',
+            name: 'fence-l'
+        },
+        {
+            shape: { type: 'box', hx: 0.06, hy: 0.45, hz: 16 },
+            x: 4.3,
+            y: 0.45,
+            z: -3.5,
+            material: 'dark-timber',
+            name: 'fence-r'
+        },
         // 2: the first sign
-        { shape: { type: 'box', hx: 0.05, hy: 0.6, hz: 0.05 }, x: 2.6, y: 0.6, z: 5.5, material: 'dark-timber', name: 'sign-post' },
-        { shape: { type: 'box', hx: 0.4, hy: 0.22, hz: 0.03 }, x: 2.6, y: 1.25, z: 5.5, material: 'hi-vis', name: 'sign' },
+        {
+            shape: { type: 'box', hx: 0.05, hy: 0.6, hz: 0.05 },
+            x: 2.6,
+            y: 0.6,
+            z: 5.5,
+            material: 'dark-timber',
+            name: 'sign-post'
+        },
+        {
+            shape: { type: 'box', hx: 0.4, hy: 0.22, hz: 0.03 },
+            x: 2.6,
+            y: 1.25,
+            z: 5.5,
+            material: 'hi-vis',
+            name: 'sign'
+        },
         // 3: a log across the lane, too high to step over (0.5 m)
-        { shape: { type: 'cylinder', axis: 'x', r: 0.25, half: 4.2 }, x: 0, y: 0.25, z: 3, material: 'dark-timber', name: 'jump-log' },
+        {
+            shape: { type: 'cylinder', axis: 'x', r: 0.25, half: 4.2 },
+            x: 0,
+            y: 0.25,
+            z: 3,
+            material: 'dark-timber',
+            name: 'jump-log'
+        },
         // 5: the pad, slightly raised
-        { shape: { type: 'box', hx: 0.85, hy: 0.04, hz: 0.85 }, x: -2.35, y: 0.04, z: -0.75, material: 'hi-vis', name: 'pad' },
+        {
+            shape: { type: 'box', hx: 0.85, hy: 0.04, hz: 0.85 },
+            x: -2.35,
+            y: 0.04,
+            z: -0.75,
+            material: 'hi-vis',
+            name: 'pad'
+        },
         // 6: the bin for the ball (low walls)
-        { shape: { type: 'box', hx: 0.8, hy: 0.2, hz: 0.04 }, x: -2.3, y: 0.2, z: -5.0, material: 'timber', name: 'bin-n' },
-        { shape: { type: 'box', hx: 0.8, hy: 0.2, hz: 0.04 }, x: -2.3, y: 0.2, z: -6.6, material: 'timber', name: 'bin-s' },
-        { shape: { type: 'box', hx: 0.04, hy: 0.2, hz: 0.8 }, x: -3.06, y: 0.2, z: -5.8, material: 'timber', name: 'bin-w' },
-        { shape: { type: 'box', hx: 0.04, hy: 0.2, hz: 0.8 }, x: -1.54, y: 0.2, z: -5.8, material: 'timber', name: 'bin-e' },
+        {
+            shape: { type: 'box', hx: 0.8, hy: 0.2, hz: 0.04 },
+            x: -2.3,
+            y: 0.2,
+            z: -5.0,
+            material: 'timber',
+            name: 'bin-n'
+        },
+        {
+            shape: { type: 'box', hx: 0.8, hy: 0.2, hz: 0.04 },
+            x: -2.3,
+            y: 0.2,
+            z: -6.6,
+            material: 'timber',
+            name: 'bin-s'
+        },
+        {
+            shape: { type: 'box', hx: 0.04, hy: 0.2, hz: 0.8 },
+            x: -3.06,
+            y: 0.2,
+            z: -5.8,
+            material: 'timber',
+            name: 'bin-w'
+        },
+        {
+            shape: { type: 'box', hx: 0.04, hy: 0.2, hz: 0.8 },
+            x: -1.54,
+            y: 0.2,
+            z: -5.8,
+            material: 'timber',
+            name: 'bin-e'
+        },
         // 8: the flag at the end
-        { shape: { type: 'box', hx: 0.04, hy: 1.2, hz: 0.04 }, x: 0, y: 1.2, z: -17.5, material: 'steel', name: 'flag-pole' },
-        { shape: { type: 'box', hx: 0.35, hy: 0.2, hz: 0.02 }, x: 0.39, y: 2.15, z: -17.5, material: 'hi-vis', name: 'flag' }
+        {
+            shape: { type: 'box', hx: 0.04, hy: 1.2, hz: 0.04 },
+            x: 0,
+            y: 1.2,
+            z: -17.5,
+            material: 'steel',
+            name: 'flag-pole'
+        },
+        {
+            shape: { type: 'box', hx: 0.35, hy: 0.2, hz: 0.02 },
+            x: 0.39,
+            y: 2.15,
+            z: -17.5,
+            material: 'hi-vis',
+            name: 'flag'
+        }
     ],
     trees: [
         { x: -9, z: 8, scale: 1.2, yaw: 0.3, kind: 'oak' },
@@ -75,12 +159,30 @@ export const TUTORIAL_DATA: LevelData = {
     objective: 'Tutorial',
     steps: [
         { kind: 'look', text: 'Look around: move the mouse (right stick, or drag on the right of the screen).' },
-        { kind: 'reach', text: 'Walk to the orange sign: W A S D (left stick, or your left thumb).', rect: { minX: -4, maxX: 4, minZ: 4.4, maxZ: 6.6 } },
+        {
+            kind: 'reach',
+            text: 'Walk to the orange sign: W A S D (left stick, or your left thumb).',
+            rect: { minX: -4, maxX: 4, minZ: 4.4, maxZ: 6.6 }
+        },
         { kind: 'jump', text: 'Jump over the log: Space (A, or the Jump button).' },
         { kind: 'grab', text: 'Look at the crate and grab it: click (RT, or Grab).', entity: 'cube' },
-        { kind: 'place', text: 'Carry the crate onto the orange pad and let go: click again (RT, or Release).', entity: 'cube', rect: { minX: -3.3, maxX: -1.4, minZ: -1.7, maxZ: 0.2 } },
-        { kind: 'place', text: 'Throw the ball into the bin: grab it, then right-click (RB, or Throw).', entity: 'sphere', rect: { minX: -3.05, maxX: -1.55, minZ: -6.6, maxZ: -5.0 } },
-        { kind: 'reach', text: 'Push the plank across the ditch and walk over it.', rect: { minX: -4, maxX: 4, minZ: -14, maxZ: -11.2 } },
+        {
+            kind: 'place',
+            text: 'Carry the crate onto the orange pad and let go: click again (RT, or Release).',
+            entity: 'cube',
+            rect: { minX: -3.3, maxX: -1.4, minZ: -1.7, maxZ: 0.2 }
+        },
+        {
+            kind: 'place',
+            text: 'Throw the ball into the bin: grab it, then right-click (RB, or Throw).',
+            entity: 'sphere',
+            rect: { minX: -3.05, maxX: -1.55, minZ: -6.6, maxZ: -5.0 }
+        },
+        {
+            kind: 'reach',
+            text: 'Push the plank across the ditch and walk over it.',
+            rect: { minX: -4, maxX: 4, minZ: -14, maxZ: -11.2 }
+        },
         { kind: 'goal', text: 'Bring the bucket to the flag. (Falling in? You are fished out.)' }
     ],
     sun: { elevation: 15, azimuth: 135 },

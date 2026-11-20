@@ -11,7 +11,6 @@ import { box, cylinder, ellipsoid } from '../voxels/volumes.ts';
 import type { MaterialField, Volume } from '../voxels/volumes.ts';
 import type { VoxelWorld } from '../voxels/world.ts';
 
-
 import type { RockSpot, TreeSpot } from './common.ts';
 import type { LevelData } from './data.ts';
 
@@ -110,7 +109,10 @@ export interface LevelDef {
     orbitHome: { pos: [number, number, number]; focus: [number, number, number] };
     startFirstPerson: boolean;
     /** Scripted actors: the beaver walks its loop or stands idle, the ute laps or is parked. */
-    actors: { beaver: { mode: 'loop' } | { mode: 'idle'; pose: Pose } | { mode: 'none' }; ute: { mode: 'track' } | { mode: 'parked'; pose: Pose } | { mode: 'none' } };
+    actors: {
+        beaver: { mode: 'loop' } | { mode: 'idle'; pose: Pose } | { mode: 'none' };
+        ute: { mode: 'track' } | { mode: 'parked'; pose: Pose } | { mode: 'none' };
+    };
     /** Dynamic props present in this level and where they start (physics props mode). */
     props: PropPlacement[];
     /** Objective and recovery rules; absent for the test lab. */
@@ -130,5 +132,6 @@ export function pieceVolume(p: StaticPiece): Volume {
 
 /** Writes the static pieces of a layout into the static voxel layer. */
 export function rasterizePieces(world: VoxelWorld, pieces: readonly StaticPiece[], stats: RasterStats): void {
-    for (const p of pieces) world.rasterizeStatic(pieceVolume(p), p.pose, p.policy ?? 'coverage50', p.priority ?? 2, stats);
+    for (const p of pieces)
+        world.rasterizeStatic(pieceVolume(p), p.pose, p.policy ?? 'coverage50', p.priority ?? 2, stats);
 }

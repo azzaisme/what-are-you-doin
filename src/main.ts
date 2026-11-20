@@ -9,25 +9,27 @@
 import { Color, Entity, Script, Vec2, Vec3 } from 'playcanvas';
 import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs';
 
-import { DebugPanel  } from './debug/panel.ts';
+import { DebugPanel } from './debug/panel.ts';
 import type { PanelHost } from './debug/panel.ts';
+import { DESIGN_KEY, Designer, loadDraft } from './editor/designer.ts';
 import { ParticleFX } from './fx/particles.ts';
 import type { WatchedEntity } from './fx/particles.ts';
 import { CALM, windAt } from './fx/wind.ts';
 import { FirstPersonInput } from './input/first-person.ts';
 import { PadManager } from './input/gamepad.ts';
 import { TouchControls, isTouchDevice } from './input/touch.ts';
+import { levelFromData } from './levels/data.ts';
 import { LEVEL_MENU, getLevel } from './levels/index.ts';
 import { GuestSession, HostSession, listGames } from './net/session.ts';
 import type { GameAd } from './net/session.ts';
 import { localTransport, roomTransport } from './net/transport.ts';
 import type { NetTransport } from './net/transport.ts';
 import { ReferenceRenderer } from './render/reference.ts';
-import { QUALITY, createLabScene  } from './render/scene.ts';
+import { QUALITY, createLabScene } from './render/scene.ts';
 import type { Quality } from './render/scene.ts';
 import { VoxelClient } from './render/voxel-pipeline.ts';
 import { VoxelRenderer } from './render/voxel-renderer.ts';
-import { FixedStepClock, SIM_DT, VOXEL_RATES, VoxelClock  } from './sim/clock.ts';
+import { FixedStepClock, SIM_DT, VOXEL_RATES, VoxelClock } from './sim/clock.ts';
 import type { VoxelRate } from './sim/clock.ts';
 import { ACTION_DROP_TEST, ACTION_RAGDOLL, ACTION_RESET_PROPS, neutralCommand } from './sim/commands.ts';
 import type { PlayerCommand } from './sim/commands.ts';
@@ -37,9 +39,15 @@ import { initPhysics } from './sim/physics/world.ts';
 import { ANIM_MAX } from './sim/snapshots.ts';
 import type { CameraControlsApi } from './types/engine-scripts.ts';
 import { OnlinePanel } from './ui/online-panel.ts';
-import { CELL_SIZE_MAX_CM, CELL_SIZE_MIN_CM, CELL_SIZE_STORAGE_KEY, GRID_SIZE, clampCellSizeCm } from './voxels/grid.ts';
+import {
+    CELL_SIZE_MAX_CM,
+    CELL_SIZE_MIN_CM,
+    CELL_SIZE_STORAGE_KEY,
+    GRID_SIZE,
+    clampCellSizeCm
+} from './voxels/grid.ts';
 import { pose } from './voxels/math.ts';
-import { SAMPLING_POLICIES  } from './voxels/rasterizer.ts';
+import { SAMPLING_POLICIES } from './voxels/rasterizer.ts';
 import type { SamplingPolicy } from './voxels/rasterizer.ts';
 
 import './style.css';
@@ -61,7 +69,10 @@ const storedLevel = (() => {
         return null;
     }
 })();
-const level = getLevel(params.get('level') ?? storedLevel ?? 'tutorial');
+const levelId = params.get('level') ?? storedLevel ?? 'tutorial';
+// 'custom' is the level designer's draft (local storage)
+const level = levelId === 'custom' ? levelFromData(loadDraft()) : getLevel(levelId);
+const editing = level.id === 'custom' && params.has('edit');
 try {
     localStorage.setItem(LEVEL_KEY, level.id);
 } catch {
@@ -80,7 +91,9 @@ function goToLevel(id: string, extra: Record<string, string> = {}): void {
         const v = params.get(k);
         if (v !== null) q.set(k, v);
     }
-    location.search = `?${q.toString()}`;
+    // the same address (a rebuild) with a hash would only be a fragment navigation: reload
+    if (`?${q.toString()}` === location.search) location.reload();
+    else location.search = `?${q.toString()}`;
 }
 const terrainHeight = level.terrainHeight;
 const scene = await createLabScene(canvas, initialQuality, level);
@@ -97,7 +110,7 @@ const renderer = new VoxelRenderer(app, scene.worldLayer);
 // the voxel world lives in a worker: static build, rasterization and meshing all happen there
 const worker = new Worker(new URL('./workers/voxel-worker.ts', import.meta.url), { type: 'module', name: 'voxels' });
 const pipeline = new VoxelClient(worker, renderer, sim);
-const build = await pipeline.init(cellCm, 1, level.id);
+const build = await pipeline.init(cellCm, 1, level.id, level.data);
 setLoading('Uploading meshes…');
 await nextFrame();
 const tUpload = performance.now();
@@ -112,7 +125,16 @@ const watch = (name: string, bottom: number, timber: boolean) => {
     const e = sim.entities.find((x) => x.name === name);
     if (e) watched.push({ slot: e.slot, bottom, timber });
 };
-for (const n of ['plank', 'held-plank', 'extra-plank-0', 'extra-plank-1', 'extra-plank-2', 'extra-plank-3', 'extra-plank-4']) watch(n, 0.05, true);
+for (const n of [
+    'plank',
+    'held-plank',
+    'extra-plank-0',
+    'extra-plank-1',
+    'extra-plank-2',
+    'extra-plank-3',
+    'extra-plank-4'
+])
+    watch(n, 0.05, true);
 for (const n of ['beam-0', 'beam-1']) watch(n, 0.075, true);
 for (const n of ['log', 'extra-log-0', 'extra-log-1']) watch(n, 0.2, true);
 watch('cube', 0.25, true);
@@ -132,12 +154,16 @@ const pads = new PadManager();
 // touch controls (phones): shown in first person on touch devices, or after the first touch
 const touch = new TouchControls();
 let touchSeen = isTouchDevice();
-window.addEventListener('touchstart', () => {
-    if (!touchSeen) {
-        touchSeen = true;
-        updateTouch();
-    }
-}, { passive: true });
+window.addEventListener(
+    'touchstart',
+    () => {
+        if (!touchSeen) {
+            touchSeen = true;
+            updateTouch();
+        }
+    },
+    { passive: true }
+);
 function updateTouch(): void {
     touch.show(touchSeen && state.mode === 'firstPerson' && !state.uiHidden);
 }
@@ -252,7 +278,11 @@ function setMode(mode: State['mode'], lock = true): void {
         // look from the current camera position at a point ahead
         const f = camera.forward;
         const p = camera.getPosition();
-        const fp = new Vec3(p.x + f.x * 6, Math.max(terrainHeight(p.x + f.x * 6, p.z + f.z * 6) + 0.6, p.y + f.y * 6), p.z + f.z * 6);
+        const fp = new Vec3(
+            p.x + f.x * 6,
+            Math.max(terrainHeight(p.x + f.x * 6, p.z + f.z * 6) + 0.6, p.y + f.y * 6),
+            p.z + f.z * 6
+        );
         orbit.focusPoint = fp;
     }
     updateHud();
@@ -341,7 +371,8 @@ class LabDirector extends Script {
         if (state.players > 1 && localSlot2 > 0) {
             const c2 = scene.camera2;
             const p2 = pads.players[1];
-            if (sim.ring.sample(sim.eyes[localSlot2].slot, renderTime, playerPose, playerAnim)) c2.setPosition(playerPose.p.x, playerPose.p.y, playerPose.p.z);
+            if (sim.ring.sample(sim.eyes[localSlot2].slot, renderTime, playerPose, playerAnim))
+                c2.setPosition(playerPose.p.x, playerPose.p.y, playerPose.p.z);
             const yaw2 = p2 ? p2.yaw : sim.players[localSlot2].yaw;
             const pitch2 = p2 ? p2.pitch : sim.players[localSlot2].pitch;
             c2.setEulerAngles((pitch2 * 180) / Math.PI, (yaw2 * 180) / Math.PI, 0);
@@ -805,7 +836,8 @@ dock.append(cellUi);
 const cellRange = cellUi.querySelector('input')!;
 const cellOut = cellUi.querySelector('output')!;
 const cellApply = cellUi.querySelector('button')!;
-for (const ev of ['pointerdown', 'mousedown', 'wheel', 'click', 'keydown']) cellUi.addEventListener(ev, (e) => e.stopPropagation());
+for (const ev of ['pointerdown', 'mousedown', 'wheel', 'click', 'keydown'])
+    cellUi.addEventListener(ev, (e) => e.stopPropagation());
 cellRange.addEventListener('input', () => {
     const v = clampCellSizeCm(Number(cellRange.value));
     cellOut.textContent = `${v.toFixed(1)} cm`;
@@ -869,14 +901,19 @@ function updateHud(): void {
             : sim.physicsProps
               ? 'Click to look · <kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>LMB</kbd>/<kbd>E</kbd> grab / release · <kbd>RMB</kbd> throw · wheel reach · <kbd>Q</kbd> drop · <kbd>G</kbd> plank · <kbd>T</kbd> ragdoll · <kbd>Esc</kbd> release mouse · <kbd>V</kbd> orbit'
               : 'Click to look · <kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>G</kbd> carry plank · <kbd>Esc</kbd> release mouse · <kbd>V</kbd> orbit';
-    const short = state.mode === 'orbit' ? 'Drag to orbit · two fingers to pan and zoom' : 'Click to look · WASD move · click grab · V orbit';
+    const short =
+        state.mode === 'orbit'
+            ? 'Drag to orbit · two fingers to pan and zoom'
+            : 'Click to look · WASD move · click grab · V orbit';
     if (touchSeen && state.mode === 'firstPerson') {
-        help.innerHTML = 'Left thumb: move (push to the edge to run) · right thumb: look · buttons: jump, grab, throw, drop';
+        help.innerHTML =
+            'Left thumb: move (push to the edge to run) · right thumb: look · buttons: jump, grab, throw, drop';
         crosshair.style.display = !state.uiHidden ? '' : 'none';
         return;
     }
     if (state.players > 1 || pads.players[0]) {
-        help.innerHTML = 'Pads: left stick move · right stick look · A jump · RT grab / release · RB throw · B drop · X ragdoll · D-pad reach';
+        help.innerHTML =
+            'Pads: left stick move · right stick look · A jump · RT grab / release · RB throw · B drop · X ragdoll · D-pad reach';
         crosshair.style.display = state.mode === 'firstPerson' && !state.uiHidden ? '' : 'none';
         return;
     }
@@ -891,9 +928,27 @@ function setUiHidden(h: boolean): void {
     layoutVars();
 }
 
-const PROP_LABEL: Record<string, string> = { plank: 'plank', 'held-plank': 'plank', log: 'log (heavy)', cube: 'crate', sphere: 'ball', bucket: 'bucket' };
+const PROP_LABEL: Record<string, string> = {
+    plank: 'plank',
+    'held-plank': 'plank',
+    log: 'log (heavy)',
+    cube: 'crate',
+    sphere: 'ball',
+    bucket: 'bucket'
+};
 const propLabel = (name: string) =>
-    PROP_LABEL[name] ?? (name.startsWith('dummy') ? 'dummy' : name.startsWith('stress') ? 'test body' : name.startsWith('extra-plank') ? 'plank' : name.startsWith('beam') ? 'beam' : name.startsWith('extra-log') ? 'log (heavy)' : name);
+    PROP_LABEL[name] ??
+    (name.startsWith('dummy')
+        ? 'dummy'
+        : name.startsWith('stress')
+          ? 'test body'
+          : name.startsWith('extra-plank')
+            ? 'plank'
+            : name.startsWith('beam')
+              ? 'beam'
+              : name.startsWith('extra-log')
+                ? 'log (heavy)'
+                : name);
 
 // ---- objective line and toasts for level events (fell in, bucket recovered, goal reached)
 const toast = document.createElement('div');
@@ -916,7 +971,9 @@ function updateObjective(): void {
     if (steps) {
         const k = guestSession ? guestSession.step : sim.progress.step;
         const done = k >= steps.length;
-        el.textContent = done ? '✓ Tutorial complete — pick a level from Levels' : `Step ${k + 1}/${steps.length} · ${steps[k].text}`;
+        el.textContent = done
+            ? '✓ Tutorial complete — pick a level from Levels'
+            : `Step ${k + 1}/${steps.length} · ${steps[k].text}`;
         el.classList.toggle('done', done);
         return;
     }
@@ -947,7 +1004,10 @@ let promptText = '';
 function interactionText(i: number, pad: boolean): string {
     const it = guestInteraction() ?? sim.interaction(i);
     const both = it.shared ? ' together' : '';
-    if (it.holding) return pad ? `Holding ${propLabel(it.holding)}${both} · RT release · RB throw · B drop` : `Holding ${propLabel(it.holding)}${both} · click to release · right-click to throw · wheel to adjust reach`;
+    if (it.holding)
+        return pad
+            ? `Holding ${propLabel(it.holding)}${both} · RT release · RB throw · B drop`
+            : `Holding ${propLabel(it.holding)}${both} · click to release · right-click to throw · wheel to adjust reach`;
     if (it.target) return pad ? `RT to grab ${propLabel(it.target)}` : `Click to grab ${propLabel(it.target)}`;
     return '';
 }
@@ -967,7 +1027,11 @@ function updatePrompt(): void {
         if (touch.enabled) {
             const it = guestInteraction() ?? sim.interaction(0);
             touch.setHolding(!!it.holding);
-            t = it.holding ? `Holding ${propLabel(it.holding)}${it.shared ? ' together' : ''}` : it.target ? `Grab ${propLabel(it.target)}` : '';
+            t = it.holding
+                ? `Holding ${propLabel(it.holding)}${it.shared ? ' together' : ''}`
+                : it.target
+                  ? `Grab ${propLabel(it.target)}`
+                  : '';
         } else if (!fpInput.locked && !pads.players[0]) t = 'Click to look around';
         else t = interactionText(0, !fpInput.locked);
     }
@@ -1039,7 +1103,29 @@ const gpuName = (() => {
     return ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : String(gl.getParameter(gl.RENDERER));
 })();
 
-const EMPTY_FRAME_STATS = { frame: -1, time: 0, objects: 0, parts: 0, candidates: 0, samples: 0, occupied: 0, rejected: 0, changedCells: 0, dirtyCells: 0, dynDynOverlaps: 0, dynStaticOverlaps: 0, staticRebuilt: 0, dynamicRebuilt: 0, rasterMs: 0, resolveMs: 0, meshMs: 0, totalMs: 0, dynamicCells: 0, chunks: build.chunks, particles: 0 };
+const EMPTY_FRAME_STATS = {
+    frame: -1,
+    time: 0,
+    objects: 0,
+    parts: 0,
+    candidates: 0,
+    samples: 0,
+    occupied: 0,
+    rejected: 0,
+    changedCells: 0,
+    dirtyCells: 0,
+    dynDynOverlaps: 0,
+    dynStaticOverlaps: 0,
+    staticRebuilt: 0,
+    dynamicRebuilt: 0,
+    rasterMs: 0,
+    resolveMs: 0,
+    meshMs: 0,
+    totalMs: 0,
+    dynamicCells: 0,
+    chunks: build.chunks,
+    particles: 0
+};
 
 function collectStats() {
     const v = { ...(pipeline.lastStats ?? EMPTY_FRAME_STATS), uploadMs: pipeline.uploadMs };
@@ -1092,7 +1178,13 @@ function collectStats() {
             releaseClamps: sim.physics.stats.releaseClamps,
             player: { x: sim.player.x, y: sim.player.y, z: sim.player.z, grounded: sim.player.grounded }
         },
-        build: { workerBuildMs: build.buildMs, workerStaticMeshMs: build.staticMeshMs, staticUploadMs, columns: build.columns, trees: build.trees }
+        build: {
+            workerBuildMs: build.buildMs,
+            workerStaticMeshMs: build.staticMeshMs,
+            staticUploadMs,
+            columns: build.columns,
+            trees: build.trees
+        }
     };
 }
 
@@ -1211,7 +1303,12 @@ const online = new OnlinePanel(
             hostSession
                 ? { mode: 'host', code: hostSession.code, players: sim.playerCount }
                 : guestSession
-                  ? { mode: 'guest', code: guestSession.code, slot: guestSession.slot, waiting: guestSession.received === 0 }
+                  ? {
+                        mode: 'guest',
+                        code: guestSession.code,
+                        slot: guestSession.slot,
+                        waiting: guestSession.received === 0
+                    }
                   : { mode: 'off' },
         host: hostOnline,
         join: joinOnline,
@@ -1230,7 +1327,8 @@ dock.insertBefore(levelsBtn, online.button);
 const levelsPanel = document.createElement('div');
 levelsPanel.className = 'online-panel levels-panel';
 levelsPanel.style.display = 'none';
-for (const ev of ['pointerdown', 'mousedown', 'wheel', 'click', 'touchstart']) levelsPanel.addEventListener(ev, (e) => e.stopPropagation());
+for (const ev of ['pointerdown', 'mousedown', 'wheel', 'click', 'touchstart'])
+    levelsPanel.addEventListener(ev, (e) => e.stopPropagation());
 document.body.append(levelsPanel);
 function renderLevels(): void {
     levelsPanel.replaceChildren();
@@ -1251,6 +1349,33 @@ function renderLevels(): void {
         n.textContent = l.note;
         levelsPanel.append(n);
     }
+    const hasDraft = (() => {
+        try {
+            return localStorage.getItem(DESIGN_KEY) !== null;
+        } catch {
+            return false;
+        }
+    })();
+    const own = document.createElement('div');
+    own.className = 'online-title';
+    own.textContent = 'Your levels';
+    levelsPanel.append(own);
+    const design = document.createElement('button');
+    design.type = 'button';
+    design.textContent = editing ? 'Level designer (open)' : 'Level designer';
+    design.addEventListener('click', () => goToLevel('custom', { edit: '1' }));
+    levelsPanel.append(design);
+    if (hasDraft || level.id === 'custom') {
+        const play = document.createElement('button');
+        play.type = 'button';
+        play.textContent = level.id === 'custom' && !editing ? 'Play my level (playing)' : 'Play my level';
+        play.addEventListener('click', () => goToLevel('custom'));
+        levelsPanel.append(play);
+    }
+    const dn = document.createElement('p');
+    dn.className = 'online-note';
+    dn.textContent = 'Build your own level, playtest it, and copy it out as JSON.';
+    levelsPanel.append(dn);
     const c = document.createElement('button');
     c.type = 'button';
     c.textContent = 'Close';
@@ -1288,7 +1413,22 @@ window.__riverLab = {
     dynamicHash: () => pipeline.query<number>('hash'),
     /** True when no voxel frame is in flight or waiting to be applied. */
     voxelIdle: () => !pipeline.inFlight && !state.forceVoxel,
-    entities: () => Object.fromEntries(sim.entities.map((e) => [e.name, { x: e.pose.p.x, y: e.pose.p.y, z: e.pose.p.z, yaw: Math.atan2(2 * (e.pose.q.w * e.pose.q.y + e.pose.q.x * e.pose.q.z), 1 - 2 * (e.pose.q.y * e.pose.q.y + e.pose.q.x * e.pose.q.x)), visible: e.visible }])),
+    entities: () =>
+        Object.fromEntries(
+            sim.entities.map((e) => [
+                e.name,
+                {
+                    x: e.pose.p.x,
+                    y: e.pose.p.y,
+                    z: e.pose.p.z,
+                    yaw: Math.atan2(
+                        2 * (e.pose.q.w * e.pose.q.y + e.pose.q.x * e.pose.q.z),
+                        1 - 2 * (e.pose.q.y * e.pose.q.y + e.pose.q.x * e.pose.q.x)
+                    ),
+                    visible: e.visible
+                }
+            ])
+        ),
     setCamera(px: number, py: number, pz: number, fx: number, fy: number, fz: number) {
         if (state.mode !== 'orbit') setMode('orbit');
         camera.setPosition(px, py, pz);
@@ -1318,7 +1458,9 @@ window.__riverLab = {
             kind: transportKind,
             hosting: hostSession?.code ?? null,
             guests: hostSession?.guestCount ?? 0,
-            guest: guestSession ? { code: guestSession.code, slot: guestSession.slot, received: guestSession.received } : null
+            guest: guestSession
+                ? { code: guestSession.code, slot: guestSession.slot, received: guestSession.received }
+                : null
         })
     },
     /** Two-player split screen without real pads (tests); player 2 commands via input2. */
@@ -1354,15 +1496,53 @@ window.__riverLab = {
     showPanel: (v: boolean) => (panel.visible = v),
     get state() {
         return { ...state };
+    },
+    /** The level designer, when open (`?level=custom&edit=1`). */
+    get designer() {
+        return designer;
     }
 };
 
 // ------------------------------------------------------------------------------------- start
 
-if (import.meta.env.DEV || params.has('debug') || location.hash === '#debug') panel.visible = true;
+if ((import.meta.env.DEV && !editing) || params.has('debug') || location.hash === '#debug') panel.visible = true;
 const startAt = Number(params.get('t'));
 if (Number.isFinite(startAt) && params.has('t')) seek(startAt);
-if (params.get('view') === 'fp' || (level.startFirstPerson && params.get('view') !== 'orbit')) {
+let designer: Designer | null = null;
+if (editing) {
+    designer = new Designer(
+        {
+            app,
+            camera,
+            layer: scene.immediateLayer,
+            canvas,
+            rebuild: () => goToLevel('custom', { edit: '1' }),
+            play: () => {
+                try {
+                    sessionStorage.removeItem('uncivil.design.camera');
+                } catch {
+                    // nothing saved
+                }
+                goToLevel('custom');
+            },
+            exit: () => goToLevel('tutorial'),
+            toast: (t) => showToast(t)
+        },
+        loadDraft()
+    );
+    document.body.classList.add('designing');
+    panel.visible = false;
+    // edit a still world: props stay where their outlines are (Play runs it)
+    setPaused(true);
+    const cam = designer.savedCamera();
+    const sp = level.spawn;
+    const g = terrainHeight(sp.x, sp.z);
+    const [px, py, pz, fx, fy, fz] = cam ? [...cam.pos, ...cam.focus] : [sp.x + 9, g + 9, sp.z + 9, sp.x, g, sp.z - 4];
+    camera.setPosition(px, py, pz);
+    orbit.focusPoint = new Vec3(fx, fy, fz);
+    const d = designer;
+    app.on('update', () => d.draw());
+} else if (params.get('view') === 'fp' || (level.startFirstPerson && params.get('view') !== 'orbit')) {
     // no pointer lock without a user gesture (design doc §9): the first click on the canvas takes it
     setMode('firstPerson', false);
     toSpawn();
@@ -1371,7 +1551,9 @@ updateObjective();
 if (params.has('noui')) setUiHidden(true);
 updateHud();
 loading?.remove();
-console.info(`${level.name} ready at ${cellCm} cm: ${build.columns} columns, ${build.staticCells} static cells, worker build ${build.buildMs.toFixed(0)} ms + static meshes ${build.staticMeshMs.toFixed(0)} ms, upload ${staticUploadMs.toFixed(0)} ms`);
+console.info(
+    `${level.name} ready at ${cellCm} cm: ${build.columns} columns, ${build.staticCells} static cells, worker build ${build.buildMs.toFixed(0)} ms + static meshes ${build.staticMeshMs.toFixed(0)} ms, upload ${staticUploadMs.toFixed(0)} ms`
+);
 
 function clamp(v: number, a: number, b: number): number {
     return Math.max(a, Math.min(b, v));

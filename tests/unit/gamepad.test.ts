@@ -5,8 +5,22 @@ import { ACTION_DROP, ACTION_NONE, ACTION_RAGDOLL } from '../../src/sim/commands
 
 /** A minimal Gamepad stand-in with the standard mapping. */
 function pad(axes: number[] = [0, 0, 0, 0], pressed: number[] = [], values: Record<number, number> = {}): Gamepad {
-    const buttons = Array.from({ length: 17 }, (_, i) => ({ pressed: pressed.includes(i), touched: pressed.includes(i), value: values[i] ?? (pressed.includes(i) ? 1 : 0) }));
-    return { axes, buttons, connected: true, index: 0, id: 'test', mapping: 'standard', timestamp: 0, hapticActuators: [], vibrationActuator: null } as unknown as Gamepad;
+    const buttons = Array.from({ length: 17 }, (_, i) => ({
+        pressed: pressed.includes(i),
+        touched: pressed.includes(i),
+        value: values[i] ?? (pressed.includes(i) ? 1 : 0)
+    }));
+    return {
+        axes,
+        buttons,
+        connected: true,
+        index: 0,
+        id: 'test',
+        mapping: 'standard',
+        timestamp: 0,
+        hapticActuators: [],
+        vibrationActuator: null
+    } as unknown as Gamepad;
 }
 
 describe('gamepad input', () => {

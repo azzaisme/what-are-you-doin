@@ -6,7 +6,15 @@
 import type { VoxelAsset } from '../assets/asset.ts';
 import { beaverAsset } from '../assets/beaver.ts';
 import { DUMMY_PARTS, dummyPartAsset } from '../assets/dummy.ts';
-import { beamAsset, bucketAsset, cubeAsset, logAsset, plankAsset, sphereAsset, windsockAsset } from '../assets/props.ts';
+import {
+    beamAsset,
+    bucketAsset,
+    cubeAsset,
+    logAsset,
+    plankAsset,
+    sphereAsset,
+    windsockAsset
+} from '../assets/props.ts';
 import { uteAsset } from '../assets/ute.ts';
 import { pose } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
@@ -66,7 +74,16 @@ export function createLabEntities(): LabEntities {
     const entities: SimEntity[] = [];
     const add = (id: number, name: string, asset: VoxelAsset, priority: number): SimEntity => {
         if (asset.animChannels > ANIM_MAX) throw new Error(`${name}: too many animation channels`);
-        const e: SimEntity = { id, name, asset, priority, pose: pose(), anim: new Float64Array(ANIM_MAX), visible: true, slot: entities.length };
+        const e: SimEntity = {
+            id,
+            name,
+            asset,
+            priority,
+            pose: pose(),
+            anim: new Float64Array(ANIM_MAX),
+            visible: true,
+            slot: entities.length
+        };
         entities.push(e);
         return e;
     };
@@ -81,21 +98,47 @@ export function createLabEntities(): LabEntities {
     const stress: SimEntity[] = [];
     for (let n = 0; n < MAX_STRESS; n++) {
         const kind = n % 3;
-        const asset = kind === 0 ? plankAsset(`stress-plank-${n}`) : kind === 1 ? cubeAsset(0.4, n % 2 ? M.TestBlue : M.TestOrange) : logAsset();
+        const asset =
+            kind === 0
+                ? plankAsset(`stress-plank-${n}`)
+                : kind === 1
+                  ? cubeAsset(0.4, n % 2 ? M.TestBlue : M.TestOrange)
+                  : logAsset();
         stress.push(add(100 + n, `stress-${n}`, asset, 0));
     }
     const dummy: SimEntity[] = [];
-    for (let n = 0; n < DUMMY_PARTS.length; n++) dummy.push(add(DUMMY_ID0 + n, `dummy-${DUMMY_PARTS[n].name}`, dummyPartAsset(n), 2));
+    for (let n = 0; n < DUMMY_PARTS.length; n++)
+        dummy.push(add(DUMMY_ID0 + n, `dummy-${DUMMY_PARTS[n].name}`, dummyPartAsset(n), 2));
     const extras: SimEntity[] = [];
-    for (let n = 0; n < EXTRA_PLANKS; n++) extras.push(add(300 + n, `extra-plank-${n}`, plankAsset(`extra-plank-${n}`), 1));
+    for (let n = 0; n < EXTRA_PLANKS; n++)
+        extras.push(add(300 + n, `extra-plank-${n}`, plankAsset(`extra-plank-${n}`), 1));
     for (let n = 0; n < EXTRA_BEAMS; n++) extras.push(add(320 + n, `beam-${n}`, beamAsset(`beam-${n}`), 1));
     for (let n = 0; n < EXTRA_LOGS; n++) extras.push(add(340 + n, `extra-log-${n}`, logAsset(), 1));
     const windsock = add(950, 'windsock', windsockAsset(), 2);
     const avatars: SimEntity[] = [];
     for (let n = 0; n < MAX_PLAYERS; n++) avatars.push(add(910 + n, `avatar-${n}`, beaverAsset, 3));
     const eyes: SimEntity[] = [];
-    for (let n = 0; n < MAX_PLAYERS; n++) eyes.push(add(900 + n, n === 0 ? 'player' : `player${n + 1}`, EMPTY_ASSET, 0));
-    return { entities, beaver, bucket, ute, plank, log, cube, sphere, held, stress, dummy, extras, windsock, avatars, player: eyes[0], player2: eyes[1], eyes };
+    for (let n = 0; n < MAX_PLAYERS; n++)
+        eyes.push(add(900 + n, n === 0 ? 'player' : `player${n + 1}`, EMPTY_ASSET, 0));
+    return {
+        entities,
+        beaver,
+        bucket,
+        ute,
+        plank,
+        log,
+        cube,
+        sphere,
+        held,
+        stress,
+        dummy,
+        extras,
+        windsock,
+        avatars,
+        player: eyes[0],
+        player2: eyes[1],
+        eyes
+    };
 }
 
 const EMPTY_ASSET: VoxelAsset = {

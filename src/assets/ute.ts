@@ -4,14 +4,14 @@
  * patterns live in the wheel's local material field so the spin reads in the reconstructed cells.
  */
 
-import { aabb, quatFromYawPitchRoll  } from '../voxels/math.ts';
+import { aabb, quatFromYawPitchRoll } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
 import { M, voxel } from '../voxels/palette.ts';
 import { box, cylinder, implicit, latticeShade, solid, speckled } from '../voxels/volumes.ts';
 
-import { ASSET_SCHEMA_VERSION   } from './asset.ts';
+import { ASSET_SCHEMA_VERSION } from './asset.ts';
 import type { AssetPart, VoxelAsset } from './asset.ts';
-import { attach, evaluateAttachments, Rig  } from './rig.ts';
+import { attach, evaluateAttachments, Rig } from './rig.ts';
 import type { Attachment } from './rig.ts';
 
 export const UTE_WHEEL_SPIN = 0;
@@ -61,7 +61,7 @@ const wheelField = (_x: number, y: number, z: number) => {
     }
     if (r < 0.08) return voxel(M.Chrome);
     // five spokes
-    const spoke = Math.abs(((((ang / (2 * Math.PI)) * 5) % 1) + 1) % 1 - 0.5) < 0.18;
+    const spoke = Math.abs((((((ang / (2 * Math.PI)) * 5) % 1) + 1) % 1) - 0.5) < 0.18;
     return spoke ? voxel(M.Chrome) : voxel(M.UteTrim);
 };
 const wheel = cylinder('x', UTE_WHEEL_RADIUS, 0.12, wheelField);
@@ -74,22 +74,67 @@ function part(p: AssetPart, a: Attachment): void {
 }
 
 part({ name: 'lowerBody', volume: lowerBody, priority: 2, refColor: 0xb3342b }, attach(CH, 0, 0.34, 0));
-part({ name: 'hood', volume: box(0.77, 0.06, 0.55, paint), priority: 2, refColor: 0xb3342b }, attach(CH, 0, 0.58, 1.24));
+part(
+    { name: 'hood', volume: box(0.77, 0.06, 0.55, paint), priority: 2, refColor: 0xb3342b },
+    attach(CH, 0, 0.58, 1.24)
+);
 part({ name: 'cab', volume: box(0.76, 0.3, 0.55, paint), priority: 2, refColor: 0xb3342b }, attach(CH, 0, 0.84, 0.15));
-part({ name: 'windscreen', volume: box(0.66, 0.19, 0.07, solid(M.Glass)), priority: 4, refColor: 0x2d3d4a }, attach(CH, 0, 0.88, 0.67));
-part({ name: 'sideWindows', volume: box(0.78, 0.16, 0.38, solid(M.Glass, 2)), priority: 3, refColor: 0x2d3d4a }, attach(CH, 0, 0.9, 0.17));
-part({ name: 'rearWindow', volume: box(0.6, 0.14, 0.06, solid(M.Glass)), priority: 3, refColor: 0x2d3d4a }, attach(CH, 0, 0.9, -0.37));
-part({ name: 'bedFloor', volume: box(0.78, 0.05, 0.86, speckled(M.Steel, 0.2, 4)), priority: 2, refColor: 0x9aa0a6 }, attach(CH, 0, 0.58, -0.94));
-part({ name: 'bedSideL', volume: box(0.05, 0.15, 0.86, paint), priority: 3, refColor: 0xb3342b }, attach(CH, 0.75, 0.76, -0.94));
-part({ name: 'bedSideR', volume: box(0.05, 0.15, 0.86, paint), priority: 3, refColor: 0xb3342b }, attach(CH, -0.75, 0.76, -0.94));
-part({ name: 'tailgate', volume: box(0.8, 0.15, 0.05, paint), priority: 3, refColor: 0xb3342b }, attach(CH, 0, 0.76, -1.77));
-part({ name: 'bumperF', volume: box(0.82, 0.07, 0.07, solid(M.UteTrim)), priority: 3, refColor: 0x2c2e31 }, attach(CH, 0, 0.17, 1.82));
-part({ name: 'bumperR', volume: box(0.82, 0.07, 0.07, solid(M.UteTrim)), priority: 3, refColor: 0x2c2e31 }, attach(CH, 0, 0.17, -1.82));
-part({ name: 'grille', volume: box(0.34, 0.1, 0.04, solid(M.UteTrim)), priority: 4, refColor: 0x2c2e31 }, attach(CH, 0, 0.42, 1.79));
-part({ name: 'headlightL', volume: box(0.11, 0.06, 0.05, solid(M.Headlight)), priority: 5, refColor: 0xf6f0d8 }, attach(CH, 0.56, 0.44, 1.78));
-part({ name: 'headlightR', volume: box(0.11, 0.06, 0.05, solid(M.Headlight)), priority: 5, refColor: 0xf6f0d8 }, attach(CH, -0.56, 0.44, 1.78));
-part({ name: 'taillightL', volume: box(0.06, 0.08, 0.05, solid(M.Taillight)), priority: 5, refColor: 0xd0281f }, attach(CH, 0.72, 0.68, -1.78));
-part({ name: 'taillightR', volume: box(0.06, 0.08, 0.05, solid(M.Taillight)), priority: 5, refColor: 0xd0281f }, attach(CH, -0.72, 0.68, -1.78));
+part(
+    { name: 'windscreen', volume: box(0.66, 0.19, 0.07, solid(M.Glass)), priority: 4, refColor: 0x2d3d4a },
+    attach(CH, 0, 0.88, 0.67)
+);
+part(
+    { name: 'sideWindows', volume: box(0.78, 0.16, 0.38, solid(M.Glass, 2)), priority: 3, refColor: 0x2d3d4a },
+    attach(CH, 0, 0.9, 0.17)
+);
+part(
+    { name: 'rearWindow', volume: box(0.6, 0.14, 0.06, solid(M.Glass)), priority: 3, refColor: 0x2d3d4a },
+    attach(CH, 0, 0.9, -0.37)
+);
+part(
+    { name: 'bedFloor', volume: box(0.78, 0.05, 0.86, speckled(M.Steel, 0.2, 4)), priority: 2, refColor: 0x9aa0a6 },
+    attach(CH, 0, 0.58, -0.94)
+);
+part(
+    { name: 'bedSideL', volume: box(0.05, 0.15, 0.86, paint), priority: 3, refColor: 0xb3342b },
+    attach(CH, 0.75, 0.76, -0.94)
+);
+part(
+    { name: 'bedSideR', volume: box(0.05, 0.15, 0.86, paint), priority: 3, refColor: 0xb3342b },
+    attach(CH, -0.75, 0.76, -0.94)
+);
+part(
+    { name: 'tailgate', volume: box(0.8, 0.15, 0.05, paint), priority: 3, refColor: 0xb3342b },
+    attach(CH, 0, 0.76, -1.77)
+);
+part(
+    { name: 'bumperF', volume: box(0.82, 0.07, 0.07, solid(M.UteTrim)), priority: 3, refColor: 0x2c2e31 },
+    attach(CH, 0, 0.17, 1.82)
+);
+part(
+    { name: 'bumperR', volume: box(0.82, 0.07, 0.07, solid(M.UteTrim)), priority: 3, refColor: 0x2c2e31 },
+    attach(CH, 0, 0.17, -1.82)
+);
+part(
+    { name: 'grille', volume: box(0.34, 0.1, 0.04, solid(M.UteTrim)), priority: 4, refColor: 0x2c2e31 },
+    attach(CH, 0, 0.42, 1.79)
+);
+part(
+    { name: 'headlightL', volume: box(0.11, 0.06, 0.05, solid(M.Headlight)), priority: 5, refColor: 0xf6f0d8 },
+    attach(CH, 0.56, 0.44, 1.78)
+);
+part(
+    { name: 'headlightR', volume: box(0.11, 0.06, 0.05, solid(M.Headlight)), priority: 5, refColor: 0xf6f0d8 },
+    attach(CH, -0.56, 0.44, 1.78)
+);
+part(
+    { name: 'taillightL', volume: box(0.06, 0.08, 0.05, solid(M.Taillight)), priority: 5, refColor: 0xd0281f },
+    attach(CH, 0.72, 0.68, -1.78)
+);
+part(
+    { name: 'taillightR', volume: box(0.06, 0.08, 0.05, solid(M.Taillight)), priority: 5, refColor: 0xd0281f },
+    attach(CH, -0.72, 0.68, -1.78)
+);
 for (let w = 0; w < 4; w++) {
     part({ name: `wheel${w}`, volume: wheel, priority: 6, refColor: 0x1f1f20 }, attach(WHEELS[w], 0, 0, 0));
 }

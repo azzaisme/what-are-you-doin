@@ -3,6 +3,7 @@
 Status: accepted (Epic 1) · Date: 2026-11-19
 
 ## Decision
+
 A single `LabDirector` script does, in `postUpdate`: fixed-step simulation, first-person camera
 placement, voxel-clock check, voxel reconstruction and mesh commit, reference-mode update. Engine
 order is script `update` (orbit camera controls) → script `postUpdate` (director) → app `update`

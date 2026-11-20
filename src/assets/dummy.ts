@@ -64,7 +64,9 @@ export function dummyPartAsset(index: number): VoxelAsset {
     switch (p.name) {
         case 'body': {
             // fur body with a hi-vis vest band
-            const vest = box(p.hx + 0.01, 0.13, p.hz + 0.01, (x, y, z) => voxel(Math.abs(y) < 0.03 ? M.HiVisStripe : M.HiVis, latticeShade(x, y, z, 0.1, 5) & 1));
+            const vest = box(p.hx + 0.01, 0.13, p.hz + 0.01, (x, y, z) =>
+                voxel(Math.abs(y) < 0.03 ? M.HiVisStripe : M.HiVis, latticeShade(x, y, z, 0.1, 5) & 1)
+            );
             return rigidParts(
                 id,
                 [
@@ -89,13 +91,42 @@ export function dummyPartAsset(index: number): VoxelAsset {
                     { name: 'eyeL', volume: eye, priority: 4, refColor: 0x111111 },
                     { name: 'eyeR', volume: eye, priority: 4, refColor: 0x111111 }
                 ],
-                [pose(), pose(0, p.hy + 0.02, 0), pose(0, p.hy + 0.1, 0), pose(0, -0.08, p.hz + 0.01), pose(0.07, 0.03, p.hz + 0.005), pose(-0.07, 0.03, p.hz + 0.005)]
+                [
+                    pose(),
+                    pose(0, p.hy + 0.02, 0),
+                    pose(0, p.hy + 0.1, 0),
+                    pose(0, -0.08, p.hz + 0.01),
+                    pose(0.07, 0.03, p.hz + 0.005),
+                    pose(-0.07, 0.03, p.hz + 0.005)
+                ]
             );
         }
         case 'tail':
-            return rigidParts(id, [{ name: 'tail', volume: box(p.hx, p.hy, p.hz, (x, y, z) => voxel(M.Tail, latticeShade(x, y, z, 0.08, 9))), priority: 1, refColor: 0x3a2a20 }], [pose()]);
+            return rigidParts(
+                id,
+                [
+                    {
+                        name: 'tail',
+                        volume: box(p.hx, p.hy, p.hz, (x, y, z) => voxel(M.Tail, latticeShade(x, y, z, 0.08, 9))),
+                        priority: 1,
+                        refColor: 0x3a2a20
+                    }
+                ],
+                [pose()]
+            );
         default:
-            return rigidParts(id, [{ name: p.name, volume: box(p.hx, p.hy, p.hz, (x, y, z) => voxel(M.FurDark, latticeShade(x, y, z, 0.1, 7))), priority: 1, refColor: 0x5a3a26 }], [pose()]);
+            return rigidParts(
+                id,
+                [
+                    {
+                        name: p.name,
+                        volume: box(p.hx, p.hy, p.hz, (x, y, z) => voxel(M.FurDark, latticeShade(x, y, z, 0.1, 7))),
+                        priority: 1,
+                        refColor: 0x5a3a26
+                    }
+                ],
+                [pose()]
+            );
     }
 }
 

@@ -29,7 +29,8 @@ for (let i = 0; i < W * H; i++) png.data.set([24, 30, 36, 255], i * 4);
 function rect(x0: number, y0: number, w: number, h: number, colour: number[]) {
     const c = colour.map((v) => Math.max(0, Math.min(255, Math.round(v))));
     for (let y = Math.max(0, Math.floor(y0)); y < Math.min(H, Math.ceil(y0 + h)); y++) {
-        for (let x = Math.max(0, Math.floor(x0)); x < Math.min(W, Math.ceil(x0 + w)); x++) png.data.set(c, (y * W + x) * 4);
+        for (let x = Math.max(0, Math.floor(x0)); x < Math.min(W, Math.ceil(x0 + w)); x++)
+            png.data.set(c, (y * W + x) * 4);
     }
 }
 
@@ -57,12 +58,22 @@ frames.forEach((f, n) => {
     for (const [key, k] of front) {
         const [i, j] = key.split(',').map(Number);
         const shade = 150 + Math.max(-60, Math.min(80, (k - cz) * 12));
-        rect(ox + (i - cx + half) * px, (half - (j - cy) - 1) * px, px, px, [shade + 40, shade * 0.75, shade * 0.45, 255]);
+        rect(ox + (i - cx + half) * px, (half - (j - cy) - 1) * px, px, px, [
+            shade + 40,
+            shade * 0.75,
+            shade * 0.45,
+            255
+        ]);
     }
     for (const [key, j] of top) {
         const [i, k] = key.split(',').map(Number);
         const shade = 150 + Math.max(-60, Math.min(80, (j - cy) * 12));
-        rect(ox + (i - cx + half) * px, PANEL + (k - cz + half) * px, px, px, [shade * 0.55, shade * 0.8, shade + 40, 255]);
+        rect(ox + (i - cx + half) * px, PANEL + (k - cz + half) * px, px, px, [
+            shade * 0.55,
+            shade * 0.8,
+            shade + 40,
+            255
+        ]);
     }
     rect(ox + PANEL - 1, 0, 1, H, [90, 100, 110, 255]);
 });
@@ -75,7 +86,14 @@ const summary = {
     cellCm: cm,
     deterministic,
     note: 'columns = captures after the drop (ticks at 60 Hz); top row front view (X right, Y up), bottom row top view (X right, Z down); grid lines every 10 cells',
-    frames: frames.map((f) => ({ tick: f.tick, t: +(f.tick / 60).toFixed(3), y: +f.pose.p.y.toFixed(4), angleDeg: +((f.angle * 180) / Math.PI).toFixed(1), cells: f.cells.length, hash: f.hash }))
+    frames: frames.map((f) => ({
+        tick: f.tick,
+        t: +(f.tick / 60).toFixed(3),
+        y: +f.pose.p.y.toFixed(4),
+        angleDeg: +((f.angle * 180) / Math.PI).toFixed(1),
+        cells: f.cells.length,
+        hash: f.hash
+    }))
 };
 fs.writeFileSync(`docs/screenshots/epic2/drop-test-${cm}cm.json`, JSON.stringify(summary, null, 2));
 console.log(JSON.stringify(summary, null, 1));

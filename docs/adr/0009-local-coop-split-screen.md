@@ -3,12 +3,14 @@
 Status: accepted (owner request: two players on a Steam Deck with two gamepads) · Date: 2026-11-20
 
 ## Context
+
 The owner wants to test with two people on one Steam Deck, each on a gamepad. The design doc plans
 local two-player as "two cameras/controllers against the same world/simulation, not duplicate
 worlds" (§6.2) and calls split screen a separate gate because it doubles camera render cost
 (§8 Epic 10). Epic 3 (online co-op) also needs a second beaver and shared grabs.
 
 ## Decision
+
 - **One simulation, N players.** `PhysicsWorld` holds one `Rig` per player (capsule, Rapier
   character controller, grab state); every character and grab call takes a player index (default
   0, so single-player code is unchanged). `LabSim.step(cmd, cmd2)`; `setPlayerCount(1 | 2)`.
@@ -39,6 +41,7 @@ worlds" (§6.2) and calls split screen a separate gate because it doubles camera
   the reflection cost — an option to measure on the Deck first.
 
 ## Consequences
+
 Split screen renders the world twice (shadows per camera, two frames); voxel reconstruction is
 shared (one grid, one worker). The Deck's frame rate is unmeasured; start it on the Low preset and
 7.5–10 cm voxels. The `CameraFrame` workaround touches engine internals (`renderPassCamera`,

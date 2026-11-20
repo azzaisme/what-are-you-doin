@@ -99,11 +99,29 @@ describe('particles', () => {
         const w = new VoxelWorld();
         w.addObject(990, 0);
         w.addObject(1, 3);
-        const pts = Float32Array.from([0.123, 0.456, 0.789, voxel(M.Leaf), 0.13, 0.46, 0.79, voxel(M.LeafRed), 5, 5, 5, voxel(M.Dust)]);
+        const pts = Float32Array.from([
+            0.123,
+            0.456,
+            0.789,
+            voxel(M.Leaf),
+            0.13,
+            0.46,
+            0.79,
+            voxel(M.LeafRed),
+            5,
+            5,
+            5,
+            voxel(M.Dust)
+        ]);
         w.rasterizePoints(990, pts, 3, 0);
         // the first two points share a cell at 5 and 10 cm
         expect(w.objectCellCount(990)).toBe(2);
-        w.rasterizeObject(1, [{ volume: box(0.5, 0.5, 0.5, solid(M.Timber)), pose: pose(0, 0.5, 0.5), priority: 0 }], 'center', createRasterStats());
+        w.rasterizeObject(
+            1,
+            [{ volume: box(0.5, 0.5, 0.5, solid(M.Timber)), pose: pose(0, 0.5, 0.5), priority: 0 }],
+            'center',
+            createRasterStats()
+        );
         w.resolve();
         const i = Math.floor(0.123 / GRID_SIZE);
         const j = Math.floor(0.456 / GRID_SIZE);

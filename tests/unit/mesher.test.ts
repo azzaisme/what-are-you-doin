@@ -7,7 +7,7 @@ import { createRasterStats } from '../../src/voxels/rasterizer.ts';
 import { box, grain, solid } from '../../src/voxels/volumes.ts';
 import { VoxelWorld } from '../../src/voxels/world.ts';
 
-import { meshAll, meshFaces, mulberry32  } from './helpers.ts';
+import { meshAll, meshFaces, mulberry32 } from './helpers.ts';
 import type { Face } from './helpers.ts';
 
 const DIRS: [string, number, number, number][] = [
@@ -20,7 +20,12 @@ const DIRS: [string, number, number, number][] = [
 ];
 
 /** Brute-force expected faces for one emission mode over a cell box. */
-function expectedFaces(world: VoxelWorld, mode: 'static' | 'dynamic', min: number[], size: number[]): Map<string, number> {
+function expectedFaces(
+    world: VoxelWorld,
+    mode: 'static' | 'dynamic',
+    min: number[],
+    size: number[]
+): Map<string, number> {
     const out = new Map<string, number>();
     for (let i = min[0]; i < min[0] + size[0]; i++)
         for (let j = min[1]; j < min[1] + size[1]; j++)
@@ -63,8 +68,18 @@ function randomWorld(seed: number): VoxelWorld {
     world.addObject(2);
     const stats = createRasterStats();
     const q = quatFromAxisAngle(0.4, 1, 0.2, 33 * DEG);
-    world.rasterizeObject(1, [{ volume: box(0.6, 0.3, 0.25, grain(M.Timber, 'x')), pose: pose(-0.07, 0.11, 0.03, q), priority: 0 }], 'coverage50', stats);
-    world.rasterizeObject(2, [{ volume: box(0.3, 0.3, 0.3, solid(M.TestBlue)), pose: pose(0.4, -0.2, -0.6), priority: 0 }], 'center', stats);
+    world.rasterizeObject(
+        1,
+        [{ volume: box(0.6, 0.3, 0.25, grain(M.Timber, 'x')), pose: pose(-0.07, 0.11, 0.03, q), priority: 0 }],
+        'coverage50',
+        stats
+    );
+    world.rasterizeObject(
+        2,
+        [{ volume: box(0.3, 0.3, 0.3, solid(M.TestBlue)), pose: pose(0.4, -0.2, -0.6), priority: 0 }],
+        'center',
+        stats
+    );
     world.resolve();
     return world;
 }
@@ -76,7 +91,9 @@ describe('mesher: exposed faces match brute force across chunk seams and negativ
             const min = [-14, -14, -14];
             const size = [28, 28, 28];
             for (const mode of ['static', 'dynamic'] as const) {
-                const got = faceMap(meshFaces(meshAll(world, mode, min[0], min[1], min[2], size[0], size[1], size[2], false)));
+                const got = faceMap(
+                    meshFaces(meshAll(world, mode, min[0], min[1], min[2], size[0], size[1], size[2], false))
+                );
                 const exp = expectedFaces(world, mode, min, size);
                 expect(got.size).toBe(exp.size);
                 for (const [id, v] of exp) expect(got.get(id), id).toBe(v);
@@ -91,7 +108,8 @@ describe('mesher: exposed faces match brute force across chunk seams and negativ
             const parts: Face[] = [];
             for (const cx of [-16, 0])
                 for (const cy of [-16, 0])
-                    for (const cz of [-16, 0]) parts.push(...meshFaces(meshAll(world, mode, cx, cy, cz, 16, 16, 16, true)));
+                    for (const cz of [-16, 0])
+                        parts.push(...meshFaces(meshAll(world, mode, cx, cy, cz, 16, 16, 16, true)));
             const chunked = faceMap(parts);
             expect(chunked).toEqual(whole);
         }

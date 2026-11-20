@@ -74,7 +74,9 @@ function routine(n: number): PlayerCommand {
         carryOn = false;
     } else if (t > 601 && t <= 700) {
         // walk up to the nearest prop, then look at it and grab it
-        const target = [sim.cube, sim.bucket, sim.log, sim.sphere, sim.plank, sim.held].reduce((a, b) => (dist(b) < dist(a) ? b : a));
+        const target = [sim.cube, sim.bucket, sim.log, sim.sphere, sim.plank, sim.held].reduce((a, b) =>
+            dist(b) < dist(a) ? b : a
+        );
         const p = sim.player;
         const dx = target.pose.p.x - p.x;
         const dz = target.pose.p.z - p.z;
@@ -140,7 +142,14 @@ const pct = (a: number[], p: number) => {
     const s = [...a].sort((x, y) => x - y);
     return +s[Math.min(s.length - 1, Math.floor(p * s.length))].toFixed(3);
 };
-const summary = (a: number[]) => ({ ticks: a.length, avg: +(a.reduce((x, y) => x + y, 0) / a.length).toFixed(3), p50: pct(a, 0.5), p95: pct(a, 0.95), p99: pct(a, 0.99), max: pct(a, 1) });
+const summary = (a: number[]) => ({
+    ticks: a.length,
+    avg: +(a.reduce((x, y) => x + y, 0) / a.length).toFixed(3),
+    p50: pct(a, 0.5),
+    p95: pct(a, 0.95),
+    p99: pct(a, 0.99),
+    max: pct(a, 1)
+});
 const st = sim.physics.stats;
 console.log(
     JSON.stringify(
@@ -154,7 +163,19 @@ console.log(
             maxActiveBodies: maxActive,
             held: { maxSpeed: +maxHeldSpeed.toFixed(2), maxForceN: +maxForce.toFixed(1), forceCapN: GRAB.maxForce },
             maxDynamicSpeedSampled: +maxAnySpeed.toFixed(2),
-            counts: { carries, throws, grabsTried, grabsMade, ragdolls, grabBreaks: st.grabBreaks, linClamps: st.linClamps, angClamps: st.angClamps, releaseClamps: st.releaseClamps, recovered: st.recovered, nonFinitePoses: nonFinite }
+            counts: {
+                carries,
+                throws,
+                grabsTried,
+                grabsMade,
+                ragdolls,
+                grabBreaks: st.grabBreaks,
+                linClamps: st.linClamps,
+                angClamps: st.angClamps,
+                releaseClamps: st.releaseClamps,
+                recovered: st.recovered,
+                nonFinitePoses: nonFinite
+            }
         },
         null,
         1

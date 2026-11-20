@@ -9,6 +9,8 @@ export function launchBrowser() {
     const software = process.env.SOFTWARE_GL === '1' || (!process.env.CHROME_PATH && executablePath === systemChrome);
     return chromium.launch({
         executablePath,
-        args: software ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] : ['--ignore-gpu-blocklist']
+        args: software
+            ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist']
+            : ['--ignore-gpu-blocklist']
     });
 }

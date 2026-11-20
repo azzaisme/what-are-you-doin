@@ -3,6 +3,7 @@
 Status: accepted (Epic 1) · Date: 2026-11-19
 
 ## Decision
+
 - **Storage:** sparse 16³-cell chunks, allocated on first write. Cell keys are small integers
   (chunk id × 4096 + local index) so hot maps never hold heap numbers.
 - **Layers:** a static layer (written once) and a dynamic composite layer. Each dynamic object keeps
@@ -22,5 +23,6 @@ Status: accepted (Epic 1) · Date: 2026-11-19
   Meshes get their full vertex format before an instance exists (the shader variant depends on it).
 
 ## Consequences
+
 Typical moving content touches ~30 dynamic chunks per voxel frame (measured). Static meshing happens
 at load (~1.1–1.3 s in Node / browser on the sandbox CPU).

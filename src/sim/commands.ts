@@ -41,7 +41,20 @@ export const PITCH_LIMIT = 1.45;
 export const MAX_REACH_STEP = 1;
 
 export function neutralCommand(seq = 0, yaw = 0, pitch = 0): PlayerCommand {
-    return { seq, moveX: 0, moveZ: 0, sprint: false, jump: false, yaw, pitch, carry: false, grab: false, throw: false, reach: 0, action: ACTION_NONE };
+    return {
+        seq,
+        moveX: 0,
+        moveZ: 0,
+        sprint: false,
+        jump: false,
+        yaw,
+        pitch,
+        carry: false,
+        grab: false,
+        throw: false,
+        reach: 0,
+        action: ACTION_NONE
+    };
 }
 
 const finite = (v: unknown, fallback = 0): number => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);

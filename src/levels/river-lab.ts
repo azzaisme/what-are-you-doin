@@ -10,12 +10,26 @@
 import { GRID_SIZE, cellCenterX, cellCenterZ, cellIndexX, cellIndexZ } from '../voxels/grid.ts';
 import { pose, quatFromYawPitchRoll } from '../voxels/math.ts';
 import { M, voxel } from '../voxels/palette.ts';
-import { createRasterStats  } from '../voxels/rasterizer.ts';
+import { createRasterStats } from '../voxels/rasterizer.ts';
 import type { RasterStats } from '../voxels/rasterizer.ts';
 import { hash3 } from '../voxels/volumes.ts';
 import type { VoxelWorld } from '../voxels/world.ts';
 
-import { PINE_TIERS, PINE_TRUNK_HEIGHT, ROCK_CENTRE_LIFT, fbm, lerp, patchShade, pineTrunkRadius, rasterizeTerrain, rng, rock, pine, smoothstep, valueNoise } from './common.ts';
+import {
+    PINE_TIERS,
+    PINE_TRUNK_HEIGHT,
+    ROCK_CENTRE_LIFT,
+    fbm,
+    lerp,
+    patchShade,
+    pineTrunkRadius,
+    rasterizeTerrain,
+    rng,
+    rock,
+    pine,
+    smoothstep,
+    valueNoise
+} from './common.ts';
 import type { RockSpot, TreeSpot } from './common.ts';
 import type { LevelDef } from './level.ts';
 
@@ -42,11 +56,6 @@ export const UTE_TRACK = { cx: -4.6, cz: -7.8, rx: 3.9, rz: 2.4 };
 export const BEAVER_LOOP = { cx: 4.4, cz: -6.4, r: 1.9 };
 
 // ------------------------------------------------------------------------------------- noise
-
-
-
-
-
 
 // ------------------------------------------------------------------------------------- terrain
 
@@ -123,13 +132,14 @@ function onUteTrack(x: number, z: number): number {
     return Math.abs(r - 1) * Math.min(t.rx, t.rz);
 }
 
-
 function surfaceMaterial(x: number, z: number, top: number): number {
     const y = (top + 1) * GRID_SIZE;
     const patch = fbm(x * 0.35, z * 0.35, 41);
     if (z < -24) {
         // distant ridge: calm colours, large patches, so faces merge
-        const slope = Math.abs(terrainHeight(x + 0.3, z) - terrainHeight(x - 0.3, z)) + Math.abs(terrainHeight(x, z + 0.3) - terrainHeight(x, z - 0.3));
+        const slope =
+            Math.abs(terrainHeight(x + 0.3, z) - terrainHeight(x - 0.3, z)) +
+            Math.abs(terrainHeight(x, z + 0.3) - terrainHeight(x, z - 0.3));
         if (slope > 0.8) return voxel(M.HillRock, patchShade(x, z, 3, 13) & 1);
         return voxel(M.HillGrass, patchShade(x, z, 4.5, 9));
     }
@@ -146,19 +156,17 @@ function surfaceMaterial(x: number, z: number, top: number): number {
 function sideMaterial(depthBelowTop: number, j: number, z: number): number {
     const strata = hash3(Math.floor((j * GRID_SIZE) / 0.1), 0, 0, 5) & 3;
     // ridge terrace risers stay green (sod over the bench edge), rock lower down
-    if (z < -24) return depthBelowTop * GRID_SIZE <= 0.3 ? voxel(M.HillGrass, 1 + (hash3(Math.floor((j * GRID_SIZE) / 0.3), 0, 0, 5) & 1) * 2) : voxel(M.HillRock, hash3(Math.floor((j * GRID_SIZE) / 0.3), 0, 0, 5) & 1);
+    if (z < -24)
+        return depthBelowTop * GRID_SIZE <= 0.3
+            ? voxel(M.HillGrass, 1 + (hash3(Math.floor((j * GRID_SIZE) / 0.3), 0, 0, 5) & 1) * 2)
+            : voxel(M.HillRock, hash3(Math.floor((j * GRID_SIZE) / 0.3), 0, 0, 5) & 1);
     if (depthBelowTop * GRID_SIZE <= 0.2) return voxel(M.Dirt, strata);
     return voxel(M.Rock, strata);
 }
 
 // ------------------------------------------------------------------------------------- props
 
-
-
 // ------------------------------------------------------------------------------------- layout
-
-
-
 
 /**
  * Tree and rock placement, independent of the voxel grid. The voxel build and the physics colliders
@@ -221,7 +229,6 @@ export function labLayout(seed = 1): { trees: TreeSpot[]; rocks: RockSpot[]; rng
     return { trees, rocks, rng: r };
 }
 
-
 // ------------------------------------------------------------------------------------- build
 
 export interface LabBuildResult {
@@ -234,11 +241,19 @@ export interface LabBuildResult {
     ms: number;
 }
 
-
 export function buildRiverLab(world: VoxelWorld, seed = 1): LabBuildResult {
     const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const stats = createRasterStats();
-    const columns = rasterizeTerrain(world, { minX: LAB_MIN_X, maxX: LAB_MAX_X, minZ: LAB_MIN_Z, maxZ: LAB_MAX_Z, cutBaseY: CUT_BASE_Y, topCell: groundTopCell, surface: surfaceMaterial, side: sideMaterial });
+    const columns = rasterizeTerrain(world, {
+        minX: LAB_MIN_X,
+        maxX: LAB_MAX_X,
+        minZ: LAB_MIN_Z,
+        maxZ: LAB_MAX_Z,
+        cutBaseY: CUT_BASE_Y,
+        topCell: groundTopCell,
+        surface: surfaceMaterial,
+        side: sideMaterial
+    });
 
     // ---- pines and rocks from the shared layout (physics builds its colliders from the same data)
     const layout = labLayout(seed);
@@ -290,7 +305,8 @@ export function buildRiverLab(world: VoxelWorld, seed = 1): LabBuildResult {
     return { columns, staticCells: world.staticCellCount(), trees, rocks, reeds, stats, ms: t1 - t0 };
 }
 
-const labAt = (x: number, z: number, lift: number, yaw = 0, pitch = 0) => pose(x, terrainHeight(x, z) + lift, z, quatFromYawPitchRoll(yaw, pitch, 0));
+const labAt = (x: number, z: number, lift: number, yaw = 0, pitch = 0) =>
+    pose(x, terrainHeight(x, z) + lift, z, quatFromYawPitchRoll(yaw, pitch, 0));
 
 /** The River Lab as a level: the Epic 1 / Epic 2 test scene. */
 export const riverLabLevel: LevelDef = {

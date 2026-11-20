@@ -2,7 +2,15 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import { LOG_RADIUS } from '../../src/assets/props.ts';
 import { terrainHeight, riverLabLevel } from '../../src/levels/river-lab.ts';
-import { ACTION_DROP, ACTION_DROP_TEST, ACTION_NONE, ACTION_RAGDOLL, PITCH_LIMIT, neutralCommand, sanitizeCommand } from '../../src/sim/commands.ts';
+import {
+    ACTION_DROP,
+    ACTION_DROP_TEST,
+    ACTION_NONE,
+    ACTION_RAGDOLL,
+    PITCH_LIMIT,
+    neutralCommand,
+    sanitizeCommand
+} from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
 import { buildLabPhysics } from '../../src/sim/lab-physics.ts';
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
@@ -30,7 +38,17 @@ function fpSim(x: number, z: number, yaw: number, pitch = 0): LabSim {
 
 describe('commands are plain, validated data (§6.2)', () => {
     it('sanitizes untrusted numbers, booleans and actions', () => {
-        const c = sanitizeCommand({ seq: -3.7, moveX: 9, moveZ: NaN, yaw: 7, pitch: 99, reach: -50, action: 77, jump: 'yes' as unknown as boolean, grab: true });
+        const c = sanitizeCommand({
+            seq: -3.7,
+            moveX: 9,
+            moveZ: NaN,
+            yaw: 7,
+            pitch: 99,
+            reach: -50,
+            action: 77,
+            jump: 'yes' as unknown as boolean,
+            grab: true
+        });
         expect(c.seq).toBe(0);
         expect(c.moveX).toBe(1);
         expect(c.moveZ).toBe(0);
@@ -44,7 +62,16 @@ describe('commands are plain, validated data (§6.2)', () => {
     });
 
     it('survives a JSON round trip unchanged (network-shaped)', () => {
-        const c = cmd(42, { moveX: 0.5, moveZ: -1, sprint: true, yaw: 1.25, pitch: -0.3, grab: true, reach: 0.4, action: ACTION_RAGDOLL });
+        const c = cmd(42, {
+            moveX: 0.5,
+            moveZ: -1,
+            sprint: true,
+            yaw: 1.25,
+            pitch: -0.3,
+            grab: true,
+            reach: 0.4,
+            action: ACTION_RAGDOLL
+        });
         expect(sanitizeCommand(JSON.parse(JSON.stringify(c)))).toEqual(c);
     });
 });
@@ -53,7 +80,17 @@ describe('grab force bounds (§2.4)', () => {
     it('never exceeds the force cap, however far or fast the target moves', () => {
         for (const d of [0.01, 0.5, 3, 100, 1e6]) {
             for (const m of [0.5, 24, 113, 5000]) {
-                const f = grabForce({ mass: m, gravity: 9.81, anchor: zero, anchorVelocity: { x: 0, y: -40, z: 0 }, target: { x: d, y: d, z: -d }, targetVelocity: { x: 30, y: 0, z: 0 } }, out());
+                const f = grabForce(
+                    {
+                        mass: m,
+                        gravity: 9.81,
+                        anchor: zero,
+                        anchorVelocity: { x: 0, y: -40, z: 0 },
+                        target: { x: d, y: d, z: -d },
+                        targetVelocity: { x: 30, y: 0, z: 0 }
+                    },
+                    out()
+                );
                 expect(Math.hypot(f.fx, f.fy, f.fz)).toBeLessThanOrEqual(GRAB.maxForce + 1e-6);
                 expect(Number.isFinite(f.fx + f.fy + f.fz)).toBe(true);
             }
@@ -61,20 +98,43 @@ describe('grab force bounds (§2.4)', () => {
     });
 
     it('holds a light object against gravity exactly at the target, without saturating', () => {
-        const f = grabForce({ mass: 2, gravity: 9.81, anchor: zero, anchorVelocity: zero, target: zero, targetVelocity: zero }, out());
+        const f = grabForce(
+            { mass: 2, gravity: 9.81, anchor: zero, anchorVelocity: zero, target: zero, targetVelocity: zero },
+            out()
+        );
         expect(f.fy).toBeCloseTo(2 * 9.81, 9);
         expect(f.fx).toBe(0);
         expect(f.saturated).toBe(false);
     });
 
     it('cannot lift the 113 kg log alone (needs more than the cap)', () => {
-        const f = grabForce({ mass: 113, gravity: 9.81, anchor: zero, anchorVelocity: zero, target: { x: 0, y: 0.5, z: 0 }, targetVelocity: zero }, out());
+        const f = grabForce(
+            {
+                mass: 113,
+                gravity: 9.81,
+                anchor: zero,
+                anchorVelocity: zero,
+                target: { x: 0, y: 0.5, z: 0 },
+                targetVelocity: zero
+            },
+            out()
+        );
         expect(f.saturated).toBe(true);
         expect(f.requested).toBeGreaterThan(113 * 9.81);
     });
 
     it('rejects non-finite input instead of producing NaN forces', () => {
-        const f = grabForce({ mass: 1, gravity: 9.81, anchor: { x: NaN, y: 0, z: 0 }, anchorVelocity: zero, target: zero, targetVelocity: zero }, out());
+        const f = grabForce(
+            {
+                mass: 1,
+                gravity: 9.81,
+                anchor: { x: NaN, y: 0, z: 0 },
+                anchorVelocity: zero,
+                target: zero,
+                targetVelocity: zero
+            },
+            out()
+        );
         expect([f.fx, f.fy, f.fz]).toEqual([0, 0, 0]);
     });
 
@@ -184,7 +244,14 @@ describe('physics adapter', () => {
         for (let n = 0; n < 600; n++) {
             // brisk but human turning: up to ~85 deg/s
             const yaw = Math.sin(n * 0.02) * 1.2;
-            s.step(cmd(301 + n, { yaw, pitch: Math.sin(n * 0.03) * 0.6, moveZ: n % 200 < 120 ? 1 : 0, sprint: n % 300 > 150 }));
+            s.step(
+                cmd(301 + n, {
+                    yaw,
+                    pitch: Math.sin(n * 0.03) * 0.6,
+                    moveZ: n % 200 < 120 ? 1 : 0,
+                    sprint: n % 300 > 150
+                })
+            );
             const v = s.physics.bodies.get(s.plank.id)!.body.linvel();
             maxSpeed = Math.max(maxSpeed, Math.hypot(v.x, v.y, v.z));
             expect(s.physics.stats.grabForce).toBeLessThanOrEqual(GRAB.maxForce + 1e-6);
@@ -277,7 +344,9 @@ describe('physics adapter', () => {
         const body = s.dummy[0].pose.p;
         for (const part of s.dummy) {
             // joints hold: every part stays within reach of the body
-            expect(Math.hypot(part.pose.p.x - body.x, part.pose.p.y - body.y, part.pose.p.z - body.z)).toBeLessThan(0.75);
+            expect(Math.hypot(part.pose.p.x - body.x, part.pose.p.y - body.y, part.pose.p.z - body.z)).toBeLessThan(
+                0.75
+            );
             expect(part.pose.p.y).toBeGreaterThan(terrainHeight(part.pose.p.x, part.pose.p.z) - 0.05);
         }
         expect(s.physics.stats.recovered).toBe(0);
@@ -289,9 +358,26 @@ describe('physics adapter', () => {
             s.fpActive = true;
             s.placePlayer(0.6, 5.2, 0);
             for (let n = 0; n < 400; n++) {
-                s.step(cmd(n, { moveZ: n < 40 ? 0.5 : 0, pitch: -0.5, yaw: Math.sin(n * 0.02), grab: n === 60, throw: n === 200, action: n === 250 ? ACTION_RAGDOLL : n === 300 ? ACTION_DROP_TEST : ACTION_NONE }));
+                s.step(
+                    cmd(n, {
+                        moveZ: n < 40 ? 0.5 : 0,
+                        pitch: -0.5,
+                        yaw: Math.sin(n * 0.02),
+                        grab: n === 60,
+                        throw: n === 200,
+                        action: n === 250 ? ACTION_RAGDOLL : n === 300 ? ACTION_DROP_TEST : ACTION_NONE
+                    })
+                );
             }
-            return s.entities.map((e) => [e.pose.p.x, e.pose.p.y, e.pose.p.z, e.pose.q.x, e.pose.q.y, e.pose.q.z, e.pose.q.w]);
+            return s.entities.map((e) => [
+                e.pose.p.x,
+                e.pose.p.y,
+                e.pose.p.z,
+                e.pose.q.x,
+                e.pose.q.y,
+                e.pose.q.z,
+                e.pose.q.w
+            ]);
         };
         expect(script(new LabSim())).toEqual(script(new LabSim()));
     });

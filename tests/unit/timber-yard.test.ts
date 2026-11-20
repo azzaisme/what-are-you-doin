@@ -1,6 +1,16 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { BRIDGE, BRIDGE_X, BUCKET_STUMP, CREEK_WATER_Y, YARD_GOAL, YARD_Y, creekCenterZ, timberYardLevel, yardHeight } from '../../src/levels/timber-yard.ts';
+import {
+    BRIDGE,
+    BRIDGE_X,
+    BUCKET_STUMP,
+    CREEK_WATER_Y,
+    YARD_GOAL,
+    YARD_Y,
+    creekCenterZ,
+    timberYardLevel,
+    yardHeight
+} from '../../src/levels/timber-yard.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
@@ -17,7 +27,9 @@ const byName = (s: LabSim, n: string) => s.entities.find((e) => e.name === n)!;
 /** Lays both beams flat across the gap, side by side, long axis along Z. */
 function bridgeBeams(s: LabSim): void {
     const flatAlongZ = quatMul(quatFromYawPitchRoll(Math.PI / 2, 0, 0), quatFromYawPitchRoll(0, Math.PI / 2, 0));
-    ['beam-0', 'beam-1'].forEach((n, i) => s.physics.place(byName(s, n).id, pose(BRIDGE_X - 0.105 + i * 0.21, YARD_Y + 0.12, BRIDGE.zc, flatAlongZ)));
+    ['beam-0', 'beam-1'].forEach((n, i) =>
+        s.physics.place(byName(s, n).id, pose(BRIDGE_X - 0.105 + i * 0.21, YARD_Y + 0.12, BRIDGE.zc, flatAlongZ))
+    );
 }
 
 describe('level 1: the timber yard', () => {
@@ -27,7 +39,16 @@ describe('level 1: the timber yard', () => {
         expect(r.columns).toBeGreaterThan(300_000);
         expect(r.trees).toBeGreaterThan(30);
         const l = timberYardLevel.layout(1);
-        for (const name of ['abutment-near', 'abutment-far', 'shed-roof', 'saw-bench', 'stump', 'flag', 'flower-centre']) expect(l.pieces.some((p) => p.name === name)).toBe(true);
+        for (const name of [
+            'abutment-near',
+            'abutment-far',
+            'shed-roof',
+            'saw-bench',
+            'stump',
+            'flag',
+            'flower-centre'
+        ])
+            expect(l.pieces.some((p) => p.name === name)).toBe(true);
         // nothing grows on the road, in the creek or in the yard
         for (const t of l.trees) expect(Math.abs(t.z - creekCenterZ(t.x))).toBeGreaterThan(2);
     }, 60_000); // the full static build takes ~10 s at 5 cm

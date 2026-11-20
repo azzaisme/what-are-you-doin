@@ -70,8 +70,17 @@ export interface BuildInfo {
 }
 
 export type ToWorker =
-    | { type: 'init'; cellCm: number; seed: number; level: string }
-    | { type: 'frame'; frame: number; time: number; policy: SamplingPolicy; reference: boolean; states: Float64Array; particles?: Float32Array; particleCount?: number }
+    | { type: 'init'; cellCm: number; seed: number; level: string; data?: unknown }
+    | {
+          type: 'frame';
+          frame: number;
+          time: number;
+          policy: SamplingPolicy;
+          reference: boolean;
+          states: Float64Array;
+          particles?: Float32Array;
+          particleCount?: number;
+      }
     | { type: 'query'; id: number; what: 'hash' | 'verify' };
 
 export type FromWorker =
@@ -84,7 +93,13 @@ export type FromWorker =
 export function transferables(units: UnitMesh[]): ArrayBuffer[] {
     const out: ArrayBuffer[] = [];
     for (const u of units) {
-        for (const c of u.classes) out.push(c.positions.buffer as ArrayBuffer, c.normals.buffer as ArrayBuffer, c.colors.buffer as ArrayBuffer, c.indices.buffer as ArrayBuffer);
+        for (const c of u.classes)
+            out.push(
+                c.positions.buffer as ArrayBuffer,
+                c.normals.buffer as ArrayBuffer,
+                c.colors.buffer as ArrayBuffer,
+                c.indices.buffer as ArrayBuffer
+            );
     }
     return out;
 }

@@ -170,7 +170,12 @@ export class Rig {
     readonly controller: RAPIER.KinematicCharacterController;
     readonly state: CharacterState;
 
-    constructor(body: RAPIER.RigidBody, collider: RAPIER.Collider, controller: RAPIER.KinematicCharacterController, state: CharacterState) {
+    constructor(
+        body: RAPIER.RigidBody,
+        collider: RAPIER.Collider,
+        controller: RAPIER.KinematicCharacterController,
+        state: CharacterState
+    ) {
         this.body = body;
         this.collider = collider;
         this.controller = controller;
@@ -182,7 +187,22 @@ export class PhysicsWorld {
     readonly world: RAPIER.World;
     readonly bodies = new Map<number, PhysBody>();
     private readonly byCollider = new Map<number, PhysBody>();
-    readonly stats: PhysicsStats = { stepMs: 0, tickMs: 0, activeBodies: 0, enabledBodies: 0, linClamps: 0, angClamps: 0, recovered: 0, releaseClamps: 0, holding: -1, grabError: 0, grabForce: 0, grabSaturated: false, maxHeldSpeed: 0, grabBreaks: 0 };
+    readonly stats: PhysicsStats = {
+        stepMs: 0,
+        tickMs: 0,
+        activeBodies: 0,
+        enabledBodies: 0,
+        linClamps: 0,
+        angClamps: 0,
+        recovered: 0,
+        releaseClamps: 0,
+        holding: -1,
+        grabError: 0,
+        grabForce: 0,
+        grabSaturated: false,
+        maxHeldSpeed: 0,
+        grabBreaks: 0
+    };
     /** One rig per player: capsule, character controller, grab state. Player 0 is the default. */
     readonly rigs: Rig[] = [];
     private terrainHandle = -1;
@@ -209,7 +229,14 @@ export class PhysicsWorld {
      * Rapier heightfields take (rows + 1) x (cols + 1) heights in column-major order; rows run along
      * Z and columns along X, centred on the collider.
      */
-    addTerrain(height: (x: number, z: number) => number, minX: number, maxX: number, minZ: number, maxZ: number, cells: number): void {
+    addTerrain(
+        height: (x: number, z: number) => number,
+        minX: number,
+        maxX: number,
+        minZ: number,
+        maxZ: number,
+        cells: number
+    ): void {
         const cols = cells;
         const rows = cells;
         const heights = new Float32Array((rows + 1) * (cols + 1));
@@ -220,7 +247,13 @@ export class PhysicsWorld {
                 heights[r + c * (rows + 1)] = height(x, z);
             }
         }
-        const desc = RAPIER.ColliderDesc.heightfield(rows, cols, heights, { x: maxX - minX, y: 1, z: maxZ - minZ }, RAPIER.HeightFieldFlags.FIX_INTERNAL_EDGES)
+        const desc = RAPIER.ColliderDesc.heightfield(
+            rows,
+            cols,
+            heights,
+            { x: maxX - minX, y: 1, z: maxZ - minZ },
+            RAPIER.HeightFieldFlags.FIX_INTERNAL_EDGES
+        )
             .setTranslation((minX + maxX) / 2, 0, (minZ + maxZ) / 2)
             .setFriction(0.9)
             .setCollisionGroups(groups(LAYER.static, ALL));
@@ -284,15 +317,31 @@ export class PhysicsWorld {
 
     /** A kinematic body that follows scripted poses (beaver, ute). Pushes props, is not pushed. */
     addKinematic(id: number, shapes: { shape: ShapeSpec; x: number; y: number; z: number }[], spawn: Pose): PhysBody {
-        const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(spawn.p.x, spawn.p.y, spawn.p.z).setRotation({ ...spawn.q }));
+        const body = this.world.createRigidBody(
+            RAPIER.RigidBodyDesc.kinematicPositionBased()
+                .setTranslation(spawn.p.x, spawn.p.y, spawn.p.z)
+                .setRotation({ ...spawn.q })
+        );
         const colliders: RAPIER.Collider[] = [];
         for (const s of shapes) {
             const d = this.colliderDesc(s.shape);
             const t = d.translation;
-            d.setTranslation(t.x + s.x, t.y + s.y, t.z + s.z).setFriction(0.8).setCollisionGroups(groups(LAYER.kinematic, ALL));
+            d.setTranslation(t.x + s.x, t.y + s.y, t.z + s.z)
+                .setFriction(0.8)
+                .setCollisionGroups(groups(LAYER.kinematic, ALL));
             colliders.push(this.world.createCollider(d, body));
         }
-        const pb: PhysBody = { id, body, colliders, kind: 'kinematic', grabbable: false, spawn: { p: { ...spawn.p }, q: { ...spawn.q } }, baseAngularDamping: 0, enabled: true, windArea: 0 };
+        const pb: PhysBody = {
+            id,
+            body,
+            colliders,
+            kind: 'kinematic',
+            grabbable: false,
+            spawn: { p: { ...spawn.p }, q: { ...spawn.q } },
+            baseAngularDamping: 0,
+            enabled: true,
+            windArea: 0
+        };
         this.bodies.set(id, pb);
         for (const c of colliders) this.byCollider.set(c.handle, pb);
         return pb;
@@ -465,7 +514,14 @@ export class PhysicsWorld {
         const ray = new RAPIER.Ray({ x: eye.x, y: eye.y, z: eye.z }, { x: d.x, y: d.y, z: d.z });
         // ignore every player capsule (yours and the other beaver's) and what any player holds is
         // still grabbable: two beavers can hold the same log
-        const hit = this.world.castRay(ray, GRAB.reach, true, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, groups(ALL, ALL & ~LAYER.player), this.rigs[p]?.collider);
+        const hit = this.world.castRay(
+            ray,
+            GRAB.reach,
+            true,
+            RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+            groups(ALL, ALL & ~LAYER.player),
+            this.rigs[p]?.collider
+        );
         if (!hit) return null;
         const pb = this.byCollider.get(hit.collider.handle);
         if (!pb || pb.kind !== 'dynamic' || !pb.grabbable || !pb.enabled) return null;
@@ -479,7 +535,12 @@ export class PhysicsWorld {
         const hit = this.castView(eye, yaw, pitch, p);
         if (!hit) return false;
         const d = viewDir(yaw, pitch, _dir);
-        this.grabAt(hit.pb, { x: eye.x + d.x * hit.toi, y: eye.y + d.y * hit.toi, z: eye.z + d.z * hit.toi }, hit.toi, p);
+        this.grabAt(
+            hit.pb,
+            { x: eye.x + d.x * hit.toi, y: eye.y + d.y * hit.toi, z: eye.z + d.z * hit.toi },
+            hit.toi,
+            p
+        );
         return true;
     }
 
@@ -529,7 +590,11 @@ export class PhysicsWorld {
             pb.body.setAngularDamping(pb.baseAngularDamping);
             for (const c of pb.colliders) c.setCollisionGroups(groups(LAYER.prop, ALL));
             const v = pb.body.linvel();
-            this.releasedGuards.push({ pb, ticks: RELEASE_GUARD_TICKS, cap: Math.max(RELEASE_MIN_CAP, 1.2 * Math.hypot(v.x, v.y, v.z)) });
+            this.releasedGuards.push({
+                pb,
+                ticks: RELEASE_GUARD_TICKS,
+                cap: Math.max(RELEASE_MIN_CAP, 1.2 * Math.hypot(v.x, v.y, v.z))
+            });
         } else {
             this.holdCount.set(pb.id, n);
         }
@@ -593,7 +658,17 @@ export class PhysicsWorld {
         r.hasPrevTarget = true;
         // with two holders, each supports half the weight (each force stays under its own cap)
         const share = 1 / Math.max(1, this.holdCount.get(pb.id) ?? 1);
-        const f = grabForce({ mass: b.mass() * share, gravity: GRAVITY, anchor, anchorVelocity: av, target: _target, targetVelocity: _tv }, _force);
+        const f = grabForce(
+            {
+                mass: b.mass() * share,
+                gravity: GRAVITY,
+                anchor,
+                anchorVelocity: av,
+                target: _target,
+                targetVelocity: _tv
+            },
+            _force
+        );
         b.applyImpulseAtPoint({ x: f.fx * SIM_DT, y: f.fy * SIM_DT, z: f.fz * SIM_DT }, anchor, true);
         r.grabError = f.error;
         r.grabForce = Math.hypot(f.fx, f.fy, f.fz);
@@ -673,7 +748,13 @@ export class PhysicsWorld {
                 s.angClamps++;
             }
             const p = b.translation();
-            const lost = !Number.isFinite(p.x + p.y + p.z) || p.y < LIMITS.killY || p.x < LIMITS.minX || p.x > LIMITS.maxX || p.z < LIMITS.minZ || p.z > LIMITS.maxZ;
+            const lost =
+                !Number.isFinite(p.x + p.y + p.z) ||
+                p.y < LIMITS.killY ||
+                p.x < LIMITS.minX ||
+                p.x > LIMITS.maxX ||
+                p.z < LIMITS.minZ ||
+                p.z > LIMITS.maxZ;
             if (lost) {
                 this.place(pb.id, pb.spawn);
                 s.recovered++;
@@ -705,7 +786,13 @@ export class PhysicsWorld {
 
     /** Raycast against static geometry only (used for placing things on the ground). */
     groundY(x: number, z: number, fromY = 50): number | null {
-        const hit = this.world.castRay(new RAPIER.Ray({ x, y: fromY, z }, { x: 0, y: -1, z: 0 }), 200, true, undefined, groups(ALL, LAYER.static));
+        const hit = this.world.castRay(
+            new RAPIER.Ray({ x, y: fromY, z }, { x: 0, y: -1, z: 0 }),
+            200,
+            true,
+            undefined,
+            groups(ALL, LAYER.static)
+        );
         return hit ? fromY - hit.timeOfImpact : null;
     }
 }
@@ -714,7 +801,13 @@ function now(): number {
     return typeof performance !== 'undefined' ? performance.now() : Date.now();
 }
 
-function rotate(q: { x: number; y: number; z: number; w: number }, x: number, y: number, z: number, out: Vec3Like): Vec3Like {
+function rotate(
+    q: { x: number; y: number; z: number; w: number },
+    x: number,
+    y: number,
+    z: number,
+    out: Vec3Like
+): Vec3Like {
     // v' = v + 2w(q x v) + 2 q x (q x v)
     const tx = 2 * (q.y * z - q.z * y);
     const ty = 2 * (q.z * x - q.x * z);
@@ -725,7 +818,13 @@ function rotate(q: { x: number; y: number; z: number; w: number }, x: number, y:
     return out;
 }
 
-function inverseRotate(q: { x: number; y: number; z: number; w: number }, x: number, y: number, z: number, out: Vec3Like): Vec3Like {
+function inverseRotate(
+    q: { x: number; y: number; z: number; w: number },
+    x: number,
+    y: number,
+    z: number,
+    out: Vec3Like
+): Vec3Like {
     return rotate({ x: -q.x, y: -q.y, z: -q.z, w: q.w }, x, y, z, out);
 }
 

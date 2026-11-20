@@ -164,7 +164,15 @@ export class TouchControls {
 
     /** Fields this contributes to a command; presses are consumed. */
     take(): Pick<PlayerCommand, 'moveX' | 'moveZ' | 'sprint' | 'jump' | 'grab' | 'throw' | 'action'> {
-        const out = { moveX: this.moveX, moveZ: this.moveZ, sprint: this.sprint, jump: this.q.jump, grab: this.q.grab, throw: this.q.throw, action: this.q.action };
+        const out = {
+            moveX: this.moveX,
+            moveZ: this.moveZ,
+            sprint: this.sprint,
+            jump: this.q.jump,
+            grab: this.q.grab,
+            throw: this.q.throw,
+            action: this.q.action
+        };
         this.q = { jump: false, grab: false, throw: false, action: ACTION_NONE };
         return out;
     }

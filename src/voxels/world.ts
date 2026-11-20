@@ -30,7 +30,7 @@ import {
     packChunkCoord
 } from './grid.ts';
 import type { Pose } from './math.ts';
-import { rasterizeVolume    } from './rasterizer.ts';
+import { rasterizeVolume } from './rasterizer.ts';
 import type { CellSink, RasterStats, SamplingPolicy } from './rasterizer.ts';
 import type { Volume } from './volumes.ts';
 
@@ -120,7 +120,12 @@ export class VoxelWorld {
     private readonly dirtyCells = new Set<number>();
 
     /** Composite telemetry from the last resolve(). */
-    readonly lastComposite: CompositeStats = { dirtyCells: 0, changedCells: 0, dynDynOverlaps: 0, dynStaticOverlaps: 0 };
+    readonly lastComposite: CompositeStats = {
+        dirtyCells: 0,
+        changedCells: 0,
+        dynDynOverlaps: 0,
+        dynStaticOverlaps: 0
+    };
     /** Running totals of overlap cells currently present. */
     dynStaticOverlapCells = 0;
 
@@ -185,7 +190,13 @@ export class VoxelWorld {
     }
 
     /** Rasterizes a static volume once into the static layer. */
-    rasterizeStatic(volume: Volume, worldPose: Pose, policy: SamplingPolicy, priority: number, stats: RasterStats): void {
+    rasterizeStatic(
+        volume: Volume,
+        worldPose: Pose,
+        policy: SamplingPolicy,
+        priority: number,
+        stats: RasterStats
+    ): void {
         this.staticSink.priority = priority;
         rasterizeVolume(volume, worldPose, policy, priority, this.staticSink, stats);
     }

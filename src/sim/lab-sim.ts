@@ -11,18 +11,49 @@
  * Rapier must be initialized (await initPhysics()) before constructing a LabSim.
  */
 
-import { BEAVER_ANIM_CHANNELS, BEAVER_CARRY, BEAVER_HEAD_YAW, BEAVER_WALK_AMOUNT, BEAVER_WALK_PHASE, beaverLeftHand } from '../assets/beaver.ts';
+import {
+    BEAVER_ANIM_CHANNELS,
+    BEAVER_CARRY,
+    BEAVER_HEAD_YAW,
+    BEAVER_WALK_AMOUNT,
+    BEAVER_WALK_PHASE,
+    beaverLeftHand
+} from '../assets/beaver.ts';
 import { BUCKET_HANDLE_TOP, LOG_RADIUS } from '../assets/props.ts';
-import { UTE_ANIM_CHANNELS, UTE_PITCH, UTE_ROLL, UTE_STEER, UTE_SUSPENSION, UTE_WHEELBASE_HALF, UTE_WHEEL_RADIUS, UTE_WHEEL_SPIN } from '../assets/ute.ts';
+import {
+    UTE_ANIM_CHANNELS,
+    UTE_PITCH,
+    UTE_ROLL,
+    UTE_STEER,
+    UTE_SUSPENSION,
+    UTE_WHEELBASE_HALF,
+    UTE_WHEEL_RADIUS,
+    UTE_WHEEL_SPIN
+} from '../assets/ute.ts';
 import { windAt } from '../fx/wind.ts';
 import type { WindSample } from '../fx/wind.ts';
 import type { LevelDef } from '../levels/level.ts';
 import { BEAVER_LOOP, PLATEAU_Y, UTE_TRACK, groundSurfaceY, riverLabLevel } from '../levels/river-lab.ts';
-import { composePose, pose, quatFromAxisAngle, quatFromYawPitchRoll, quatMul, quatRotate, quatSlerp, vec3  } from '../voxels/math.ts';
-
+import {
+    composePose,
+    pose,
+    quatFromAxisAngle,
+    quatFromYawPitchRoll,
+    quatMul,
+    quatRotate,
+    quatSlerp,
+    vec3
+} from '../voxels/math.ts';
 
 import { SIM_DT } from './clock.ts';
-import { ACTION_DROP, ACTION_DROP_TEST, ACTION_RAGDOLL, ACTION_RESET_PROPS, neutralCommand, sanitizeCommand } from './commands.ts';
+import {
+    ACTION_DROP,
+    ACTION_DROP_TEST,
+    ACTION_RAGDOLL,
+    ACTION_RESET_PROPS,
+    neutralCommand,
+    sanitizeCommand
+} from './commands.ts';
 import type { PlayerCommand } from './commands.ts';
 import { MAX_PLAYERS, MAX_STRESS, createLabEntities } from './lab-entities.ts';
 import type { SimEntity } from './lab-entities.ts';
@@ -30,7 +61,6 @@ import { addDummy, addLabKinematics, buildLabPhysics, launchDummy, propBody, str
 import { CHARACTER } from './physics/world.ts';
 import type { PhysicsWorld } from './physics/world.ts';
 import { ANIM_MAX, SnapshotRing, writeEntity } from './snapshots.ts';
-
 
 export type { PlayerCommand, SimEntity };
 export { MAX_PLAYERS, MAX_STRESS };
@@ -195,7 +225,17 @@ export class LabSim {
 
     /** Physics-driven props (everything dynamic), in a fixed order. */
     private get propEntities(): SimEntity[] {
-        return [this.plank, this.log, this.cube, this.sphere, this.bucket, this.held, ...this.extras, ...this.stress, ...this.dummy];
+        return [
+            this.plank,
+            this.log,
+            this.cube,
+            this.sphere,
+            this.bucket,
+            this.held,
+            ...this.extras,
+            ...this.stress,
+            ...this.dummy
+        ];
     }
 
     private buildPhysics(): void {
@@ -210,7 +250,8 @@ export class LabSim {
                 if (e && body) pw.addDynamic(e.id, body.shape, placement.pose, body.opts);
             }
             pw.setEnabled(this.held.id, false);
-            for (const e of [this.plank, this.log, this.cube, this.sphere, this.bucket, ...this.extras]) if (!pw.bodies.has(e.id)) e.visible = false;
+            for (const e of [this.plank, this.log, this.cube, this.sphere, this.bucket, ...this.extras])
+                if (!pw.bodies.has(e.id)) e.visible = false;
             for (let n = 0; n < this.stress.length; n++) {
                 const d = stressDef(this.level, this.stress[n].id, n);
                 pw.addDynamic(d.id, d.shape, d.spawn, d.opts);
@@ -233,7 +274,8 @@ export class LabSim {
         // replay holds the look and carry state but repeats no edge-triggered request
         const c = this.lastCmd;
         const others = this.lastCmds.slice(1).map((x) => neutralCommand(x.seq, x.yaw, x.pitch));
-        while (this.tick < tick) this.step({ ...neutralCommand(c.seq, c.yaw, c.pitch), carry: c.carry }, others[0], others.slice(1));
+        while (this.tick < tick)
+            this.step({ ...neutralCommand(c.seq, c.yaw, c.pitch), carry: c.carry }, others[0], others.slice(1));
     }
 
     /**
@@ -435,7 +477,11 @@ export class LabSim {
                 const sp = p.safe.valid ? p.safe : { x: this.level.spawn.x + i * 1.2, z: this.level.spawn.z };
                 this.placePlayer(sp.x, sp.z, p.yaw, i);
                 const who = this.playerCount > 1 ? `Player ${i + 1}: splash!` : 'Splash!';
-                this.events.push({ tick: this.tick, kind: 'fell', text: `${who} Fished out and put back on the bank.` });
+                this.events.push({
+                    tick: this.tick,
+                    kind: 'fell',
+                    text: `${who} Fished out and put back on the bank.`
+                });
             }
         }
         const bk = this.bucket;
@@ -450,7 +496,11 @@ export class LabSim {
             this.lostTicks = 0;
             this.progress.recoveries++;
             pw.respawn(bk.id);
-            this.events.push({ tick: this.tick, kind: 'recovered', text: 'The bucket floated off. A spare one is back on the stump.' });
+            this.events.push({
+                tick: this.tick,
+                kind: 'recovered',
+                text: 'The bucket floated off. A spare one is back on the stump.'
+            });
         }
         if (!this.progress.goalReached) {
             const g = rules.goal;
@@ -462,7 +512,11 @@ export class LabSim {
                 this.progress.goalReached = true;
                 this.progress.goalTick = this.tick;
                 const steps = rules.steps;
-                this.events.push({ tick: this.tick, kind: 'goal', text: steps ? 'Bucket delivered!' : 'Bucket delivered across the creek!' });
+                this.events.push({
+                    tick: this.tick,
+                    kind: 'goal',
+                    text: steps ? 'Bucket delivered!' : 'Bucket delivered across the creek!'
+                });
             }
         }
         this.applySteps(rules);
@@ -486,7 +540,8 @@ export class LabSim {
             if (!p.grounded && p.y > this.level.terrainHeight(p.x, p.z) + 0.35) this.jumped = true;
         }
         const st = steps[this.progress.step];
-        const inRect = (r: { minX: number; maxX: number; minZ: number; maxZ: number }, x: number, z: number) => x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ;
+        const inRect = (r: { minX: number; maxX: number; minZ: number; maxZ: number }, x: number, z: number) =>
+            x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ;
         const anyPlayer = (f: (i: number) => boolean) => this.players.some((_, i) => this.playerActive(i) && f(i));
         let done = false;
         switch (st.kind) {
@@ -512,7 +567,10 @@ export class LabSim {
                 const b = e ? this.physics.bodies.get(e.id) : undefined;
                 if (e && b) {
                     const v = b.body.linvel();
-                    done = inRect(st.rect, e.pose.p.x, e.pose.p.z) && Math.hypot(v.x, v.y, v.z) < 0.5 && this.physics.holders(e.id) === 0;
+                    done =
+                        inRect(st.rect, e.pose.p.x, e.pose.p.z) &&
+                        Math.hypot(v.x, v.y, v.z) < 0.5 &&
+                        this.physics.holders(e.id) === 0;
                 }
                 break;
             }
@@ -523,7 +581,11 @@ export class LabSim {
         if (!done) return;
         this.progress.step++;
         const last = this.progress.step >= steps.length;
-        this.events.push({ tick: this.tick, kind: last ? 'goal' : 'step', text: last ? 'Tutorial complete! Now try the Timber Yard.' : `✓ ${st.text.replace(/\.$/, '')}` });
+        this.events.push({
+            tick: this.tick,
+            kind: last ? 'goal' : 'step',
+            text: last ? 'Tutorial complete! Now try the Timber Yard.' : `✓ ${st.text.replace(/\.$/, '')}`
+        });
         this.jumped = false;
     }
 
@@ -958,7 +1020,6 @@ function smooth(x: number): number {
     return x * x * (3 - 2 * x);
 }
 
-
 const _hand = pose();
 const _windTmp: WindSample = { x: 0, z: 0, speed: 0, gustiness: 0 };
 const _q = { x: 0, y: 0, z: 0, w: 1 };
@@ -987,5 +1048,19 @@ export interface PlayerState {
 }
 
 function newPlayerState(x: number, z: number): PlayerState {
-    return { x, y: 0.5, z, vy: 0, yaw: 0, pitch: 0, grounded: true, eyeLift: 0, speed: 0, walkDist: 0, prevCarry: false, fallTicks: 0, safe: { x, z, valid: false } };
+    return {
+        x,
+        y: 0.5,
+        z,
+        vy: 0,
+        yaw: 0,
+        pitch: 0,
+        grounded: true,
+        eyeLift: 0,
+        speed: 0,
+        walkDist: 0,
+        prevCarry: false,
+        fallTicks: 0,
+        safe: { x, z, valid: false }
+    };
 }

@@ -26,7 +26,11 @@ export function clampCellSizeCm(cm: number): number {
 }
 
 function configuredCellSizeCm(): number {
-    const g = globalThis as { __UE_CELL_CM__?: number; localStorage?: Pick<Storage, 'getItem'>; process?: { env?: Record<string, string | undefined> } };
+    const g = globalThis as {
+        __UE_CELL_CM__?: number;
+        localStorage?: Pick<Storage, 'getItem'>;
+        process?: { env?: Record<string, string | undefined> };
+    };
     try {
         // set by the voxel worker before it imports any voxel module
         if (typeof g.__UE_CELL_CM__ === 'number') return clampCellSizeCm(g.__UE_CELL_CM__);

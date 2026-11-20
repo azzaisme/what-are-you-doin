@@ -16,7 +16,22 @@
 import { ACTION_DROP, ACTION_NONE, ACTION_RAGDOLL, PITCH_LIMIT } from '../sim/commands.ts';
 import type { PlayerCommand } from '../sim/commands.ts';
 
-export const PAD = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, VIEW: 8, MENU: 9, L3: 10, R3: 11, UP: 12, DOWN: 13 } as const;
+export const PAD = {
+    A: 0,
+    B: 1,
+    X: 2,
+    Y: 3,
+    LB: 4,
+    RB: 5,
+    LT: 6,
+    RT: 7,
+    VIEW: 8,
+    MENU: 9,
+    L3: 10,
+    R3: 11,
+    UP: 12,
+    DOWN: 13
+} as const;
 
 const DEADZONE = 0.18;
 /** Look speed at full stick deflection (rad/s), with a squared response for fine aim. */
@@ -58,7 +73,10 @@ export class PadPlayer {
         this.sprint = b(PAD.L3) || (pad.buttons[PAD.LT]?.value ?? 0) > 0.4;
         const step = Math.min(dt, 0.1);
         this.yaw -= rx * Math.abs(rx) * LOOK_SPEED.yaw * step;
-        this.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, this.pitch - ry * Math.abs(ry) * LOOK_SPEED.pitch * step));
+        this.pitch = Math.max(
+            -PITCH_LIMIT,
+            Math.min(PITCH_LIMIT, this.pitch - ry * Math.abs(ry) * LOOK_SPEED.pitch * step)
+        );
         if (edge(PAD.A)) this.q.jump = true;
         if (edge(PAD.RT)) this.q.grab = true;
         if (edge(PAD.RB)) this.q.throw = true;
@@ -77,7 +95,16 @@ export class PadPlayer {
 
     /** Fields this pad contributes to a command; edges are consumed. */
     take(): Pick<PlayerCommand, 'moveX' | 'moveZ' | 'sprint' | 'jump' | 'grab' | 'throw' | 'reach' | 'action'> {
-        const out = { moveX: this.moveX, moveZ: this.moveZ, sprint: this.sprint, jump: this.q.jump, grab: this.q.grab, throw: this.q.throw, reach: this.q.reach, action: this.q.action };
+        const out = {
+            moveX: this.moveX,
+            moveZ: this.moveZ,
+            sprint: this.sprint,
+            jump: this.q.jump,
+            grab: this.q.grab,
+            throw: this.q.throw,
+            reach: this.q.reach,
+            action: this.q.action
+        };
         this.q = { jump: false, grab: false, throw: false, reach: 0, action: ACTION_NONE };
         return out;
     }

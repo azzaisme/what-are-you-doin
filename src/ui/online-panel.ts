@@ -36,7 +36,8 @@ export class OnlinePanel {
         const el = document.createElement('div');
         el.className = 'online-panel';
         el.style.display = 'none';
-        for (const ev of ['pointerdown', 'mousedown', 'wheel', 'click', 'touchstart']) el.addEventListener(ev, (e) => e.stopPropagation());
+        for (const ev of ['pointerdown', 'mousedown', 'wheel', 'click', 'touchstart'])
+            el.addEventListener(ev, (e) => e.stopPropagation());
         document.body.append(el);
         this.el = el;
     }
@@ -54,7 +55,12 @@ export class OnlinePanel {
     /** Re-renders (call when the lobby or the session changes). */
     render(): void {
         const st = this.host.status();
-        this.button.textContent = st.mode === 'host' ? `Hosting ${st.code} · ${st.players}/4` : st.mode === 'guest' ? `In game ${st.code}` : 'Play online';
+        this.button.textContent =
+            st.mode === 'host'
+                ? `Hosting ${st.code} · ${st.players}/4`
+                : st.mode === 'guest'
+                  ? `In game ${st.code}`
+                  : 'Play online';
         this.button.classList.toggle('live', st.mode !== 'off');
         if (!this.open) return;
         const el = this.el;
@@ -80,19 +86,29 @@ export class OnlinePanel {
         };
         const avail = this.host.available();
         if (avail === 'none') {
-            note('Online play works when this page is open on claude.ai and shared with the people you play with (they sign in and open the same link).');
+            note(
+                'Online play works when this page is open on claude.ai and shared with the people you play with (they sign in and open the same link).'
+            );
             button('Close', () => this.toggle(false));
             return;
         }
         if (st.mode === 'host') {
-            note(`Hosting game ${st.code}. Players: ${st.players}/4. Friends open this page and tap “Play online”, then join ${st.code}.`);
+            note(
+                `Hosting game ${st.code}. Players: ${st.players}/4. Friends open this page and tap “Play online”, then join ${st.code}.`
+            );
             note('Your device runs the game for everyone: keep this page open and in front.', 'online-warn');
             button('Stop hosting', () => this.host.leave());
             button('Close', () => this.toggle(false));
             return;
         }
         if (st.mode === 'guest') {
-            note(st.waiting ? `Joined ${st.code}, waiting for the host…` : st.slot !== undefined && st.slot < 0 ? `Game ${st.code} is full: you are watching.` : `Playing in game ${st.code} as player ${(st.slot ?? 0) + 1}.`);
+            note(
+                st.waiting
+                    ? `Joined ${st.code}, waiting for the host…`
+                    : st.slot !== undefined && st.slot < 0
+                      ? `Game ${st.code} is full: you are watching.`
+                      : `Playing in game ${st.code} as player ${(st.slot ?? 0) + 1}.`
+            );
             button('Leave game', () => this.host.leave());
             button('Close', () => this.toggle(false));
             return;
@@ -101,7 +117,9 @@ export class OnlinePanel {
         const games = this.host.games();
         const sub = document.createElement('div');
         sub.className = 'online-sub';
-        sub.textContent = games.length ? 'Games here now' : 'No games yet: someone taps “Host a game”, the others join it here.';
+        sub.textContent = games.length
+            ? 'Games here now'
+            : 'No games yet: someone taps “Host a game”, the others join it here.';
         el.append(sub);
         for (const g of games) {
             const same = g.level === this.host.level;

@@ -59,11 +59,11 @@ export class VoxelClient {
     }
 
     /** Builds the static world in the worker; resolves once its meshes are ready to apply. */
-    init(cellCm: number, seed: number, level: string): Promise<BuildInfo> {
+    init(cellCm: number, seed: number, level: string, data?: unknown): Promise<BuildInfo> {
         return new Promise((resolve, reject) => {
             this.readyResolve = resolve;
             this.readyReject = reject;
-            this.send({ type: 'init', cellCm, seed, level });
+            this.send({ type: 'init', cellCm, seed, level, data });
         });
     }
 
@@ -135,7 +135,19 @@ export class VoxelClient {
         const particles = fx && fx.count > 0 ? fx.buffer.slice(0, fx.count * 4) : undefined;
         const transfer: ArrayBuffer[] = [states.buffer as ArrayBuffer];
         if (particles) transfer.push(particles.buffer as ArrayBuffer);
-        this.send({ type: 'frame', frame, time, policy: this.policy, reference: this.reference, states, particles, particleCount: fx?.count ?? 0 }, transfer);
+        this.send(
+            {
+                type: 'frame',
+                frame,
+                time,
+                policy: this.policy,
+                reference: this.reference,
+                states,
+                particles,
+                particleCount: fx?.count ?? 0
+            },
+            transfer
+        );
     }
 
     private send(msg: ToWorker, transfer: ArrayBuffer[] = []): void {

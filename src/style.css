@@ -14,7 +14,12 @@ canvas {
 body {
     background: #1a2026;
     color: #f4f1ea;
-    font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    font-family:
+        ui-sans-serif,
+        system-ui,
+        -apple-system,
+        'Segoe UI',
+        sans-serif;
 }
 
 canvas {
@@ -72,7 +77,9 @@ canvas {
 }
 
 kbd {
-    font: 11px ui-monospace, monospace;
+    font:
+        11px ui-monospace,
+        monospace;
     padding: 1px 5px;
     border: 1px solid #ffffff40;
     border-radius: 4px;
@@ -232,7 +239,11 @@ body.debug-open .hud-prompt:not(:empty) {
 
 .debug-stats {
     margin: 8px 0 0;
-    font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+    font:
+        11px/1.45 ui-monospace,
+        SFMono-Regular,
+        Menlo,
+        monospace;
     white-space: pre-wrap;
     color: #cfe3da;
 }
@@ -424,7 +435,9 @@ body.ui-hidden .inspector-hint {
     text-align: center;
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.25s, transform 0.25s;
+    transition:
+        opacity 0.25s,
+        transform 0.25s;
     z-index: 25;
 }
 
@@ -498,7 +511,10 @@ body.split .player-tag {
     position: fixed;
     right: 14px;
     padding: 2px 8px;
-    font: 600 13px ui-sans-serif, system-ui, sans-serif;
+    font:
+        600 13px ui-sans-serif,
+        system-ui,
+        sans-serif;
     border-radius: 6px;
     color: #10161c;
     pointer-events: none;
@@ -665,7 +681,10 @@ body.touch-play .cell-size {
 .touch-buttons button {
     width: 64px;
     height: 64px;
-    font: 600 13px ui-sans-serif, system-ui, sans-serif;
+    font:
+        600 13px ui-sans-serif,
+        system-ui,
+        sans-serif;
     color: #f4f1ea;
     border: 2px solid #ffffff50;
     border-radius: 50%;
@@ -701,4 +720,118 @@ body.ui-hidden .online-panel {
 body.ui-hidden .levels-chip,
 body.ui-hidden .levels-panel {
     display: none !important;
+}
+
+/* ---- level designer */
+.designer {
+    position: fixed;
+    right: 12px;
+    top: 12px;
+    z-index: 35;
+    width: min(300px, calc(100vw - 32px));
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
+    padding: 12px;
+    font-size: 13px;
+    border: 1px solid #ffffff22;
+    border-radius: 12px;
+    background: #0e1418ee;
+    box-shadow: 0 8px 30px #0008;
+}
+
+.designer button {
+    font: inherit;
+    color: inherit;
+    padding: 5px 8px;
+    border: 1px solid #ffffff2a;
+    border-radius: 7px;
+    background: #ffffff10;
+    cursor: pointer;
+}
+
+.designer button.on {
+    background: #3aa86b;
+    border-color: #5fd393;
+}
+
+.designer-name {
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 8px;
+    font: inherit;
+    color: inherit;
+    padding: 5px 8px;
+    border: 1px solid #ffffff2a;
+    border-radius: 7px;
+    background: #0006;
+}
+
+.designer-tools,
+.designer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 6px 0;
+}
+
+.designer-props {
+    display: grid;
+    gap: 4px;
+    margin: 8px 0;
+    padding: 8px;
+    border-radius: 8px;
+    background: #ffffff0a;
+}
+
+.designer-props label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+}
+
+.designer-props input,
+.designer-props select {
+    width: 90px;
+    font: inherit;
+    color: inherit;
+    background: #0006;
+    border: 1px solid #ffffff2a;
+    border-radius: 5px;
+    padding: 2px 4px;
+}
+
+.designer-sel {
+    font-weight: 600;
+}
+
+.designer-json {
+    width: 100%;
+    box-sizing: border-box;
+    height: 140px;
+    margin: 6px 0;
+    font:
+        11px ui-monospace,
+        monospace;
+    color: inherit;
+    background: #0008;
+    border: 1px solid #ffffff2a;
+    border-radius: 6px;
+}
+
+body.designing .hud-objective,
+body.designing .crosshair {
+    display: none;
+}
+
+body.ui-hidden .designer {
+    display: none;
+}
+
+@media (max-width: 700px) {
+    .designer {
+        top: auto;
+        bottom: 12px;
+        max-height: 45vh;
+    }
 }

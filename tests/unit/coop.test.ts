@@ -43,7 +43,9 @@ describe('local co-op: two players, one world', () => {
         expect(s.players[0].x - a0.x).toBeLessThan(-1);
         expect(s.players[1].x - b0.x).toBeGreaterThan(1);
         // the bodies follow the players (feet), walking
-        expect(Math.hypot(s.avatars[1].pose.p.x - s.players[1].x, s.avatars[1].pose.p.z - s.players[1].z)).toBeLessThan(1e-9);
+        expect(Math.hypot(s.avatars[1].pose.p.x - s.players[1].x, s.avatars[1].pose.p.z - s.players[1].z)).toBeLessThan(
+            1e-9
+        );
         s.setPlayerCount(1);
         s.step(cmd(500));
         expect(s.avatars.some((a) => a.visible)).toBe(false);
@@ -98,9 +100,15 @@ describe('local co-op: two players, one world', () => {
         const run = () => {
             const s = coop();
             for (let n = 0; n < 300; n++) {
-                s.step(cmd(n, { moveZ: n < 100 ? 1 : 0, yaw: Math.sin(n * 0.02), pitch: -0.4, grab: n === 120 }), cmd(n, { moveX: n < 80 ? 1 : 0, yaw: -Math.sin(n * 0.03), jump: n === 50 }));
+                s.step(
+                    cmd(n, { moveZ: n < 100 ? 1 : 0, yaw: Math.sin(n * 0.02), pitch: -0.4, grab: n === 120 }),
+                    cmd(n, { moveX: n < 80 ? 1 : 0, yaw: -Math.sin(n * 0.03), jump: n === 50 })
+                );
             }
-            return [...s.players.map((p) => [p.x, p.y, p.z]), ...s.entities.map((e) => [e.pose.p.x, e.pose.p.y, e.pose.p.z])];
+            return [
+                ...s.players.map((p) => [p.x, p.y, p.z]),
+                ...s.entities.map((e) => [e.pose.p.x, e.pose.p.y, e.pose.p.z])
+            ];
         };
         expect(run()).toEqual(run());
     });

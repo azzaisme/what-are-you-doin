@@ -23,7 +23,11 @@ const ent = (x: number, y: number, z: number, yaw: number, pitch: number, anim: 
 
 describe('snapshot codec', () => {
     it('round-trips poses to 2 mm and orientations to well under a degree, in a few hundred bytes', () => {
-        const es = [ent(-27.3, 9.81, -41.9, 2.1, 0.4), ent(0.001, -1.05, 13.2, -3, -1.2, [1.5, 0.25, 3]), { ...ent(5, 5, 5, 0, 0), visible: false }];
+        const es = [
+            ent(-27.3, 9.81, -41.9, 2.1, 0.4),
+            ent(0.001, -1.05, 13.2, -3, -1.2, [1.5, 0.25, 3]),
+            { ...ent(5, 5, 5, 0, 0), visible: false }
+        ];
         const bytes = encodeSnapshot(1234, es);
         expect(bytes.length).toBeLessThan(60);
         const ring = new SnapshotRing(3, 8);
@@ -62,7 +66,18 @@ describe('snapshot codec', () => {
 describe('online co-op sessions (in-memory transport)', () => {
     it('validates untrusted guest input', () => {
         expect(readInput(null)).toBeNull();
-        expect(readInput({ mx: 'x', y: NaN, sp: 'yes', j: 3 })).toEqual({ mx: 0, mz: 0, sp: false, y: 0, p: 0, j: 3, g: 0, t: 0, a: 0, an: 0 });
+        expect(readInput({ mx: 'x', y: NaN, sp: 'yes', j: 3 })).toEqual({
+            mx: 0,
+            mz: 0,
+            sp: false,
+            y: 0,
+            p: 0,
+            j: 3,
+            g: 0,
+            t: 0,
+            a: 0,
+            an: 0
+        });
     });
 
     it('a guest joins, gets a slot, walks on its own input, and sees the host world through snapshots', async () => {
@@ -123,7 +138,8 @@ describe('online co-op sessions (in-memory transport)', () => {
         const hs = await HostSession.start(hub.transport('host'), host, 'yard', 'full');
         const ad = listGames(hub.channel('lobby', 'w'))[0];
         const guests = [];
-        for (let i = 0; i < 4; i++) guests.push(await GuestSession.join(hub.transport(`g${i}`), new LabSim({ level: timberYardLevel }), ad));
+        for (let i = 0; i < 4; i++)
+            guests.push(await GuestSession.join(hub.transport(`g${i}`), new LabSim({ level: timberYardLevel }), ad));
         expect(guests.map((g) => g.slot).sort()).toEqual([-1, 1, 2, 3]);
         expect(host.playerCount).toBe(4);
         hs.stop();

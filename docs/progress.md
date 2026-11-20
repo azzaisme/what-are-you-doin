@@ -100,12 +100,12 @@ known issue 1); no fastening, so a beam bridge is only held by friction.
 
 ### Environment for every number below
 
-| | |
-|---|---|
-| CPU | Intel Xeon @ 2.10 GHz, 4 vCPU (cloud sandbox; a different, similar machine from gate 1) |
-| GPU | **none**: headless Chrome, SwiftShader software WebGL2 |
-| Node | 22.23.5 |
-| Packages | as gate 1, plus **@dimforge/rapier3d-compat 0.21.0** (exact pin) |
+|          |                                                                                         |
+| -------- | --------------------------------------------------------------------------------------- |
+| CPU      | Intel Xeon @ 2.10 GHz, 4 vCPU (cloud sandbox; a different, similar machine from gate 1) |
+| GPU      | **none**: headless Chrome, SwiftShader software WebGL2                                  |
+| Node     | 22.23.5                                                                                 |
+| Packages | as gate 1, plus **@dimforge/rapier3d-compat 0.21.0** (exact pin)                        |
 
 As at gate 1, there is no GPU here, so **frame times on a real desktop and on the owner's phone
 were not measured**: the browser renders at ~0.5 fps in software, and every browser frame time and
@@ -178,10 +178,10 @@ jumps, carries the plank while turning and looking up and down, throws it, walks
 nearest prop, drops it, launches the ragdoll every 40 s, runs the drop test; 25 stress bodies for the
 second 5 minutes):
 
-| | ticks | avg | p50 | p95 | p99 | max (ms per 60 Hz tick) |
-|---|---|---|---|---|---|---|
-| base scene + player + ragdoll | 18,000 | 0.51 | 0.47 | 0.83 | 1.16 | 4.77 |
-| + 25 moving stress bodies (36 active) | 18,000 | 1.56 | 1.60 | 2.53 | 3.06 | 12.86 |
+|                                       | ticks  | avg  | p50  | p95  | p99  | max (ms per 60 Hz tick) |
+| ------------------------------------- | ------ | ---- | ---- | ---- | ---- | ----------------------- |
+| base scene + player + ragdoll         | 18,000 | 0.51 | 0.47 | 0.83 | 1.16 | 4.77                    |
+| + 25 moving stress bodies (36 active) | 18,000 | 1.56 | 1.60 | 2.53 | 3.06 | 12.86                   |
 
 - Ticks over the 16.7 ms budget: **0** (so no dropped ticks from physics on this CPU).
 - Held props: max speed 10.2 m/s, force never above the 450 N cap. Max sampled speed of any
@@ -204,12 +204,12 @@ not): physics tick avg 0.83 / p95 2.9 ms with 1 moving body, 0.87 / 2.3 ms with 
 **Voxel worker cost with physics props** (Node, 5 cm, 20 Hz, `bench-voxels`; ms p50 / p95 per
 voxel frame; same run, same machine for both):
 
-| props | moving extra bodies | raster | mesh | total |
-|---|---|---|---|---|
-| scripted (Epic 1) | 0 | 25.1 | 27.0 | 59.2 / 83.6 |
-| physics | 0 | 24.7 | 26.7 | 61.0 / 88.6 |
-| scripted | 25 | 46.5 | 50.5 | 138 / 173 |
-| physics | 25 | 44.6 | 120.0 | 198 / 312 |
+| props             | moving extra bodies | raster | mesh  | total       |
+| ----------------- | ------------------- | ------ | ----- | ----------- |
+| scripted (Epic 1) | 0                   | 25.1   | 27.0  | 59.2 / 83.6 |
+| physics           | 0                   | 24.7   | 26.7  | 61.0 / 88.6 |
+| scripted          | 25                  | 46.5   | 50.5  | 138 / 173   |
+| physics           | 25                  | 44.6   | 120.0 | 198 / 312   |
 
 Physics bodies tumble on and rest against the terrain; each overlap with ground voxels re-meshes a
 whole 6.4 m static region (the Epic 1 compositor rule), so meshing with 25 physics bodies costs
@@ -265,7 +265,6 @@ worker 28 ms per frame (raster 11.9, resolve 3.3, mesh 12.8), main-thread upload
 frame, 0 skipped voxel frames. Known: in portrait the voxel-size box overlaps the debug panel.
 Next: see `START_HERE.md` (mobile layout fix, then Epic 2).
 
-
 ## Gate 1b — voxel size as a quality setting, 5 cm default, worker reconstruction (2026-11-19)
 
 Owner feedback on gate 1: frame rate fine on their phone, look approved. Requests: 5 cm voxels, then
@@ -292,7 +291,6 @@ a voxel-size slider (asked 0.5–10 cm). See ADR 0007.
 - Screenshots in `docs/screenshots` are now at 5 cm; `docs/screenshots/10cm/` keeps three 10 cm
   references. The video `docs/media/river-lab.mp4` is still the 10 cm capture.
 
-
 ## Gate 1 — Epic 0 + Epic 1 "River Lab" (2026-11-19)
 
 **Status: built and verified to the extent this environment allows. Waiting on the owner's visual
@@ -300,15 +298,15 @@ approval (an explicit gate). No later epic has been started.**
 
 ### Environment used for every number below
 
-| | |
-|---|---|
-| CPU | Intel Xeon @ 2.10 GHz, 2 vCPU (cloud sandbox) |
-| GPU | **none** — Chrome 1xx headless, ANGLE → Mesa llvmpipe (software WebGL2) |
-| Node | 22.23.5 |
-| Browser tests | system Google Chrome via Playwright 1.65.1, `--use-angle=swiftshader` |
-| Viewport | 1280 × 720 (screenshots), 960 × 540 (video) |
-| Packages (lockfile) | playcanvas 2.24.2, vite 8.3.8, typescript 6.0.3, vitest 5.1.1, @playwright/test 1.65.1 |
-| Scaffold | `npm create playcanvas@latest uncivil-engineers -- -f engine` (create-playcanvas 0.17.0, minimal engine starter, defaults) |
+|                     |                                                                                                                            |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| CPU                 | Intel Xeon @ 2.10 GHz, 2 vCPU (cloud sandbox)                                                                              |
+| GPU                 | **none** — Chrome 1xx headless, ANGLE → Mesa llvmpipe (software WebGL2)                                                    |
+| Node                | 22.23.5                                                                                                                    |
+| Browser tests       | system Google Chrome via Playwright 1.65.1, `--use-angle=swiftshader`                                                      |
+| Viewport            | 1280 × 720 (screenshots), 960 × 540 (video)                                                                                |
+| Packages (lockfile) | playcanvas 2.24.2, vite 8.3.8, typescript 6.0.3, vitest 5.1.1, @playwright/test 1.65.1                                     |
+| Scaffold            | `npm create playcanvas@latest uncivil-engineers -- -f engine` (create-playcanvas 0.17.0, minimal engine starter, defaults) |
 
 Because there is no GPU, **no frame-rate target in §7.4 has been measured**. Browser frame times
 below are software-rendering times and must not be read as performance results. CPU-side voxel
@@ -382,15 +380,15 @@ bedrock + terraced ridge, ADR 0005).
 **Voxel reconstruction CPU cost per voxel frame** (Node, 20 Hz, scripted scene, after the two
 output-identical optimisations in ADR 0002/0004; ms p50 / p95):
 
-| Policy | Extra objects | Frames | Raster | Resolve | Mesh | **Total** | Max | Samples | Cells | Dyn chunks meshed |
-|---|---|---|---|---|---|---|---|---|---|---|
-| center | 0 | 300 | 1.4 / 2.0 | 0.6 / 0.8 | 5.6 / 9.0 | **7.6 / 11.7** | 22.8 | 7.5k | 5,332 | 29.8 |
-| **coverage50 (default)** | 0 | 300 | 4.0 / 6.0 | 0.6 / 0.9 | 5.8 / 10.4 | **10.5 / 16.1** | 27.7 | 89.5k | 6,006 | 30.4 |
-| coverage25 | 0 | 300 | 4.2 / 6.0 | 0.7 / 1.1 | 5.8 / 11.1 | **10.9 / 16.1** | 26.1 | 89.5k | 6,975 | 31.4 |
-| conservative | 0 | 300 | 3.6 / 5.5 | 0.7 / 1.1 | 10.5 / 16.9 | **14.9 / 22.0** | 31.8 | 57.5k | 8,794 | 32.6 |
-| coverage50 | 10 | 300 | 5.4 / 7.3 | 1.4 / 1.8 | 10.5 / 15.5 | **17.3 / 22.4** | 29.8 | 110.8k | 7,200 | 61.4 |
-| coverage50 | 25 | 300 | 7.4 / 11.5 | 3.2 / 4.5 | 16.9 / 26.6 | **27.7 / 42.2** | 50.8 | 144.1k | 9,107 | 100.4 |
-| coverage50, 10 min | 0 | 12,000 | 3.9 / 5.4 | 0.6 / 0.8 | 5.5 / 10.0 | **10.0 / 15.4** | 31.7 | 89.4k | 6,003 | 31 |
+| Policy                   | Extra objects | Frames | Raster     | Resolve   | Mesh        | **Total**       | Max  | Samples | Cells | Dyn chunks meshed |
+| ------------------------ | ------------- | ------ | ---------- | --------- | ----------- | --------------- | ---- | ------- | ----- | ----------------- |
+| center                   | 0             | 300    | 1.4 / 2.0  | 0.6 / 0.8 | 5.6 / 9.0   | **7.6 / 11.7**  | 22.8 | 7.5k    | 5,332 | 29.8              |
+| **coverage50 (default)** | 0             | 300    | 4.0 / 6.0  | 0.6 / 0.9 | 5.8 / 10.4  | **10.5 / 16.1** | 27.7 | 89.5k   | 6,006 | 30.4              |
+| coverage25               | 0             | 300    | 4.2 / 6.0  | 0.7 / 1.1 | 5.8 / 11.1  | **10.9 / 16.1** | 26.1 | 89.5k   | 6,975 | 31.4              |
+| conservative             | 0             | 300    | 3.6 / 5.5  | 0.7 / 1.1 | 10.5 / 16.9 | **14.9 / 22.0** | 31.8 | 57.5k   | 8,794 | 32.6              |
+| coverage50               | 10            | 300    | 5.4 / 7.3  | 1.4 / 1.8 | 10.5 / 15.5 | **17.3 / 22.4** | 29.8 | 110.8k  | 7,200 | 61.4              |
+| coverage50               | 25            | 300    | 7.4 / 11.5 | 3.2 / 4.5 | 16.9 / 26.6 | **27.7 / 42.2** | 50.8 | 144.1k  | 9,107 | 100.4             |
+| coverage50, 10 min       | 0             | 12,000 | 3.9 / 5.4  | 0.6 / 0.8 | 5.5 / 10.0  | **10.0 / 15.4** | 31.7 | 89.4k   | 6,003 | 31                |
 
 Raw output: `node --expose-gc scripts/bench-voxels.ts 10 20` (also saved locally as
 `artifacts/bench-voxels.txt`, not committed).

@@ -4,7 +4,7 @@
  * without allocating.
  */
 
-import { composePose, copyPose, pose, quatFromYawPitchRoll, quatIdentity   } from '../voxels/math.ts';
+import { composePose, copyPose, pose, quatFromYawPitchRoll, quatIdentity } from '../voxels/math.ts';
 import type { Pose, Quat } from '../voxels/math.ts';
 
 export interface JointDef {

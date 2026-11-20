@@ -27,16 +27,25 @@ type Lab = {
     placeProp(name: string, x: number, y: number, z: number, yaw?: number): boolean;
 };
 
-const IGNORED = [/GPU stall due to ReadPixels/, /GL Driver Message/, /Powered by PlayCanvas/, /favicon/i, /status of 404/];
+const IGNORED = [
+    /GPU stall due to ReadPixels/,
+    /GL Driver Message/,
+    /Powered by PlayCanvas/,
+    /favicon/i,
+    /status of 404/
+];
 
 async function boot(page: Page, query = '?level=lab&t=4&noui'): Promise<string[]> {
     const problems: string[] = [];
     page.on('console', (m) => {
-        if ((m.type() === 'error' || m.type() === 'warning') && !IGNORED.some((r) => r.test(m.text()))) problems.push(`${m.type()}: ${m.text()}`);
+        if ((m.type() === 'error' || m.type() === 'warning') && !IGNORED.some((r) => r.test(m.text())))
+            problems.push(`${m.type()}: ${m.text()}`);
     });
     page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
     await page.goto(`/${query}`);
-    await page.waitForFunction(() => (window as unknown as { __riverLab?: Lab }).__riverLab?.ready === true, null, { timeout: 150_000 });
+    await page.waitForFunction(() => (window as unknown as { __riverLab?: Lab }).__riverLab?.ready === true, null, {
+        timeout: 150_000
+    });
     await idle(page);
     await page.waitForTimeout(1500);
     return problems;
@@ -45,10 +54,16 @@ async function boot(page: Page, query = '?level=lab&t=4&noui'): Promise<string[]
 /** Voxel frames are built in a worker: wait until none is in flight. */
 async function idle(page: Page): Promise<void> {
     await page.waitForTimeout(150);
-    await page.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.voxelIdle(), null, { timeout: 60_000 });
+    await page.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.voxelIdle(), null, {
+        timeout: 60_000
+    });
 }
 
-const lab = <T>(page: Page, fn: (l: Lab) => T) => page.evaluate((src) => new Function('l', `return (${src})(l)`)((window as unknown as { __riverLab: Lab }).__riverLab), fn.toString()) as Promise<T>;
+const lab = <T>(page: Page, fn: (l: Lab) => T) =>
+    page.evaluate(
+        (src) => new Function('l', `return (${src})(l)`)((window as unknown as { __riverLab: Lab }).__riverLab),
+        fn.toString()
+    ) as Promise<T>;
 
 test('boots the River Lab with no console errors and a non-blank frame', async ({ page }) => {
     const problems = await boot(page);
@@ -111,7 +126,8 @@ test('debug controls: reference mode, voxel rates, sampling policies and stress 
     await idle(page);
     expect((await lab(page, (l) => l.stats())).dynamicCells).toBe(0);
     await lab(page, (l) => l.set('reference', false));
-    for (const hz of ['12', '30', '60', '20']) await page.evaluate((hz) => (window as unknown as { __riverLab: Lab }).__riverLab.set('hz', hz), hz);
+    for (const hz of ['12', '30', '60', '20'])
+        await page.evaluate((hz) => (window as unknown as { __riverLab: Lab }).__riverLab.set('hz', hz), hz);
     for (const p of ['center', 'coverage25', 'conservative', 'coverage50']) {
         await page.evaluate((p) => (window as unknown as { __riverLab: Lab }).__riverLab.set('policy', p), p);
         await page.waitForTimeout(300);
@@ -182,7 +198,10 @@ test('UI boxes never overlap: portrait phone, portrait tablet, desktop and lands
         const names = Object.keys(r).filter((k) => r[k]);
         for (const n of names) {
             const b = r[n]!;
-            expect(b.l >= 0 && b.t >= 0 && b.r <= w + 0.5 && b.b <= h + 0.5, `${label}: ${n} inside the viewport ${JSON.stringify(b)}`).toBe(true);
+            expect(
+                b.l >= 0 && b.t >= 0 && b.r <= w + 0.5 && b.b <= h + 0.5,
+                `${label}: ${n} inside the viewport ${JSON.stringify(b)}`
+            ).toBe(true);
             for (const m of names) if (m < n) expect(hit(r[n]!, r[m]!), `${label}: ${n} overlaps ${m}`).toBe(false);
         }
         return r;
@@ -230,13 +249,19 @@ test('physics sandbox: grab and carry the plank, launch the ragdoll, switch to s
     await page.waitForTimeout(3000); // props settle
     const plank = (await lab(page, (l) => l.entities())).plank;
     // stand 1.6 m behind the plank (towards +Z) facing it, and aim the crosshair at it
-    await page.evaluate(([x, z]) => (window as unknown as { __riverLab: Lab }).__riverLab.setFirstPerson(x, z + 1.6, 0, -0.3), [plank.x, plank.z]);
+    await page.evaluate(
+        ([x, z]) => (window as unknown as { __riverLab: Lab }).__riverLab.setFirstPerson(x, z + 1.6, 0, -0.3),
+        [plank.x, plank.z]
+    );
     await lab(page, (l) => l.set('carry', false));
     await page.waitForTimeout(1500);
     const p = await lab(page, (l) => l.player());
     expect(p.grounded).toBe(true);
     const pitch = -Math.atan2(p.y + 1.22 - plank.y, Math.hypot(plank.x - p.x, plank.z - p.z));
-    await page.evaluate(([x, z, pitch]) => (window as unknown as { __riverLab: Lab }).__riverLab.setFirstPerson(x, z + 1.6, 0, pitch), [plank.x, plank.z, pitch]);
+    await page.evaluate(
+        ([x, z, pitch]) => (window as unknown as { __riverLab: Lab }).__riverLab.setFirstPerson(x, z + 1.6, 0, pitch),
+        [plank.x, plank.z, pitch]
+    );
     await page.waitForTimeout(500);
     await lab(page, (l) => l.input({ grab: true }));
     await page.waitForTimeout(3000);
@@ -244,14 +269,22 @@ test('physics sandbox: grab and carry the plank, launch the ragdoll, switch to s
     // look ahead: the hold point follows the view, so the plank is lifted to chest height
     await lab(page, (l) => l.look(0, 0));
     // lifted off the ground (software GL runs ~1 fps, so wait on sim progress, not wall time)
-    await page.waitForFunction((y0) => (window as unknown as { __riverLab: Lab }).__riverLab.entities().plank.y > y0 + 0.3, plank.y, { timeout: 120_000 });
+    await page.waitForFunction(
+        (y0) => (window as unknown as { __riverLab: Lab }).__riverLab.entities().plank.y > y0 + 0.3,
+        plank.y,
+        { timeout: 120_000 }
+    );
     expect((await lab(page, (l) => l.player())).holding).toBe(4);
     await lab(page, (l) => l.input({ throw: true }));
     await page.waitForTimeout(500);
     expect((await lab(page, (l) => l.player())).holding).toBe(-1);
 
     await lab(page, (l) => l.action('ragdoll'));
-    await page.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.entities()['dummy-body'].visible, null, { timeout: 60_000 });
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.entities()['dummy-body'].visible,
+        null,
+        { timeout: 60_000 }
+    );
     await page.waitForTimeout(3000);
     const e = await lab(page, (l) => l.entities());
     expect(e['dummy-body'].visible).toBe(true);
@@ -268,7 +301,9 @@ test('physics sandbox: grab and carry the plank, launch the ragdoll, switch to s
     expect(problems).toEqual([]);
 });
 
-test('level 1, the Timber Yard: starts in first person with the objective, and the bucket delivery completes it', async ({ page }) => {
+test('level 1, the Timber Yard: starts in first person with the objective, and the bucket delivery completes it', async ({
+    page
+}) => {
     const problems = await boot(page, '?level=yard&t=0.01&quality=low#cell100');
     expect(await lab(page, (l) => l.level)).toBe('yard');
     const st = await lab(page, (l) => l.state as unknown as { mode: string });
@@ -283,7 +318,11 @@ test('level 1, the Timber Yard: starts in first person with the objective, and t
     // deliver the bucket by hand (teleport) and let the sim run
     await lab(page, (l) => l.action('pause'));
     await lab(page, (l) => l.placeProp('bucket', -1, 1.2, -7));
-    await page.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.progress().goalReached, null, { timeout: 120_000 });
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.progress().goalReached,
+        null,
+        { timeout: 120_000 }
+    );
     await expect(page.locator('#hud-objective')).toHaveClass(/done/);
     await expect(page.locator('.toast')).toContainText('delivered');
     expect(problems).toEqual([]);
@@ -312,16 +351,30 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
     expect(rowBrightness(Math.floor(shot.height * 0.3))).toBeGreaterThan(30);
     expect(rowBrightness(Math.floor(shot.height * 0.8))).toBeGreaterThan(30);
     // and they are different views
-    expect(Math.abs(rowBrightness(Math.floor(shot.height * 0.3)) - rowBrightness(Math.floor(shot.height * 0.8)))).toBeGreaterThan(1);
+    expect(
+        Math.abs(rowBrightness(Math.floor(shot.height * 0.3)) - rowBrightness(Math.floor(shot.height * 0.8)))
+    ).toBeGreaterThan(1);
     const s = await lab(page, (l) => l.stats());
     expect(s.voxel.objects).toBe(17); // the yard's 15 plus two voxel beaver bodies
     // player 2 walks on their own commands
-    const before = await page.evaluate(() => (window as unknown as { __riverLab: { entities(): Record<string, { x: number; z: number }> } }).__riverLab.entities()['avatar-1']);
+    const before = await page.evaluate(
+        () =>
+            (
+                window as unknown as { __riverLab: { entities(): Record<string, { x: number; z: number }> } }
+            ).__riverLab.entities()['avatar-1']
+    );
     for (let i = 0; i < 20; i++) {
-        await lab(page, (l) => (l as unknown as { input2(c: Record<string, unknown>): void }).input2({ moveZ: 1, yaw: 1.57 }));
+        await lab(page, (l) =>
+            (l as unknown as { input2(c: Record<string, unknown>): void }).input2({ moveZ: 1, yaw: 1.57 })
+        );
         await page.waitForTimeout(250);
     }
-    const after = await page.evaluate(() => (window as unknown as { __riverLab: { entities(): Record<string, { x: number; z: number }> } }).__riverLab.entities()['avatar-1']);
+    const after = await page.evaluate(
+        () =>
+            (
+                window as unknown as { __riverLab: { entities(): Record<string, { x: number; z: number }> } }
+            ).__riverLab.entities()['avatar-1']
+    );
     expect(Math.hypot(after.x - before.x, after.z - before.z)).toBeGreaterThan(0.1);
     // back to one player: one full view, bodies hidden
     await lab(page, (l) => (l as unknown as { setPlayers(n: number): void }).setPlayers(1));
@@ -330,7 +383,10 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
     expect(problems).toEqual([]);
 });
 
-test('online co-op: a second device joins the host, plays as player 2 and renders the host world', async ({ page, context }) => {
+test('online co-op: a second device joins the host, plays as player 2 and renders the host world', async ({
+    page,
+    context
+}) => {
     // ?net=local links pages of one browser with BroadcastChannel; the same sessions run over the
     // claude.ai room in the published artifact
     const query = '?level=yard&t=0.01&quality=low&net=local#cell100';
@@ -339,23 +395,54 @@ test('online co-op: a second device joins the host, plays as player 2 and render
     const guestProblems: string[] = [];
     guest.on('pageerror', (e) => guestProblems.push(e.message));
     await guest.goto(`/${query}`);
-    await guest.waitForFunction(() => (window as unknown as { __riverLab?: Lab }).__riverLab?.ready === true, null, { timeout: 150_000 });
-    type Net = { net: { host(): Promise<void>; games(): { code: string }[]; join(c: string): Promise<void>; leave(): void; status(): { hosting: string | null; guests: number; guest: { slot: number; received: number } | null } } };
-    const net = (p: Page, src: string, arg?: unknown) => p.evaluate(([s, a]) => new Function('l', 'a', `return (${s})(l, a)`)((window as unknown as { __riverLab: Net }).__riverLab, a), [src, arg] as const);
+    await guest.waitForFunction(() => (window as unknown as { __riverLab?: Lab }).__riverLab?.ready === true, null, {
+        timeout: 150_000
+    });
+    type Net = {
+        net: {
+            host(): Promise<void>;
+            games(): { code: string }[];
+            join(c: string): Promise<void>;
+            leave(): void;
+            status(): { hosting: string | null; guests: number; guest: { slot: number; received: number } | null };
+        };
+    };
+    const net = (p: Page, src: string, arg?: unknown) =>
+        p.evaluate(
+            ([s, a]) =>
+                new Function('l', 'a', `return (${s})(l, a)`)((window as unknown as { __riverLab: Net }).__riverLab, a),
+            [src, arg] as const
+        );
 
     await lab(page, (l) => l.action('pause'));
     await net(page, '(l) => l.net.host()');
     const code = ((await net(page, '(l) => l.net.status()')) as { hosting: string }).hosting;
     expect(code).toMatch(/^[a-z0-9]{4}$/);
-    await guest.waitForFunction((c) => (window as unknown as { __riverLab: Net }).__riverLab.net.games().some((g) => g.code === c), code, { timeout: 30_000 });
+    await guest.waitForFunction(
+        (c) => (window as unknown as { __riverLab: Net }).__riverLab.net.games().some((g) => g.code === c),
+        code,
+        { timeout: 30_000 }
+    );
     await net(guest, '(l, c) => l.net.join(c)', code);
-    await guest.waitForFunction(() => ((window as unknown as { __riverLab: Net }).__riverLab.net.status().guest?.received ?? 0) > 5, null, { timeout: 120_000 });
+    await guest.waitForFunction(
+        () => ((window as unknown as { __riverLab: Net }).__riverLab.net.status().guest?.received ?? 0) > 5,
+        null,
+        { timeout: 120_000 }
+    );
     const g = (await net(guest, '(l) => l.net.status()')) as { guest: { slot: number } };
     expect(g.guest.slot).toBe(1);
     expect(((await net(page, '(l) => l.net.status()')) as { guests: number }).guests).toBe(1);
 
     // the guest's input moves player 2 on the host
-    const where = () => page.evaluate(() => (window as unknown as { __riverLab: { entities(): Record<string, { x: number; z: number; visible: boolean }> } }).__riverLab.entities()['avatar-1']);
+    const where = () =>
+        page.evaluate(
+            () =>
+                (
+                    window as unknown as {
+                        __riverLab: { entities(): Record<string, { x: number; z: number; visible: boolean }> };
+                    }
+                ).__riverLab.entities()['avatar-1']
+        );
     const before = await where();
     expect(before.visible).toBe(true);
     for (let i = 0; i < 15; i++) {
@@ -366,14 +453,24 @@ test('online co-op: a second device joins the host, plays as player 2 and render
     expect(Math.hypot(after.x - before.x, after.z - before.z)).toBeGreaterThan(0.3);
     // the guest renders the host's world: both beaver bodies and every prop, all on the grid
     // (voxel frames lag the snapshots in software GL, so wait for the frame that has both beavers)
-    await guest.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 17, null, { timeout: 60_000 });
+    await guest.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 17,
+        null,
+        { timeout: 60_000 }
+    );
     const gs = await guest.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.stats());
     expect(gs.voxel.rejected).toBe(0);
-    expect((await guest.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid())).misaligned).toBe(0);
+    expect(
+        (await guest.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid())).misaligned
+    ).toBe(0);
 
     // leaving frees the slot on the host
     await net(guest, '(l) => l.net.leave()');
-    await page.waitForFunction(() => (window as unknown as { __riverLab: Net }).__riverLab.net.status().guests === 0, null, { timeout: 30_000 });
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Net }).__riverLab.net.status().guests === 0,
+        null,
+        { timeout: 30_000 }
+    );
     expect(problems).toEqual([]);
     expect(guestProblems).toEqual([]);
 });
@@ -387,5 +484,20 @@ test('a first visit starts the tutorial: step-by-step objective, the Levels menu
     await page.locator('.levels-chip').click();
     await expect(page.locator('.levels-panel')).toContainText('Timber Yard');
     await expect(page.locator('.levels-panel')).toContainText('Tutorial (playing)');
+    expect(problems).toEqual([]);
+});
+
+test('the level designer opens on the starter level and places a box with a click', async ({ page }) => {
+    const problems = await boot(page, '?level=custom&edit=1&quality=low#cell100');
+    await expect(page.locator('.designer')).toContainText('Level designer');
+    await page.locator('.designer-tools button', { hasText: 'Box' }).click();
+    const box = (await page.locator('canvas').boundingBox())!;
+    await page.mouse.click(box.x + box.width * 0.4, box.y + box.height * 0.6);
+    const pieces = await lab(
+        page,
+        (l) => (l as unknown as { designer: { d: { pieces: unknown[] } } }).designer.d.pieces.length
+    );
+    expect(pieces).toBe(1);
+    await expect(page.locator('.designer')).toContainText('not built yet');
     expect(problems).toEqual([]);
 });

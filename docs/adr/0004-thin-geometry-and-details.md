@@ -3,10 +3,12 @@
 Status: proposed default, for owner review · Date: 2026-11-19
 
 ## Context
+
 A 10 cm board at 45° can miss centre samples (§5.4). A 14-cell beaver has features smaller than a
 cell (eyes, nose, teeth) that must neither vanish nor be drawn with smaller voxels.
 
 ## Decision
+
 - Default policy **coverage50**: 2×2×2 sub-samples, a cell is occupied when ≥ 4 of 8 are inside.
   In tests it keeps the 10 cm plank in one 26-connected piece over a full turn about a skew axis,
   within 30–110 cells of a nominal 48. Per-part overrides: `coverage25` for the hat brim and tail,
@@ -23,4 +25,5 @@ cell (eyes, nose, teeth) that must neither vanish nor be drawn with smaller voxe
   bounds than any sub-sample can reach (231k → 90k samples per frame, same 6,006 cells).
 
 ## Open
+
 Hysteresis was not adopted (history-dependent poses). Owner to judge flicker at 12/20/30/60 Hz.

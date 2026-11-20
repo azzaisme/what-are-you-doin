@@ -23,7 +23,11 @@ export interface WindSample {
 }
 
 /** Wind at simulation time t (seconds). */
-export function windAt(t: number, spec: WindSpec, out: WindSample = { x: 0, z: 0, speed: 0, gustiness: 0 }): WindSample {
+export function windAt(
+    t: number,
+    spec: WindSpec,
+    out: WindSample = { x: 0, z: 0, speed: 0, gustiness: 0 }
+): WindSample {
     const g = Math.max(0, 0.6 * Math.sin(t * 0.23) + 0.45 * Math.sin(t * 0.57 + 1.3) + 0.2 * Math.sin(t * 1.9 + 0.4));
     const gustiness = Math.min(1, g);
     const speed = spec.base + spec.gust * gustiness;

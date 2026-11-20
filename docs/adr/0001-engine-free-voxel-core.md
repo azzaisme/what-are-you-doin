@@ -3,10 +3,12 @@
 Status: accepted (Epic 1) · Date: 2026-11-19
 
 ## Context
+
 The design doc (§4.2–4.3) requires renderer and simulation to communicate through shared data, never
 engine objects, so the simulation can later run on a Node server and reconstruction in workers.
 
 ## Decision
+
 - `src/voxels`, `src/assets`, `src/levels`, `src/sim` import nothing from PlayCanvas. Poses are plain
   `{p, q}` objects; occupancy is typed arrays.
 - The simulation publishes snapshots (pose + small animation vector + visibility) into a ring buffer.
@@ -15,5 +17,6 @@ engine objects, so the simulation can later run on a Node server and reconstruct
   packages were scaffolded.
 
 ## Consequences
+
 Unit tests run the whole reconstruction path in Node. The headless benchmark measures CPU cost
 without a GPU. Extracting `packages/sim` later is a move, not a rewrite.
