@@ -1,5 +1,168 @@
 # Progress log
 
+## Gate 2 — Epic 2 "Physical sandbox (offline)" (2026-11-20)
+
+**Status: built and verified to the extent this environment allows. Waiting on the owner to try it
+(an explicit gate). Epic 3 has not been started.** ADR 0008 records the design.
+
+### Environment for every number below
+
+| | |
+|---|---|
+| CPU | Intel Xeon @ 2.10 GHz, 4 vCPU (cloud sandbox; a different, similar machine from gate 1) |
+| GPU | **none**: headless Chrome, SwiftShader software WebGL2 |
+| Node | 22.23.5 |
+| Packages | as gate 1, plus **@dimforge/rapier3d-compat 0.21.0** (exact pin) |
+
+As at gate 1, there is no GPU here, so **frame times on a real desktop and on the owner's phone
+were not measured**: the browser renders at ~0.5 fps in software, and every browser frame time and
+dropped-tick count below is a sandbox artefact. CPU-side physics and voxel costs are real.
+
+### Task 1 — mobile portrait layout (done first, own commit)
+
+The voxel-size box and debug chip now sit in a bottom dock whose measured height bounds the debug
+panel, so nothing can overlap. On screens ≤ 700 px wide the panel is a bottom sheet below the HUD
+with the stats first, the HUD help is shortened, and touch targets are ≥ 40 px (also on any
+coarse-pointer device). Wide screens narrow the HUD when the panel is open. H and F3 / the chip
+still work. New e2e test checks the rectangles at 390 × 844, 768 × 1408, 1280 × 720 and 844 × 390
+with the panel open and closed, touch-target heights, the chip toggle and H; it fails on the old
+layout ("HUD overlaps debug panel" at 390 × 844). Screenshots: `docs/screenshots/layout/`.
+
+### What was built (Epic 2)
+
+- **Rapier** in the engine-free sim layer (`src/sim/physics/`, `src/sim/lab-physics.ts`), stepped
+  by the existing fixed 60 Hz tick; poses flow out as snapshots → main thread samples at the voxel
+  time → voxel worker rasterizes (unchanged). Nothing flows back from render or voxels.
+- **Static collision from the analytic level, never voxels:** a 251 × 251 heightfield from
+  `terrainHeight` (within 1.1 cm of the analytic surface), tree trunks and needle cones and rock
+  hulls from the same `labLayout()` the voxel build uses, invisible walls at the Epic 1 walker limits.
+- **Character:** Rapier kinematic character controller replaces the terrain walker: walk 2.2 m/s,
+  run 4.2, jump, 0.32 m step-up (smoothed for the camera only), ground snap, 50° climb limit,
+  bounded pushing of props (no contact forces on props from the capsule).
+- **Grab / release / throw:** left click or E grabs what the crosshair points at (2.6 m reach) and
+  releases it; right click throws; wheel adjusts reach; Q drops; G puts a plank in your hands. A
+  context prompt under the crosshair says what a click will do. Force law: spring-damper at the grab
+  anchor, gravity support first, capped at **450 N**; snag release after 0.75 s beyond 1.25 m (or at
+  once beyond 2.2 m); held objects ignore the player (no stand-on-what-you-hold feedback).
+- **Bodies:** plank 24 kg, log 113 kg (too heavy to lift alone; drag it), crate 25 kg, bouncy ball,
+  ~1.5 kg bucket proxy, carry plank, **ragdoll dummy** (7 boxes, ball joints; T launches it), up to
+  **25 stress bodies** kept moving by a deterministic fountain, and kinematic colliders following
+  the scripted beaver and ute (they push props).
+- **Safety bounds** after every step: |v| ≤ 30 m/s, |ω| ≤ 30 rad/s, recovery of lost bodies,
+  and a 0.5 s post-release speed bound — all counted in the debug panel.
+- **Scripted props stay available:** debug panel → Physics → Props, or `?props=scripted`.
+- **Commands** are plain sequenced data with edge-triggered requests, sanitized before use.
+- **Drop test:** `LabSim.dropTest()` / panel button; `scripts/drop-test.ts` writes the voxel
+  captures (`docs/screenshots/epic2/drop-test-5cm.png`, `-10cm.png` and `.json`).
+- Debug: physics collider wireframes, physics stats; `scripts/soak-physics.ts`,
+  `scripts/capture-epic2.mjs`; `bench-voxels` runs with physics or scripted props.
+- Publish build loads Rapier from jsDelivr through the import map (85 KB own bundle). **Not
+  verified from here:** this sandbox cannot reach jsDelivr. `npm run build` bundles Rapier:
+  main chunk 5.9 MB raw / 2.1 MB gzip (was 1.5 / 0.4 MB).
+
+### Test results (actual)
+
+- Unit (Vitest): **142 / 142 runs pass** (71 tests × 5 cm and 10 cm). New: command sanitizing and
+  JSON round trip; grab force never above the cap for any distance, mass or velocity, gravity hold,
+  log too heavy, NaN rejected, throw and reach bounds, view convention; heightfield vs analytic
+  terrain (< 2 cm); props come to rest without sinking; character stands, walks, is stopped by walls,
+  jumps and lands; climbs three 0.3 m terraces; grab-carry-throw for 10 s of turning with max held
+  speed < 15 m/s and zero clamps; a violent flick drops the plank instead of flinging it; snag
+  release on the log; Q drops; release speed bound; G carry; ragdoll settles with joints intact;
+  identical states for identical commands (grabs, throws, ragdoll, drop test, stress); 25 bodies keep
+  moving; scripted mode unchanged; drop test deterministic with stepped, never-vanishing voxel
+  silhouettes and identical cells at rest.
+- Browser (Playwright, production build): **9 / 9 pass** (2 new: UI overlap; physics sandbox
+  grab → lift → throw → ragdoll → scripted switch with no console errors and 0 rejected parts).
+  The boot test's dynamic/static overlap bound was raised from 50 to 400 cells: resting physics props
+  share one layer of cells with the voxel ground (measured 123 at 5 cm; see known issue 1).
+- `npm run typecheck`, `npm run lint`, `npm run build`: pass.
+
+### Measurements (actual)
+
+**10-minute playground soak** (`node scripts/soak-physics.ts 10`; scripted player walks, sprints,
+jumps, carries the plank while turning and looking up and down, throws it, walks to and grabs the
+nearest prop, drops it, launches the ragdoll every 40 s, runs the drop test; 25 stress bodies for the
+second 5 minutes):
+
+| | ticks | avg | p50 | p95 | p99 | max (ms per 60 Hz tick) |
+|---|---|---|---|---|---|---|
+| base scene + player + ragdoll | 18,000 | 0.51 | 0.47 | 0.83 | 1.16 | 4.77 |
+| + 25 moving stress bodies (36 active) | 18,000 | 1.56 | 1.60 | 2.53 | 3.06 | 12.86 |
+
+- Ticks over the 16.7 ms budget: **0** (so no dropped ticks from physics on this CPU).
+- Held props: max speed 10.2 m/s, force never above the 450 N cap. Max sampled speed of any
+  dynamic body 10.2 m/s. Non-finite poses 0, bodies recovered 0.
+- 30 carries, 30 throws, 23 / 30 bot grabs succeeded (the 7 misses were not investigated; the bot
+  aims at the prop's centre from wherever it stopped walking), 15 ragdolls.
+- **Grab breaks 21**: 20 carries ended in a snag release and 1 log lift attempt broke. At every
+  carry break the plank was touching static geometry (tree trunks or cones, rocks, the invisible
+  boundary walls the bot wanders into, the ground). Nothing exploded; 3 post-release speed bounds
+  and 1 linear clamp fired in 10 minutes; angular clamps 86 (ragdoll arms on their joints).
+- Before two fixes in this gate, the soak found: (1) the grab sagged and saturated when turning,
+  because the damper treated the swinging hold point as error (now uses its real velocity, with
+  gravity support kept first under the cap); (2) a plank snag-released out of a tree trunk at
+  21 m/s (now bounded for 0.5 s after any release).
+
+**Main thread in the browser** (5 cm, low preset, software GL — physics numbers real, frame times
+not): physics tick avg 0.83 / p95 2.9 ms with 1 moving body, 0.87 / 2.3 ms with 25; upload 4.0 ms
+(1 body) and 10.9 ms (25 bodies) per applied voxel frame; frame time ~2,000 ms (software GL).
+
+**Voxel worker cost with physics props** (Node, 5 cm, 20 Hz, `bench-voxels`; ms p50 / p95 per
+voxel frame; same run, same machine for both):
+
+| props | moving extra bodies | raster | mesh | total |
+|---|---|---|---|---|
+| scripted (Epic 1) | 0 | 25.1 | 27.0 | 59.2 / 83.6 |
+| physics | 0 | 24.7 | 26.7 | 61.0 / 88.6 |
+| scripted | 25 | 46.5 | 50.5 | 138 / 173 |
+| physics | 25 | 44.6 | 120.0 | 198 / 312 |
+
+Physics bodies tumble on and rest against the terrain; each overlap with ground voxels re-meshes a
+whole 6.4 m static region (the Epic 1 compositor rule), so meshing with 25 physics bodies costs
+2.4× the scripted case. In the browser the worker took 147 ms (1 body) and 190 ms (25) per voxel
+frame on this CPU; the voxel rate drops instead of the frame rate (0 skipped frames, lag 1–2).
+
+**Phone and desktop GPU: not measured** (no access here). Please read the debug panel on the phone
+with Extra moving objects at 1 and at 25: "frame ms", "physics tick ms", "worker total" and
+"dropped ticks".
+
+### Known issues and limitations
+
+1. **Resting props look up to one cell sunk** into the ground: physics uses the analytic terrain,
+   and the voxel ground surface lies 0–1 cell above it (0–5 cm at 5 cm). Lifting the collision
+   surface would tie physics to the render setting; options for the owner are a fixed 2.5 cm lift
+   or snapping the voxel ground down.
+2. **25 physics bodies make voxel meshing expensive** (above). Options: per-cell static patching
+   instead of whole-region re-meshing, smaller static regions near the play area, or treating
+   one-cell ground contact as "dynamic hides nothing".
+3. **Carrying a 2.4 m plank snags often** on trees and walls, because the held plank's orientation
+   is free (damped). Orientation control (R / right mouse in the brief) is not built yet.
+4. Ragdoll joints have no angle limits (arms can spin through); it never recovers on its own — it is
+   an experiment, not the beaver.
+5. The terraced ridge is only climbable for the first three benches (treads narrower than a
+   heightfield cell); it is outside the play area.
+6. Determinism is same-build, same-platform only (Rapier's enhanced-determinism build not used).
+7. Rapier's heightfield misses rays exactly on cell boundaries; avoided by a non-round cell size.
+8. No touch controls (out of scope unless requested). Firefox / Safari not tested.
+9. Bundled build grew by ~1.7 MB gzip (Rapier's inlined WASM); the publish build loads it from the CDN.
+
+### Owner gate — please try
+
+1. In first person (`V`), click the plank, look up, walk and turn: does carrying feel responsive
+   and bounded? Throw it (right click). Try the 113 kg log (you can drag it, not lift it).
+2. Launch the ragdoll (`T`): funny enough to keep developing, or tone it down?
+3. Is the one-cell sink of resting props (known issue 1) acceptable?
+4. Phone numbers with 1 and 25 moving bodies (debug panel).
+5. Should a held plank keep its orientation relative to the view (fewer snags) or stay floppy?
+
+### Evidence
+
+`docs/screenshots/epic2/`: 01 sandbox props, 02 first-person aim, 03 carrying the plank,
+04 ragdoll launch, 05 ragdoll landed, 06 collider wireframes over the voxels, 07 25 moving bodies,
+`drop-test-5cm.png` / `drop-test-10cm.png` (+ JSON: poses, angles, cell counts, hashes; both runs
+identical). Regenerate with `node scripts/capture-epic2.mjs` and `node scripts/drop-test.ts`.
+
 ## Owner approval of Epic 1 (2026-11-20)
 
 Aaron approved the River Lab ("Game looks fantastic", "I think this is going to work") after testing

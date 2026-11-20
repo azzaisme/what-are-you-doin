@@ -59,6 +59,10 @@ Rapier 0.21 heightfield ray casts miss when the ray lands exactly on a cell boun
 rows along Z; a shorter array aborts the WASM module.
 
 ## Consequences
-Physics costs about 0.2–1 ms per tick on the sandbox CPU in the default scene (see progress.md for
-measured numbers). Physics runs on the main thread; moving it next to the voxel worker or onto a
+Measured on the sandbox CPU (progress.md, gate 2): physics 0.47 ms p50 / 0.83 ms p95 per tick in
+the default scene and 1.6 / 2.5 ms with 25 moving bodies; no tick over the 16.7 ms budget in a
+10-minute soak. A post-release speed bound was added after the soak caught a snag-released plank
+leaving a tree trunk at 21 m/s. Physics props resting on the terrain overlap the voxel ground by up
+to one cell, and each such overlap re-meshes a static region, which makes 25 bodies 2.4× as costly
+to mesh as Epic 1's scripted ones. Physics runs on the main thread; moving it next to the voxel worker or onto a
 server is possible later because it is engine-free and talks only through commands and snapshots.

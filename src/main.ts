@@ -787,6 +787,7 @@ window.__riverLab = {
         sim.placePlayer(x, z, yaw);
         fpInput.yaw = yaw;
         fpInput.pitch = pitch;
+        fpInput.carry = state.carry;
         sim.step(fpInput.command());
         sim.step(fpInput.command());
         clock.reset(sim.tick);
@@ -795,6 +796,7 @@ window.__riverLab = {
     /** Merges fields into the next player command (grab / throw / move edges for tests). */
     input: (c: Record<string, unknown>) => fpInput.inject(c),
     player: () => ({ ...sim.player, holding: sim.physics.heldId }),
+    interaction: () => sim.interaction(),
     /** Sets the first-person look angles (as mouse look would). */
     look(yaw: number, pitch: number) {
         fpInput.yaw = yaw;
