@@ -6,7 +6,7 @@
  * pipeline samples them at the voxel clock, the renderer uploads meshes.
  */
 
-import { Entity, Script, Vec2, Vec3 } from 'playcanvas';
+import { Color, Entity, Script, Vec2, Vec3 } from 'playcanvas';
 import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs';
 
 import { DebugPanel  } from './debug/panel.ts';
@@ -20,7 +20,10 @@ import { VoxelClient } from './render/voxel-pipeline.ts';
 import { VoxelRenderer } from './render/voxel-renderer.ts';
 import { FixedStepClock, SIM_DT, VOXEL_RATES, VoxelClock  } from './sim/clock.ts';
 import type { VoxelRate } from './sim/clock.ts';
+import { ACTION_DROP_TEST, ACTION_RAGDOLL, ACTION_RESET_PROPS } from './sim/commands.ts';
 import { EYE_HEIGHT, LabSim } from './sim/lab-sim.ts';
+import type { PropsMode } from './sim/lab-sim.ts';
+import { initPhysics } from './sim/physics/world.ts';
 import { ANIM_MAX } from './sim/snapshots.ts';
 import type { CameraControlsApi } from './types/engine-scripts.ts';
 import { CELL_SIZE_MAX_CM, CELL_SIZE_MIN_CM, CELL_SIZE_STORAGE_KEY, GRID_SIZE, clampCellSizeCm } from './voxels/grid.ts';
@@ -46,7 +49,8 @@ const { app, camera } = scene;
 const cellCm = Math.round(GRID_SIZE * 1000) / 10;
 setLoading(`Rasterizing the River Lab into the ${cellCm} cm grid…`);
 await nextFrame();
-const sim = new LabSim();
+await initPhysics();
+const sim = new LabSim({ props: params.get('props') === 'scripted' ? 'scripted' : 'physics' });
 const renderer = new VoxelRenderer(app, scene.worldLayer);
 // the voxel world lives in a worker: static build, rasterization and meshing all happen there
 const worker = new Worker(new URL('./workers/voxel-worker.ts', import.meta.url), { type: 'module', name: 'voxels' });
@@ -85,6 +89,8 @@ interface State {
     carry: boolean;
     uiHidden: boolean;
     forceVoxel: boolean;
+    props: PropsMode;
+    colliders: boolean;
 }
 
 const state: State = {
@@ -107,7 +113,9 @@ const state: State = {
     sensitivity: 2.2,
     carry: true,
     uiHidden: false,
-    forceVoxel: true
+    forceVoxel: true,
+    props: sim.propsMode,
+    colliders: false
 };
 
 const rateParam = Number(params.get('hz'));
@@ -157,6 +165,11 @@ function setMode(mode: State['mode']): void {
 // ------------------------------------------------------------------------------------- frame loop
 
 const frameTimes = new Float64Array(600);
+const physTimes = new Float64Array(600);
+let physCount = 0;
+let physHead = 0;
+const COLLIDER_COLOR = new Color(1, 0.35, 0.8);
+const colliderPoints: Vec3[] = [];
 let frameTimeCount = 0;
 let frameTimeHead = 0;
 let lastFrameStamp = performance.now();
@@ -179,7 +192,12 @@ class LabDirector extends Script {
         fpInput.carry = state.carry;
         if (!state.paused) {
             const steps = clock.advance(dt);
-            for (let s = 0; s < steps; s++) sim.step(fpInput.command());
+            for (let s = 0; s < steps; s++) {
+                sim.step(fpInput.command());
+                physTimes[physHead] = sim.physicsMs;
+                physHead = (physHead + 1) % physTimes.length;
+                physCount = Math.min(physTimes.length, physCount + 1);
+            }
             clock.tick = sim.tick;
             renderTime = clock.renderTime;
         } else {
@@ -207,6 +225,7 @@ class LabDirector extends Script {
         // apply a finished voxel frame (all its meshes at once) before this frame renders
         pipeline.poll();
         reference.update(renderTime);
+        if (state.colliders) drawColliders();
 
         // ---- debug overlay uniform
         const g = state.gridLines ? 1 : 0;
@@ -216,6 +235,7 @@ class LabDirector extends Script {
         }
 
         if (panel.visible && (frameTimeHead & 7) === 0) panel.setStats(statsText());
+        if ((frameTimeHead & 3) === 0) updatePrompt();
     }
 }
 const directorEntity = new Entity('LabDirector');
@@ -223,6 +243,15 @@ directorEntity.addComponent('script');
 directorEntity.script!.create(LabDirector);
 app.root.addChild(directorEntity);
 app.graphicsDevice.scope.resolve('uVoxelGridLines').setValue(0);
+
+/** Debug only: Rapier's collider wireframes (read-only; nothing flows back into physics). */
+function drawColliders(): void {
+    const v = sim.physics.debugLines();
+    const n = v.length / 3;
+    while (colliderPoints.length < n) colliderPoints.push(new Vec3());
+    for (let i = 0; i < n; i++) colliderPoints[i].set(v[i * 3], v[i * 3 + 1], v[i * 3 + 2]);
+    if (n >= 2) app.drawLines(colliderPoints.slice(0, n & ~1), COLLIDER_COLOR, false, scene.immediateLayer);
+}
 
 // ------------------------------------------------------------------------------------- actions
 
@@ -349,6 +378,18 @@ const host: PanelHost = {
             case 'carry':
                 state.carry = Boolean(v);
                 break;
+            case 'props':
+                state.props = v === 'scripted' ? 'scripted' : 'physics';
+                sim.setPropsMode(state.props);
+                clock.reset(sim.tick);
+                state.pausedTime = 0;
+                state.forceVoxel = true;
+                panel.sync();
+                updateHud();
+                break;
+            case 'colliders':
+                state.colliders = Boolean(v);
+                break;
         }
     },
     action(id) {
@@ -356,6 +397,9 @@ const host: PanelHost = {
         else if (id === 'step') stepVoxelFrame();
         else if (id === 'reset') resetScene();
         else if (id === 'hideUi') setUiHidden(true);
+        else if (id === 'ragdoll') fpInput.queueAction(ACTION_RAGDOLL);
+        else if (id === 'dropTest') fpInput.queueAction(ACTION_DROP_TEST);
+        else if (id === 'resetProps') fpInput.queueAction(ACTION_RESET_PROPS);
     }
 };
 
@@ -373,6 +417,24 @@ const panel = new DebugPanel(host, [
                 label: 'Voxel rate',
                 options: VOXEL_RATES.map((r) => ({ value: String(r), label: `${r} Hz` }))
             }
+        ]
+    },
+    {
+        title: 'Physics',
+        controls: [
+            {
+                kind: 'select',
+                id: 'props',
+                label: 'Props',
+                options: [
+                    { value: 'physics', label: 'Physics (Rapier)' },
+                    { value: 'scripted', label: 'Scripted (Epic 1)' }
+                ]
+            },
+            { kind: 'button', id: 'ragdoll', label: 'Launch ragdoll', key: 'T' },
+            { kind: 'button', id: 'dropTest', label: 'Drop test' },
+            { kind: 'button', id: 'resetProps', label: 'Reset props' },
+            { kind: 'toggle', id: 'colliders', label: 'Physics colliders' }
         ]
     },
     {
@@ -510,8 +572,10 @@ function updateHud(): void {
     const long =
         state.mode === 'orbit'
             ? 'Drag to orbit · right-drag to pan · wheel to zoom · <kbd>V</kbd> first person · <kbd>H</kbd> hide UI'
-            : 'Click to look · <kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>G</kbd> carry plank · <kbd>Esc</kbd> release mouse · <kbd>V</kbd> orbit';
-    const short = state.mode === 'orbit' ? 'Drag to orbit · two fingers to pan and zoom' : 'Click to look · WASD move · V orbit';
+            : sim.physicsProps
+              ? 'Click to look · <kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>LMB</kbd>/<kbd>E</kbd> grab / release · <kbd>RMB</kbd> throw · wheel reach · <kbd>Q</kbd> drop · <kbd>G</kbd> plank · <kbd>T</kbd> ragdoll · <kbd>Esc</kbd> release mouse · <kbd>V</kbd> orbit'
+              : 'Click to look · <kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>G</kbd> carry plank · <kbd>Esc</kbd> release mouse · <kbd>V</kbd> orbit';
+    const short = state.mode === 'orbit' ? 'Drag to orbit · two fingers to pan and zoom' : 'Click to look · WASD move · click grab · V orbit';
     help.innerHTML = `<span class="help-long">${long}</span><span class="help-short">${short}</span>`;
     crosshair.style.display = state.mode === 'firstPerson' && !state.uiHidden ? '' : 'none';
 }
@@ -523,10 +587,28 @@ function setUiHidden(h: boolean): void {
     layoutVars();
 }
 
-document.addEventListener('pointerlockchange', () => {
-    const prompt = document.getElementById('hud-prompt')!;
-    prompt.textContent = state.mode === 'firstPerson' && !fpInput.locked ? 'Click to look around' : '';
-});
+const PROP_LABEL: Record<string, string> = { plank: 'plank', 'held-plank': 'plank', log: 'log (heavy)', cube: 'crate', sphere: 'ball', bucket: 'bucket' };
+const propLabel = (name: string) => PROP_LABEL[name] ?? (name.startsWith('dummy') ? 'dummy' : name.startsWith('stress') ? 'test body' : name);
+let promptText = '';
+
+/** Context prompt (design doc §2.3): what a click would do right now. */
+function updatePrompt(): void {
+    let t = '';
+    if (state.mode === 'firstPerson') {
+        if (!fpInput.locked) t = 'Click to look around';
+        else {
+            const i = sim.interaction();
+            if (i.holding) t = `Holding ${propLabel(i.holding)} · click to release · right-click to throw · wheel to adjust reach`;
+            else if (i.target) t = `Click to grab ${propLabel(i.target)}`;
+        }
+    }
+    if (t !== promptText) {
+        promptText = t;
+        document.getElementById('hud-prompt')!.textContent = t;
+        crosshair.classList.toggle('crosshair-active', t.startsWith('Click to grab') || t.startsWith('Holding'));
+    }
+}
+document.addEventListener('pointerlockchange', updatePrompt);
 
 window.addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
@@ -560,6 +642,18 @@ window.addEventListener('keydown', (e) => {
 });
 
 // ------------------------------------------------------------------------------------- stats
+
+function physAvg(): number {
+    let sum = 0;
+    for (let i = 0; i < physCount; i++) sum += physTimes[i];
+    return physCount ? sum / physCount : 0;
+}
+
+function physPercentile(p: number): number {
+    if (!physCount) return 0;
+    const a = Array.from(physTimes.subarray(0, physCount)).sort((x, y) => x - y);
+    return a[Math.min(physCount - 1, Math.floor(p * physCount))];
+}
 
 function percentile(p: number): number {
     const n = frameTimeCount;
@@ -609,6 +703,24 @@ function collectStats() {
         drawables: t.drawables,
         heapMB: mem ? mem.usedJSHeapSize / 1e6 : null,
         droppedTicks: clock.droppedTicks,
+        physics: {
+            props: sim.propsMode,
+            tickMsAvg: physAvg(),
+            tickMsP95: physPercentile(0.95),
+            tickMsMax: physPercentile(1),
+            stepMs: sim.physics.stats.stepMs,
+            activeBodies: sim.physics.stats.activeBodies,
+            enabledBodies: sim.physics.stats.enabledBodies,
+            holding: sim.physics.stats.holding,
+            grabForce: sim.physics.stats.grabForce,
+            grabError: sim.physics.stats.grabError,
+            maxHeldSpeed: sim.physics.stats.maxHeldSpeed,
+            grabBreaks: sim.physics.stats.grabBreaks,
+            linClamps: sim.physics.stats.linClamps,
+            angClamps: sim.physics.stats.angClamps,
+            recovered: sim.physics.stats.recovered,
+            player: { x: sim.player.x, y: sim.player.y, z: sim.player.z, grounded: sim.player.grounded }
+        },
         build: { workerBuildMs: build.buildMs, workerStaticMeshMs: build.staticMeshMs, staticUploadMs, columns: build.columns, trees: build.trees }
     };
 }
@@ -632,6 +744,9 @@ function statsText(): string {
         `  overlap dyn/dyn ${v.dynDynOverlaps} dyn/static ${v.dynStaticOverlaps}`,
         `  worker ms raster ${f(v.rasterMs)} resolve ${f(v.resolveMs)} mesh ${f(v.meshMs)}`,
         `  worker total ${f(v.totalMs)}   main-thread upload ${f(v.uploadMs)}`,
+        `physics  ${s.physics.props}  tick ms avg ${f(s.physics.tickMsAvg)} p95 ${f(s.physics.tickMsP95)} max ${f(s.physics.tickMsMax)}`,
+        `  bodies active ${s.physics.activeBodies}/${s.physics.enabledBodies}  held ${s.physics.holding < 0 ? '-' : s.physics.holding}  force ${f(s.physics.grabForce, 0)} N  err ${f(s.physics.grabError)} m`,
+        `  clamps lin ${s.physics.linClamps} ang ${s.physics.angClamps}  recovered ${s.physics.recovered}  grab breaks ${s.physics.grabBreaks}`,
         `heap     ${s.heapMB === null ? 'n/a' : f(s.heapMB, 1) + ' MB'}  dropped ticks ${s.droppedTicks}`
     ].join('\n');
 }
@@ -676,6 +791,9 @@ window.__riverLab = {
         clock.reset(sim.tick);
         state.forceVoxel = true;
     },
+    /** Merges fields into the next player command (grab / throw / move edges for tests). */
+    input: (c: Record<string, unknown>) => fpInput.inject(c),
+    player: () => ({ ...sim.player, holding: sim.physics.heldId }),
     hideUi: (h: boolean) => setUiHidden(h),
     showPanel: (v: boolean) => (panel.visible = v),
     get state() {

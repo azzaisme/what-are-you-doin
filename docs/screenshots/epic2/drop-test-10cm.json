@@ -1,0 +1,103 @@
+{
+  "cellCm": 10,
+  "deterministic": true,
+  "note": "columns = captures after the drop (ticks at 60 Hz); top row front view (X right, Y up), bottom row top view (X right, Z down); grid lines every 10 cells",
+  "frames": [
+    {
+      "tick": 0,
+      "t": 0,
+      "y": 2.6953,
+      "angleDeg": 0,
+      "cells": 48,
+      "hash": 1858455934
+    },
+    {
+      "tick": 6,
+      "t": 0.1,
+      "y": 2.6279,
+      "angleDeg": 19.7,
+      "cells": 50,
+      "hash": 3694984224
+    },
+    {
+      "tick": 12,
+      "t": 0.2,
+      "y": 2.4631,
+      "angleDeg": 39.1,
+      "cells": 48,
+      "hash": 843440289
+    },
+    {
+      "tick": 18,
+      "t": 0.3,
+      "y": 2.2012,
+      "angleDeg": 58.4,
+      "cells": 48,
+      "hash": 3564903959
+    },
+    {
+      "tick": 24,
+      "t": 0.4,
+      "y": 1.8428,
+      "angleDeg": 77.4,
+      "cells": 45,
+      "hash": 3824479195
+    },
+    {
+      "tick": 30,
+      "t": 0.5,
+      "y": 1.3882,
+      "angleDeg": 95.7,
+      "cells": 44,
+      "hash": 1236098249
+    },
+    {
+      "tick": 36,
+      "t": 0.6,
+      "y": 0.8892,
+      "angleDeg": 120.7,
+      "cells": 54,
+      "hash": 2939707197
+    },
+    {
+      "tick": 42,
+      "t": 0.7,
+      "y": 0.5019,
+      "angleDeg": 127.2,
+      "cells": 55,
+      "hash": 2649805197
+    },
+    {
+      "tick": 48,
+      "t": 0.8,
+      "y": 0.2233,
+      "angleDeg": 117.3,
+      "cells": 52,
+      "hash": 591886373
+    },
+    {
+      "tick": 60,
+      "t": 1,
+      "y": 0.2559,
+      "angleDeg": 143.2,
+      "cells": 48,
+      "hash": 1026239563
+    },
+    {
+      "tick": 90,
+      "t": 1.5,
+      "y": 0.1474,
+      "angleDeg": 146.4,
+      "cells": 45,
+      "hash": 839745411
+    },
+    {
+      "tick": 180,
+      "t": 3,
+      "y": 0.1382,
+      "angleDeg": 149.3,
+      "cells": 48,
+      "hash": 4116918396
+    }
+  ]
+}

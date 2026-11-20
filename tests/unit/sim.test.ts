@@ -1,11 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import { BEAVER_HEIGHT, BEAVER_WALK_AMOUNT, BEAVER_WALK_PHASE, beaverAsset } from '../../src/assets/beaver.ts';
 import { BUCKET_HANDLE_TOP } from '../../src/assets/props.ts';
 import { UTE_WHEEL_RADIUS, uteAsset } from '../../src/assets/ute.ts';
 import { PLATEAU_Y } from '../../src/levels/river-lab.ts';
 import { FixedStepClock, MAX_CATCHUP_STEPS, SIM_DT, VoxelClock } from '../../src/sim/clock.ts';
+import { neutralCommand } from '../../src/sim/commands.ts';
 import { LabSim } from '../../src/sim/lab-sim.ts';
+import { initPhysics } from '../../src/sim/physics/world.ts';
 import { ANIM_MAX, SnapshotRing, writeEntity } from '../../src/sim/snapshots.ts';
 import { GRID_SIZE } from '../../src/voxels/grid.ts';
 import { DEG, pose, quatFromYawPitchRoll } from '../../src/voxels/math.ts';
@@ -59,6 +61,8 @@ describe('snapshot interpolation', () => {
 });
 
 describe('lab simulation', () => {
+    beforeAll(() => initPhysics());
+
     it('is deterministic: seeking to the same tick twice gives identical states', () => {
         const a = new LabSim();
         const b = new LabSim();
@@ -79,13 +83,13 @@ describe('lab simulation', () => {
         const s = new LabSim();
         s.stressCount = 25;
         for (let n = 0; n < 60 * 120; n++) {
-            s.step({ seq: n, moveX: 0, moveZ: 0, sprint: false, jump: false, yaw: 0, pitch: 0, carry: false });
+            s.step(neutralCommand(n));
             if (n % 97 === 0) for (const e of s.entities) expect(Number.isFinite(e.pose.p.x + e.pose.p.y + e.pose.p.z + e.pose.q.w)).toBe(true);
         }
-    });
+    }, 120_000);
 
-    it('hangs the bucket below the beaver hand, above the ground', () => {
-        const s = new LabSim();
+    it('hangs the bucket below the beaver hand, above the ground (scripted props)', () => {
+        const s = new LabSim({ props: 'scripted' });
         for (const tick of [10, 200, 450, 700]) {
             s.runTo(tick);
             const bk = s.bucket.pose.p;

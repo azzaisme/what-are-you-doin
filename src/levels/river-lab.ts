@@ -189,16 +189,11 @@ function sideMaterial(depthBelowTop: number, j: number, z: number): number {
 
 function pine(world: VoxelWorld, x: number, z: number, scale: number, yaw: number, stats: RasterStats, seed: number): void {
     const base = groundSurfaceY(x, z);
-    const trunkH = 1.8 * scale;
-    const trunk = cylinder('y', 0.13 * scale + 0.03, trunkH * 0.5, (lx, ly, lz) => voxel(M.Bark, latticeShade(lx, ly * 0.5, lz, 0.1, seed)));
+    const trunkH = PINE_TRUNK_HEIGHT * scale;
+    const trunk = cylinder('y', pineTrunkRadius(scale), trunkH * 0.5, (lx, ly, lz) => voxel(M.Bark, latticeShade(lx, ly * 0.5, lz, 0.1, seed)));
     const q = quatFromYawPitchRoll(yaw, 0, 0);
     world.rasterizeStatic(trunk, pose(x, base + trunkH * 0.5 - 0.05, z, q), 'coverage50', 1, stats);
-    const tiers = [
-        { r: 1.15, h: 1.7, y: 0.9 },
-        { r: 0.92, h: 1.5, y: 1.75 },
-        { r: 0.68, h: 1.3, y: 2.55 },
-        { r: 0.42, h: 1.05, y: 3.3 }
-    ];
+    const tiers = PINE_TIERS;
     for (let n = 0; n < tiers.length; n++) {
         const t = tiers[n];
         const r = t.r * scale;
@@ -224,8 +219,100 @@ function rock(world: VoxelWorld, x: number, z: number, rx: number, ry: number, r
         },
         (lx, ly, lz) => (ly > ry * 0.45 && valueNoise(lx * 4, lz * 4, seed + 3) > 0.35 ? voxel(M.Moss, latticeShade(lx, ly, lz, 0.1, seed)) : voxel(M.Rock, latticeShade(lx, ly, lz, 0.1, seed)))
     );
-    world.rasterizeStatic(v, pose(x, base + ry * 0.35, z, quatFromYawPitchRoll(yaw, 0, 0)), 'center', 3, stats);
+    world.rasterizeStatic(v, pose(x, base + ry * ROCK_CENTRE_LIFT, z, quatFromYawPitchRoll(yaw, 0, 0)), 'center', 3, stats);
 }
+
+// ------------------------------------------------------------------------------------- layout
+
+export interface TreeSpot {
+    x: number;
+    z: number;
+    scale: number;
+    yaw: number;
+}
+
+export interface RockSpot {
+    x: number;
+    z: number;
+    rx: number;
+    ry: number;
+    rz: number;
+    yaw: number;
+}
+
+/** Pine tier cones (radius, height, base height), in units of the tree scale. */
+export const PINE_TIERS = [
+    { r: 1.15, h: 1.7, y: 0.9 },
+    { r: 0.92, h: 1.5, y: 1.75 },
+    { r: 0.68, h: 1.3, y: 2.55 },
+    { r: 0.42, h: 1.05, y: 3.3 }
+] as const;
+export const PINE_TRUNK_HEIGHT = 1.8;
+export const pineTrunkRadius = (scale: number) => 0.13 * scale + 0.03;
+
+/**
+ * Tree and rock placement, independent of the voxel grid. The voxel build and the physics colliders
+ * both read it, so they always agree. Same random sequence as the original build.
+ */
+export function labLayout(seed = 1): { trees: TreeSpot[]; rocks: RockSpot[]; rng: () => number } {
+    const r = rng(seed);
+    const trees: TreeSpot[] = [];
+    const lab: [number, number, number][] = [
+        [-11.5, -13.0, 1.15],
+        [-8.6, -14.6, 1.3],
+        [-5.0, -13.4, 1.0],
+        [-1.8, -15.0, 1.25],
+        [1.4, -12.8, 0.95],
+        [4.8, -14.2, 1.2],
+        [8.6, -12.2, 1.05],
+        [11.6, -9.5, 1.3],
+        [12.5, -14.8, 1.0],
+        [-13.2, -7.0, 1.2],
+        [-12.6, 5.6, 1.1],
+        [11.8, 6.4, 1.25],
+        [9.4, 10.5, 0.9],
+        [-9.8, 10.8, 1.0],
+        [16.5, -11.0, 1.2],
+        [-17.0, -12.5, 1.3],
+        [19.5, -16.0, 1.1],
+        [-20.5, -17.5, 1.15]
+    ];
+    for (const [x, z, s] of lab) {
+        const tx = x + (r() - 0.5) * 0.4;
+        const tz = z + (r() - 0.5) * 0.4;
+        trees.push({ x: tx, z: tz, scale: s, yaw: r() * Math.PI * 2 });
+    }
+    for (let n = 0; n < 34; n++) {
+        const x = -32 + r() * 64;
+        const z = -25 - r() * 12;
+        const scale = 0.8 + r() * 0.6;
+        trees.push({ x, z, scale, yaw: r() * Math.PI * 2 });
+    }
+    const rocks: RockSpot[] = [];
+    const rockSpots: [number, number, number][] = [
+        [-6.8, -3.1, 0.55],
+        [-2.6, 2.9, 0.4],
+        [6.6, 3.1, 0.6],
+        [9.4, -3.4, 0.45],
+        [2.4, 0.4, 0.32],
+        [-9.6, 0.1, 0.38],
+        [12.0, 1.9, 0.7],
+        [-12.4, -3.6, 0.6],
+        [0.6, -16.5, 0.9],
+        [-15.5, -14.0, 0.75]
+    ];
+    for (const [x, z, s] of rockSpots) {
+        const rx = s * (1.1 + r() * 0.4);
+        const ry = s * (0.65 + r() * 0.2);
+        const rz = s * (0.9 + r() * 0.3);
+        rocks.push({ x, z, rx, ry, rz, yaw: r() * Math.PI });
+    }
+    // the voxel build continues this random stream for reeds and flowers
+    return { trees, rocks, rng: r };
+}
+
+/** Height of a rock's centre above the analytic ground (the voxel build uses the same offset). */
+export const ROCK_CENTRE_LIFT = 0.35;
 
 // ------------------------------------------------------------------------------------- build
 
@@ -295,57 +382,17 @@ export function buildRiverLab(world: VoxelWorld, seed = 1): LabBuildResult {
     // everything below the stored shell is implicit bedrock (solid for exposure, never drawn)
     world.bedrock = { minI: i0, minK: k0, width: W, depth: D, bottom: bottoms };
 
-    const r = rng(seed);
-
-    // ---- pines: framing the far bank, the near-bank sides and the ridge
+    // ---- pines and rocks from the shared layout (physics builds its colliders from the same data)
+    const layout = labLayout(seed);
+    const r = layout.rng;
     let trees = 0;
-    const lab: [number, number, number][] = [
-        [-11.5, -13.0, 1.15],
-        [-8.6, -14.6, 1.3],
-        [-5.0, -13.4, 1.0],
-        [-1.8, -15.0, 1.25],
-        [1.4, -12.8, 0.95],
-        [4.8, -14.2, 1.2],
-        [8.6, -12.2, 1.05],
-        [11.6, -9.5, 1.3],
-        [12.5, -14.8, 1.0],
-        [-13.2, -7.0, 1.2],
-        [-12.6, 5.6, 1.1],
-        [11.8, 6.4, 1.25],
-        [9.4, 10.5, 0.9],
-        [-9.8, 10.8, 1.0],
-        [16.5, -11.0, 1.2],
-        [-17.0, -12.5, 1.3],
-        [19.5, -16.0, 1.1],
-        [-20.5, -17.5, 1.15]
-    ];
-    for (const [x, z, s] of lab) {
-        pine(world, x + (r() - 0.5) * 0.4, z + (r() - 0.5) * 0.4, s, r() * Math.PI * 2, stats, trees + seed * 13);
+    for (const t of layout.trees) {
+        pine(world, t.x, t.z, t.scale, t.yaw, stats, trees + seed * 13);
         trees++;
     }
-    for (let n = 0; n < 34; n++) {
-        const x = -32 + r() * 64;
-        const z = -25 - r() * 12;
-        pine(world, x, z, 0.8 + r() * 0.6, r() * Math.PI * 2, stats, trees + seed * 13);
-        trees++;
-    }
-
-    // ---- rocks along the banks and in the river
     let rocks = 0;
-    const rockSpots: [number, number, number][] = [
-        [-6.8, -3.1, 0.55],
-        [-2.6, 2.9, 0.4],
-        [6.6, 3.1, 0.6],
-        [9.4, -3.4, 0.45],
-        [2.4, 0.4, 0.32],
-        [-9.6, 0.1, 0.38],
-        [12.0, 1.9, 0.7],
-        [-12.4, -3.6, 0.6],
-        [0.6, -16.5, 0.9],
-        [-15.5, -14.0, 0.75]
-    ];
-    for (const [x, z, s] of rockSpots) {
-        rock(world, x, z, s * (1.1 + r() * 0.4), s * (0.65 + r() * 0.2), s * (0.9 + r() * 0.3), r() * Math.PI, stats, rocks + 3);
+    for (const k of layout.rocks) {
+        rock(world, k.x, k.z, k.rx, k.ry, k.rz, k.yaw, stats, rocks + 3);
         rocks++;
     }
 

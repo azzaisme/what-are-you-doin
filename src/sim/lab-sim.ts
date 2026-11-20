@@ -1,59 +1,56 @@
 /**
- * The River Lab simulation: deterministic scripted motion for the test props (no physics yet -
- * Epic 2), plus a command-driven first-person walker and a spring-held plank for the first-person
- * comfort test. Runs only in fixed ticks and publishes snapshots; it never touches the renderer.
+ * The River Lab simulation (Epic 2): a Rapier physics world (static terrain, trees, rocks; dynamic
+ * props, a ragdoll dummy and stress bodies; kinematic colliders for the scripted beaver and ute) and
+ * a command-driven first-person character with grab / release / throw. The Epic 1 scripted prop
+ * motion stays available as a mode (`props: 'scripted'`) for visual comparisons.
  *
- * Commands are plain data (sequenced input), shaped so a network adapter can carry them later.
+ * Runs only in fixed ticks and publishes snapshots; it never touches the renderer, and nothing from
+ * the renderer or the voxel grid flows back in. Commands are plain sequenced data (commands.ts) and
+ * are sanitized before use, so a network adapter can carry them later.
+ *
+ * Rapier must be initialized (await initPhysics()) before constructing a LabSim.
  */
 
-import type { VoxelAsset } from '../assets/asset.ts';
-import { BEAVER_ANIM_CHANNELS, BEAVER_CARRY, BEAVER_HEAD_YAW, BEAVER_WALK_AMOUNT, BEAVER_WALK_PHASE, beaverAsset, beaverLeftHand } from '../assets/beaver.ts';
-import { BUCKET_HANDLE_TOP, LOG_RADIUS, bucketAsset, cubeAsset, logAsset, plankAsset, sphereAsset } from '../assets/props.ts';
-import { UTE_ANIM_CHANNELS, UTE_PITCH, UTE_ROLL, UTE_STEER, UTE_SUSPENSION, UTE_WHEELBASE_HALF, UTE_WHEEL_RADIUS, UTE_WHEEL_SPIN, uteAsset } from '../assets/ute.ts';
+import { BEAVER_ANIM_CHANNELS, BEAVER_CARRY, BEAVER_HEAD_YAW, BEAVER_WALK_AMOUNT, BEAVER_WALK_PHASE, beaverLeftHand } from '../assets/beaver.ts';
+import { BUCKET_HANDLE_TOP, LOG_RADIUS } from '../assets/props.ts';
+import { UTE_ANIM_CHANNELS, UTE_PITCH, UTE_ROLL, UTE_STEER, UTE_SUSPENSION, UTE_WHEELBASE_HALF, UTE_WHEEL_RADIUS, UTE_WHEEL_SPIN } from '../assets/ute.ts';
 import { BEAVER_LOOP, PLATEAU_Y, UTE_TRACK, groundSurfaceY, terrainHeight } from '../levels/river-lab.ts';
 import { composePose, pose, quatFromAxisAngle, quatFromYawPitchRoll, quatMul, quatRotate, quatSlerp, vec3  } from '../voxels/math.ts';
-import type { Pose } from '../voxels/math.ts';
-import { M } from '../voxels/palette.ts';
 
 import { SIM_DT } from './clock.ts';
+import { ACTION_DROP, ACTION_DROP_TEST, ACTION_RAGDOLL, ACTION_RESET_PROPS, neutralCommand, sanitizeCommand } from './commands.ts';
+import type { PlayerCommand } from './commands.ts';
+import { MAX_STRESS, createLabEntities } from './lab-entities.ts';
+import type { SimEntity } from './lab-entities.ts';
+import { PLAY_AREA, addDummy, addLabKinematics, buildLabPhysics, labPropDefs, launchDummy, stressDef } from './lab-physics.ts';
+import { CHARACTER } from './physics/world.ts';
+import type { PhysicsWorld } from './physics/world.ts';
 import { ANIM_MAX, SnapshotRing, writeEntity } from './snapshots.ts';
 
-export interface SimEntity {
-    /** Stable identity, also the voxel object id. */
-    id: number;
-    name: string;
-    asset: VoxelAsset;
-    /** Cross-object overlap priority (higher wins). */
-    priority: number;
-    pose: Pose;
-    anim: Float64Array;
-    visible: boolean;
-    /** Index in snapshot buffers. */
-    slot: number;
-}
 
-export interface PlayerCommand {
-    seq: number;
-    /** Desired move in player space: x right, z forward, each -1..1. */
-    moveX: number;
-    moveZ: number;
-    sprint: boolean;
-    jump: boolean;
-    /** Look yaw/pitch in radians (absolute, from the client's mouse look). */
-    yaw: number;
-    pitch: number;
-    carry: boolean;
-}
+export type { PlayerCommand, SimEntity };
+export { MAX_STRESS };
+export type PropsMode = 'physics' | 'scripted';
 
-export const MAX_STRESS = 25;
 export const EYE_HEIGHT = 1.22;
+/** Stress bodies get a deterministic upward kick this often (ticks), so 25 bodies keep moving. */
+export const STRESS_KICK_TICKS = 150;
+
+export interface LabSimOptions {
+    props?: PropsMode;
+}
 
 export class LabSim {
-    readonly entities: SimEntity[] = [];
+    readonly entities: SimEntity[];
     readonly ring: SnapshotRing;
     tick = 0;
     stressCount = 0;
     fpActive = false;
+    propsMode: PropsMode;
+    /** The Rapier world; rebuilt on reset so replays are deterministic. */
+    physics!: PhysicsWorld;
+    /** Wall time of the last fixed tick's physics work (ms), for the debug panel. */
+    physicsMs = 0;
 
     // scripted state
     private beaverDist = 0;
@@ -61,10 +58,14 @@ export class LabSim {
     private uteTheta = 0;
     private uteSpin = 0;
 
-    // player state
-    readonly player = { x: 0, y: 0.5, z: 6.5, vy: 0, yaw: 0, pitch: 0, grounded: true };
-    private lastCmd: PlayerCommand = { seq: 0, moveX: 0, moveZ: 0, sprint: false, jump: false, yaw: 0, pitch: 0, carry: false };
+    // player state (feet position; `eyeLift` smooths step-ups for the camera)
+    readonly player = { x: 0, y: 0.5, z: 6.5, vy: 0, yaw: 0, pitch: 0, grounded: true, eyeLift: 0 };
+    private lastCmd: PlayerCommand = neutralCommand();
     private heldInit = false;
+    private prevCarry = false;
+    private prevFp = false;
+    /** Ticks at which stress bodies were enabled (their kick schedule starts there). */
+    private readonly stressEnabled = new Int32Array(MAX_STRESS).fill(-1);
 
     readonly beaver: SimEntity;
     readonly bucket: SimEntity;
@@ -74,34 +75,28 @@ export class LabSim {
     readonly cube: SimEntity;
     readonly sphere: SimEntity;
     readonly held: SimEntity;
-    readonly stress: SimEntity[] = [];
+    readonly stress: SimEntity[];
+    readonly dummy: SimEntity[];
     /** Not voxelized: carries the walker's pose through the snapshot ring for interpolation. */
     readonly playerEntity: SimEntity;
 
-    constructor() {
-        this.beaver = this.add(1, 'beaver', beaverAsset, 3);
-        this.bucket = this.add(2, 'bucket', bucketAsset(), 4);
-        this.ute = this.add(3, 'ute', uteAsset, 2);
-        this.plank = this.add(4, 'plank', plankAsset(), 1);
-        this.log = this.add(5, 'log', logAsset(), 1);
-        this.cube = this.add(6, 'cube', cubeAsset(), 1);
-        this.sphere = this.add(7, 'sphere', sphereAsset(), 1);
-        this.held = this.add(8, 'held-plank', plankAsset('held-plank'), 5);
-        for (let n = 0; n < MAX_STRESS; n++) {
-            const kind = n % 3;
-            const asset = kind === 0 ? plankAsset(`stress-plank-${n}`) : kind === 1 ? cubeAsset(0.4, n % 2 ? M.TestBlue : M.TestOrange) : logAsset();
-            this.stress.push(this.add(100 + n, `stress-${n}`, asset, 0));
-        }
-        this.playerEntity = this.add(900, 'player', EMPTY_ASSET, 0);
+    constructor(opts: LabSimOptions = {}) {
+        this.propsMode = opts.props ?? 'physics';
+        const c = createLabEntities();
+        this.entities = c.entities;
+        this.beaver = c.beaver;
+        this.bucket = c.bucket;
+        this.ute = c.ute;
+        this.plank = c.plank;
+        this.log = c.log;
+        this.cube = c.cube;
+        this.sphere = c.sphere;
+        this.held = c.held;
+        this.stress = c.stress;
+        this.dummy = c.dummy;
+        this.playerEntity = c.player;
         this.ring = new SnapshotRing(this.entities.length, 32);
         this.reset();
-    }
-
-    private add(id: number, name: string, asset: VoxelAsset, priority: number): SimEntity {
-        if (asset.animChannels > ANIM_MAX) throw new Error(`${name}: too many animation channels`);
-        const e: SimEntity = { id, name, asset, priority, pose: pose(), anim: new Float64Array(ANIM_MAX), visible: true, slot: this.entities.length };
-        this.entities.push(e);
-        return e;
     }
 
     reset(): void {
@@ -111,22 +106,69 @@ export class LabSim {
         this.uteTheta = 0;
         this.uteSpin = 0;
         this.heldInit = false;
+        this.prevCarry = false;
+        this.stressEnabled.fill(-1);
         this.ring.clear();
         this.evaluate();
+        this.buildPhysics();
+        this.readPhysics();
         this.publish();
+    }
+
+    /** Switches between physics props and the Epic 1 scripted props (resets the scene). */
+    setPropsMode(mode: PropsMode): void {
+        if (mode === this.propsMode) return;
+        this.propsMode = mode;
+        this.reset();
+    }
+
+    get physicsProps(): boolean {
+        return this.propsMode === 'physics';
+    }
+
+    /** Physics-driven props (everything dynamic), in a fixed order. */
+    private get propEntities(): SimEntity[] {
+        return [this.plank, this.log, this.cube, this.sphere, this.bucket, this.held, ...this.stress, ...this.dummy];
+    }
+
+    private buildPhysics(): void {
+        this.physics?.free();
+        const pw = buildLabPhysics();
+        addLabKinematics(pw, this.beaver.id, this.ute.id, this.beaver.pose, this.ute.pose);
+        if (this.physicsProps) {
+            for (const d of labPropDefs({ plank: this.plank.id, log: this.log.id, cube: this.cube.id, sphere: this.sphere.id, bucket: this.bucket.id, heldPlank: this.held.id })) pw.addDynamic(d.id, d.shape, d.spawn, d.opts);
+            pw.setEnabled(this.held.id, false);
+            for (let n = 0; n < this.stress.length; n++) {
+                const d = stressDef(this.stress[n].id, n);
+                pw.addDynamic(d.id, d.shape, d.spawn, d.opts);
+                pw.setEnabled(d.id, false);
+            }
+            addDummy(
+                pw,
+                this.dummy.map((e) => e.id)
+            );
+        }
+        const p = this.player;
+        pw.createCharacter(p.x, p.y, p.z);
+        pw.setCharacterEnabled(this.fpActive);
+        this.physics = pw;
     }
 
     /** Runs the simulation up to (at least) a tick, for deterministic seeking. */
     runTo(tick: number): void {
         if (tick < this.tick) this.reset();
-        while (this.tick < tick) this.step(this.lastCmd);
+        // replay holds the look and carry state but repeats no edge-triggered request
+        const c = this.lastCmd;
+        while (this.tick < tick) this.step({ ...neutralCommand(c.seq, c.yaw, c.pitch), carry: c.carry });
     }
 
-    step(cmd: PlayerCommand): void {
+    step(input: PlayerCommand): void {
+        const cmd = sanitizeCommand(input);
         this.lastCmd = cmd;
         this.tick++;
         this.integrate(cmd);
         this.evaluate();
+        this.stepPhysics(cmd);
         this.publish();
     }
 
@@ -152,12 +194,31 @@ export class LabSim {
         this.uteTheta += (v / dpdtheta) * dt;
         this.uteSpin += (v / UTE_WHEEL_RADIUS) * dt;
 
-        // first-person walker (camera control for Epic 1; not physics)
+        this.player.yaw = cmd.yaw;
+        this.player.pitch = cmd.pitch;
+    }
+
+    // ------------------------------------------------------------------------------- physics
+
+    private stepPhysics(cmd: PlayerCommand): void {
+        const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        const pw = this.physics;
         const p = this.player;
-        p.yaw = cmd.yaw;
-        p.pitch = cmd.pitch;
+        // kinematic colliders follow this tick's scripted poses
+        pw.setKinematicTarget(this.beaver.id, this.beaver.pose);
+        pw.setKinematicTarget(this.ute.id, this.ute.pose);
+
+        if (this.fpActive !== this.prevFp) {
+            pw.setCharacterEnabled(this.fpActive);
+            if (!this.fpActive) this.prevCarry = false;
+            this.prevFp = this.fpActive;
+        }
+
+        const eyeX = p.x;
+        const eyeY = p.y + EYE_HEIGHT;
+        const eyeZ = p.z;
         if (this.fpActive) {
-            const run = cmd.sprint ? 4.2 : 2.2;
+            const run = cmd.sprint ? CHARACTER.run : CHARACTER.walk;
             let mx = cmd.moveX;
             let mz = cmd.moveZ;
             const len = Math.hypot(mx, mz);
@@ -170,28 +231,122 @@ export class LabSim {
             const fz = -Math.cos(p.yaw);
             const rx = Math.cos(p.yaw);
             const rz = -Math.sin(p.yaw);
-            p.x += (fx * mz + rx * mx) * run * dt;
-            p.z += (fz * mz + rz * mx) * run * dt;
-            p.x = Math.max(-26, Math.min(26, p.x));
-            p.z = Math.max(-20, Math.min(13, p.z));
-            const ground = Math.max(terrainHeight(p.x, p.z), -0.62);
-            if (p.grounded && cmd.jump) {
-                p.vy = 4.2;
-                p.grounded = false;
+            pw.moveCharacter((fx * mz + rx * mx) * run, (fz * mz + rz * mx) * run, cmd.jump);
+            const c = pw.character;
+            // smooth step-ups (and only step-ups) for the camera
+            const dy = c.y - p.y;
+            p.eyeLift = c.grounded && dy > 0.04 && dy < CHARACTER.stepHeight + 0.05 ? p.eyeLift - dy : p.eyeLift;
+            p.eyeLift *= Math.exp(-SIM_DT * 14);
+            if (Math.abs(p.eyeLift) < 1e-4) p.eyeLift = 0;
+            p.x = c.x;
+            p.y = c.y;
+            p.z = c.z;
+            p.vy = c.vy;
+            p.grounded = c.grounded;
+
+            if (this.physicsProps) {
+                // carry (G): the rising edge puts the carry plank in your grip, the falling edge drops it
+                if (cmd.carry && !this.prevCarry) this.summonCarryPlank();
+                else if (!cmd.carry && this.prevCarry && pw.heldId === this.held.id) pw.release();
+                this.prevCarry = cmd.carry;
+                if (cmd.reach) pw.adjustHold(cmd.reach);
+                const eye = { x: p.x, y: p.y + EYE_HEIGHT, z: p.z };
+                if (cmd.action === ACTION_DROP) pw.release();
+                if (cmd.throw) pw.throwHeld(cmd.yaw, cmd.pitch);
+                else if (cmd.grab) {
+                    if (pw.heldId >= 0) pw.release();
+                    else pw.tryGrab(eye, cmd.yaw, cmd.pitch);
+                }
+                const ev = { x: (eye.x - eyeX) / SIM_DT, y: (eye.y - eyeY) / SIM_DT, z: (eye.z - eyeZ) / SIM_DT };
+                pw.applyGrab(eye, cmd.yaw, cmd.pitch, ev);
             }
-            p.vy -= 12 * dt;
-            p.y += p.vy * dt;
-            if (p.y <= ground) {
-                // step-up is smoothed so stepped terrain does not jolt the camera
-                p.y = p.grounded ? p.y + (ground - p.y) * Math.min(1, dt * 14) : ground;
-                if (ground - p.y < 0.01) p.y = ground;
-                p.vy = 0;
-                p.grounded = true;
-            } else if (p.grounded && p.y - ground < 0.35) {
-                p.y += (ground - p.y) * Math.min(1, dt * 14);
-                p.vy = 0;
-            } else {
-                p.grounded = false;
+        }
+
+        if (this.physicsProps) {
+            if (cmd.action === ACTION_RAGDOLL) this.launchRagdoll();
+            else if (cmd.action === ACTION_DROP_TEST) this.dropTest();
+            else if (cmd.action === ACTION_RESET_PROPS) for (const e of this.propEntities) pw.respawn(e.id);
+            this.updateStress();
+        }
+
+        pw.step();
+        this.readPhysics();
+        const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        this.physicsMs = t1 - t0;
+    }
+
+    /** Copies dynamic body poses into their entities (physics props mode). */
+    private readPhysics(): void {
+        if (!this.physicsProps) return;
+        const pw = this.physics;
+        for (const e of this.propEntities) {
+            const b = pw.bodies.get(e.id);
+            if (!b) continue;
+            e.visible = b.enabled;
+            if (b.enabled) pw.readPose(e.id, e.pose);
+        }
+    }
+
+    private summonCarryPlank(): void {
+        const pw = this.physics;
+        const p = this.player;
+        const eyeY = p.y + EYE_HEIGHT;
+        // across the body, 1.3 m ahead and 0.45 m below the eye
+        const fx = -Math.sin(p.yaw);
+        const fz = -Math.cos(p.yaw);
+        const q = quatFromYawPitchRoll(p.yaw, Math.PI / 2, 0);
+        const at = pose(p.x + fx * 1.3, eyeY - 0.45, p.z + fz * 1.3, q);
+        pw.setEnabled(this.held.id, true);
+        pw.place(this.held.id, at);
+        pw.grabById(this.held.id, at.p, Math.hypot(1.3, 0.45));
+    }
+
+    private launchRagdoll(): void {
+        const p = this.player;
+        const ids = this.dummy.map((e) => e.id);
+        if (this.fpActive) {
+            const fx = -Math.sin(p.yaw);
+            const fz = -Math.cos(p.yaw);
+            launchDummy(this.physics, ids, p.x + fx * 1.6, p.y + 0.6, p.z + fz * 1.6, p.yaw, 6);
+        } else {
+            // from the near bank towards the river
+            launchDummy(this.physics, ids, 0.5, 2.2, 5.2, 0, 5);
+        }
+    }
+
+    /**
+     * Scripted, deterministic drop test: the main plank is placed 2.5 m above the near bank with a
+     * fixed tilt and spin and released. Used by the debug panel and by the drop test in tests/.
+     */
+    dropTest(): void {
+        const x = 0.6;
+        const z = 3.6;
+        const at = pose(x, terrainHeight(x, z) + 2.5, z, quatFromYawPitchRoll(0.4, 0.6, 0.2));
+        this.physics.setEnabled(this.plank.id, true);
+        this.physics.place(this.plank.id, at, { x: 0, y: 0, z: 0 }, { x: 1.5, y: 3.0, z: 0.8 });
+    }
+
+    private updateStress(): void {
+        const pw = this.physics;
+        for (let n = 0; n < this.stress.length; n++) {
+            const e = this.stress[n];
+            const on = n < this.stressCount;
+            const was = this.stressEnabled[n] >= 0;
+            if (on && !was) {
+                pw.setEnabled(e.id, true);
+                pw.respawn(e.id);
+                this.stressEnabled[n] = this.tick;
+            } else if (!on && was) {
+                pw.setEnabled(e.id, false);
+                this.stressEnabled[n] = -1;
+            }
+            // a deterministic fountain keeps every stress body moving (for the 25-body measurement)
+            if (on && (this.tick - this.stressEnabled[n]) % STRESS_KICK_TICKS === STRESS_KICK_TICKS - 1) {
+                const b = pw.bodies.get(e.id)!.body;
+                const m = b.mass();
+                const a = n * 2.399;
+                b.applyImpulse({ x: Math.cos(a) * m * 1.2, y: m * 5.5, z: Math.sin(a) * m * 1.2 }, true);
+                b.applyTorqueImpulse({ x: m * 0.05, y: m * 0.08 * (n % 2 ? 1 : -1), z: 0 }, true);
             }
         }
     }
@@ -216,9 +371,17 @@ export class LabSim {
             const amount = beaverWalkAmount(t);
             b.anim[BEAVER_WALK_PHASE] = (this.beaverDist / 0.95) * Math.PI * 2;
             b.anim[BEAVER_WALK_AMOUNT] = amount;
-            b.anim[BEAVER_CARRY] = 1;
+            // physics mode: the bucket is a free physics prop, so the beaver walks empty-handed
+            b.anim[BEAVER_CARRY] = this.physicsProps ? 0 : 1;
             b.anim[BEAVER_HEAD_YAW] = (1 - amount) * 0.55 * Math.sin(t * 1.7);
             b.visible = true;
+        }
+        if (!this.physicsProps) {
+            const b = this.beaver;
+            const th = this.beaverTheta;
+            const dx = -Math.sin(th);
+            const dz = Math.cos(th);
+            const amount = beaverWalkAmount(t);
 
             const hand = beaverLeftHand(b.pose, b.anim, _hand);
             const swing = 0.16 * amount * Math.sin(b.anim[BEAVER_WALK_PHASE] + 0.9) + 0.03 * Math.sin(t * 2.3);
@@ -237,6 +400,11 @@ export class LabSim {
             bk.visible = true;
         }
 
+        this.evaluateUte(t);
+        if (!this.physicsProps) this.evaluateScriptedProps(t);
+    }
+
+    private evaluateUte(t: number): void {
         // ---- ute on its oval
         {
             const u = this.ute;
@@ -262,7 +430,10 @@ export class LabSim {
             u.anim[UTE_ROLL] = Math.max(-0.07, Math.min(0.07, -curvature * v * v * 0.035));
             u.visible = true;
         }
+    }
 
+    /** Epic 1 scripted motion for the props (the `scripted` comparison mode). */
+    private evaluateScriptedProps(t: number): void {
         // ---- plank: a hovering specimen, translating and continuously rotating
         {
             const p = this.plank;
@@ -375,7 +546,7 @@ export class LabSim {
     private publishPlayer(): void {
         const e = this.playerEntity;
         e.pose.p.x = this.player.x;
-        e.pose.p.y = this.player.y + EYE_HEIGHT;
+        e.pose.p.y = this.player.y + this.player.eyeLift + EYE_HEIGHT;
         e.pose.p.z = this.player.z;
         e.visible = this.fpActive;
     }
@@ -386,16 +557,36 @@ export class LabSim {
         for (const e of this.entities) writeEntity(buf, e.slot, e.pose, e.visible, e.anim, ANIM_MAX);
     }
 
-    /** Places the walker (e.g. when entering first-person mode). */
+    /** Places the character (e.g. when entering first-person mode), on the ground, inside the play area. */
     placePlayer(x: number, z: number, yaw: number): void {
         const p = this.player;
-        p.x = x;
-        p.z = z;
-        p.y = Math.max(terrainHeight(x, z), -0.62);
+        const A = PLAY_AREA;
+        p.x = Math.max(A.minX + 0.5, Math.min(A.maxX - 0.5, x));
+        p.z = Math.max(A.minZ + 0.5, Math.min(A.maxZ - 0.5, z));
+        const g = this.physics.groundY(p.x, p.z) ?? terrainHeight(p.x, p.z);
+        p.y = g + 0.05;
         p.vy = 0;
         p.yaw = yaw;
         p.grounded = true;
+        p.eyeLift = 0;
+        this.physics.placeCharacter(p.x, p.y, p.z);
         this.lastCmd = { ...this.lastCmd, yaw };
+    }
+
+    /** Read-only, for UI: what the player is holding and what the crosshair would grab. */
+    interaction(): { holding: string | null; target: string | null } {
+        if (!this.fpActive || !this.physicsProps) return { holding: null, target: null };
+        const pw = this.physics;
+        const p = this.player;
+        const name = (id: number) => (id < 0 ? null : (this.entities.find((e) => e.id === id)?.name ?? null));
+        const holding = name(pw.heldId);
+        const target = holding ? null : name(pw.probe({ x: p.x, y: p.y + EYE_HEIGHT, z: p.z }, p.yaw, p.pitch));
+        return { holding, target };
+    }
+
+    /** True when the voxelized dummy is in the world. */
+    get dummyActive(): boolean {
+        return this.dummy[0].visible;
     }
 }
 
@@ -413,15 +604,6 @@ function smooth(x: number): number {
     return x * x * (3 - 2 * x);
 }
 
-const EMPTY_ASSET: VoxelAsset = {
-    schema: 1,
-    name: 'empty',
-    parts: [],
-    animChannels: 0,
-    evaluate() {
-        // no parts to pose
-    }
-};
 
 const _hand = pose();
 const _q = { x: 0, y: 0, z: 0, w: 1 };

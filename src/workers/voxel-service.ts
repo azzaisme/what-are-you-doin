@@ -9,7 +9,8 @@
  */
 
 import { buildRiverLab } from '../levels/river-lab.ts';
-import { LabSim } from '../sim/lab-sim.ts';
+import { createLabEntities } from '../sim/lab-entities.ts';
+import type { SimEntity } from '../sim/lab-entities.ts';
 import { ANIM_MAX } from '../sim/snapshots.ts';
 import { DYNAMIC_REGION, STATIC_REGION, collectDirty, unpackRegion } from '../voxels/dirty.ts';
 import type { DirtyWork } from '../voxels/dirty.ts';
@@ -36,7 +37,7 @@ interface Tracked {
 }
 
 /** Order of tracked objects: every sim entity that has voxel parts, in sim order. */
-export function trackedEntityOrder(sim: LabSim): number[] {
+export function trackedEntityOrder(sim: { entities: SimEntity[] }): number[] {
     return sim.entities.filter((e) => e.asset.parts.length > 0).map((e) => e.slot);
 }
 
@@ -50,8 +51,7 @@ export class VoxelService {
     private readonly knownDynamic = new Set<number>();
 
     constructor() {
-        const sim = new LabSim();
-        for (const e of sim.entities) {
+        for (const e of createLabEntities().entities) {
             if (e.asset.parts.length === 0) continue;
             this.world.addObject(e.id, e.priority);
             const poses = e.asset.parts.map(() => pose());
