@@ -45,6 +45,7 @@ import {
     CELL_SIZE_MIN_CM,
     CELL_SIZE_STORAGE_KEY,
     GRID_SIZE,
+    OLD_CELL_SIZE_STORAGE_KEYS,
     clampCellSizeCm
 } from './voxels/grid.ts';
 import { pose } from './voxels/math.ts';
@@ -103,6 +104,11 @@ const { app, camera } = scene;
 // ------------------------------------------------------------------------------------- voxel world
 
 const cellCm = Math.round(GRID_SIZE * 1000) / 10;
+try {
+    for (const k of OLD_CELL_SIZE_STORAGE_KEYS) localStorage.removeItem(k);
+} catch {
+    // storage blocked: nothing saved to clear
+}
 setLoading(`Rasterizing the ${level.name} into the ${cellCm} cm grid…`);
 await nextFrame();
 await initPhysics();

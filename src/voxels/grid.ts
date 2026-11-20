@@ -18,7 +18,13 @@
 export const CELL_SIZE_MIN_CM = 5;
 export const CELL_SIZE_MAX_CM = 10;
 export const CELL_SIZE_DEFAULT_CM = 5;
-export const CELL_SIZE_STORAGE_KEY = 'uncivil.cellSizeCm';
+/**
+ * Where a player's own choice is saved. Renamed on 2026-11-20 (owner: "default to 5 cm") so sizes
+ * saved while testing earlier builds no longer override the 5 cm default.
+ */
+export const CELL_SIZE_STORAGE_KEY = 'uncivil.cellSizeCm.v2';
+/** The old key; cleared at startup. */
+export const OLD_CELL_SIZE_STORAGE_KEYS = ['uncivil.cellSizeCm'];
 
 export function clampCellSizeCm(cm: number): number {
     if (!Number.isFinite(cm)) return CELL_SIZE_DEFAULT_CM;
