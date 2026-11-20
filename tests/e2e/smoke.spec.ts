@@ -288,3 +288,44 @@ test('level 1, the Timber Yard: starts in first person with the objective, and t
     await expect(page.locator('.toast')).toContainText('delivered');
     expect(problems).toEqual([]);
 });
+
+test('local co-op: split screen renders both views, player 2 moves with their own commands', async ({ page }) => {
+    const problems = await boot(page, '?t=0.01&quality=low&noui#cell100');
+    await lab(page, (l) => l.action('pause'));
+    await lab(page, (l) => (l as unknown as { setPlayers(n: number): void }).setPlayers(2));
+    // face different ways: player 1 north to the creek, player 2 west towards the shed
+    await lab(page, (l) => {
+        l.look(0, -0.1);
+        (l as unknown as { look2(y: number, p: number): void }).look2(1.57, -0.1);
+    });
+    await page.waitForTimeout(4000);
+    const shot = PNG.sync.read(await page.screenshot());
+    const rowBrightness = (y: number) => {
+        let sum = 0;
+        for (let x = 0; x < shot.width; x += 8) {
+            const i = (y * shot.width + x) * 4;
+            sum += shot.data[i] + shot.data[i + 1] + shot.data[i + 2];
+        }
+        return sum / (shot.width / 8) / 3;
+    };
+    // both halves draw a lit scene (a failed split leaves one half black)
+    expect(rowBrightness(Math.floor(shot.height * 0.3))).toBeGreaterThan(30);
+    expect(rowBrightness(Math.floor(shot.height * 0.8))).toBeGreaterThan(30);
+    // and they are different views
+    expect(Math.abs(rowBrightness(Math.floor(shot.height * 0.3)) - rowBrightness(Math.floor(shot.height * 0.8)))).toBeGreaterThan(1);
+    const s = await lab(page, (l) => l.stats());
+    expect(s.voxel.objects).toBe(17); // the yard's 15 plus two voxel beaver bodies
+    // player 2 walks on their own commands
+    const before = await page.evaluate(() => (window as unknown as { __riverLab: { entities(): Record<string, { x: number; z: number }> } }).__riverLab.entities()['avatar-1']);
+    for (let i = 0; i < 20; i++) {
+        await lab(page, (l) => (l as unknown as { input2(c: Record<string, unknown>): void }).input2({ moveZ: 1, yaw: 1.57 }));
+        await page.waitForTimeout(250);
+    }
+    const after = await page.evaluate(() => (window as unknown as { __riverLab: { entities(): Record<string, { x: number; z: number }> } }).__riverLab.entities()['avatar-1']);
+    expect(Math.hypot(after.x - before.x, after.z - before.z)).toBeGreaterThan(0.1);
+    // back to one player: one full view, bodies hidden
+    await lab(page, (l) => (l as unknown as { setPlayers(n: number): void }).setPlayers(1));
+    await page.waitForTimeout(2500);
+    expect((await lab(page, (l) => l.stats())).voxel.objects).toBe(15);
+    expect(problems).toEqual([]);
+});

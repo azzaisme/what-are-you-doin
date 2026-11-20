@@ -1,5 +1,34 @@
 # Progress log
 
+## Local co-op: two players, split screen, gamepads (2026-11-20, owner request)
+
+The owner will test two-player on a Steam Deck with two gamepads. ADR 0009 has the design.
+
+- **Join:** press **A** on a pad: the first pad drives player 1 (keyboard and mouse still work),
+  the next pad joins as **player 2** and the screen splits top (P1) / bottom (P2). Unplugging player
+  2's pad returns to one player. Debug panel → Physics → Players also switches 1 / 2 (player 2 then
+  stands still without a pad).
+- **Pad controls:** left stick move · right stick look · A jump · LT or L3 sprint · RT grab /
+  release · RB throw · B drop · X ragdoll · Y plank (player 1) · D-pad up/down reach.
+- **Two beavers, one world:** both players are voxel beavers the other sees (walk cycle, carry
+  pose), they bump into each other, and they can hold the same object: forces add, each bounded.
+  Force cap per beaver raised 450 → **650 N**: beams and planks are easy alone, and the **113 kg log
+  now needs two beavers** (unit tested: one cannot lift it, two can, each under the cap).
+- Each player has their own creek recovery; the level objective is shared.
+- **Split screen** works around the engine's CameraFrame ignoring viewport rects (half-height
+  targets, compose viewports); water uses its sky reflection while split (planar reflection follows
+  one camera only). Single player is unchanged.
+- Also fixed: the level no longer starts with the comfort-test plank in your hands (it stays on by
+  default in the River Lab only); level start no longer requests pointer lock without a click.
+- **Tests:** 87 unit tests × 2 = 174 pass (new: deadzone, stick move and look rate, one command per
+  press, Y only for player 1; two players move independently, bodies only in two-player mode, the
+  two-beaver log lift, per-player creek recovery, two-player determinism). New browser test: both
+  split halves render lit and different, player 2 walks on their own commands, back to one player.
+- **Not measured:** the Steam Deck (no device here). In this sandbox's software GL, split screen at
+  10 cm drew ~2,150 draw calls a frame (two views). Suggested start on the Deck: Low preset, 7.5–10
+  cm voxels (slider), then try High / 5 cm. Gamepads were tested with simulated pads only; please
+  check the button layout on the Deck (Steam Input may remap).
+
 ## Level 1 — the Timber Yard (2026-11-20, owner request after gate 2)
 
 Owner, after trying the gate 2 build ("this works"): set up the very first level, in first person.

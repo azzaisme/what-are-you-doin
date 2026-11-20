@@ -442,3 +442,81 @@ body.ui-hidden .inspector-hint {
 body.ui-hidden .toast {
     display: none;
 }
+
+/* ---- split screen (local co-op): player 1 on top, player 2 below ------------------------------ */
+
+.crosshair-p2,
+.prompt-p2,
+.player-tag {
+    display: none;
+}
+
+body.split .crosshair {
+    top: 25%;
+}
+
+body.split .crosshair-p2 {
+    display: block;
+    top: 75%;
+}
+
+body.split .hud-prompt:not(:empty) {
+    top: calc(25% + 22px);
+}
+
+body.split .prompt-p2:not(:empty) {
+    display: block;
+    position: fixed;
+    left: 50%;
+    top: calc(75% + 22px);
+    transform: translateX(-50%);
+    padding: 3px 9px;
+    max-width: calc(100vw - 32px);
+    font-size: 13px;
+    color: #ffd27a;
+    text-align: center;
+    border-radius: 6px;
+    background: #0008;
+    pointer-events: none;
+    z-index: 10;
+}
+
+body.split::after {
+    content: '';
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: calc(50% - 1px);
+    height: 2px;
+    background: #0e1418;
+    z-index: 9;
+    pointer-events: none;
+}
+
+body.split .player-tag {
+    display: block;
+    position: fixed;
+    right: 14px;
+    padding: 2px 8px;
+    font: 600 13px ui-sans-serif, system-ui, sans-serif;
+    border-radius: 6px;
+    color: #10161c;
+    pointer-events: none;
+    z-index: 10;
+}
+
+body.split .player-tag-1 {
+    top: 12px;
+    background: #ffd27a;
+}
+
+body.split .player-tag-2 {
+    top: calc(50% + 10px);
+    background: #8fd3ff;
+}
+
+body.ui-hidden .player-tag,
+body.ui-hidden .prompt-p2,
+body.ui-hidden .crosshair-p2 {
+    display: none !important;
+}

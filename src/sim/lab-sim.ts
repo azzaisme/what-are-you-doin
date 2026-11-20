@@ -68,11 +68,14 @@ export class LabSim {
     private uteTheta = 0;
     private uteSpin = 0;
 
-    // player state (feet position; `eyeLift` smooths step-ups for the camera)
-    readonly player = { x: 0, y: 0.5, z: 6.5, vy: 0, yaw: 0, pitch: 0, grounded: true, eyeLift: 0 };
+    // player state (feet position; `eyeLift` smooths step-ups for the camera). Player 1 is `player`.
+    readonly players: PlayerState[] = [newPlayerState(0, 6.5), newPlayerState(1.2, 6.5)];
+    readonly player = this.players[0];
+    /** 1, or 2 for local co-op (split screen). Player 2 is always in first person. */
+    playerCount = 1;
+    private lastCmd2: PlayerCommand = neutralCommand();
     private lastCmd: PlayerCommand = neutralCommand();
     private heldInit = false;
-    private prevCarry = false;
     private prevFp = false;
     /** Ticks at which stress bodies were enabled (their kick schedule starts there). */
     private readonly stressEnabled = new Int32Array(MAX_STRESS).fill(-1);
@@ -88,13 +91,13 @@ export class LabSim {
     readonly stress: SimEntity[];
     readonly dummy: SimEntity[];
     readonly extras: SimEntity[];
+    readonly avatars: SimEntity[];
+    readonly player2Entity: SimEntity;
     readonly level: LevelDef;
     /** Level progress (rules): the objective, once reached, stays reached until reset. */
     readonly progress = { goalReached: false, goalTick: -1, falls: 0, recoveries: 0 };
     /** Events since reset, newest last (the client shows them as toasts). */
     readonly events: SimEvent[] = [];
-    private safeSpot = { x: 0, y: 0, z: 0, valid: false };
-    private fallTicks = 0;
     private lostTicks = 0;
     private goalTicks = 0;
     /** Not voxelized: carries the walker's pose through the snapshot ring for interpolation. */
@@ -116,12 +119,19 @@ export class LabSim {
         this.stress = c.stress;
         this.dummy = c.dummy;
         this.extras = c.extras;
+        this.avatars = c.avatars;
         this.playerEntity = c.player;
+        this.player2Entity = c.player2;
         const sp = this.level.spawn;
         this.player.x = sp.x;
         this.player.z = sp.z;
         this.player.y = this.level.terrainHeight(sp.x, sp.z);
         this.player.yaw = sp.yaw;
+        const p2 = this.players[1];
+        p2.x = sp.x + Math.cos(sp.yaw) * 1.2;
+        p2.z = sp.z - Math.sin(sp.yaw) * 1.2;
+        p2.y = this.level.terrainHeight(p2.x, p2.z);
+        p2.yaw = sp.yaw;
         this.ring = new SnapshotRing(this.entities.length, 32);
         this.reset();
     }
@@ -133,11 +143,15 @@ export class LabSim {
         this.uteTheta = 0;
         this.uteSpin = 0;
         this.heldInit = false;
-        this.prevCarry = false;
+        this.player.prevCarry = false;
         this.stressEnabled.fill(-1);
         Object.assign(this.progress, { goalReached: false, goalTick: -1, falls: 0, recoveries: 0 });
         this.events.length = 0;
-        this.fallTicks = this.lostTicks = this.goalTicks = 0;
+        this.lostTicks = this.goalTicks = 0;
+        for (const pl of this.players) {
+            pl.fallTicks = 0;
+            pl.safe.valid = false;
+        }
         this.ring.clear();
         this.evaluate();
         this.buildPhysics();
@@ -184,9 +198,9 @@ export class LabSim {
                 this.dummy.map((e) => e.id)
             );
         }
-        const p = this.player;
-        pw.createCharacter(p.x, p.y, p.z);
-        pw.setCharacterEnabled(this.fpActive);
+        this.players.forEach((pl, i) => pw.createCharacter(pl.x, pl.y, pl.z, i));
+        pw.setCharacterEnabled(this.fpActive, 0);
+        pw.setCharacterEnabled(this.playerCount > 1, 1);
         this.physics = pw;
     }
 
@@ -195,17 +209,41 @@ export class LabSim {
         if (tick < this.tick) this.reset();
         // replay holds the look and carry state but repeats no edge-triggered request
         const c = this.lastCmd;
-        while (this.tick < tick) this.step({ ...neutralCommand(c.seq, c.yaw, c.pitch), carry: c.carry });
+        const c2 = this.lastCmd2;
+        while (this.tick < tick) this.step({ ...neutralCommand(c.seq, c.yaw, c.pitch), carry: c.carry }, neutralCommand(c2.seq, c2.yaw, c2.pitch));
     }
 
-    step(input: PlayerCommand): void {
+    /** One fixed tick. `input2` is player 2's command (two-player mode; ignored otherwise). */
+    step(input: PlayerCommand, input2?: PlayerCommand): void {
         const cmd = sanitizeCommand(input);
+        const cmd2 = sanitizeCommand(input2 ?? { ...neutralCommand(0, this.players[1].yaw, this.players[1].pitch) });
         this.lastCmd = cmd;
+        this.lastCmd2 = cmd2;
         this.tick++;
         this.integrate(cmd);
+        this.players[1].yaw = cmd2.yaw;
+        this.players[1].pitch = cmd2.pitch;
         this.evaluate();
-        this.stepPhysics(cmd);
+        this.stepPhysics([cmd, cmd2]);
         this.publish();
+    }
+
+    /** Switches between one player and two-player local co-op; player 2 appears beside player 1. */
+    setPlayerCount(n: number): void {
+        const count = n >= 2 ? 2 : 1;
+        if (count === this.playerCount) return;
+        this.playerCount = count;
+        const pw = this.physics;
+        if (count === 2) {
+            const p1 = this.player;
+            const p2 = this.players[1];
+            // one step to the right of player 1, facing the same way
+            this.placePlayer(p1.x + Math.cos(p1.yaw) * 1.2, p1.z - Math.sin(p1.yaw) * 1.2, p1.yaw, 1);
+            p2.pitch = p1.pitch;
+            pw.setCharacterEnabled(true, 1);
+        } else {
+            pw.setCharacterEnabled(false, 1);
+        }
     }
 
     get time(): number {
@@ -236,62 +274,21 @@ export class LabSim {
 
     // ------------------------------------------------------------------------------- physics
 
-    private stepPhysics(cmd: PlayerCommand): void {
+    private stepPhysics(cmds: PlayerCommand[]): void {
         const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
         const pw = this.physics;
-        const p = this.player;
+        const cmd = cmds[0];
         // kinematic colliders follow this tick's scripted poses
         pw.setKinematicTarget(this.beaver.id, this.beaver.pose);
         pw.setKinematicTarget(this.ute.id, this.ute.pose);
 
         if (this.fpActive !== this.prevFp) {
-            pw.setCharacterEnabled(this.fpActive);
-            if (!this.fpActive) this.prevCarry = false;
+            pw.setCharacterEnabled(this.fpActive, 0);
+            if (!this.fpActive) this.player.prevCarry = false;
             this.prevFp = this.fpActive;
         }
-
-        if (this.fpActive) {
-            const run = cmd.sprint ? CHARACTER.run : CHARACTER.walk;
-            let mx = cmd.moveX;
-            let mz = cmd.moveZ;
-            const len = Math.hypot(mx, mz);
-            if (len > 1) {
-                mx /= len;
-                mz /= len;
-            }
-            // camera looks along -Z at yaw 0 (engine convention); forward = (-sin yaw, -cos yaw)
-            const fx = -Math.sin(p.yaw);
-            const fz = -Math.cos(p.yaw);
-            const rx = Math.cos(p.yaw);
-            const rz = -Math.sin(p.yaw);
-            pw.moveCharacter((fx * mz + rx * mx) * run, (fz * mz + rz * mx) * run, cmd.jump);
-            const c = pw.character;
-            // smooth step-ups (and only step-ups) for the camera
-            const dy = c.y - p.y;
-            p.eyeLift = c.grounded && dy > 0.04 && dy < CHARACTER.stepHeight + 0.05 ? p.eyeLift - dy : p.eyeLift;
-            p.eyeLift *= Math.exp(-SIM_DT * 14);
-            if (Math.abs(p.eyeLift) < 1e-4) p.eyeLift = 0;
-            p.x = c.x;
-            p.y = c.y;
-            p.z = c.z;
-            p.vy = c.vy;
-            p.grounded = c.grounded;
-
-            if (this.physicsProps) {
-                // carry (G): the rising edge puts the carry plank in your grip, the falling edge drops it
-                if (cmd.carry && !this.prevCarry) this.summonCarryPlank();
-                else if (!cmd.carry && this.prevCarry && pw.heldId === this.held.id) pw.release();
-                this.prevCarry = cmd.carry;
-                if (cmd.reach) pw.adjustHold(cmd.reach);
-                const eye = { x: p.x, y: p.y + EYE_HEIGHT, z: p.z };
-                if (cmd.action === ACTION_DROP) pw.release();
-                if (cmd.throw) pw.throwHeld(cmd.yaw, cmd.pitch);
-                else if (cmd.grab) {
-                    if (pw.heldId >= 0) pw.release();
-                    else pw.tryGrab(eye, cmd.yaw, cmd.pitch);
-                }
-                pw.applyGrab(eye, cmd.yaw, cmd.pitch);
-            }
+        for (let i = 0; i < this.players.length; i++) {
+            if (this.playerActive(i)) this.stepPlayer(i, cmds[i]);
         }
 
         if (this.physicsProps) {
@@ -308,6 +305,60 @@ export class LabSim {
         this.physicsMs = t1 - t0;
     }
 
+    private playerActive(i: number): boolean {
+        return i === 0 ? this.fpActive : i < this.playerCount;
+    }
+
+    /** Movement, carry, grab, throw for one player (first person). */
+    private stepPlayer(i: number, cmd: PlayerCommand): void {
+        const pw = this.physics;
+        const p = this.players[i];
+        const run = cmd.sprint ? CHARACTER.run : CHARACTER.walk;
+        let mx = cmd.moveX;
+        let mz = cmd.moveZ;
+        const len = Math.hypot(mx, mz);
+        if (len > 1) {
+            mx /= len;
+            mz /= len;
+        }
+        // camera looks along -Z at yaw 0 (engine convention); forward = (-sin yaw, -cos yaw)
+        const fx = -Math.sin(p.yaw);
+        const fz = -Math.cos(p.yaw);
+        const rx = Math.cos(p.yaw);
+        const rz = -Math.sin(p.yaw);
+        pw.moveCharacter((fx * mz + rx * mx) * run, (fz * mz + rz * mx) * run, cmd.jump, i);
+        const c = pw.rig(i)!.state;
+        // smooth step-ups (and only step-ups) for the camera
+        const dy = c.y - p.y;
+        p.eyeLift = c.grounded && dy > 0.04 && dy < CHARACTER.stepHeight + 0.05 ? p.eyeLift - dy : p.eyeLift;
+        p.eyeLift *= Math.exp(-SIM_DT * 14);
+        if (Math.abs(p.eyeLift) < 1e-4) p.eyeLift = 0;
+        p.walkDist += Math.hypot(c.x - p.x, c.z - p.z);
+        p.speed = Math.hypot(c.vx, c.vz);
+        p.x = c.x;
+        p.y = c.y;
+        p.z = c.z;
+        p.vy = c.vy;
+        p.grounded = c.grounded;
+
+        if (!this.physicsProps) return;
+        // carry (G, player 1): the rising edge puts the carry plank in your grip, the falling edge drops it
+        if (i === 0) {
+            if (cmd.carry && !p.prevCarry) this.summonCarryPlank();
+            else if (!cmd.carry && p.prevCarry && pw.heldIdOf(0) === this.held.id) pw.release(0);
+            p.prevCarry = cmd.carry;
+        }
+        if (cmd.reach) pw.adjustHold(cmd.reach, i);
+        const eye = { x: p.x, y: p.y + EYE_HEIGHT, z: p.z };
+        if (cmd.action === ACTION_DROP) pw.release(i);
+        if (cmd.throw) pw.throwHeld(cmd.yaw, cmd.pitch, i);
+        else if (cmd.grab) {
+            if (pw.heldIdOf(i) >= 0) pw.release(i);
+            else pw.tryGrab(eye, cmd.yaw, cmd.pitch, i);
+        }
+        pw.applyGrab(eye, cmd.yaw, cmd.pitch, i);
+    }
+
     /**
      * Level rules, once per tick after the physics step: the objective (bucket resting in the goal
      * area), falling into the creek (put back on the last safe ground), and losing the bucket in the
@@ -317,28 +368,29 @@ export class LabSim {
         const rules = this.level.rules;
         if (!rules || !this.physicsProps) return;
         const pw = this.physics;
-        const p = this.player;
-        if (this.fpActive) {
+        for (let i = 0; i < this.players.length; i++) {
+            if (!this.playerActive(i)) continue;
+            const p = this.players[i];
             if (p.grounded && p.y > rules.fallY + 0.3 && rules.isSafe(p.x, p.z)) {
-                this.safeSpot.x = p.x;
-                this.safeSpot.y = p.y;
-                this.safeSpot.z = p.z;
-                this.safeSpot.valid = true;
+                p.safe.x = p.x;
+                p.safe.z = p.z;
+                p.safe.valid = true;
             }
-            this.fallTicks = p.y < rules.fallY ? this.fallTicks + 1 : 0;
-            if (this.fallTicks > 45) {
-                this.fallTicks = 0;
+            p.fallTicks = p.y < rules.fallY ? p.fallTicks + 1 : 0;
+            if (p.fallTicks > 45) {
+                p.fallTicks = 0;
                 this.progress.falls++;
-                const sp = this.safeSpot.valid ? this.safeSpot : { x: this.level.spawn.x, z: this.level.spawn.z };
-                this.placePlayer(sp.x, sp.z, p.yaw);
-                this.events.push({ tick: this.tick, kind: 'fell', text: 'Splash! Fished out and put back on the bank.' });
+                const sp = p.safe.valid ? p.safe : { x: this.level.spawn.x + i * 1.2, z: this.level.spawn.z };
+                this.placePlayer(sp.x, sp.z, p.yaw, i);
+                const who = this.playerCount > 1 ? `Player ${i + 1}: splash!` : 'Splash!';
+                this.events.push({ tick: this.tick, kind: 'fell', text: `${who} Fished out and put back on the bank.` });
             }
         }
         const bk = this.bucket;
         const body = pw.bodies.get(bk.id);
         if (!body) return;
         // essential item: lost in the creek for 1.5 s -> back on its stump
-        this.lostTicks = bk.pose.p.y < rules.lostY && pw.heldId !== bk.id ? this.lostTicks + 1 : 0;
+        this.lostTicks = bk.pose.p.y < rules.lostY && pw.holders(bk.id) === 0 ? this.lostTicks + 1 : 0;
         if (this.lostTicks > 90) {
             this.lostTicks = 0;
             this.progress.recoveries++;
@@ -349,7 +401,7 @@ export class LabSim {
             const g = rules.goal;
             const v = body.body.linvel();
             const inside = bk.pose.p.x > g.minX && bk.pose.p.x < g.maxX && bk.pose.p.z > g.minZ && bk.pose.p.z < g.maxZ;
-            const resting = Math.hypot(v.x, v.y, v.z) < 0.4 && pw.heldId !== bk.id;
+            const resting = Math.hypot(v.x, v.y, v.z) < 0.4 && pw.holders(bk.id) === 0;
             this.goalTicks = inside && resting ? this.goalTicks + 1 : 0;
             if (this.goalTicks > 30) {
                 this.progress.goalReached = true;
@@ -663,11 +715,30 @@ export class LabSim {
     }
 
     private publishPlayer(): void {
-        const e = this.playerEntity;
-        e.pose.p.x = this.player.x;
-        e.pose.p.y = this.player.y + this.player.eyeLift + EYE_HEIGHT;
-        e.pose.p.z = this.player.z;
-        e.visible = this.fpActive;
+        const eyes = [this.playerEntity, this.player2Entity];
+        for (let i = 0; i < 2; i++) {
+            const p = this.players[i];
+            const e = eyes[i];
+            e.pose.p.x = p.x;
+            e.pose.p.y = p.y + p.eyeLift + EYE_HEIGHT;
+            e.pose.p.z = p.z;
+            e.visible = this.playerActive(i);
+            // voxel beaver bodies: seen by the other player (and your own feet when you look down;
+            // from inside your own head every face points away, so it never blocks your view)
+            const a = this.avatars[i];
+            a.visible = this.playerCount > 1 && this.playerActive(i);
+            if (!a.visible) continue;
+            a.pose.p.x = p.x;
+            a.pose.p.y = p.y;
+            a.pose.p.z = p.z;
+            // the beaver faces +Z at yaw 0, the camera -Z
+            quatFromYawPitchRoll(p.yaw + Math.PI, 0, 0, a.pose.q);
+            const walk = Math.min(1, p.speed / CHARACTER.walk);
+            a.anim[BEAVER_WALK_PHASE] = (p.walkDist / 0.95) * Math.PI * 2;
+            a.anim[BEAVER_WALK_AMOUNT] = p.grounded ? walk : 0.3;
+            a.anim[BEAVER_CARRY] = this.physics.heldIdOf(i) >= 0 ? 1 : 0;
+            a.anim[BEAVER_HEAD_YAW] = 0;
+        }
     }
 
     private publish(): void {
@@ -677,8 +748,8 @@ export class LabSim {
     }
 
     /** Places the character (e.g. when entering first-person mode), on the ground, inside the play area. */
-    placePlayer(x: number, z: number, yaw: number): void {
-        const p = this.player;
+    placePlayer(x: number, z: number, yaw: number, i = 0): void {
+        const p = this.players[i];
         const A = this.level.playArea;
         p.x = Math.max(A.minX + 0.5, Math.min(A.maxX - 0.5, x));
         p.z = Math.max(A.minZ + 0.5, Math.min(A.maxZ - 0.5, z));
@@ -690,19 +761,21 @@ export class LabSim {
         p.yaw = yaw;
         p.grounded = true;
         p.eyeLift = 0;
-        this.physics.placeCharacter(p.x, p.y, p.z);
-        this.lastCmd = { ...this.lastCmd, yaw };
+        this.physics.placeCharacter(p.x, p.y, p.z, i);
+        if (i === 0) this.lastCmd = { ...this.lastCmd, yaw };
+        else this.lastCmd2 = { ...this.lastCmd2, yaw };
     }
 
     /** Read-only, for UI: what the player is holding and what the crosshair would grab. */
-    interaction(): { holding: string | null; target: string | null } {
-        if (!this.fpActive || !this.physicsProps) return { holding: null, target: null };
+    interaction(i = 0): { holding: string | null; target: string | null; shared: boolean } {
+        if (!this.playerActive(i) || !this.physicsProps) return { holding: null, target: null, shared: false };
         const pw = this.physics;
-        const p = this.player;
+        const p = this.players[i];
         const name = (id: number) => (id < 0 ? null : (this.entities.find((e) => e.id === id)?.name ?? null));
-        const holding = name(pw.heldId);
-        const target = holding ? null : name(pw.probe({ x: p.x, y: p.y + EYE_HEIGHT, z: p.z }, p.yaw, p.pitch));
-        return { holding, target };
+        const heldId = pw.heldIdOf(i);
+        const holding = name(heldId);
+        const target = holding ? null : name(pw.probe({ x: p.x, y: p.y + EYE_HEIGHT, z: p.z }, p.yaw, p.pitch, i));
+        return { holding, target, shared: heldId >= 0 && pw.holders(heldId) > 1 };
     }
 
     /** True when the voxelized dummy is in the world. */
@@ -734,3 +807,24 @@ const _target = pose();
 const _offset = pose();
 
 export { BEAVER_ANIM_CHANNELS, UTE_ANIM_CHANNELS };
+
+export interface PlayerState {
+    x: number;
+    y: number;
+    z: number;
+    vy: number;
+    yaw: number;
+    pitch: number;
+    grounded: boolean;
+    eyeLift: number;
+    /** Horizontal speed and distance walked (for the voxel beaver's walk cycle). */
+    speed: number;
+    walkDist: number;
+    prevCarry: boolean;
+    fallTicks: number;
+    safe: { x: number; z: number; valid: boolean };
+}
+
+function newPlayerState(x: number, z: number): PlayerState {
+    return { x, y: 0.5, z, vy: 0, yaw: 0, pitch: 0, grounded: true, eyeLift: 0, speed: 0, walkDist: 0, prevCarry: false, fallTicks: 0, safe: { x, z, valid: false } };
+}

@@ -48,8 +48,12 @@ export interface LabEntities {
     dummy: SimEntity[];
     /** Extra level props (more planks, beams, logs); hidden unless a level places them. */
     extras: SimEntity[];
+    /** Voxel beaver bodies for the players (shown in two-player mode). */
+    avatars: SimEntity[];
     /** Not voxelized: carries the character's eye pose through the snapshot ring. */
     player: SimEntity;
+    /** Not voxelized: player 2's eye pose. */
+    player2: SimEntity;
 }
 
 export function createLabEntities(): LabEntities {
@@ -80,8 +84,10 @@ export function createLabEntities(): LabEntities {
     for (let n = 0; n < EXTRA_PLANKS; n++) extras.push(add(300 + n, `extra-plank-${n}`, plankAsset(`extra-plank-${n}`), 1));
     for (let n = 0; n < EXTRA_BEAMS; n++) extras.push(add(320 + n, `beam-${n}`, beamAsset(`beam-${n}`), 1));
     for (let n = 0; n < EXTRA_LOGS; n++) extras.push(add(340 + n, `extra-log-${n}`, logAsset(), 1));
+    const avatars = [add(910, 'avatar-0', beaverAsset, 3), add(911, 'avatar-1', beaverAsset, 3)];
     const player = add(900, 'player', EMPTY_ASSET, 0);
-    return { entities, beaver, bucket, ute, plank, log, cube, sphere, held, stress, dummy, extras, player };
+    const player2 = add(901, 'player2', EMPTY_ASSET, 0);
+    return { entities, beaver, bucket, ute, plank, log, cube, sphere, held, stress, dummy, extras, avatars, player, player2 };
 }
 
 const EMPTY_ASSET: VoxelAsset = {

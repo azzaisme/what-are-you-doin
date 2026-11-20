@@ -12,6 +12,7 @@ import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs';
 import { DebugPanel  } from './debug/panel.ts';
 import type { PanelHost } from './debug/panel.ts';
 import { FirstPersonInput } from './input/first-person.ts';
+import { PadManager } from './input/gamepad.ts';
 import { getLevel } from './levels/index.ts';
 import { ReferenceRenderer } from './render/reference.ts';
 import { QUALITY, createLabScene  } from './render/scene.ts';
@@ -20,7 +21,8 @@ import { VoxelClient } from './render/voxel-pipeline.ts';
 import { VoxelRenderer } from './render/voxel-renderer.ts';
 import { FixedStepClock, SIM_DT, VOXEL_RATES, VoxelClock  } from './sim/clock.ts';
 import type { VoxelRate } from './sim/clock.ts';
-import { ACTION_DROP_TEST, ACTION_RAGDOLL, ACTION_RESET_PROPS } from './sim/commands.ts';
+import { ACTION_DROP_TEST, ACTION_RAGDOLL, ACTION_RESET_PROPS, neutralCommand } from './sim/commands.ts';
+import type { PlayerCommand } from './sim/commands.ts';
 import { EYE_HEIGHT, LabSim } from './sim/lab-sim.ts';
 import type { PropsMode } from './sim/lab-sim.ts';
 import { initPhysics } from './sim/physics/world.ts';
@@ -66,6 +68,10 @@ pipeline.applyStatic();
 const staticUploadMs = performance.now() - tUpload;
 const reference = new ReferenceRenderer(app, sim, scene.worldLayer, scene.immediateLayer);
 const fpInput = new FirstPersonInput(canvas);
+// gamepads (local co-op): the first pad to press A drives player 1, the next one joins as player 2
+const pads = new PadManager();
+/** Test hook: fields merged into player 2's next command (no real pad in headless tests). */
+let p2Injected: Partial<PlayerCommand> | null = null;
 const clock = new FixedStepClock();
 const voxelClock = new VoxelClock();
 
@@ -94,6 +100,7 @@ interface State {
     forceVoxel: boolean;
     props: PropsMode;
     colliders: boolean;
+    players: number;
 }
 
 const state: State = {
@@ -114,11 +121,13 @@ const state: State = {
     quality: initialQuality.name,
     fov: 52,
     sensitivity: 2.2,
-    carry: true,
+    // the Epic 1 comfort-test plank is on by default in the River Lab only; in a level you start empty-handed
+    carry: level.id === 'lab',
     uiHidden: false,
     forceVoxel: true,
     props: sim.propsMode,
-    colliders: false
+    colliders: false,
+    players: 1
 };
 
 const rateParam = Number(params.get('hz'));
@@ -192,12 +201,29 @@ class LabDirector extends Script {
         frameTimeCount = Math.min(frameTimes.length, frameTimeCount + 1);
         lastFrameStamp = now;
 
+        // ---- gamepads: look at display rate; player 1's pad shares the mouse's look angles
+        const pad1 = pads.players[0];
+        if (pad1) {
+            pad1.yaw = fpInput.yaw;
+            pad1.pitch = fpInput.pitch;
+            pad1.carry = state.carry;
+        }
+        pads.poll(dt);
+        if (pad1 && pads.players[0] === pad1) {
+            fpInput.yaw = pad1.yaw;
+            fpInput.pitch = pad1.pitch;
+            if (pad1.carry !== state.carry) {
+                state.carry = pad1.carry;
+                panel.sync();
+            }
+        }
+
         // ---- fixed-step simulation
         fpInput.carry = state.carry;
         if (!state.paused) {
             const steps = clock.advance(dt);
             for (let s = 0; s < steps; s++) {
-                sim.step(fpInput.command());
+                sim.step(playerOneCommand(), playerTwoCommand());
                 physTimes[physHead] = sim.physicsMs;
                 physHead = (physHead + 1) % physTimes.length;
                 physCount = Math.min(physTimes.length, physCount + 1);
@@ -218,6 +244,16 @@ class LabDirector extends Script {
             camera.setEulerAngles((fpInput.pitch * 180) / Math.PI, (fpInput.yaw * 180) / Math.PI, 0);
         }
         if (camera.camera!.fov !== state.fov) camera.camera!.fov = state.fov;
+        // ---- player 2's view (split screen): interpolated eye, look at display rate
+        if (state.players > 1) {
+            const c2 = scene.camera2;
+            const p2 = pads.players[1];
+            if (sim.ring.sample(sim.player2Entity.slot, renderTime, playerPose, playerAnim)) c2.setPosition(playerPose.p.x, playerPose.p.y, playerPose.p.z);
+            const yaw2 = p2 ? p2.yaw : sim.players[1].yaw;
+            const pitch2 = p2 ? p2.pitch : sim.players[1].pitch;
+            c2.setEulerAngles((pitch2 * 180) / Math.PI, (yaw2 * 180) / Math.PI, 0);
+            if (c2.camera!.fov !== state.fov) c2.camera!.fov = state.fov;
+        }
 
         // ---- voxel clock: one reconstruction per voxel frame, committed before any pass renders
         const frame = voxelClock.frameAt(renderTime);
@@ -248,6 +284,76 @@ directorEntity.addComponent('script');
 directorEntity.script!.create(LabDirector);
 app.root.addChild(directorEntity);
 app.graphicsDevice.scope.resolve('uVoxelGridLines').setValue(0);
+
+/** Player 1: keyboard + mouse, merged with player 1's pad when one has joined. */
+function playerOneCommand() {
+    const cmd = fpInput.command();
+    const pad = pads.players[0];
+    if (!pad) return cmd;
+    const p = pad.take();
+    if (pad.moving) {
+        cmd.moveX = p.moveX;
+        cmd.moveZ = p.moveZ;
+    }
+    cmd.sprint ||= p.sprint;
+    cmd.jump ||= p.jump && state.mode === 'firstPerson';
+    cmd.grab ||= p.grab && state.mode === 'firstPerson';
+    cmd.throw ||= p.throw && state.mode === 'firstPerson';
+    cmd.reach += p.reach;
+    if (p.action) cmd.action = p.action;
+    // a pad drives player 1 without pointer lock
+    if (state.mode === 'firstPerson' && pad.moving && !fpInput.locked) {
+        cmd.moveX = p.moveX;
+        cmd.moveZ = p.moveZ;
+    }
+    return cmd;
+}
+
+/** Player 2: their pad (or the test hook); undefined in single player. */
+function playerTwoCommand() {
+    if (state.players < 2) return undefined;
+    const pad = pads.players[1];
+    const base = pad ? pad.command() : { ...neutralCommand(0, sim.players[1].yaw, sim.players[1].pitch) };
+    if (p2Injected) {
+        Object.assign(base, p2Injected);
+        p2Injected = null;
+    }
+    return base;
+}
+
+/** One player or two (split screen: player 1 on top, player 2 below). */
+function setPlayers(n: number): void {
+    const count = n >= 2 ? 2 : 1;
+    if (count === state.players) return;
+    state.players = count;
+    if (count === 2 && state.mode !== 'firstPerson') setMode('firstPerson', false);
+    sim.setPlayerCount(count);
+    const p2 = pads.players[1];
+    if (p2) {
+        p2.yaw = sim.players[1].yaw;
+        p2.pitch = sim.players[1].pitch;
+    }
+    scene.setSplit(count === 2);
+    document.body.classList.toggle('split', count === 2);
+    panel.sync();
+    updateHud();
+}
+
+pads.onJoin = (slot) => {
+    if (slot === 0) {
+        if (state.mode !== 'firstPerson') setMode('firstPerson', false);
+        showToast('Player 1: gamepad connected');
+    } else {
+        setPlayers(2);
+        showToast('Player 2 joined — split screen');
+    }
+};
+pads.onLeave = (slot) => {
+    if (slot === 1) {
+        setPlayers(1);
+        showToast('Player 2 left');
+    }
+};
 
 /** Debug only: Rapier's collider wireframes (read-only; nothing flows back into physics). */
 function drawColliders(): void {
@@ -327,6 +433,7 @@ const host: PanelHost = {
     get(id) {
         if (id === 'stress') return String(state.stress);
         if (id === 'props') return sim.propsMode;
+        if (id === 'players') return String(state.players);
         if (id === 'hz') return String(state.hz);
         if (id === 'reflectionScale') return String(state.reflectionScale);
         return (state as unknown as Record<string, string | number | boolean>)[id];
@@ -409,6 +516,9 @@ const host: PanelHost = {
             case 'colliders':
                 state.colliders = Boolean(v);
                 break;
+            case 'players':
+                setPlayers(Number(v));
+                break;
         }
     },
     action(id) {
@@ -453,7 +563,16 @@ const panel = new DebugPanel(host, [
             { kind: 'button', id: 'ragdoll', label: 'Launch ragdoll', key: 'T' },
             { kind: 'button', id: 'dropTest', label: 'Drop test' },
             { kind: 'button', id: 'resetProps', label: 'Reset props' },
-            { kind: 'toggle', id: 'colliders', label: 'Physics colliders' }
+            { kind: 'toggle', id: 'colliders', label: 'Physics colliders' },
+            {
+                kind: 'select',
+                id: 'players',
+                label: 'Players (split screen)',
+                options: [
+                    { value: '1', label: '1' },
+                    { value: '2', label: '2 (gamepad A joins)' }
+                ]
+            }
         ]
     },
     {
@@ -567,6 +686,19 @@ function applyCellSize(cm: number): void {
 const crosshair = document.createElement('div');
 crosshair.className = 'crosshair';
 document.body.append(crosshair);
+// split screen: player 2's crosshair, prompt and label in the bottom view; player 1's label on top
+const crosshair2 = document.createElement('div');
+crosshair2.className = 'crosshair crosshair-p2';
+document.body.append(crosshair2);
+const prompt2 = document.createElement('div');
+prompt2.className = 'hud-prompt prompt-p2';
+document.body.append(prompt2);
+for (const n of [1, 2]) {
+    const tag = document.createElement('div');
+    tag.className = `player-tag player-tag-${n}`;
+    tag.textContent = `P${n}`;
+    document.body.append(tag);
+}
 const chip = document.createElement('button');
 chip.className = 'debug-chip';
 chip.textContent = 'Debug panel (F3)';
@@ -596,6 +728,11 @@ function updateHud(): void {
               ? 'Click to look · <kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>LMB</kbd>/<kbd>E</kbd> grab / release · <kbd>RMB</kbd> throw · wheel reach · <kbd>Q</kbd> drop · <kbd>G</kbd> plank · <kbd>T</kbd> ragdoll · <kbd>Esc</kbd> release mouse · <kbd>V</kbd> orbit'
               : 'Click to look · <kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>G</kbd> carry plank · <kbd>Esc</kbd> release mouse · <kbd>V</kbd> orbit';
     const short = state.mode === 'orbit' ? 'Drag to orbit · two fingers to pan and zoom' : 'Click to look · WASD move · click grab · V orbit';
+    if (state.players > 1 || pads.players[0]) {
+        help.innerHTML = 'Pads: left stick move · right stick look · A jump · RT grab / release · RB throw · B drop · X ragdoll · D-pad reach';
+        crosshair.style.display = state.mode === 'firstPerson' && !state.uiHidden ? '' : 'none';
+        return;
+    }
     help.innerHTML = `<span class="help-long">${long}</span><span class="help-short">${short}</span>`;
     crosshair.style.display = state.mode === 'firstPerson' && !state.uiHidden ? '' : 'none';
 }
@@ -617,6 +754,13 @@ toast.className = 'toast';
 document.body.append(toast);
 let toastTimer = 0;
 let seenEvents = 0;
+function showToast(text: string, kind = 'info'): void {
+    toast.textContent = text;
+    toast.className = `toast show toast-${kind}`;
+    clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => (toast.className = 'toast'), kind === 'goal' ? 6000 : 3500);
+}
+
 function updateObjective(): void {
     const el = document.getElementById('hud-objective');
     if (!el) return;
@@ -628,26 +772,28 @@ function pollEvents(): void {
     if (sim.events.length < seenEvents) seenEvents = 0;
     while (seenEvents < sim.events.length) {
         const e = sim.events[seenEvents++];
-        toast.textContent = e.text;
-        toast.className = `toast show toast-${e.kind}`;
-        clearTimeout(toastTimer);
-        toastTimer = window.setTimeout(() => (toast.className = 'toast'), e.kind === 'goal' ? 6000 : 3500);
+        showToast(e.text, e.kind);
         updateObjective();
     }
 }
 let promptText = '';
 
-/** Context prompt (design doc §2.3): what a click would do right now. */
+/** Context prompt (design doc §2.3): what a click (or a trigger) would do right now. */
+function interactionText(i: number, pad: boolean): string {
+    const it = sim.interaction(i);
+    const both = it.shared ? ' together' : '';
+    if (it.holding) return pad ? `Holding ${propLabel(it.holding)}${both} · RT release · RB throw · B drop` : `Holding ${propLabel(it.holding)}${both} · click to release · right-click to throw · wheel to adjust reach`;
+    if (it.target) return pad ? `RT to grab ${propLabel(it.target)}` : `Click to grab ${propLabel(it.target)}`;
+    return '';
+}
+
 function updatePrompt(): void {
     let t = '';
     if (state.mode === 'firstPerson') {
-        if (!fpInput.locked) t = 'Click to look around';
-        else {
-            const i = sim.interaction();
-            if (i.holding) t = `Holding ${propLabel(i.holding)} · click to release · right-click to throw · wheel to adjust reach`;
-            else if (i.target) t = `Click to grab ${propLabel(i.target)}`;
-        }
+        if (!fpInput.locked && !pads.players[0]) t = 'Click to look around';
+        else t = interactionText(0, !fpInput.locked);
     }
+    if (state.players > 1) prompt2.textContent = interactionText(1, true);
     if (t !== promptText) {
         promptText = t;
         document.getElementById('hud-prompt')!.textContent = t;
@@ -838,6 +984,16 @@ window.__riverLab = {
         sim.step(fpInput.command());
         clock.reset(sim.tick);
         state.forceVoxel = true;
+    },
+    /** Two-player split screen without real pads (tests); player 2 commands via input2. */
+    setPlayers: (n: number) => setPlayers(n),
+    input2: (c: Record<string, unknown>) => {
+        p2Injected = { ...p2Injected, ...c };
+    },
+    look2(yaw: number, pitch: number) {
+        sim.players[1].yaw = yaw;
+        sim.players[1].pitch = pitch;
+        p2Injected = { ...p2Injected, yaw, pitch };
     },
     /** Merges fields into the next player command (grab / throw / move edges for tests). */
     input: (c: Record<string, unknown>) => fpInput.inject(c),

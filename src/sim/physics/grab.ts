@@ -21,8 +21,11 @@ export const GRAB = {
     /** Spring natural frequency (Hz) and damping ratio, mass-normalized. */
     frequency: 3.2,
     damping: 1.0,
-    /** Hard cap on the force a beaver can exert (~45 kg lift after gravity). */
-    maxForce: 450,
+    /**
+     * Hard cap on the force one beaver can exert: lifts up to ~66 kg alone. The 113 kg log needs two
+     * beavers (2 x 650 N > 1,108 N), as the design intends (§2.4).
+     */
+    maxForce: 650,
     /** Released when the anchor stays further than this from its target... */
     breakDistance: 1.25,
     /** ...for this long (seconds; a 24 kg plank lifted from the ground needs ~0.5 s at the cap)... */

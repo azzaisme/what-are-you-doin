@@ -151,29 +151,43 @@ const _target = { x: 0, y: 0, z: 0 };
 const _tv = { x: 0, y: 0, z: 0 };
 const _force: GrabForceResult = { fx: 0, fy: 0, fz: 0, requested: 0, error: 0, saturated: false };
 
+const EMPTY_STATE: CharacterState = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, grounded: false };
+
+/** One player's physical presence: capsule, controller and what they hold. */
+export class Rig {
+    held: PhysBody | null = null;
+    heldLocal = { x: 0, y: 0, z: 0 };
+    holdDist = 1.5;
+    stretchTime = 0;
+    prevTarget = { x: 0, y: 0, z: 0 };
+    hasPrevTarget = false;
+    grabError = 0;
+    grabForce = 0;
+    readonly body: RAPIER.RigidBody;
+    readonly collider: RAPIER.Collider;
+    readonly controller: RAPIER.KinematicCharacterController;
+    readonly state: CharacterState;
+
+    constructor(body: RAPIER.RigidBody, collider: RAPIER.Collider, controller: RAPIER.KinematicCharacterController, state: CharacterState) {
+        this.body = body;
+        this.collider = collider;
+        this.controller = controller;
+        this.state = state;
+    }
+}
+
 export class PhysicsWorld {
     readonly world: RAPIER.World;
     readonly bodies = new Map<number, PhysBody>();
     private readonly byCollider = new Map<number, PhysBody>();
     readonly stats: PhysicsStats = { stepMs: 0, tickMs: 0, activeBodies: 0, enabledBodies: 0, linClamps: 0, angClamps: 0, recovered: 0, releaseClamps: 0, holding: -1, grabError: 0, grabForce: 0, grabSaturated: false, maxHeldSpeed: 0, grabBreaks: 0 };
-    readonly character: CharacterState = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, grounded: false };
-
-    private player: RAPIER.RigidBody | null = null;
-    private playerCollider: RAPIER.Collider | null = null;
-    private controller: RAPIER.KinematicCharacterController | null = null;
+    /** One rig per player: capsule, character controller, grab state. Player 0 is the default. */
+    readonly rigs: Rig[] = [];
     private terrainHandle = -1;
-
-    // grab state
-    private held: PhysBody | null = null;
-    private heldLocal = { x: 0, y: 0, z: 0 };
-    private holdDist = 1.5;
-    private stretchTime = 0;
+    /** How many rigs hold each body (two beavers can carry one log; forces add, each bounded). */
+    private readonly holdCount = new Map<number, number>();
     // a just-released body may be pressed into geometry (a snag); bound the energy it can pick up
-    private released: PhysBody | null = null;
-    private releasedTicks = 0;
-    private releasedCap = 0;
-    private prevTarget = { x: 0, y: 0, z: 0 };
-    private hasPrevTarget = false;
+    private readonly releasedGuards: { pb: PhysBody; ticks: number; cap: number }[] = [];
 
     constructor() {
         this.world = new RAPIER.World({ x: 0, y: -GRAVITY, z: 0 });
@@ -291,7 +305,7 @@ export class PhysicsWorld {
     setEnabled(id: number, enabled: boolean): void {
         const b = this.bodies.get(id);
         if (!b || b.enabled === enabled) return;
-        if (!enabled && this.held === b) this.release();
+        if (!enabled) this.releaseBody(b);
         b.enabled = enabled;
         b.body.setEnabled(enabled);
     }
@@ -300,7 +314,7 @@ export class PhysicsWorld {
     place(id: number, p: Pose, lin: Vec3Like = { x: 0, y: 0, z: 0 }, ang: Vec3Like = { x: 0, y: 0, z: 0 }): void {
         const b = this.bodies.get(id);
         if (!b) return;
-        if (this.held === b) this.release();
+        this.releaseBody(b);
         b.body.setTranslation(p.p, true);
         b.body.setRotation(p.q, true);
         b.body.setLinvel(lin, true);
@@ -329,16 +343,24 @@ export class PhysicsWorld {
 
     // ------------------------------------------------------------------------------- character
 
-    /** Kinematic capsule driven by Rapier's character controller (step-up, slopes, ground snap). */
-    createCharacter(x: number, y: number, z: number): void {
+    /** Player 0's character state (back-compatible accessor). */
+    get character(): CharacterState {
+        return this.rigs[0]?.state ?? EMPTY_STATE;
+    }
+
+    /**
+     * Kinematic capsule driven by Rapier's character controller (step-up, slopes, ground snap) for a
+     * player index (0, 1, ...). Players bump into each other but never push each other's held props.
+     */
+    createCharacter(x: number, y: number, z: number, p = 0): void {
         const C = CHARACTER;
-        this.player = this.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(x, y, z));
+        const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(x, y, z));
         const cd = RAPIER.ColliderDesc.capsule(C.half, C.radius)
             .setTranslation(0, C.half + C.radius, 0)
-            .setCollisionGroups(groups(LAYER.player, LAYER.static | LAYER.prop | LAYER.kinematic))
+            .setCollisionGroups(groups(LAYER.player, LAYER.static | LAYER.prop | LAYER.kinematic | LAYER.player))
             // no contact forces with props: the controller pushes them with bounded impulses instead
             .setSolverGroups(groups(LAYER.player, 0));
-        this.playerCollider = this.world.createCollider(cd, this.player);
+        const collider = this.world.createCollider(cd, body);
         const k = this.world.createCharacterController(0.02);
         // dynamic bodies count as steps: you walk up onto beams and planks you have laid down
         k.enableAutostep(C.stepHeight, C.stepMinWidth, true);
@@ -348,34 +370,39 @@ export class PhysicsWorld {
         k.setApplyImpulsesToDynamicBodies(true);
         k.setCharacterMass(C.pushMass);
         k.setSlideEnabled(true);
-        this.controller = k;
-        Object.assign(this.character, { x, y, z, vx: 0, vy: 0, vz: 0, grounded: false });
+        this.rigs[p] = new Rig(body, collider, k, { x, y, z, vx: 0, vy: 0, vz: 0, grounded: false });
     }
 
-    setCharacterEnabled(enabled: boolean): void {
-        if (!this.player) return;
-        if (!enabled) this.release();
-        this.player.setEnabled(enabled);
+    rig(p = 0): Rig | undefined {
+        return this.rigs[p];
     }
 
-    placeCharacter(x: number, y: number, z: number): void {
-        if (!this.player) return;
-        this.player.setTranslation({ x, y, z }, true);
-        this.player.setNextKinematicTranslation({ x, y, z });
-        Object.assign(this.character, { x, y, z, vx: 0, vy: 0, vz: 0, grounded: false });
+    setCharacterEnabled(enabled: boolean, p = 0): void {
+        const r = this.rigs[p];
+        if (!r) return;
+        if (!enabled) this.release(p);
+        r.body.setEnabled(enabled);
+    }
+
+    placeCharacter(x: number, y: number, z: number, p = 0): void {
+        const r = this.rigs[p];
+        if (!r) return;
+        r.body.setTranslation({ x, y, z }, true);
+        r.body.setNextKinematicTranslation({ x, y, z });
+        Object.assign(r.state, { x, y, z, vx: 0, vy: 0, vz: 0, grounded: false });
     }
 
     /**
-     * Moves the character for one tick from a desired horizontal velocity (world space) and a jump
+     * Moves a character for one tick from a desired horizontal velocity (world space) and a jump
      * request. Gravity, step-up and sliding are handled here; the controller never enters statics.
      */
-    moveCharacter(wishX: number, wishZ: number, jump: boolean): void {
-        const k = this.controller;
-        const body = this.player;
-        const col = this.playerCollider;
-        if (!k || !body || !col) return;
+    moveCharacter(wishX: number, wishZ: number, jump: boolean, p = 0): void {
+        const r = this.rigs[p];
+        if (!r) return;
+        const k = r.controller;
+        const body = r.body;
         const C = CHARACTER;
-        const s = this.character;
+        const s = r.state;
         const dt = SIM_DT;
         const a = Math.min(1, dt * (s.grounded ? C.accelGround : C.accelAir));
         s.vx += (wishX - s.vx) * a;
@@ -386,12 +413,12 @@ export class PhysicsWorld {
         }
         s.vy -= GRAVITY * dt;
         if (s.grounded && s.vy < -1) s.vy = -1; // keep pressing into the ground, never accumulate
-        const heldHandle = this.held ? this.held.body.handle : -1;
+        const heldHandle = r.held ? r.held.body.handle : -1;
         k.computeColliderMovement(
-            col,
+            r.collider,
             { x: s.vx * dt, y: s.vy * dt, z: s.vz * dt },
             RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
-            groups(LAYER.player, LAYER.static | LAYER.prop | LAYER.kinematic),
+            groups(LAYER.player, LAYER.static | LAYER.prop | LAYER.kinematic | LAYER.player),
             // never collide with (or climb onto) what you are holding: no grab/body feedback loop
             heldHandle < 0 ? undefined : (c: RAPIER.Collider) => c.parent()?.handle !== heldHandle
         );
@@ -415,128 +442,171 @@ export class PhysicsWorld {
 
     // ------------------------------------------------------------------------------- grab
 
+    /** Id of the body player 0 holds, or -1. */
     get heldId(): number {
-        return this.held ? this.held.id : -1;
+        return this.heldIdOf(0);
+    }
+
+    heldIdOf(p: number): number {
+        const r = this.rigs[p];
+        return r?.held ? r.held.id : -1;
+    }
+
+    /** Number of players holding a body. */
+    holders(id: number): number {
+        return this.holdCount.get(id) ?? 0;
+    }
+
+    private castView(eye: Vec3Like, yaw: number, pitch: number, p: number): { pb: PhysBody; toi: number } | null {
+        const d = viewDir(yaw, pitch, _dir);
+        const ray = new RAPIER.Ray({ x: eye.x, y: eye.y, z: eye.z }, { x: d.x, y: d.y, z: d.z });
+        // ignore every player capsule (yours and the other beaver's) and what any player holds is
+        // still grabbable: two beavers can hold the same log
+        const hit = this.world.castRay(ray, GRAB.reach, true, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, groups(ALL, ALL & ~LAYER.player), this.rigs[p]?.collider);
+        if (!hit) return null;
+        const pb = this.byCollider.get(hit.collider.handle);
+        if (!pb || pb.kind !== 'dynamic' || !pb.grabbable || !pb.enabled) return null;
+        return { pb, toi: hit.timeOfImpact };
     }
 
     /** Raycasts from the eye along the view; grabs the first grabbable dynamic body within reach. */
-    tryGrab(eye: Vec3Like, yaw: number, pitch: number): boolean {
-        if (this.held) return false;
-        const d = viewDir(yaw, pitch, _dir);
-        const ray = new RAPIER.Ray({ x: eye.x, y: eye.y, z: eye.z }, { x: d.x, y: d.y, z: d.z });
-        const hit = this.world.castRay(ray, GRAB.reach, true, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, groups(ALL, ALL & ~LAYER.player), this.playerCollider ?? undefined);
+    tryGrab(eye: Vec3Like, yaw: number, pitch: number, p = 0): boolean {
+        const r = this.rigs[p];
+        if (!r || r.held) return false;
+        const hit = this.castView(eye, yaw, pitch, p);
         if (!hit) return false;
-        const pb = this.byCollider.get(hit.collider.handle);
-        if (!pb || pb.kind !== 'dynamic' || !pb.grabbable || !pb.enabled) return false;
-        const px = eye.x + d.x * hit.timeOfImpact;
-        const py = eye.y + d.y * hit.timeOfImpact;
-        const pz = eye.z + d.z * hit.timeOfImpact;
-        this.grabAt(pb, { x: px, y: py, z: pz }, hit.timeOfImpact);
+        const d = viewDir(yaw, pitch, _dir);
+        this.grabAt(hit.pb, { x: eye.x + d.x * hit.toi, y: eye.y + d.y * hit.toi, z: eye.z + d.z * hit.toi }, hit.toi, p);
         return true;
     }
 
     /** Read-only: id of the grabbable body the view ray hits within reach, or -1 (for UI prompts). */
-    probe(eye: Vec3Like, yaw: number, pitch: number): number {
-        const d = viewDir(yaw, pitch, _dir);
-        const ray = new RAPIER.Ray({ x: eye.x, y: eye.y, z: eye.z }, { x: d.x, y: d.y, z: d.z });
-        const hit = this.world.castRay(ray, GRAB.reach, true, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, groups(ALL, ALL & ~LAYER.player), this.playerCollider ?? undefined);
-        const pb = hit ? this.byCollider.get(hit.collider.handle) : undefined;
-        return pb && pb.kind === 'dynamic' && pb.grabbable && pb.enabled && pb !== this.held ? pb.id : -1;
+    probe(eye: Vec3Like, yaw: number, pitch: number, p = 0): number {
+        const hit = this.castView(eye, yaw, pitch, p);
+        return hit && hit.pb !== this.rigs[p]?.held ? hit.pb.id : -1;
     }
 
     /** Grabs a body at a world point (used by tryGrab and by "put the plank in my hands"). */
-    grabAt(pb: PhysBody, point: Vec3Like, holdDistance: number): void {
-        if (this.held) this.release();
+    grabAt(pb: PhysBody, point: Vec3Like, holdDistance: number, p = 0): void {
+        const r = this.rigs[p];
+        if (!r) return;
+        if (r.held) this.release(p);
         // anchor in body-local coordinates
         const t = pb.body.translation();
         const q = pb.body.rotation();
-        inverseRotate(q, point.x - t.x, point.y - t.y, point.z - t.z, this.heldLocal);
-        this.held = pb;
-        this.holdDist = clampHold(holdDistance);
-        this.stretchTime = 0;
-        this.hasPrevTarget = false;
-        pb.body.setAngularDamping(GRAB.heldAngularDamping);
-        for (const c of pb.colliders) c.setCollisionGroups(groups(LAYER.held, ALL & ~LAYER.player));
+        inverseRotate(q, point.x - t.x, point.y - t.y, point.z - t.z, r.heldLocal);
+        r.held = pb;
+        r.holdDist = clampHold(holdDistance);
+        r.stretchTime = 0;
+        r.hasPrevTarget = false;
+        const n = (this.holdCount.get(pb.id) ?? 0) + 1;
+        this.holdCount.set(pb.id, n);
+        if (n === 1) {
+            pb.body.setAngularDamping(GRAB.heldAngularDamping);
+            for (const c of pb.colliders) c.setCollisionGroups(groups(LAYER.held, ALL & ~LAYER.player));
+        }
         pb.body.wakeUp();
-        this.stats.holding = pb.id;
+        if (p === 0) this.stats.holding = pb.id;
     }
 
-    grabById(id: number, point: Vec3Like, holdDistance: number): void {
+    grabById(id: number, point: Vec3Like, holdDistance: number, p = 0): void {
         const pb = this.bodies.get(id);
-        if (pb && pb.kind === 'dynamic' && pb.enabled) this.grabAt(pb, point, holdDistance);
+        if (pb && pb.kind === 'dynamic' && pb.enabled) this.grabAt(pb, point, holdDistance, p);
     }
 
-    release(): void {
-        const pb = this.held;
-        if (!pb) return;
-        pb.body.setAngularDamping(pb.baseAngularDamping);
-        for (const c of pb.colliders) c.setCollisionGroups(groups(LAYER.prop, ALL));
-        this.held = null;
-        const v = pb.body.linvel();
-        this.released = pb;
-        this.releasedTicks = RELEASE_GUARD_TICKS;
-        this.releasedCap = Math.max(RELEASE_MIN_CAP, 1.2 * Math.hypot(v.x, v.y, v.z));
-        this.stats.holding = -1;
-        this.stats.grabError = 0;
-        this.stats.grabForce = 0;
-        this.stats.grabSaturated = false;
+    /** Releases whatever a player holds. */
+    release(p = 0): void {
+        const r = this.rigs[p];
+        const pb = r?.held;
+        if (!r || !pb) return;
+        r.held = null;
+        const n = (this.holdCount.get(pb.id) ?? 1) - 1;
+        if (n <= 0) {
+            this.holdCount.delete(pb.id);
+            pb.body.setAngularDamping(pb.baseAngularDamping);
+            for (const c of pb.colliders) c.setCollisionGroups(groups(LAYER.prop, ALL));
+            const v = pb.body.linvel();
+            this.releasedGuards.push({ pb, ticks: RELEASE_GUARD_TICKS, cap: Math.max(RELEASE_MIN_CAP, 1.2 * Math.hypot(v.x, v.y, v.z)) });
+        } else {
+            this.holdCount.set(pb.id, n);
+        }
+        if (p === 0) {
+            this.stats.holding = -1;
+            this.stats.grabError = 0;
+            this.stats.grabForce = 0;
+            this.stats.grabSaturated = false;
+        }
+    }
+
+    /** Every player lets go of a body (it is being moved, disabled or respawned). */
+    private releaseBody(pb: PhysBody): void {
+        for (let p = 0; p < this.rigs.length; p++) if (this.rigs[p]?.held === pb) this.release(p);
     }
 
     /** Releases with a bounded impulse along the view. */
-    throwHeld(yaw: number, pitch: number): void {
-        const pb = this.held;
+    throwHeld(yaw: number, pitch: number, p = 0): void {
+        const pb = this.rigs[p]?.held;
         if (!pb) return;
-        this.release();
+        this.release(p);
         const d = viewDir(yaw, pitch, _dir);
         const j = throwImpulse(pb.body.mass());
         pb.body.applyImpulse({ x: d.x * j, y: d.y * j + j * 0.15, z: d.z * j }, true);
-        // the throw itself is allowed: raise the post-release cap by the throw speed
-        this.releasedCap += j / Math.max(pb.body.mass(), 1e-3);
+        // the throw itself is allowed: raise the post-release bound by the throw speed
+        const g = this.releasedGuards.find((x) => x.pb === pb);
+        if (g) g.cap += j / Math.max(pb.body.mass(), 1e-3);
     }
 
-    adjustHold(delta: number): void {
-        this.holdDist = clampHold(this.holdDist + delta);
+    adjustHold(delta: number, p = 0): void {
+        const r = this.rigs[p];
+        if (r) r.holdDist = clampHold(r.holdDist + delta);
     }
 
-    /** Applies this tick's bounded grab force. Call once per tick before step(). */
-    applyGrab(eye: Vec3Like, yaw: number, pitch: number): void {
-        const pb = this.held;
-        if (!pb) return;
+    /** Applies this tick's bounded grab force for a player. Call once per tick before step(). */
+    applyGrab(eye: Vec3Like, yaw: number, pitch: number, p = 0): void {
+        const r = this.rigs[p];
+        const pb = r?.held;
+        if (!r || !pb) return;
         const d = viewDir(yaw, pitch, _dir);
-        _target.x = eye.x + d.x * this.holdDist;
-        _target.y = eye.y + d.y * this.holdDist;
-        _target.z = eye.z + d.z * this.holdDist;
+        _target.x = eye.x + d.x * r.holdDist;
+        _target.y = eye.y + d.y * r.holdDist;
+        _target.z = eye.z + d.z * r.holdDist;
         const b = pb.body;
         const t = b.translation();
         const q = b.rotation();
-        rotate(q, this.heldLocal.x, this.heldLocal.y, this.heldLocal.z, _v);
+        rotate(q, r.heldLocal.x, r.heldLocal.y, r.heldLocal.z, _v);
         const anchor = { x: t.x + _v.x, y: t.y + _v.y, z: t.z + _v.z };
         const av = b.velocityAtPoint(anchor);
         // the hold point's own velocity: walking plus swinging round with the view
-        if (this.hasPrevTarget) {
-            _tv.x = (_target.x - this.prevTarget.x) / SIM_DT;
-            _tv.y = (_target.y - this.prevTarget.y) / SIM_DT;
-            _tv.z = (_target.z - this.prevTarget.z) / SIM_DT;
+        if (r.hasPrevTarget) {
+            _tv.x = (_target.x - r.prevTarget.x) / SIM_DT;
+            _tv.y = (_target.y - r.prevTarget.y) / SIM_DT;
+            _tv.z = (_target.z - r.prevTarget.z) / SIM_DT;
         } else {
             _tv.x = _tv.y = _tv.z = 0;
         }
-        this.prevTarget.x = _target.x;
-        this.prevTarget.y = _target.y;
-        this.prevTarget.z = _target.z;
-        this.hasPrevTarget = true;
-        const f = grabForce({ mass: b.mass(), gravity: GRAVITY, anchor, anchorVelocity: av, target: _target, targetVelocity: _tv }, _force);
+        r.prevTarget.x = _target.x;
+        r.prevTarget.y = _target.y;
+        r.prevTarget.z = _target.z;
+        r.hasPrevTarget = true;
+        // with two holders, each supports half the weight (each force stays under its own cap)
+        const share = 1 / Math.max(1, this.holdCount.get(pb.id) ?? 1);
+        const f = grabForce({ mass: b.mass() * share, gravity: GRAVITY, anchor, anchorVelocity: av, target: _target, targetVelocity: _tv }, _force);
         b.applyImpulseAtPoint({ x: f.fx * SIM_DT, y: f.fy * SIM_DT, z: f.fz * SIM_DT }, anchor, true);
+        r.grabError = f.error;
+        r.grabForce = Math.hypot(f.fx, f.fy, f.fz);
         const s = this.stats;
-        s.grabError = f.error;
-        s.grabForce = Math.hypot(f.fx, f.fy, f.fz);
-        s.grabSaturated = f.saturated;
+        if (p === 0) {
+            s.grabError = f.error;
+            s.grabForce = r.grabForce;
+            s.grabSaturated = f.saturated;
+        }
         const lv = b.linvel();
         s.maxHeldSpeed = Math.max(s.maxHeldSpeed, Math.hypot(lv.x, lv.y, lv.z));
         // snagged or too heavy to follow: let go rather than build up energy
-        this.stretchTime = f.error > GRAB.breakDistance ? this.stretchTime + SIM_DT : 0;
-        if (this.stretchTime > GRAB.breakTime || f.error > GRAB.snapDistance) {
+        r.stretchTime = f.error > GRAB.breakDistance ? r.stretchTime + SIM_DT : 0;
+        if (r.stretchTime > GRAB.breakTime || f.error > GRAB.snapDistance) {
             s.grabBreaks++;
-            this.release();
+            this.release(p);
         }
     }
 
@@ -577,17 +647,17 @@ export class PhysicsWorld {
                 s.recovered++;
             }
         }
-        if (this.released && this.releasedTicks > 0) {
-            this.releasedTicks--;
-            const b = this.released.body;
+        for (let i = this.releasedGuards.length - 1; i >= 0; i--) {
+            const g = this.releasedGuards[i];
+            const b = g.pb.body;
             const lv = b.linvel();
             const ls = Math.hypot(lv.x, lv.y, lv.z);
-            if (ls > this.releasedCap) {
-                const k = this.releasedCap / ls;
+            if (ls > g.cap) {
+                const k = g.cap / ls;
                 b.setLinvel({ x: lv.x * k, y: lv.y * k, z: lv.z * k }, true);
                 s.releaseClamps++;
             }
-            if (this.releasedTicks === 0) this.released = null;
+            if (--g.ticks <= 0 || this.holders(g.pb.id) > 0) this.releasedGuards.splice(i, 1);
         }
         s.activeBodies = active;
         s.enabledBodies = enabled;

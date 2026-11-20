@@ -67,6 +67,9 @@ Query parameters (handy for comparisons and screenshots):
 | `Q` | drop |
 | `G` | put a plank in your hands (scripted mode: the Epic 1 comfort-test plank) |
 | `T` | launch the ragdoll dummy |
+| **Gamepad** | press **A** to join (first pad: player 1, second pad: player 2 → split screen) |
+| left / right stick | move / look |
+| A · LT or L3 · RT · RB · B · X · Y · D-pad | jump · sprint · grab / release · throw · drop · ragdoll · plank · reach |
 | `P` / `N` | pause / step exactly one voxel frame |
 | `Backspace` | reset the scene |
 | `H` | hide all UI (for screenshots) |
