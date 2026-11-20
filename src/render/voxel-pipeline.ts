@@ -57,11 +57,11 @@ export class VoxelClient {
     }
 
     /** Builds the static world in the worker; resolves once its meshes are ready to apply. */
-    init(cellCm: number, seed: number): Promise<BuildInfo> {
+    init(cellCm: number, seed: number, level: string): Promise<BuildInfo> {
         return new Promise((resolve, reject) => {
             this.readyResolve = resolve;
             this.readyReject = reject;
-            this.send({ type: 'init', cellCm, seed });
+            this.send({ type: 'init', cellCm, seed, level });
         });
     }
 

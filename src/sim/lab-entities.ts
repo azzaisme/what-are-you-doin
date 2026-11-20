@@ -6,7 +6,7 @@
 import type { VoxelAsset } from '../assets/asset.ts';
 import { beaverAsset } from '../assets/beaver.ts';
 import { DUMMY_PARTS, dummyPartAsset } from '../assets/dummy.ts';
-import { bucketAsset, cubeAsset, logAsset, plankAsset, sphereAsset } from '../assets/props.ts';
+import { beamAsset, bucketAsset, cubeAsset, logAsset, plankAsset, sphereAsset } from '../assets/props.ts';
 import { uteAsset } from '../assets/ute.ts';
 import { pose } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
@@ -16,6 +16,9 @@ import { ANIM_MAX } from './snapshots.ts';
 
 export const MAX_STRESS = 25;
 export const DUMMY_ID0 = 200;
+export const EXTRA_PLANKS = 5;
+export const EXTRA_BEAMS = 2;
+export const EXTRA_LOGS = 2;
 
 export interface SimEntity {
     /** Stable identity, also the voxel object id. */
@@ -43,6 +46,8 @@ export interface LabEntities {
     held: SimEntity;
     stress: SimEntity[];
     dummy: SimEntity[];
+    /** Extra level props (more planks, beams, logs); hidden unless a level places them. */
+    extras: SimEntity[];
     /** Not voxelized: carries the character's eye pose through the snapshot ring. */
     player: SimEntity;
 }
@@ -71,8 +76,12 @@ export function createLabEntities(): LabEntities {
     }
     const dummy: SimEntity[] = [];
     for (let n = 0; n < DUMMY_PARTS.length; n++) dummy.push(add(DUMMY_ID0 + n, `dummy-${DUMMY_PARTS[n].name}`, dummyPartAsset(n), 2));
+    const extras: SimEntity[] = [];
+    for (let n = 0; n < EXTRA_PLANKS; n++) extras.push(add(300 + n, `extra-plank-${n}`, plankAsset(`extra-plank-${n}`), 1));
+    for (let n = 0; n < EXTRA_BEAMS; n++) extras.push(add(320 + n, `beam-${n}`, beamAsset(`beam-${n}`), 1));
+    for (let n = 0; n < EXTRA_LOGS; n++) extras.push(add(340 + n, `extra-log-${n}`, logAsset(), 1));
     const player = add(900, 'player', EMPTY_ASSET, 0);
-    return { entities, beaver, bucket, ute, plank, log, cube, sphere, held, stress, dummy, player };
+    return { entities, beaver, bucket, ute, plank, log, cube, sphere, held, stress, dummy, extras, player };
 }
 
 const EMPTY_ASSET: VoxelAsset = {

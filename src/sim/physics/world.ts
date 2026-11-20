@@ -340,7 +340,8 @@ export class PhysicsWorld {
             .setSolverGroups(groups(LAYER.player, 0));
         this.playerCollider = this.world.createCollider(cd, this.player);
         const k = this.world.createCharacterController(0.02);
-        k.enableAutostep(C.stepHeight, C.stepMinWidth, false);
+        // dynamic bodies count as steps: you walk up onto beams and planks you have laid down
+        k.enableAutostep(C.stepHeight, C.stepMinWidth, true);
         k.enableSnapToGround(C.snap);
         k.setMaxSlopeClimbAngle(C.maxClimb);
         k.setMinSlopeSlideAngle(C.minSlide);

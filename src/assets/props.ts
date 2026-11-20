@@ -33,6 +33,14 @@ export function plankAsset(name = 'plank'): VoxelAsset {
     return rigid(name, [{ name: 'plank', volume: v, priority: 1, refColor: 0xc48d55 }]);
 }
 
+/** 3.2 x 0.2 x 0.15 m beam (long enough to span the timber yard's 2.7 m creek gap), long axis X. */
+export const BEAM_HALF = { x: 1.6, y: 0.1, z: 0.075 };
+export function beamAsset(name = 'beam'): VoxelAsset {
+    const g = grain(M.Timber, 'x', 0.15, 11);
+    const v = box(BEAM_HALF.x, BEAM_HALF.y, BEAM_HALF.z, (x, y, z) => (Math.abs(x) > BEAM_HALF.x - 0.07 ? voxel(M.TimberEnd, latticeShade(x, y, z, 0.1, 3)) : g(x, y, z)));
+    return rigid(name, [{ name: 'beam', volume: v, priority: 1, refColor: 0xa8743f }]);
+}
+
 /** Log: radius 0.2 m, length 2.0 m, long axis X. Bark with ring end grain. */
 export const LOG_RADIUS = 0.2;
 export function logAsset(): VoxelAsset {

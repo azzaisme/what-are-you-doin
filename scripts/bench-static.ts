@@ -1,11 +1,14 @@
 // Measures static scene build + meshing in Node (CPU reference, no GPU).
-import { buildRiverLab } from '../src/levels/river-lab.ts';
+import { getLevel } from '../src/levels/index.ts';
 import { DYNAMIC_REGION, STATIC_REGION } from '../src/voxels/dirty.ts';
 import { MeshOutput, meshRegionBlocked } from '../src/voxels/mesher.ts';
 import { VoxelWorld } from '../src/voxels/world.ts';
 
 const world = new VoxelWorld();
-const r = buildRiverLab(world, 1);
+// LEVEL=lab for the River Lab; default: the Timber Yard
+const level = getLevel(process.env.LEVEL ?? 'yard');
+const r = level.build(world, 1);
+console.log(`level: ${level.name}`);
 console.log(`build: ${r.ms.toFixed(0)} ms, columns ${r.columns}, static cells ${r.staticCells}, chunks ${world.chunkCount}, trees ${r.trees}, rocks ${r.rocks}, reeds ${r.reeds}`);
 const RX = STATIC_REGION.x, RY = STATIC_REGION.y, RZ = STATIC_REGION.z;
 const regions = new Set<string>();

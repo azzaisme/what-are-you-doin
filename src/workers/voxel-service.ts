@@ -8,7 +8,7 @@
  * finished buffers. The main thread only uploads them, all at once.
  */
 
-import { buildRiverLab } from '../levels/river-lab.ts';
+import { getLevel } from '../levels/index.ts';
 import { createLabEntities } from '../sim/lab-entities.ts';
 import type { SimEntity } from '../sim/lab-entities.ts';
 import { ANIM_MAX } from '../sim/snapshots.ts';
@@ -70,8 +70,8 @@ export class VoxelService {
         return this.tracked.length;
     }
 
-    build(seed: number): { build: BuildInfo; units: UnitMesh[] } {
-        const r = buildRiverLab(this.world, seed);
+    build(seed: number, level = 'yard'): { build: BuildInfo; units: UnitMesh[] } {
+        const r = getLevel(level).build(this.world, seed);
         const t0 = performance.now();
         const units = this.meshDirty();
         return {

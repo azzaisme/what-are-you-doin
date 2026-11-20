@@ -65,7 +65,7 @@ export interface BuildInfo {
 }
 
 export type ToWorker =
-    | { type: 'init'; cellCm: number; seed: number }
+    | { type: 'init'; cellCm: number; seed: number; level: string }
     | { type: 'frame'; frame: number; time: number; policy: SamplingPolicy; reference: boolean; states: Float64Array }
     | { type: 'query'; id: number; what: 'hash' | 'verify' };
 

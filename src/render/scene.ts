@@ -46,7 +46,7 @@ import {
 import type { GraphicsDevice } from 'playcanvas';
 import { Water } from 'playcanvas/scripts/esm/water.mjs';
 
-import { LAB_MAX_X, LAB_MIN_X, WATER_Y } from '../levels/river-lab.ts';
+import type { LevelDef } from '../levels/level.ts';
 import type { WaterApi } from '../types/engine-scripts.ts';
 
 export interface Quality {
@@ -82,7 +82,7 @@ export interface LabScene {
     sunAzimuth: number;
 }
 
-export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality): Promise<LabScene> {
+export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality, level: LevelDef): Promise<LabScene> {
     // WebGL2 baseline (design doc §4.1). WebGPU is an optional, measured extension for later.
     const device = await createGraphicsDevice(canvas, { deviceTypes: [DEVICETYPE_WEBGL2], antialias: false });
     device.maxPixelRatio = Math.min(window.devicePixelRatio, quality.pixelRatio);
@@ -174,8 +174,8 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
     app.scene.fog.end = 120;
 
     // ---- the river: one smooth surface exception (design doc §3.3 item 5)
-    const riverLength = LAB_MAX_X - LAB_MIN_X;
-    const waterMesh = Mesh.fromGeometry(device, new PlaneGeometry({ halfExtents: new Vec2(riverLength / 2, 4.9), widthSegments: 1, lengthSegments: 1 }));
+    const W = level.water;
+    const waterMesh = Mesh.fromGeometry(device, new PlaneGeometry({ halfExtents: new Vec2(W.halfX, W.halfZ), widthSegments: 1, lengthSegments: 1 }));
     const waterEntity = new Entity('River');
     waterEntity.addComponent('render', {
         meshInstances: [new MeshInstance(waterMesh, new StandardMaterial())],
@@ -183,7 +183,7 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
         castShadows: false,
         receiveShadows: false
     });
-    waterEntity.setLocalPosition((LAB_MIN_X + LAB_MAX_X) / 2, WATER_Y, 0);
+    waterEntity.setLocalPosition(W.cx, W.y, W.cz);
     app.root.addChild(waterEntity);
     waterEntity.addComponent('script');
     const water = waterEntity.script!.create(Water, {
@@ -233,8 +233,8 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
         worldLayer,
         immediateLayer,
         quality,
-        sunElevation: 5,
-        sunAzimuth: 30,
+        sunElevation: level.sun.elevation,
+        sunAzimuth: level.sun.azimuth,
         setSun(elevation: number, azimuth: number) {
             scene.sunElevation = elevation;
             scene.sunAzimuth = azimuth;

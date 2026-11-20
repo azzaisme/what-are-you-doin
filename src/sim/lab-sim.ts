@@ -14,7 +14,8 @@
 import { BEAVER_ANIM_CHANNELS, BEAVER_CARRY, BEAVER_HEAD_YAW, BEAVER_WALK_AMOUNT, BEAVER_WALK_PHASE, beaverLeftHand } from '../assets/beaver.ts';
 import { BUCKET_HANDLE_TOP, LOG_RADIUS } from '../assets/props.ts';
 import { UTE_ANIM_CHANNELS, UTE_PITCH, UTE_ROLL, UTE_STEER, UTE_SUSPENSION, UTE_WHEELBASE_HALF, UTE_WHEEL_RADIUS, UTE_WHEEL_SPIN } from '../assets/ute.ts';
-import { BEAVER_LOOP, PLATEAU_Y, UTE_TRACK, groundSurfaceY, terrainHeight } from '../levels/river-lab.ts';
+import type { LevelDef } from '../levels/level.ts';
+import { BEAVER_LOOP, PLATEAU_Y, UTE_TRACK, groundSurfaceY, riverLabLevel } from '../levels/river-lab.ts';
 import { composePose, pose, quatFromAxisAngle, quatFromYawPitchRoll, quatMul, quatRotate, quatSlerp, vec3  } from '../voxels/math.ts';
 
 import { SIM_DT } from './clock.ts';
@@ -22,7 +23,7 @@ import { ACTION_DROP, ACTION_DROP_TEST, ACTION_RAGDOLL, ACTION_RESET_PROPS, neut
 import type { PlayerCommand } from './commands.ts';
 import { MAX_STRESS, createLabEntities } from './lab-entities.ts';
 import type { SimEntity } from './lab-entities.ts';
-import { PLAY_AREA, addDummy, addLabKinematics, buildLabPhysics, labPropDefs, launchDummy, stressDef } from './lab-physics.ts';
+import { addDummy, addLabKinematics, buildLabPhysics, launchDummy, propBody, stressDef } from './lab-physics.ts';
 import { CHARACTER } from './physics/world.ts';
 import type { PhysicsWorld } from './physics/world.ts';
 import { ANIM_MAX, SnapshotRing, writeEntity } from './snapshots.ts';
@@ -38,6 +39,15 @@ export const STRESS_KICK_TICKS = 150;
 
 export interface LabSimOptions {
     props?: PropsMode;
+    /** The level to simulate (default: the River Lab test scene). */
+    level?: LevelDef;
+}
+
+/** Something the player should be told (objective reached, fell in the creek, ...). */
+export interface SimEvent {
+    tick: number;
+    kind: 'goal' | 'fell' | 'recovered';
+    text: string;
 }
 
 export class LabSim {
@@ -77,11 +87,22 @@ export class LabSim {
     readonly held: SimEntity;
     readonly stress: SimEntity[];
     readonly dummy: SimEntity[];
+    readonly extras: SimEntity[];
+    readonly level: LevelDef;
+    /** Level progress (rules): the objective, once reached, stays reached until reset. */
+    readonly progress = { goalReached: false, goalTick: -1, falls: 0, recoveries: 0 };
+    /** Events since reset, newest last (the client shows them as toasts). */
+    readonly events: SimEvent[] = [];
+    private safeSpot = { x: 0, y: 0, z: 0, valid: false };
+    private fallTicks = 0;
+    private lostTicks = 0;
+    private goalTicks = 0;
     /** Not voxelized: carries the walker's pose through the snapshot ring for interpolation. */
     readonly playerEntity: SimEntity;
 
     constructor(opts: LabSimOptions = {}) {
-        this.propsMode = opts.props ?? 'physics';
+        this.level = opts.level ?? riverLabLevel;
+        this.propsMode = this.level.scriptedProps ? (opts.props ?? 'physics') : 'physics';
         const c = createLabEntities();
         this.entities = c.entities;
         this.beaver = c.beaver;
@@ -94,7 +115,13 @@ export class LabSim {
         this.held = c.held;
         this.stress = c.stress;
         this.dummy = c.dummy;
+        this.extras = c.extras;
         this.playerEntity = c.player;
+        const sp = this.level.spawn;
+        this.player.x = sp.x;
+        this.player.z = sp.z;
+        this.player.y = this.level.terrainHeight(sp.x, sp.z);
+        this.player.yaw = sp.yaw;
         this.ring = new SnapshotRing(this.entities.length, 32);
         this.reset();
     }
@@ -108,6 +135,9 @@ export class LabSim {
         this.heldInit = false;
         this.prevCarry = false;
         this.stressEnabled.fill(-1);
+        Object.assign(this.progress, { goalReached: false, goalTick: -1, falls: 0, recoveries: 0 });
+        this.events.length = 0;
+        this.fallTicks = this.lostTicks = this.goalTicks = 0;
         this.ring.clear();
         this.evaluate();
         this.buildPhysics();
@@ -117,7 +147,7 @@ export class LabSim {
 
     /** Switches between physics props and the Epic 1 scripted props (resets the scene). */
     setPropsMode(mode: PropsMode): void {
-        if (mode === this.propsMode) return;
+        if (mode === this.propsMode || !this.level.scriptedProps) return;
         this.propsMode = mode;
         this.reset();
     }
@@ -128,18 +158,24 @@ export class LabSim {
 
     /** Physics-driven props (everything dynamic), in a fixed order. */
     private get propEntities(): SimEntity[] {
-        return [this.plank, this.log, this.cube, this.sphere, this.bucket, this.held, ...this.stress, ...this.dummy];
+        return [this.plank, this.log, this.cube, this.sphere, this.bucket, this.held, ...this.extras, ...this.stress, ...this.dummy];
     }
 
     private buildPhysics(): void {
         this.physics?.free();
-        const pw = buildLabPhysics();
+        const pw = buildLabPhysics(this.level);
         addLabKinematics(pw, this.beaver.id, this.ute.id, this.beaver.pose, this.ute.pose);
         if (this.physicsProps) {
-            for (const d of labPropDefs({ plank: this.plank.id, log: this.log.id, cube: this.cube.id, sphere: this.sphere.id, bucket: this.bucket.id, heldPlank: this.held.id })) pw.addDynamic(d.id, d.shape, d.spawn, d.opts);
+            // the level places its props by entity name; entities it does not place stay hidden
+            for (const placement of this.level.props) {
+                const e = this.entities.find((x) => x.name === placement.name);
+                const body = propBody(placement.name);
+                if (e && body) pw.addDynamic(e.id, body.shape, placement.pose, body.opts);
+            }
             pw.setEnabled(this.held.id, false);
+            for (const e of [this.plank, this.log, this.cube, this.sphere, this.bucket, ...this.extras]) if (!pw.bodies.has(e.id)) e.visible = false;
             for (let n = 0; n < this.stress.length; n++) {
-                const d = stressDef(this.stress[n].id, n);
+                const d = stressDef(this.level, this.stress[n].id, n);
                 pw.addDynamic(d.id, d.shape, d.spawn, d.opts);
                 pw.setEnabled(d.id, false);
             }
@@ -267,8 +303,60 @@ export class LabSim {
 
         pw.step();
         this.readPhysics();
+        this.applyRules();
         const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
         this.physicsMs = t1 - t0;
+    }
+
+    /**
+     * Level rules, once per tick after the physics step: the objective (bucket resting in the goal
+     * area), falling into the creek (put back on the last safe ground), and losing the bucket in the
+     * creek (it returns to its start). Pure sim state; the client only reads `events`.
+     */
+    private applyRules(): void {
+        const rules = this.level.rules;
+        if (!rules || !this.physicsProps) return;
+        const pw = this.physics;
+        const p = this.player;
+        if (this.fpActive) {
+            if (p.grounded && p.y > rules.fallY + 0.3 && rules.isSafe(p.x, p.z)) {
+                this.safeSpot.x = p.x;
+                this.safeSpot.y = p.y;
+                this.safeSpot.z = p.z;
+                this.safeSpot.valid = true;
+            }
+            this.fallTicks = p.y < rules.fallY ? this.fallTicks + 1 : 0;
+            if (this.fallTicks > 45) {
+                this.fallTicks = 0;
+                this.progress.falls++;
+                const sp = this.safeSpot.valid ? this.safeSpot : { x: this.level.spawn.x, z: this.level.spawn.z };
+                this.placePlayer(sp.x, sp.z, p.yaw);
+                this.events.push({ tick: this.tick, kind: 'fell', text: 'Splash! Fished out and put back on the bank.' });
+            }
+        }
+        const bk = this.bucket;
+        const body = pw.bodies.get(bk.id);
+        if (!body) return;
+        // essential item: lost in the creek for 1.5 s -> back on its stump
+        this.lostTicks = bk.pose.p.y < rules.lostY && pw.heldId !== bk.id ? this.lostTicks + 1 : 0;
+        if (this.lostTicks > 90) {
+            this.lostTicks = 0;
+            this.progress.recoveries++;
+            pw.respawn(bk.id);
+            this.events.push({ tick: this.tick, kind: 'recovered', text: 'The bucket floated off. A spare one is back on the stump.' });
+        }
+        if (!this.progress.goalReached) {
+            const g = rules.goal;
+            const v = body.body.linvel();
+            const inside = bk.pose.p.x > g.minX && bk.pose.p.x < g.maxX && bk.pose.p.z > g.minZ && bk.pose.p.z < g.maxZ;
+            const resting = Math.hypot(v.x, v.y, v.z) < 0.4 && pw.heldId !== bk.id;
+            this.goalTicks = inside && resting ? this.goalTicks + 1 : 0;
+            if (this.goalTicks > 30) {
+                this.progress.goalReached = true;
+                this.progress.goalTick = this.tick;
+                this.events.push({ tick: this.tick, kind: 'goal', text: 'Bucket delivered across the creek!' });
+            }
+        }
     }
 
     /** Copies dynamic body poses into their entities (physics props mode). */
@@ -277,7 +365,10 @@ export class LabSim {
         const pw = this.physics;
         for (const e of this.propEntities) {
             const b = pw.bodies.get(e.id);
-            if (!b) continue;
+            if (!b) {
+                e.visible = false;
+                continue;
+            }
             e.visible = b.enabled;
             if (b.enabled) pw.readPose(e.id, e.pose);
         }
@@ -317,7 +408,7 @@ export class LabSim {
     dropTest(): void {
         const x = 0.6;
         const z = 3.6;
-        const at = pose(x, terrainHeight(x, z) + 2.5, z, quatFromYawPitchRoll(0.4, 0.6, 0.2));
+        const at = pose(x, this.level.terrainHeight(x, z) + 2.5, z, quatFromYawPitchRoll(0.4, 0.6, 0.2));
         this.physics.setEnabled(this.plank.id, true);
         this.physics.place(this.plank.id, at, { x: 0, y: 0, z: 0 }, { x: 1.5, y: 3.0, z: 0.8 });
     }
@@ -352,8 +443,26 @@ export class LabSim {
     private evaluate(): void {
         const t = this.tick * SIM_DT;
 
+        const actors = this.level.actors;
+        if (actors.beaver.mode === 'idle') {
+            // a co-worker standing about, looking around
+            const b = this.beaver;
+            const ip = actors.beaver.pose;
+            b.pose.p.x = ip.p.x;
+            b.pose.p.y = ip.p.y;
+            b.pose.p.z = ip.p.z;
+            b.pose.q.x = ip.q.x;
+            b.pose.q.y = ip.q.y;
+            b.pose.q.z = ip.q.z;
+            b.pose.q.w = ip.q.w;
+            b.anim[BEAVER_WALK_PHASE] = 0;
+            b.anim[BEAVER_WALK_AMOUNT] = 0;
+            b.anim[BEAVER_CARRY] = 0;
+            b.anim[BEAVER_HEAD_YAW] = 0.6 * Math.sin(t * 0.45) + 0.15 * Math.sin(t * 1.3);
+            b.visible = true;
+        }
         // ---- beaver + bucket
-        {
+        if (actors.beaver.mode === 'loop') {
             const b = this.beaver;
             const th = this.beaverTheta;
             const x = BEAVER_LOOP.cx + BEAVER_LOOP.r * Math.cos(th);
@@ -372,7 +481,7 @@ export class LabSim {
             b.anim[BEAVER_HEAD_YAW] = (1 - amount) * 0.55 * Math.sin(t * 1.7);
             b.visible = true;
         }
-        if (!this.physicsProps) {
+        if (!this.physicsProps && actors.beaver.mode === 'loop') {
             const b = this.beaver;
             const th = this.beaverTheta;
             const dx = -Math.sin(th);
@@ -401,6 +510,20 @@ export class LabSim {
     }
 
     private evaluateUte(t: number): void {
+        const ute = this.level.actors.ute;
+        if (ute.mode === 'parked') {
+            const u = this.ute;
+            u.pose.p.x = ute.pose.p.x;
+            u.pose.p.y = ute.pose.p.y;
+            u.pose.p.z = ute.pose.p.z;
+            u.pose.q.x = ute.pose.q.x;
+            u.pose.q.y = ute.pose.q.y;
+            u.pose.q.z = ute.pose.q.z;
+            u.pose.q.w = ute.pose.q.w;
+            for (const c of [UTE_WHEEL_SPIN, UTE_STEER, UTE_SUSPENSION, UTE_PITCH, UTE_ROLL]) u.anim[c] = 0;
+            u.visible = true;
+            return;
+        }
         // ---- ute on its oval
         {
             const u = this.ute;
@@ -556,10 +679,12 @@ export class LabSim {
     /** Places the character (e.g. when entering first-person mode), on the ground, inside the play area. */
     placePlayer(x: number, z: number, yaw: number): void {
         const p = this.player;
-        const A = PLAY_AREA;
+        const A = this.level.playArea;
         p.x = Math.max(A.minX + 0.5, Math.min(A.maxX - 0.5, x));
         p.z = Math.max(A.minZ + 0.5, Math.min(A.maxZ - 0.5, z));
-        const g = this.physics.groundY(p.x, p.z) ?? terrainHeight(p.x, p.z);
+        // cast from just above the terrain, so roofs and tree tops are never "the ground"
+        const th = this.level.terrainHeight(p.x, p.z);
+        const g = this.physics.groundY(p.x, p.z, th + 0.6) ?? th;
         p.y = g + 0.05;
         p.vy = 0;
         p.yaw = yaw;

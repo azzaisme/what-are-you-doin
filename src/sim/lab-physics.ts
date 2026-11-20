@@ -1,5 +1,5 @@
 /**
- * River Lab physics content (Epic 2): static terrain, trees, rocks and boundary walls; kinematic
+ * Level physics content (Epic 2): static terrain, trees, rocks, scenery pieces and walls; kinematic
  * colliders following the scripted beaver and ute; dynamic props, the ragdoll dummy and stress
  * bodies. Built from the analytic level description (never from voxels), engine-free.
  */
@@ -7,16 +7,15 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 
 import { DUMMY_PARTS, dummyRestPose } from '../assets/dummy.ts';
-import { BUCKET_HEIGHT, LOG_RADIUS } from '../assets/props.ts';
-import { LAB_MAX_X, LAB_MAX_Z, LAB_MIN_X, LAB_MIN_Z, PINE_TIERS, PINE_TRUNK_HEIGHT, ROCK_CENTRE_LIFT, labLayout, pineTrunkRadius, terrainHeight } from '../levels/river-lab.ts';
-import { pose, quatFromYawPitchRoll } from '../voxels/math.ts';
+import { BEAM_HALF, BUCKET_HEIGHT, LOG_RADIUS } from '../assets/props.ts';
+import { PINE_TIERS, PINE_TRUNK_HEIGHT, ROCK_CENTRE_LIFT, pineTrunkRadius } from '../levels/common.ts';
+import type { LevelDef } from '../levels/level.ts';
+import { pose, quatFromYawPitchRoll, quatMul } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
 
 import { CHARACTER, PhysicsWorld } from './physics/world.ts';
 import type { BodyOptions, ShapeSpec } from './physics/world.ts';
 
-/** Player-reachable area (the Epic 1 walker clamp, now as walls). */
-export const PLAY_AREA = { minX: -26, maxX: 26, minZ: -20, maxZ: 13 };
 /**
  * Heightfield cells per side (56 m / 251 = 0.223 m). Deliberately not a round spacing: Rapier 0.21
  * misses ray casts that land exactly on a heightfield cell boundary (measured with 0.2 m cells at
@@ -31,51 +30,49 @@ export interface PropDef {
     spawn: Pose;
 }
 
-const ground = (x: number, z: number) => terrainHeight(x, z);
+const PLANK: { shape: ShapeSpec; opts: BodyOptions } = { shape: { type: 'box', hx: 1.2, hy: 0.1, hz: 0.05 }, opts: { density: 500, friction: 0.7, restitution: 0.1, ccd: true } };
 
-/** Physics props on the near bank, in front of where first-person play starts. */
-export function labPropDefs(ids: { plank: number; log: number; cube: number; sphere: number; bucket: number; heldPlank: number }): PropDef[] {
-    const at = (x: number, z: number, lift: number, yaw = 0, pitch = 0, roll = 0) => pose(x, ground(x, z) + lift, z, quatFromYawPitchRoll(yaw, pitch, roll));
-    return [
-        // 2.4 x 0.2 x 0.1 m pine plank, ~24 kg
-        { id: ids.plank, shape: { type: 'box', hx: 1.2, hy: 0.1, hz: 0.05 }, opts: { density: 500, friction: 0.7, restitution: 0.1, ccd: true }, spawn: at(0.6, 3.6, 0.08, 0.35, Math.PI / 2) },
-        // 2 m log, r 0.2 m, ~113 kg: too heavy to lift alone, can be dragged and rolled
-        { id: ids.log, shape: { type: 'cylinder', axis: 'x', r: LOG_RADIUS, half: 1.0 }, opts: { density: 450, friction: 0.8, restitution: 0.05, angularDamping: 0.4 }, spawn: at(-1.6, 3.2, LOG_RADIUS + 0.03, 0.1) },
-        // 0.5 m crate, ~25 kg
-        { id: ids.cube, shape: { type: 'box', hx: 0.25, hy: 0.25, hz: 0.25 }, opts: { density: 200, friction: 0.7, restitution: 0.1 }, spawn: at(-3.2, 4.4, 0.27, 0.5) },
-        // 0.3 m bouncy ball, ~2.3 kg
-        { id: ids.sphere, shape: { type: 'ball', r: 0.3 }, opts: { density: 20, friction: 0.6, restitution: 0.78, angularDamping: 0.1, ccd: true }, spawn: at(2.8, 3.9, 0.9) },
-        // empty ~10 L bucket proxy, ~1.5 kg (water arrives in Epic 7); origin at its base
-        { id: ids.bucket, shape: { type: 'cylinder', axis: 'y', r: 0.15, half: BUCKET_HEIGHT / 2, offsetY: BUCKET_HEIGHT / 2 }, opts: { density: 70, friction: 0.6, restitution: 0.1, ccd: true }, spawn: at(1.6, 4.8, 0.02) },
-        // the first-person carry plank (G): parked until summoned into the player's grip
-        { id: ids.heldPlank, shape: { type: 'box', hx: 1.2, hy: 0.1, hz: 0.05 }, opts: { density: 500, friction: 0.7, restitution: 0.1, ccd: true }, spawn: at(-5, 6, 0.08, 0, Math.PI / 2) }
-    ];
+/**
+ * Collision shape and material for a prop entity, by name (the entity catalogue's naming):
+ * plank 2.4 x 0.2 x 0.1 m ~24 kg; beam 3.2 x 0.2 x 0.15 m ~36 kg (liftable alone, just); log r 0.2
+ * x 2 m ~113 kg (drag it); crate 0.5 m ~25 kg; bouncy ball; ~1.5 kg empty bucket (origin at base).
+ */
+export function propBody(name: string): { shape: ShapeSpec; opts: BodyOptions } | null {
+    if (name === 'plank' || name === 'held-plank' || name.startsWith('extra-plank')) return PLANK;
+    if (name.startsWith('beam')) return { shape: { type: 'box', hx: BEAM_HALF.x, hy: BEAM_HALF.y, hz: BEAM_HALF.z }, opts: { density: 380, friction: 0.75, restitution: 0.05, ccd: true } };
+    if (name === 'log' || name.startsWith('extra-log')) return { shape: { type: 'cylinder', axis: 'x', r: LOG_RADIUS, half: 1.0 }, opts: { density: 450, friction: 0.8, restitution: 0.05, angularDamping: 0.4 } };
+    if (name === 'cube') return { shape: { type: 'box', hx: 0.25, hy: 0.25, hz: 0.25 }, opts: { density: 200, friction: 0.7, restitution: 0.1 } };
+    if (name === 'sphere') return { shape: { type: 'ball', r: 0.3 }, opts: { density: 20, friction: 0.6, restitution: 0.78, angularDamping: 0.1, ccd: true } };
+    if (name === 'bucket') return { shape: { type: 'cylinder', axis: 'y', r: 0.15, half: BUCKET_HEIGHT / 2, offsetY: BUCKET_HEIGHT / 2 }, opts: { density: 70, friction: 0.6, restitution: 0.1, ccd: true } };
+    return null;
 }
 
 const STRESS_SHAPES: { shape: ShapeSpec; opts: BodyOptions }[] = [
-    { shape: { type: 'box', hx: 1.2, hy: 0.1, hz: 0.05 }, opts: { density: 500, ccd: true } },
+    PLANK,
     { shape: { type: 'box', hx: 0.2, hy: 0.2, hz: 0.2 }, opts: { density: 250 } },
     { shape: { type: 'cylinder', axis: 'x', r: LOG_RADIUS, half: 1.0 }, opts: { density: 450 } }
 ];
 
 /** Stress body kinds match the scripted stress assets: plank, 0.4 m cube, log. */
-export function stressDef(id: number, n: number): PropDef {
+export function stressDef(level: LevelDef, id: number, n: number): PropDef {
     const k = STRESS_SHAPES[n % 3];
     const col = n % 5;
     const row = Math.floor(n / 5);
     const x = -4 + col * 2.1;
-    const z = 1.5 + row * 1.1;
-    return { id, shape: k.shape, opts: k.opts, spawn: pose(x, Math.max(ground(x, z), 0) + 2.5 + (n % 3) * 0.8, z, quatFromYawPitchRoll(n * 0.7, n * 0.3, n * 1.1)) };
+    const z = (level.id === 'yard' ? 4.5 : 1.5) + row * 1.1;
+    return { id, shape: k.shape, opts: k.opts, spawn: pose(x, Math.max(level.terrainHeight(x, z), 0) + 2.5 + (n % 3) * 0.8, z, quatFromYawPitchRoll(n * 0.7, n * 0.3, n * 1.1)) };
 }
 
-export function buildLabPhysics(): PhysicsWorld {
+export function buildLabPhysics(level: LevelDef): PhysicsWorld {
     const pw = new PhysicsWorld();
-    pw.addTerrain(ground, LAB_MIN_X, LAB_MAX_X, LAB_MIN_Z, LAB_MAX_Z, TERRAIN_CELLS);
+    const B = level.bounds;
+    const ground = level.terrainHeight;
+    pw.addTerrain(ground, B.minX, B.maxX, B.minZ, B.maxZ, TERRAIN_CELLS);
 
     // trees: trunk cylinder plus the four needle cones (the same layout the voxel build uses)
-    const layout = labLayout(1);
+    const layout = level.layout(1);
     for (const t of layout.trees) {
-        if (t.x < LAB_MIN_X || t.x > LAB_MAX_X || t.z < LAB_MIN_Z || t.z > LAB_MAX_Z) continue;
+        if (t.x < B.minX || t.x > B.maxX || t.z < B.minZ || t.z > B.maxZ) continue;
         const base = ground(t.x, t.z);
         const s = t.scale;
         const trunkH = PINE_TRUNK_HEIGHT * s;
@@ -110,8 +107,26 @@ export function buildLabPhysics(): PhysicsWorld {
         );
     }
 
+    // static scenery pieces (abutments, shed, saw bench, ...): the same shapes the voxels use
+    for (const p of layout.pieces) {
+        if (!p.collide) continue;
+        const sh = p.shape;
+        let d: RAPIER.ColliderDesc;
+        if (sh.type === 'box') d = RAPIER.ColliderDesc.cuboid(sh.hx, sh.hy, sh.hz);
+        else if (sh.type === 'ellipsoid') d = RAPIER.ColliderDesc.ball(Math.min(sh.rx, sh.ry, sh.rz));
+        else {
+            d = RAPIER.ColliderDesc.cylinder(sh.half, sh.r);
+            const h = Math.SQRT1_2;
+            const axisRot = sh.axis === 'x' ? { x: 0, y: 0, z: h, w: h } : sh.axis === 'z' ? { x: h, y: 0, z: 0, w: h } : { x: 0, y: 0, z: 0, w: 1 };
+            d.setRotation(quatMul(p.pose.q, axisRot));
+            pw.addStatic(d.setTranslation(p.pose.p.x, p.pose.p.y, p.pose.p.z).setFriction(0.8));
+            continue;
+        }
+        pw.addStatic(d.setTranslation(p.pose.p.x, p.pose.p.y, p.pose.p.z).setRotation({ ...p.pose.q }).setFriction(0.8));
+    }
+
     // invisible walls around the play area (the Epic 1 walker had the same limits as a clamp)
-    const A = PLAY_AREA;
+    const A = level.playArea;
     const H = 6;
     const cx = (A.minX + A.maxX) / 2;
     const cz = (A.minZ + A.maxZ) / 2;

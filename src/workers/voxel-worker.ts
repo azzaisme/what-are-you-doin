@@ -21,7 +21,7 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
         try {
             const { VoxelService } = await import('./voxel-service.ts');
             service = new VoxelService();
-            const { build, units } = service.build(msg.seed);
+            const { build, units } = service.build(msg.seed, msg.level);
             post({ type: 'ready', build, units }, transferables(units));
             ready = true;
             for (const m of queue.splice(0)) handle(m);

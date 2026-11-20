@@ -12,7 +12,7 @@ import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs';
 import { DebugPanel  } from './debug/panel.ts';
 import type { PanelHost } from './debug/panel.ts';
 import { FirstPersonInput } from './input/first-person.ts';
-import { terrainHeight } from './levels/river-lab.ts';
+import { getLevel } from './levels/index.ts';
 import { ReferenceRenderer } from './render/reference.ts';
 import { QUALITY, createLabScene  } from './render/scene.ts';
 import type { Quality } from './render/scene.ts';
@@ -41,21 +41,24 @@ const setLoading = (t: string) => {
 };
 
 const initialQuality: Quality = QUALITY[params.get('quality') === 'low' ? 'low' : 'high'];
-const scene = await createLabScene(canvas, initialQuality);
+// ?level=lab for the River Lab test scene; the Timber Yard (level 1) by default
+const level = getLevel(params.get('level'));
+const terrainHeight = level.terrainHeight;
+const scene = await createLabScene(canvas, initialQuality, level);
 const { app, camera } = scene;
 
 // ------------------------------------------------------------------------------------- voxel world
 
 const cellCm = Math.round(GRID_SIZE * 1000) / 10;
-setLoading(`Rasterizing the River Lab into the ${cellCm} cm grid…`);
+setLoading(`Rasterizing the ${level.name} into the ${cellCm} cm grid…`);
 await nextFrame();
 await initPhysics();
-const sim = new LabSim({ props: params.get('props') === 'scripted' ? 'scripted' : 'physics' });
+const sim = new LabSim({ level, props: params.get('props') === 'scripted' ? 'scripted' : 'physics' });
 const renderer = new VoxelRenderer(app, scene.worldLayer);
 // the voxel world lives in a worker: static build, rasterization and meshing all happen there
 const worker = new Worker(new URL('./workers/voxel-worker.ts', import.meta.url), { type: 'module', name: 'voxels' });
 const pipeline = new VoxelClient(worker, renderer, sim);
-const build = await pipeline.init(cellCm, 1);
+const build = await pipeline.init(cellCm, 1, level.id);
 setLoading('Uploading meshes…');
 await nextFrame();
 const tUpload = performance.now();
@@ -124,7 +127,7 @@ voxelClock.setRate(state.hz);
 
 // ------------------------------------------------------------------------------------- cameras
 
-const ORBIT_HOME = { pos: new Vec3(-1.5, 2.6, 5.5), focus: new Vec3(-1.0, 0.8, -5.5) };
+const ORBIT_HOME = { pos: new Vec3(...level.orbitHome.pos), focus: new Vec3(...level.orbitHome.focus) };
 camera.setPosition(ORBIT_HOME.pos);
 camera.addComponent('script');
 const orbit = camera.script!.create(CameraControls) as unknown as CameraControlsApi;
@@ -236,6 +239,7 @@ class LabDirector extends Script {
 
         if (panel.visible && (frameTimeHead & 7) === 0) panel.setStats(statsText());
         if ((frameTimeHead & 3) === 0) updatePrompt();
+        pollEvents();
     }
 }
 const directorEntity = new Entity('LabDirector');
@@ -294,7 +298,20 @@ function resetScene(): void {
     if (state.mode === 'orbit') {
         camera.setPosition(ORBIT_HOME.pos);
         orbit.focusPoint = ORBIT_HOME.focus.clone();
+    } else if (level.rules) {
+        toSpawn();
     }
+    seenEvents = 0;
+    updateObjective();
+}
+
+/** First person at the level's start, looking where the level wants you to look. */
+function toSpawn(): void {
+    const sp = level.spawn;
+    sim.placePlayer(sp.x, sp.z, sp.yaw);
+    fpInput.yaw = sp.yaw;
+    fpInput.pitch = sp.pitch;
+    clock.reset(sim.tick);
 }
 
 function applyWater(): void {
@@ -308,6 +325,7 @@ function applyWater(): void {
 const host: PanelHost = {
     get(id) {
         if (id === 'stress') return String(state.stress);
+        if (id === 'props') return sim.propsMode;
         if (id === 'hz') return String(state.hz);
         if (id === 'reflectionScale') return String(state.reflectionScale);
         return (state as unknown as Record<string, string | number | boolean>)[id];
@@ -505,7 +523,8 @@ const panel = new DebugPanel(host, [
 const hud = document.createElement('div');
 hud.className = 'hud';
 hud.innerHTML = `
-  <div class="hud-title"><b>(Un)civil Engineers</b> <span>River Lab · voxel tech demo</span></div>
+  <div class="hud-title"><b>(Un)civil Engineers</b> <span>${level.id === 'lab' ? 'River Lab · voxel tech demo' : `Level 1 · ${level.name}`}</span></div>
+  <div class="hud-objective" id="hud-objective"></div>
   <div class="hud-help" id="hud-help"></div>
   <div class="hud-prompt" id="hud-prompt"></div>`;
 document.body.append(hud);
@@ -588,7 +607,33 @@ function setUiHidden(h: boolean): void {
 }
 
 const PROP_LABEL: Record<string, string> = { plank: 'plank', 'held-plank': 'plank', log: 'log (heavy)', cube: 'crate', sphere: 'ball', bucket: 'bucket' };
-const propLabel = (name: string) => PROP_LABEL[name] ?? (name.startsWith('dummy') ? 'dummy' : name.startsWith('stress') ? 'test body' : name);
+const propLabel = (name: string) =>
+    PROP_LABEL[name] ?? (name.startsWith('dummy') ? 'dummy' : name.startsWith('stress') ? 'test body' : name.startsWith('extra-plank') ? 'plank' : name.startsWith('beam') ? 'beam' : name.startsWith('extra-log') ? 'log (heavy)' : name);
+
+// ---- objective line and toasts for level events (fell in, bucket recovered, goal reached)
+const toast = document.createElement('div');
+toast.className = 'toast';
+document.body.append(toast);
+let toastTimer = 0;
+let seenEvents = 0;
+function updateObjective(): void {
+    const el = document.getElementById('hud-objective');
+    if (!el) return;
+    const r = level.rules;
+    el.textContent = r ? `${sim.progress.goalReached ? '✓' : '○'} ${r.objective}` : '';
+    el.classList.toggle('done', sim.progress.goalReached);
+}
+function pollEvents(): void {
+    if (sim.events.length < seenEvents) seenEvents = 0;
+    while (seenEvents < sim.events.length) {
+        const e = sim.events[seenEvents++];
+        toast.textContent = e.text;
+        toast.className = `toast show toast-${e.kind}`;
+        clearTimeout(toastTimer);
+        toastTimer = window.setTimeout(() => (toast.className = 'toast'), e.kind === 'goal' ? 6000 : 3500);
+        updateObjective();
+    }
+}
 let promptText = '';
 
 /** Context prompt (design doc §2.3): what a click would do right now. */
@@ -796,6 +841,16 @@ window.__riverLab = {
     /** Merges fields into the next player command (grab / throw / move edges for tests). */
     input: (c: Record<string, unknown>) => fpInput.inject(c),
     player: () => ({ ...sim.player, holding: sim.physics.heldId }),
+    level: level.id,
+    progress: () => ({ ...sim.progress, events: sim.events.map((e) => e.kind) }),
+    /** Places a named prop at a pose (tests and the evidence capture), as a teleport. */
+    placeProp(name: string, x: number, y: number, z: number, yaw = 0) {
+        const e = sim.entities.find((n) => n.name === name);
+        if (!e) return false;
+        const q = { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) };
+        sim.physics.place(e.id, { p: { x, y, z }, q });
+        return true;
+    },
     interaction: () => sim.interaction(),
     /** Sets the first-person look angles (as mouse look would). */
     look(yaw: number, pitch: number) {
@@ -814,11 +869,15 @@ window.__riverLab = {
 if (import.meta.env.DEV || params.has('debug') || location.hash === '#debug') panel.visible = true;
 const startAt = Number(params.get('t'));
 if (Number.isFinite(startAt) && params.has('t')) seek(startAt);
-if (params.get('view') === 'fp') setMode('firstPerson');
+if (params.get('view') === 'fp' || (level.startFirstPerson && params.get('view') !== 'orbit')) {
+    setMode('firstPerson');
+    toSpawn();
+}
+updateObjective();
 if (params.has('noui')) setUiHidden(true);
 updateHud();
 loading?.remove();
-console.info(`River Lab ready at ${cellCm} cm: ${build.columns} columns, ${build.staticCells} static cells, worker build ${build.buildMs.toFixed(0)} ms + static meshes ${build.staticMeshMs.toFixed(0)} ms, upload ${staticUploadMs.toFixed(0)} ms`);
+console.info(`${level.name} ready at ${cellCm} cm: ${build.columns} columns, ${build.staticCells} static cells, worker build ${build.buildMs.toFixed(0)} ms + static meshes ${build.staticMeshMs.toFixed(0)} ms, upload ${staticUploadMs.toFixed(0)} ms`);
 
 function clamp(v: number, a: number, b: number): number {
     return Math.max(a, Math.min(b, v));

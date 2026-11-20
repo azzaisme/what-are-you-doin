@@ -1,16 +1,18 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { LOG_RADIUS } from '../../src/assets/props.ts';
-import { terrainHeight } from '../../src/levels/river-lab.ts';
+import { terrainHeight, riverLabLevel } from '../../src/levels/river-lab.ts';
 import { ACTION_DROP, ACTION_DROP_TEST, ACTION_NONE, ACTION_RAGDOLL, PITCH_LIMIT, neutralCommand, sanitizeCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
-import { PLAY_AREA, buildLabPhysics } from '../../src/sim/lab-physics.ts';
+import { buildLabPhysics } from '../../src/sim/lab-physics.ts';
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
 import { GRAB, clampHold, grabForce, throwImpulse, viewDir } from '../../src/sim/physics/grab.ts';
 import type { GrabForceResult } from '../../src/sim/physics/grab.ts';
 import { PhysicsWorld, RELEASE_MIN_CAP, initPhysics } from '../../src/sim/physics/world.ts';
 
 beforeAll(() => initPhysics());
+
+const PLAY_AREA = riverLabLevel.playArea;
 
 const cmd = (n: number, c: Partial<PlayerCommand> = {}): PlayerCommand => ({ ...neutralCommand(n), ...c });
 const zero = { x: 0, y: 0, z: 0 };
@@ -96,7 +98,7 @@ describe('grab force bounds (§2.4)', () => {
 
 describe('physics adapter', () => {
     it('static terrain collision follows the analytic terrain, not voxels (within 2 cm)', () => {
-        const pw = buildLabPhysics();
+        const pw = buildLabPhysics(riverLabLevel);
         pw.world.step();
         let worst = 0;
         for (let i = 0; i < 200; i++) {
