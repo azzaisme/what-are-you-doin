@@ -24,7 +24,7 @@ import type { SamplingPolicy } from '../voxels/rasterizer.ts';
 import { VoxelWorld } from '../voxels/world.ts';
 import type { PartInstance } from '../voxels/world.ts';
 
-import { STATE_STRIDE } from './protocol.ts';
+import { PARTICLE_OBJECT_ID, STATE_STRIDE } from './protocol.ts';
 import type { BuildInfo, ClassMesh, FrameStats, UnitMesh } from './protocol.ts';
 
 interface Tracked {
@@ -51,6 +51,7 @@ export class VoxelService {
     private readonly knownDynamic = new Set<number>();
 
     constructor() {
+        this.world.addObject(PARTICLE_OBJECT_ID, 0);
         for (const e of createLabEntities().entities) {
             if (e.asset.parts.length === 0) continue;
             this.world.addObject(e.id, e.priority);
@@ -88,7 +89,7 @@ export class VoxelService {
         };
     }
 
-    frame(frame: number, time: number, policy: SamplingPolicy, reference: boolean, states: Float64Array): { units: UnitMesh[]; stats: FrameStats } {
+    frame(frame: number, time: number, policy: SamplingPolicy, reference: boolean, states: Float64Array, particles?: Float32Array, particleCount = 0): { units: UnitMesh[]; stats: FrameStats } {
         const t0 = performance.now();
         resetRasterStats(this.raster);
         let objects = 0;
@@ -112,6 +113,10 @@ export class VoxelService {
             this.world.rasterizeObject(t.id, t.parts, policy, this.raster);
             objects++;
         }
+        // particles: single cells on the global grid, behind every object
+        const pc = particles && !reference ? Math.min(particleCount, Math.floor(particles.length / 4)) : 0;
+        if (pc > 0) this.world.rasterizePoints(PARTICLE_OBJECT_ID, particles!, pc, 0);
+        else if (this.world.objectCellCount(PARTICLE_OBJECT_ID) > 0) this.world.clearObject(PARTICLE_OBJECT_ID);
         const t1 = performance.now();
         const comp = this.world.resolve();
         const t2 = performance.now();
@@ -141,6 +146,7 @@ export class VoxelService {
                 meshMs: t3 - t2,
                 totalMs: t3 - t0,
                 dynamicCells: this.world.dynamicCellCount(),
+                particles: pc,
                 chunks: this.world.chunkCount
             }
         };

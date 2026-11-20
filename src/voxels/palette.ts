@@ -76,7 +76,13 @@ export const M = {
     HillRock: 39,
     Path: 40,
     Flower: 41,
-    Snow: 42
+    Snow: 42,
+    Leaf: 43,
+    LeafGold: 44,
+    LeafRed: 45,
+    Splash: 46,
+    Dust: 47,
+    WindSock: 48
 } as const;
 
 const defs: MaterialDef[] = [];
@@ -131,6 +137,13 @@ def(M.HillRock, 'hill-rock', R, 0x7a7f7c, 0x717673, 0x838885, 0x6a6f6c);
 def(M.Path, 'path', R, 0x8e7a5c, 0x857254, 0x968263, 0x7d6b4f);
 def(M.Flower, 'flower', R, 0xe85a8a, 0xe85a8a, 0xf2c94c, 0xe85a8a);
 def(M.Snow, 'snow', R, 0xeef1f2, 0xe6eaeb, 0xf4f6f7, 0xe0e4e6);
+// deciduous crowns and falling leaves (early autumn), particles
+def(M.Leaf, 'leaf', R, 0x6f9a3a, 0x648d34, 0x7aa743, 0x5a8030);
+def(M.LeafGold, 'leaf-gold', R, 0xd9a32e, 0xcf9828, 0xe3b03c, 0xc48c22);
+def(M.LeafRed, 'leaf-red', R, 0xc4542a, 0xb84c25, 0xd06032, 0xa94420);
+def(M.Splash, 'splash', S, 0xd8eef0, 0xc6e4e8, 0xe6f6f7, 0xb6dbe0);
+def(M.Dust, 'dust', R, 0xb39f80, 0xa89577, 0xbeab8b, 0x9d8a6d);
+def(M.WindSock, 'wind-sock', R, 0xf26a1b, 0xe8e8cf, 0xf26a1b, 0xe8e8cf);
 
 // details that must survive sub-cell placement
 for (const [m, p] of [

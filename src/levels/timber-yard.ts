@@ -19,7 +19,7 @@ import { grain, hash3, latticeShade, solid } from '../voxels/volumes.ts';
 import type { MaterialField } from '../voxels/volumes.ts';
 import type { VoxelWorld } from '../voxels/world.ts';
 
-import { fbm, lerp, patchShade, pine, rasterizeTerrain, rng, rock, smoothstep } from './common.ts';
+import { fbm, lerp, oak, patchShade, pine, rasterizeTerrain, rng, rock, smoothstep } from './common.ts';
 import type { RockSpot, TreeSpot } from './common.ts';
 import { rasterizePieces } from './level.ts';
 import type { LevelBuildResult, LevelDef, LevelLayout, PropPlacement, StaticPiece } from './level.ts';
@@ -238,6 +238,10 @@ function yardPieces(): StaticPiece[] {
     P.push(piece('saw-blade', { type: 'cylinder', axis: 'z', r: 0.42, half: 0.02 }, mx + 0.4, YARD_Y + 1.0, mz, (x, y) => voxel(Math.hypot(x, y) > 0.36 ? M.Chrome : M.Steel, 0), { priority: 4 }));
     P.push(piece('saw-motor', boxS(0.28, 0.22, 0.24), mx - 1.1, YARD_Y + 1.14, mz, (_x, y) => voxel(y > 0.12 ? M.HiVis : M.UteTrim, 0), { priority: 3 }));
 
+    // ---- the windsock pole (the sock itself is a moving object that follows the wind)
+    const wsy = yardHeight(WINDSOCK.x, WINDSOCK.z);
+    P.push(piece('windsock-pole', boxS(0.05, WINDSOCK.height / 2, 0.05), WINDSOCK.x, wsy + WINDSOCK.height / 2, WINDSOCK.z, solid(M.Steel, 1)));
+
     // ---- the bucket stump and a yard sign
     P.push(piece('stump', { type: 'cylinder', axis: 'y', r: 0.26, half: 0.22 }, BUCKET_STUMP.x, YARD_Y + 0.22, BUCKET_STUMP.z, (x, y, z) => voxel(y > 0.17 ? M.LogEnd : M.LogBark, y > 0.17 ? (Math.floor(Math.hypot(x, z) / 0.07) & 1 ? 1 : 2) : latticeShade(x, y, z, 0.15, 3))));
     P.push(piece('sign-post-l', boxS(0.05, 0.75, 0.05), 6.4, YARD_Y + 0.75, 2.6, darkTimber));
@@ -256,6 +260,9 @@ function yardPieces(): StaticPiece[] {
     return P;
 }
 
+/** The windsock: a pole by the yard's creek edge. */
+export const WINDSOCK = { x: 4.6, z: 1.6, height: 3.2 };
+
 /** Bucket stump in the yard. */
 export const BUCKET_STUMP = { x: 5.6, z: 4.4, top: YARD_Y + 0.44 };
 /** Far-bank goal area for the bucket. */
@@ -264,13 +271,13 @@ export const YARD_GOAL = { minX: BRIDGE_X - 3.5, maxX: BRIDGE_X + 3.5, minZ: -9.
 export function yardLayout(seed = 1): LevelLayout {
     const r = rng(seed * 7 + 3);
     const trees: TreeSpot[] = [];
-    const add = (x: number, z: number, s: number) => {
+    const add = (x: number, z: number, s: number, kind: 'pine' | 'oak' = 'pine') => {
         // keep the road, the creek, the yard and the goal clear
         if (onRoad(x, z) < 2.6) return;
         if (Math.abs(z - creekCenterZ(x)) < creekHalfWidth(x) + 1.2) return;
         if (yardWeight(x, z) > 0.05) return;
         if (x > YARD_GOAL.minX - 1.5 && x < YARD_GOAL.maxX + 1.5 && z > YARD_GOAL.minZ - 1.5 && z < YARD_GOAL.maxZ + 1.5) return;
-        trees.push({ x, z, scale: s, yaw: r() * Math.PI * 2 });
+        trees.push({ x, z, scale: s, yaw: r() * Math.PI * 2, kind });
     };
     // the forest across the creek, thickening uphill
     for (let n = 0; n < 44; n++) add(-26 + r() * 52, -6 - r() * 15, 0.9 + r() * 0.55);
@@ -288,6 +295,19 @@ export function yardLayout(seed = 1): LevelLayout {
         [21, 8, 1.2]
     ] as const) {
         add(x, z, s);
+    }
+    // autumn oaks by the creek and the yard: their leaves fall and drift on the wind
+    for (const [x, z, s] of [
+        [-16.5, 3.4, 1.25],
+        [10.5, 2.9, 1.1],
+        [6.8, -6.8, 1.2],
+        [-8.8, -6.4, 1.15],
+        [14.5, -4.6, 1.3],
+        [-19.5, -5.2, 1.2],
+        [4.2, -12.5, 1.1],
+        [-6.5, -11.5, 1.25]
+    ] as const) {
+        add(x, z, s, 'oak');
     }
     const rocks: RockSpot[] = [];
     for (const [x, z, s] of [
@@ -311,7 +331,8 @@ export function buildTimberYard(world: VoxelWorld, seed = 1): LevelBuildResult {
     const layout = yardLayout(seed);
     let trees = 0;
     for (const t of layout.trees) {
-        pine(world, t.x, t.z, yardSurfaceY(t.x, t.z), t.scale, t.yaw, stats, trees + seed * 17);
+        if (t.kind === 'oak') oak(world, t.x, t.z, yardSurfaceY(t.x, t.z), t.scale, t.yaw, stats, trees + seed * 17);
+        else pine(world, t.x, t.z, yardSurfaceY(t.x, t.z), t.scale, t.yaw, stats, trees + seed * 17);
         trees++;
     }
     let rocks = 0;
@@ -381,8 +402,10 @@ export const timberYardLevel: LevelDef = {
     terrainHeight: yardHeight,
     layout: yardLayout,
     build: buildTimberYard,
-    // early sunrise over the creek
+    // early sunrise over the creek; a north-westerly breeze with gusts down the valley
     sun: { elevation: 7, azimuth: 105 },
+    wind: { dir: Math.PI * 0.3, base: 1.4, gust: 3.6 },
+    windsock: WINDSOCK,
     spawn: { x: 1.2, z: 6.2, yaw: 0.12, pitch: -0.1 },
     orbitHome: { pos: [9, 4.2, 12], focus: [-1, 0.5, 0] },
     startFirstPerson: true,

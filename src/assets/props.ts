@@ -100,3 +100,22 @@ export function yprPose(x: number, y: number, z: number, yaw: number, pitch: num
 }
 
 export { copyPose };
+
+/** Windsock: a tapered striped tube along +X from its mount (the pole top). */
+export function windsockAsset(): VoxelAsset {
+    const segs = [
+        { x: 0.13, h: 0.13 },
+        { x: 0.39, h: 0.11 },
+        { x: 0.63, h: 0.09 },
+        { x: 0.85, h: 0.07 }
+    ];
+    const parts = segs.map((g, i) => ({
+        name: `sock-${i}`,
+        volume: box(0.12, g.h, g.h, solid(i % 2 ? M.HiVisStripe : M.HiVis)),
+        priority: 2,
+        refColor: i % 2 ? 0xe8e8cf : 0xf26a1b
+    }));
+    const offsets = segs.map((g) => pose(g.x, 0, 0));
+    const ring = { name: 'sock-ring', volume: box(0.02, 0.15, 0.15, solid(M.Steel, 1)), priority: 3, refColor: 0x9aa0a6 };
+    return rigid('windsock', [ring, ...parts], [pose(0, 0, 0), ...offsets]);
+}

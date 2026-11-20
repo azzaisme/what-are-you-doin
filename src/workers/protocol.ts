@@ -31,6 +31,9 @@ export interface UnitMesh {
     classes: ClassMesh[];
 }
 
+/** Dynamic object id of the particle cells (one object, single cells, lowest priority). */
+export const PARTICLE_OBJECT_ID = 990;
+
 export interface FrameStats {
     frame: number;
     time: number;
@@ -52,6 +55,8 @@ export interface FrameStats {
     totalMs: number;
     dynamicCells: number;
     chunks: number;
+    /** Particle cells drawn this voxel frame (leaves, chips, splashes). */
+    particles: number;
 }
 
 export interface BuildInfo {
@@ -66,7 +71,7 @@ export interface BuildInfo {
 
 export type ToWorker =
     | { type: 'init'; cellCm: number; seed: number; level: string }
-    | { type: 'frame'; frame: number; time: number; policy: SamplingPolicy; reference: boolean; states: Float64Array }
+    | { type: 'frame'; frame: number; time: number; policy: SamplingPolicy; reference: boolean; states: Float64Array; particles?: Float32Array; particleCount?: number }
     | { type: 'query'; id: number; what: 'hash' | 'verify' };
 
 export type FromWorker =

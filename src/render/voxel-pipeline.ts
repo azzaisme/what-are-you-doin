@@ -28,6 +28,8 @@ export class VoxelClient {
     skippedFrames = 0;
     appliedFrame = -1;
     uploadMs = 0;
+    /** Particle cells for a voxel time (leaves, dust, splashes); optional. */
+    particles: ((time: number) => { buffer: Float32Array; count: number }) | null = null;
 
     private readonly worker: Worker;
     private readonly renderer: VoxelRenderer;
@@ -129,7 +131,11 @@ export class VoxelClient {
             for (let c = 0; c < ANIM_MAX; c++) states[o + 8 + c] = this.anim[c];
         }
         this.busy = true;
-        this.send({ type: 'frame', frame, time, policy: this.policy, reference: this.reference, states }, [states.buffer]);
+        const fx = this.particles?.(time);
+        const particles = fx && fx.count > 0 ? fx.buffer.slice(0, fx.count * 4) : undefined;
+        const transfer: ArrayBuffer[] = [states.buffer as ArrayBuffer];
+        if (particles) transfer.push(particles.buffer as ArrayBuffer);
+        this.send({ type: 'frame', frame, time, policy: this.policy, reference: this.reference, states, particles, particleCount: fx?.count ?? 0 }, transfer);
     }
 
     private send(msg: ToWorker, transfer: ArrayBuffer[] = []): void {

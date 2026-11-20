@@ -14,9 +14,12 @@
 import { BEAVER_ANIM_CHANNELS, BEAVER_CARRY, BEAVER_HEAD_YAW, BEAVER_WALK_AMOUNT, BEAVER_WALK_PHASE, beaverLeftHand } from '../assets/beaver.ts';
 import { BUCKET_HANDLE_TOP, LOG_RADIUS } from '../assets/props.ts';
 import { UTE_ANIM_CHANNELS, UTE_PITCH, UTE_ROLL, UTE_STEER, UTE_SUSPENSION, UTE_WHEELBASE_HALF, UTE_WHEEL_RADIUS, UTE_WHEEL_SPIN } from '../assets/ute.ts';
+import { windAt } from '../fx/wind.ts';
+import type { WindSample } from '../fx/wind.ts';
 import type { LevelDef } from '../levels/level.ts';
 import { BEAVER_LOOP, PLATEAU_Y, UTE_TRACK, groundSurfaceY, riverLabLevel } from '../levels/river-lab.ts';
 import { composePose, pose, quatFromAxisAngle, quatFromYawPitchRoll, quatMul, quatRotate, quatSlerp, vec3  } from '../voxels/math.ts';
+
 
 import { SIM_DT } from './clock.ts';
 import { ACTION_DROP, ACTION_DROP_TEST, ACTION_RAGDOLL, ACTION_RESET_PROPS, neutralCommand, sanitizeCommand } from './commands.ts';
@@ -59,6 +62,9 @@ export class LabSim {
     propsMode: PropsMode;
     /** The Rapier world; rebuilt on reset so replays are deterministic. */
     physics!: PhysicsWorld;
+    /** This tick's wind (zero in calm levels) and the largest wind force on a body (N). */
+    readonly wind: WindSample = { x: 0, z: 0, speed: 0, gustiness: 0 };
+    windForce = 0;
     /** Wall time of the last fixed tick's physics work (ms), for the debug panel. */
     physicsMs = 0;
 
@@ -94,6 +100,7 @@ export class LabSim {
     readonly stress: SimEntity[];
     readonly dummy: SimEntity[];
     readonly extras: SimEntity[];
+    readonly windsock: SimEntity;
     readonly avatars: SimEntity[];
     readonly player2Entity: SimEntity;
     /** Every player's eye entity, by slot. */
@@ -124,6 +131,7 @@ export class LabSim {
         this.stress = c.stress;
         this.dummy = c.dummy;
         this.extras = c.extras;
+        this.windsock = c.windsock;
         this.avatars = c.avatars;
         this.playerEntity = c.player;
         this.player2Entity = c.player2;
@@ -332,6 +340,10 @@ export class LabSim {
             this.updateStress();
         }
 
+        if (this.level.wind && this.physicsProps) {
+            windAt(this.tick * SIM_DT, this.level.wind, this.wind);
+            this.windForce = pw.applyWind(this.wind.x, this.wind.z, SIM_DT);
+        }
         pw.step();
         this.readPhysics();
         this.applyRules();
@@ -592,7 +604,26 @@ export class LabSim {
         }
 
         this.evaluateUte(t);
+        this.evaluateWindsock(t);
         if (!this.physicsProps) this.evaluateScriptedProps(t);
+    }
+
+    /** The windsock turns downwind and lifts with the wind speed (limp when calm). */
+    private evaluateWindsock(t: number): void {
+        const ws = this.windsock;
+        const spot = this.level.windsock;
+        ws.visible = !!spot && !!this.level.wind;
+        if (!spot || !this.level.wind) return;
+        const w = windAt(t, this.level.wind, _windTmp);
+        const a = Math.atan2(w.z, w.x) + 0.06 * Math.sin(t * 5.3) * w.gustiness;
+        const droop = (1 - Math.min(1, w.speed / 5.5)) * 1.15 + 0.04 * Math.sin(t * 7.1);
+        ws.pose.p.x = spot.x;
+        ws.pose.p.y = this.level.terrainHeight(spot.x, spot.z) + spot.height;
+        ws.pose.p.z = spot.z;
+        // +X points downwind (a rotation of -a about Y), then the tip droops (about local Z)
+        quatFromAxisAngle(0, 1, 0, -a, _q);
+        quatFromAxisAngle(0, 0, 1, -droop, _q2);
+        quatMul(_q, _q2, ws.pose.q);
     }
 
     private evaluateUte(t: number): void {
@@ -845,6 +876,7 @@ function smooth(x: number): number {
 
 
 const _hand = pose();
+const _windTmp: WindSample = { x: 0, z: 0, speed: 0, gustiness: 0 };
 const _q = { x: 0, y: 0, z: 0, w: 1 };
 const _q2 = { x: 0, y: 0, z: 0, w: 1 };
 const _v = vec3();

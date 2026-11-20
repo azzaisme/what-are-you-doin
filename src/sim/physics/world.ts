@@ -85,6 +85,8 @@ export interface PhysBody {
     spawn: Pose;
     baseAngularDamping: number;
     enabled: boolean;
+    /** Average projected area (m^2) the wind acts on (surface area / 4 for convex shapes). */
+    windArea: number;
 }
 
 /**
@@ -272,7 +274,8 @@ export class PhysicsWorld {
             grabbable: o.grabbable ?? true,
             spawn: { p: { ...spawn.p }, q: { ...spawn.q } },
             baseAngularDamping: o.angularDamping ?? 0.3,
-            enabled: true
+            enabled: true,
+            windArea: windArea(shape)
         };
         this.bodies.set(id, pb);
         this.byCollider.set(col.handle, pb);
@@ -289,7 +292,7 @@ export class PhysicsWorld {
             d.setTranslation(t.x + s.x, t.y + s.y, t.z + s.z).setFriction(0.8).setCollisionGroups(groups(LAYER.kinematic, ALL));
             colliders.push(this.world.createCollider(d, body));
         }
-        const pb: PhysBody = { id, body, colliders, kind: 'kinematic', grabbable: false, spawn: { p: { ...spawn.p }, q: { ...spawn.q } }, baseAngularDamping: 0, enabled: true };
+        const pb: PhysBody = { id, body, colliders, kind: 'kinematic', grabbable: false, spawn: { p: { ...spawn.p }, q: { ...spawn.q } }, baseAngularDamping: 0, enabled: true, windArea: 0 };
         this.bodies.set(id, pb);
         for (const c of colliders) this.byCollider.set(c.handle, pb);
         return pb;
@@ -610,6 +613,35 @@ export class PhysicsWorld {
         }
     }
 
+    /**
+     * Wind drag on every awake dynamic body for one tick: F = 1/2 rho Cd A |dv| dv (horizontal, with
+     * rho Cd / 2 ~ 0.6), capped at 0.6 g per body so gusts push things around but never launch them.
+     * Sleeping and resting bodies (slower than 0.25 m/s, not held) are left alone, so props settle
+     * and sleep. Returns the largest force applied (N).
+     */
+    applyWind(wx: number, wz: number, dt: number): number {
+        let maxF = 0;
+        for (const pb of this.bodies.values()) {
+            if (pb.kind !== 'dynamic' || !pb.enabled || pb.windArea <= 0) continue;
+            const b = pb.body;
+            if (b.isSleeping()) continue;
+            const v = b.linvel();
+            // resting props are left alone, so they settle and sleep; wind acts on what moves, falls
+            // or is carried
+            if (Math.hypot(v.x, v.y, v.z) < 0.25 && this.holders(pb.id) === 0) continue;
+            const rx = wx - v.x;
+            const rz = wz - v.z;
+            const rel = Math.hypot(rx, rz);
+            if (rel < 1e-3) continue;
+            let f = 0.6 * pb.windArea * rel * rel;
+            const cap = 0.6 * b.mass() * GRAVITY;
+            if (f > cap) f = cap;
+            maxF = Math.max(maxF, f);
+            b.applyImpulse({ x: (rx / rel) * f * dt, y: 0, z: (rz / rel) * f * dt }, false);
+        }
+        return maxF;
+    }
+
     // ------------------------------------------------------------------------------- step
 
     step(): void {
@@ -695,4 +727,18 @@ function rotate(q: { x: number; y: number; z: number; w: number }, x: number, y:
 
 function inverseRotate(q: { x: number; y: number; z: number; w: number }, x: number, y: number, z: number, out: Vec3Like): Vec3Like {
     return rotate({ x: -q.x, y: -q.y, z: -q.z, w: q.w }, x, y, z, out);
+}
+
+/** Average projected area of a convex shape: a quarter of its surface area. */
+function windArea(s: ShapeSpec): number {
+    switch (s.type) {
+        case 'box':
+            return 2 * (s.hx * s.hy + s.hy * s.hz + s.hz * s.hx);
+        case 'ball':
+            return Math.PI * s.r * s.r;
+        case 'cylinder':
+            return (2 * Math.PI * s.r * s.r + 4 * Math.PI * s.r * s.half) / 4;
+        case 'capsule':
+            return (4 * Math.PI * s.r * s.r + 4 * Math.PI * s.r * s.half) / 4;
+    }
 }

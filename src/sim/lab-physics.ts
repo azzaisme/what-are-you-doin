@@ -8,7 +8,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 
 import { DUMMY_PARTS, dummyRestPose } from '../assets/dummy.ts';
 import { BEAM_HALF, BUCKET_HEIGHT, LOG_RADIUS } from '../assets/props.ts';
-import { PINE_TIERS, PINE_TRUNK_HEIGHT, ROCK_CENTRE_LIFT, pineTrunkRadius } from '../levels/common.ts';
+import { OAK, PINE_TIERS, PINE_TRUNK_HEIGHT, ROCK_CENTRE_LIFT, oakCrown, pineTrunkRadius } from '../levels/common.ts';
 import type { LevelDef } from '../levels/level.ts';
 import { pose, quatFromYawPitchRoll, quatMul } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
@@ -75,6 +75,12 @@ export function buildLabPhysics(level: LevelDef): PhysicsWorld {
         if (t.x < B.minX || t.x > B.maxX || t.z < B.minZ || t.z > B.maxZ) continue;
         const base = ground(t.x, t.z);
         const s = t.scale;
+        if (t.kind === 'oak') {
+            const th = OAK.trunkHeight * s;
+            pw.addStatic(RAPIER.ColliderDesc.cylinder(th / 2, OAK.trunkRadius * s + 0.02).setTranslation(t.x, base + th / 2 - 0.05, t.z).setFriction(0.8));
+            for (const b of oakCrown(t, base)) pw.addStatic(RAPIER.ColliderDesc.ball(b.r * 0.85).setTranslation(b.x, b.y, b.z).setFriction(0.5));
+            continue;
+        }
         const trunkH = PINE_TRUNK_HEIGHT * s;
         pw.addStatic(RAPIER.ColliderDesc.cylinder(trunkH / 2, pineTrunkRadius(s)).setTranslation(t.x, base + trunkH / 2 - 0.05, t.z).setFriction(0.8));
         for (const tier of PINE_TIERS) {

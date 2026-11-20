@@ -11,6 +11,9 @@ import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs';
 
 import { DebugPanel  } from './debug/panel.ts';
 import type { PanelHost } from './debug/panel.ts';
+import { ParticleFX } from './fx/particles.ts';
+import type { WatchedEntity } from './fx/particles.ts';
+import { CALM, windAt } from './fx/wind.ts';
 import { FirstPersonInput } from './input/first-person.ts';
 import { PadManager } from './input/gamepad.ts';
 import { TouchControls, isTouchDevice } from './input/touch.ts';
@@ -74,6 +77,28 @@ pipeline.applyStatic();
 const staticUploadMs = performance.now() - tUpload;
 const reference = new ReferenceRenderer(app, sim, scene.worldLayer, scene.immediateLayer);
 const fpInput = new FirstPersonInput(canvas);
+
+// ---- particles (voxel cells): falling leaves, landing dust and chips, splashes
+const watched: WatchedEntity[] = [];
+const watch = (name: string, bottom: number, timber: boolean) => {
+    const e = sim.entities.find((x) => x.name === name);
+    if (e) watched.push({ slot: e.slot, bottom, timber });
+};
+for (const n of ['plank', 'held-plank', 'extra-plank-0', 'extra-plank-1', 'extra-plank-2', 'extra-plank-3', 'extra-plank-4']) watch(n, 0.05, true);
+for (const n of ['beam-0', 'beam-1']) watch(n, 0.075, true);
+for (const n of ['log', 'extra-log-0', 'extra-log-1']) watch(n, 0.2, true);
+watch('cube', 0.25, true);
+watch('sphere', 0.3, false);
+watch('bucket', 0, false);
+for (const d of sim.dummy) watch(d.name, 0.15, false);
+for (const e of sim.eyes) watched.push({ slot: e.slot, bottom: 0, timber: false, eyeHeight: EYE_HEIGHT });
+const fx = new ParticleFX(level, watched);
+pipeline.particles = (time) => {
+    const cp = camera.getPosition();
+    fx.update(time, sim.ring, { x: cp.x, z: cp.z });
+    return { buffer: fx.buffer, count: fx.count };
+};
+const windNow = { x: 0, z: 0, speed: 0, gustiness: 0 };
 // gamepads (local co-op): the first pad to press A drives player 1, the next one joins as player 2
 const pads = new PadManager();
 // touch controls (phones): shown in first person on touch devices, or after the first touch
@@ -129,6 +154,7 @@ interface State {
     props: PropsMode;
     colliders: boolean;
     players: number;
+    particles: boolean;
 }
 
 const state: State = {
@@ -155,7 +181,8 @@ const state: State = {
     forceVoxel: true,
     props: sim.propsMode,
     colliders: false,
-    players: 1
+    players: 1,
+    particles: true
 };
 
 const rateParam = Number(params.get('hz'));
@@ -304,6 +331,10 @@ class LabDirector extends Script {
         pipeline.poll();
         reference.update(renderTime);
         if (state.colliders) drawColliders();
+        // gusts stir the water
+        windAt(renderTime, level.wind ?? CALM, windNow);
+        scene.water.rippleSpeed = 0.03 + 0.012 * windNow.speed;
+        scene.water.bumpiness = 0.26 + 0.03 * windNow.speed;
 
         // ---- debug overlay uniform
         const g = state.gridLines ? 1 : 0;
@@ -595,6 +626,11 @@ const host: PanelHost = {
             case 'players':
                 setPlayers(Number(v));
                 break;
+            case 'particles':
+                state.particles = Boolean(v);
+                fx.enabled = state.particles;
+                state.forceVoxel = true;
+                break;
         }
     },
     action(id) {
@@ -640,6 +676,7 @@ const panel = new DebugPanel(host, [
             { kind: 'button', id: 'dropTest', label: 'Drop test' },
             { kind: 'button', id: 'resetProps', label: 'Reset props' },
             { kind: 'toggle', id: 'colliders', label: 'Physics colliders' },
+            { kind: 'toggle', id: 'particles', label: 'Leaves & particles' },
             {
                 kind: 'select',
                 id: 'players',
@@ -966,7 +1003,7 @@ const gpuName = (() => {
     return ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : String(gl.getParameter(gl.RENDERER));
 })();
 
-const EMPTY_FRAME_STATS = { frame: -1, time: 0, objects: 0, parts: 0, candidates: 0, samples: 0, occupied: 0, rejected: 0, changedCells: 0, dirtyCells: 0, dynDynOverlaps: 0, dynStaticOverlaps: 0, staticRebuilt: 0, dynamicRebuilt: 0, rasterMs: 0, resolveMs: 0, meshMs: 0, totalMs: 0, dynamicCells: 0, chunks: build.chunks };
+const EMPTY_FRAME_STATS = { frame: -1, time: 0, objects: 0, parts: 0, candidates: 0, samples: 0, occupied: 0, rejected: 0, changedCells: 0, dirtyCells: 0, dynDynOverlaps: 0, dynStaticOverlaps: 0, staticRebuilt: 0, dynamicRebuilt: 0, rasterMs: 0, resolveMs: 0, meshMs: 0, totalMs: 0, dynamicCells: 0, chunks: build.chunks, particles: 0 };
 
 function collectStats() {
     const v = { ...(pipeline.lastStats ?? EMPTY_FRAME_STATS), uploadMs: pipeline.uploadMs };
@@ -1045,6 +1082,7 @@ function statsText(): string {
         `physics  ${s.physics.props}  tick ms avg ${f(s.physics.tickMsAvg)} p95 ${f(s.physics.tickMsP95)} max ${f(s.physics.tickMsMax)}`,
         `  bodies active ${s.physics.activeBodies}/${s.physics.enabledBodies}  held ${s.physics.holding < 0 ? '-' : s.physics.holding}  force ${f(s.physics.grabForce, 0)} N  err ${f(s.physics.grabError)} m`,
         `  clamps lin ${s.physics.linClamps} ang ${s.physics.angClamps}  release ${s.physics.releaseClamps}  recovered ${s.physics.recovered}  breaks ${s.physics.grabBreaks}`,
+        `fx       particles ${v.particles ?? 0}  wind ${f(windNow.speed, 1)} m/s  max wind force ${f(sim.windForce, 1)} N`,
         `heap     ${s.heapMB === null ? 'n/a' : f(s.heapMB, 1) + ' MB'}  dropped ticks ${s.droppedTicks}`
     ].join('\n');
 }

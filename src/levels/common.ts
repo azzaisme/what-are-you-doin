@@ -75,7 +75,20 @@ export interface TreeSpot {
     z: number;
     scale: number;
     yaw: number;
+    /** 'pine' (default) or 'oak' (deciduous, autumn crown: leaves fall from it). */
+    kind?: 'pine' | 'oak';
 }
+
+/** Oak dimensions in units of its scale: trunk, and the crown blobs (offset x, y, z, radius). */
+export const OAK = {
+    trunkHeight: 1.9,
+    trunkRadius: 0.17,
+    blobs: [
+        [0, 2.55, 0, 1.15],
+        [0.7, 2.25, 0.3, 0.8],
+        [-0.55, 2.35, -0.45, 0.85]
+    ] as const
+};
 
 export interface RockSpot {
     x: number;
@@ -187,4 +200,37 @@ export function rock(world: VoxelWorld, x: number, z: number, base: number, rx: 
         (lx, ly, lz) => (ly > ry * 0.45 && valueNoise(lx * 4, lz * 4, seed + 3) > 0.35 ? voxel(M.Moss, latticeShade(lx, ly, lz, 0.1, seed)) : voxel(M.Rock, latticeShade(lx, ly, lz, 0.1, seed)))
     );
     world.rasterizeStatic(v, pose(x, base + ry * ROCK_CENTRE_LIFT, z, quatFromYawPitchRoll(yaw, 0, 0)), 'center', 3, stats);
+}
+
+/** A deciduous tree in early autumn: trunk and a lumpy crown of green, gold and red patches. */
+export function oak(world: VoxelWorld, x: number, z: number, base: number, scale: number, yaw: number, stats: RasterStats, seed: number): void {
+    const q = quatFromYawPitchRoll(yaw, 0, 0);
+    const th = OAK.trunkHeight * scale;
+    const trunk = cylinder('y', OAK.trunkRadius * scale + 0.02, th * 0.5, (lx, ly, lz) => voxel(M.Bark, latticeShade(lx, ly * 0.5, lz, 0.1, seed)));
+    world.rasterizeStatic(trunk, pose(x, base + th * 0.5 - 0.05, z, q), 'coverage50', 1, stats);
+    for (let n = 0; n < OAK.blobs.length; n++) {
+        const [bx, by, bz, br] = OAK.blobs[n];
+        const r = br * scale;
+        const crown = implicit(
+            aabb(-r * 1.2, -r * 1.2, -r * 1.2, r * 1.2, r * 1.2, r * 1.2),
+            (lx, ly, lz) => lx * lx + ly * ly * 1.25 + lz * lz < r * r * (0.82 + 0.3 * valueNoise(lx * 2.2 + seed, lz * 2.2 + ly * 1.7, seed + n)),
+            (lx, ly, lz) => {
+                const t = valueNoise((lx + x) * 1.3, (lz + z) * 1.3 + ly, seed + 7);
+                const mat = t > 0.68 ? M.LeafRed : t > 0.45 ? M.LeafGold : M.Leaf;
+                return voxel(mat, latticeShade(lx, ly, lz, 0.2, seed + n));
+            }
+        );
+        const off = { x: bx * scale, z: bz * scale };
+        // the blobs turn with the tree's yaw
+        const c = Math.cos(yaw);
+        const sn = Math.sin(yaw);
+        world.rasterizeStatic(crown, pose(x + off.x * c + off.z * sn, base + by * scale, z - off.x * sn + off.z * c, q), 'coverage50', 2, stats);
+    }
+}
+
+/** World centres and radii of an oak's crown blobs (for colliders and falling leaves). */
+export function oakCrown(t: TreeSpot, base: number): { x: number; y: number; z: number; r: number }[] {
+    const c = Math.cos(t.yaw);
+    const sn = Math.sin(t.yaw);
+    return OAK.blobs.map(([bx, by, bz, br]) => ({ x: t.x + bx * t.scale * c + bz * t.scale * sn, y: base + by * t.scale, z: t.z - bx * t.scale * sn + bz * t.scale * c, r: br * t.scale }));
 }

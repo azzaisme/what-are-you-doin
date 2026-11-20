@@ -4,11 +4,13 @@
  * here are descriptions; the physics adapter turns them into colliders).
  */
 
+import type { WindSpec } from '../fx/wind.ts';
 import type { Pose } from '../voxels/math.ts';
 import type { RasterStats, SamplingPolicy } from '../voxels/rasterizer.ts';
 import { box, cylinder, ellipsoid } from '../voxels/volumes.ts';
 import type { MaterialField, Volume } from '../voxels/volumes.ts';
 import type { VoxelWorld } from '../voxels/world.ts';
+
 
 import type { RockSpot, TreeSpot } from './common.ts';
 
@@ -87,6 +89,10 @@ export interface LevelDef {
     layout(seed: number): LevelLayout;
     build(world: VoxelWorld, seed: number): LevelBuildResult;
     sun: { elevation: number; azimuth: number };
+    /** Wind (forces on light bodies, leaves, water ripples); calm when absent. */
+    wind?: WindSpec;
+    /** A windsock on a pole (the wind's visible tell, §2.9). */
+    windsock?: { x: number; z: number; height: number };
     spawn: { x: number; z: number; yaw: number; pitch: number };
     orbitHome: { pos: [number, number, number]; focus: [number, number, number] };
     startFirstPerson: boolean;

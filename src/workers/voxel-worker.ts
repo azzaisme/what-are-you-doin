@@ -38,7 +38,7 @@ function handle(msg: ToWorker): void {
     if (!service) return;
     try {
         if (msg.type === 'frame') {
-            const { units, stats } = service.frame(msg.frame, msg.time, msg.policy, msg.reference, msg.states);
+            const { units, stats } = service.frame(msg.frame, msg.time, msg.policy, msg.reference, msg.states, msg.particles, msg.particleCount ?? 0);
             post({ type: 'frame', units, stats }, transferables(units));
         } else if (msg.type === 'query') {
             const result = msg.what === 'hash' ? service.world.dynamicHash() : service.verifyGrid();
