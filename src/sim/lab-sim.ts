@@ -21,7 +21,7 @@ import { composePose, pose, quatFromAxisAngle, quatFromYawPitchRoll, quatMul, qu
 import { SIM_DT } from './clock.ts';
 import { ACTION_DROP, ACTION_DROP_TEST, ACTION_RAGDOLL, ACTION_RESET_PROPS, neutralCommand, sanitizeCommand } from './commands.ts';
 import type { PlayerCommand } from './commands.ts';
-import { MAX_STRESS, createLabEntities } from './lab-entities.ts';
+import { MAX_PLAYERS, MAX_STRESS, createLabEntities } from './lab-entities.ts';
 import type { SimEntity } from './lab-entities.ts';
 import { addDummy, addLabKinematics, buildLabPhysics, launchDummy, propBody, stressDef } from './lab-physics.ts';
 import { CHARACTER } from './physics/world.ts';
@@ -30,7 +30,7 @@ import { ANIM_MAX, SnapshotRing, writeEntity } from './snapshots.ts';
 
 
 export type { PlayerCommand, SimEntity };
-export { MAX_STRESS };
+export { MAX_PLAYERS, MAX_STRESS };
 export type PropsMode = 'physics' | 'scripted';
 
 export const EYE_HEIGHT = 1.22;
@@ -69,11 +69,14 @@ export class LabSim {
     private uteSpin = 0;
 
     // player state (feet position; `eyeLift` smooths step-ups for the camera). Player 1 is `player`.
-    readonly players: PlayerState[] = [newPlayerState(0, 6.5), newPlayerState(1.2, 6.5)];
+    readonly players: PlayerState[] = Array.from({ length: MAX_PLAYERS }, (_, i) => newPlayerState(i * 1.2, 6.5));
     readonly player = this.players[0];
-    /** 1, or 2 for local co-op (split screen). Player 2 is always in first person. */
-    playerCount = 1;
-    private lastCmd2: PlayerCommand = neutralCommand();
+    /**
+     * Which slots play (slot 0 follows `fpActive`). Local split screen uses slot 1; networked guests
+     * take any free slot. Extra players are always in first person.
+     */
+    private readonly slotActive: boolean[] = Array.from({ length: MAX_PLAYERS }, () => false);
+    private readonly lastCmds: PlayerCommand[] = Array.from({ length: MAX_PLAYERS }, () => neutralCommand());
     private lastCmd: PlayerCommand = neutralCommand();
     private heldInit = false;
     private prevFp = false;
@@ -93,6 +96,8 @@ export class LabSim {
     readonly extras: SimEntity[];
     readonly avatars: SimEntity[];
     readonly player2Entity: SimEntity;
+    /** Every player's eye entity, by slot. */
+    readonly eyes: SimEntity[];
     readonly level: LevelDef;
     /** Level progress (rules): the objective, once reached, stays reached until reset. */
     readonly progress = { goalReached: false, goalTick: -1, falls: 0, recoveries: 0 };
@@ -122,16 +127,20 @@ export class LabSim {
         this.avatars = c.avatars;
         this.playerEntity = c.player;
         this.player2Entity = c.player2;
+        this.eyes = c.eyes;
         const sp = this.level.spawn;
         this.player.x = sp.x;
         this.player.z = sp.z;
         this.player.y = this.level.terrainHeight(sp.x, sp.z);
         this.player.yaw = sp.yaw;
-        const p2 = this.players[1];
-        p2.x = sp.x + Math.cos(sp.yaw) * 1.2;
-        p2.z = sp.z - Math.sin(sp.yaw) * 1.2;
-        p2.y = this.level.terrainHeight(p2.x, p2.z);
-        p2.yaw = sp.yaw;
+        for (let i = 1; i < MAX_PLAYERS; i++) {
+            const pi = this.players[i];
+            // a row to player 1's right
+            pi.x = sp.x + Math.cos(sp.yaw) * 1.2 * i;
+            pi.z = sp.z - Math.sin(sp.yaw) * 1.2 * i;
+            pi.y = this.level.terrainHeight(pi.x, pi.z);
+            pi.yaw = sp.yaw;
+        }
         this.ring = new SnapshotRing(this.entities.length, 32);
         this.reset();
     }
@@ -200,7 +209,7 @@ export class LabSim {
         }
         this.players.forEach((pl, i) => pw.createCharacter(pl.x, pl.y, pl.z, i));
         pw.setCharacterEnabled(this.fpActive, 0);
-        pw.setCharacterEnabled(this.playerCount > 1, 1);
+        for (let i = 1; i < MAX_PLAYERS; i++) pw.setCharacterEnabled(this.slotActive[i], i);
         this.physics = pw;
     }
 
@@ -209,45 +218,72 @@ export class LabSim {
         if (tick < this.tick) this.reset();
         // replay holds the look and carry state but repeats no edge-triggered request
         const c = this.lastCmd;
-        const c2 = this.lastCmd2;
-        while (this.tick < tick) this.step({ ...neutralCommand(c.seq, c.yaw, c.pitch), carry: c.carry }, neutralCommand(c2.seq, c2.yaw, c2.pitch));
+        const others = this.lastCmds.slice(1).map((x) => neutralCommand(x.seq, x.yaw, x.pitch));
+        while (this.tick < tick) this.step({ ...neutralCommand(c.seq, c.yaw, c.pitch), carry: c.carry }, others[0], others.slice(1));
     }
 
-    /** One fixed tick. `input2` is player 2's command (two-player mode; ignored otherwise). */
-    step(input: PlayerCommand, input2?: PlayerCommand): void {
-        const cmd = sanitizeCommand(input);
-        const cmd2 = sanitizeCommand(input2 ?? { ...neutralCommand(0, this.players[1].yaw, this.players[1].pitch) });
+    /**
+     * One fixed tick. `input2` is slot 1's command, `rest` slots 2.. (each ignored when its slot is
+     * not playing; a missing command means "no input, keep looking the same way").
+     */
+    step(input: PlayerCommand, input2?: PlayerCommand, rest: (PlayerCommand | undefined)[] = []): void {
+        const cmds: PlayerCommand[] = [sanitizeCommand(input)];
+        for (let i = 1; i < MAX_PLAYERS; i++) {
+            const raw = i === 1 ? input2 : rest[i - 2];
+            const p = this.players[i];
+            cmds.push(sanitizeCommand(raw ?? neutralCommand(0, p.yaw, p.pitch)));
+        }
+        const cmd = cmds[0];
         this.lastCmd = cmd;
-        this.lastCmd2 = cmd2;
+        for (let i = 1; i < MAX_PLAYERS; i++) {
+            this.lastCmds[i] = cmds[i];
+            this.players[i].yaw = cmds[i].yaw;
+            this.players[i].pitch = cmds[i].pitch;
+        }
         this.tick++;
         this.integrate(cmd);
-        this.players[1].yaw = cmd2.yaw;
-        this.players[1].pitch = cmd2.pitch;
         this.evaluate();
-        this.stepPhysics([cmd, cmd2]);
+        this.stepPhysics(cmds);
         this.publish();
     }
 
-    /** Switches between one player and two-player local co-op; player 2 appears beside player 1. */
-    setPlayerCount(n: number): void {
-        const count = n >= 2 ? 2 : 1;
-        if (count === this.playerCount) return;
-        this.playerCount = count;
+    /** Number of players playing (slot 0 counts when in first person). */
+    get playerCount(): number {
+        let n = 1;
+        for (let i = 1; i < MAX_PLAYERS; i++) if (this.slotActive[i]) n++;
+        return n;
+    }
+
+    isSlotActive(i: number): boolean {
+        return i === 0 ? this.fpActive : !!this.slotActive[i];
+    }
+
+    /** First free slot (1..), or -1. */
+    freeSlot(): number {
+        for (let i = 1; i < MAX_PLAYERS; i++) if (!this.slotActive[i]) return i;
+        return -1;
+    }
+
+    /** Starts or stops a player slot (1..); a starting player appears beside player 1. */
+    setSlotActive(i: number, active: boolean): void {
+        if (i < 1 || i >= MAX_PLAYERS || this.slotActive[i] === active) return;
+        this.slotActive[i] = active;
         const pw = this.physics;
-        if (count === 2) {
+        if (active) {
             const p1 = this.player;
-            const p2 = this.players[1];
-            // one step to the right of player 1, facing the same way
-            this.placePlayer(p1.x + Math.cos(p1.yaw) * 1.2, p1.z - Math.sin(p1.yaw) * 1.2, p1.yaw, 1);
-            p2.pitch = p1.pitch;
-            pw.setCharacterEnabled(true, 1);
+            const pi = this.players[i];
+            this.placePlayer(p1.x + Math.cos(p1.yaw) * 1.2 * i, p1.z - Math.sin(p1.yaw) * 1.2 * i, p1.yaw, i);
+            pi.pitch = p1.pitch;
+            pi.walkDist = 0;
+            pw.setCharacterEnabled(true, i);
         } else {
-            pw.setCharacterEnabled(false, 1);
+            pw.setCharacterEnabled(false, i);
         }
     }
 
-    get time(): number {
-        return this.tick * SIM_DT;
+    /** Local split screen: 1 or 2 players (slot 1 on or off). */
+    setPlayerCount(n: number): void {
+        this.setSlotActive(1, n >= 2);
     }
 
     // ------------------------------------------------------------------------------- integrate
@@ -271,8 +307,6 @@ export class LabSim {
         this.player.yaw = cmd.yaw;
         this.player.pitch = cmd.pitch;
     }
-
-    // ------------------------------------------------------------------------------- physics
 
     private stepPhysics(cmds: PlayerCommand[]): void {
         const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -306,7 +340,7 @@ export class LabSim {
     }
 
     private playerActive(i: number): boolean {
-        return i === 0 ? this.fpActive : i < this.playerCount;
+        return this.isSlotActive(i);
     }
 
     /** Movement, carry, grab, throw for one player (first person). */
@@ -715,8 +749,9 @@ export class LabSim {
     }
 
     private publishPlayer(): void {
-        const eyes = [this.playerEntity, this.player2Entity];
-        for (let i = 0; i < 2; i++) {
+        const eyes = this.eyes;
+        const many = this.playerCount > 1;
+        for (let i = 0; i < MAX_PLAYERS; i++) {
             const p = this.players[i];
             const e = eyes[i];
             e.pose.p.x = p.x;
@@ -726,7 +761,7 @@ export class LabSim {
             // voxel beaver bodies: seen by the other player (and your own feet when you look down;
             // from inside your own head every face points away, so it never blocks your view)
             const a = this.avatars[i];
-            a.visible = this.playerCount > 1 && this.playerActive(i);
+            a.visible = many && this.playerActive(i);
             if (!a.visible) continue;
             a.pose.p.x = p.x;
             a.pose.p.y = p.y;
@@ -763,7 +798,7 @@ export class LabSim {
         p.eyeLift = 0;
         this.physics.placeCharacter(p.x, p.y, p.z, i);
         if (i === 0) this.lastCmd = { ...this.lastCmd, yaw };
-        else this.lastCmd2 = { ...this.lastCmd2, yaw };
+        else this.lastCmds[i] = { ...this.lastCmds[i], yaw };
     }
 
     /** Read-only, for UI: what the player is holding and what the crosshair would grab. */
@@ -776,6 +811,16 @@ export class LabSim {
         const holding = name(heldId);
         const target = holding ? null : name(pw.probe({ x: p.x, y: p.y + EYE_HEIGHT, z: p.z }, p.yaw, p.pitch, i));
         return { holding, target, shared: heldId >= 0 && pw.holders(heldId) > 1 };
+    }
+
+    /** Like `interaction`, as entity ids (-1 for none): what the host sends to guests for their prompts. */
+    interactionIds(i: number): { held: number; target: number; shared: boolean } {
+        if (!this.playerActive(i) || !this.physicsProps) return { held: -1, target: -1, shared: false };
+        const pw = this.physics;
+        const p = this.players[i];
+        const held = pw.heldIdOf(i);
+        const target = held >= 0 ? -1 : pw.probe({ x: p.x, y: p.y + EYE_HEIGHT, z: p.z }, p.yaw, p.pitch, i);
+        return { held, target, shared: held >= 0 && pw.holders(held) > 1 };
     }
 
     /** True when the voxelized dummy is in the world. */

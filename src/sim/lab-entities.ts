@@ -15,6 +15,8 @@ import { M } from '../voxels/palette.ts';
 import { ANIM_MAX } from './snapshots.ts';
 
 export const MAX_STRESS = 25;
+/** Players per world: local split screen and networked guests share these slots. */
+export const MAX_PLAYERS = 4;
 export const DUMMY_ID0 = 200;
 export const EXTRA_PLANKS = 5;
 export const EXTRA_BEAMS = 2;
@@ -54,6 +56,8 @@ export interface LabEntities {
     player: SimEntity;
     /** Not voxelized: player 2's eye pose. */
     player2: SimEntity;
+    /** Not voxelized: every player's eye pose, by slot (player, player2, player3, player4). */
+    eyes: SimEntity[];
 }
 
 export function createLabEntities(): LabEntities {
@@ -84,10 +88,11 @@ export function createLabEntities(): LabEntities {
     for (let n = 0; n < EXTRA_PLANKS; n++) extras.push(add(300 + n, `extra-plank-${n}`, plankAsset(`extra-plank-${n}`), 1));
     for (let n = 0; n < EXTRA_BEAMS; n++) extras.push(add(320 + n, `beam-${n}`, beamAsset(`beam-${n}`), 1));
     for (let n = 0; n < EXTRA_LOGS; n++) extras.push(add(340 + n, `extra-log-${n}`, logAsset(), 1));
-    const avatars = [add(910, 'avatar-0', beaverAsset, 3), add(911, 'avatar-1', beaverAsset, 3)];
-    const player = add(900, 'player', EMPTY_ASSET, 0);
-    const player2 = add(901, 'player2', EMPTY_ASSET, 0);
-    return { entities, beaver, bucket, ute, plank, log, cube, sphere, held, stress, dummy, extras, avatars, player, player2 };
+    const avatars: SimEntity[] = [];
+    for (let n = 0; n < MAX_PLAYERS; n++) avatars.push(add(910 + n, `avatar-${n}`, beaverAsset, 3));
+    const eyes: SimEntity[] = [];
+    for (let n = 0; n < MAX_PLAYERS; n++) eyes.push(add(900 + n, n === 0 ? 'player' : `player${n + 1}`, EMPTY_ASSET, 0));
+    return { entities, beaver, bucket, ute, plank, log, cube, sphere, held, stress, dummy, extras, avatars, player: eyes[0], player2: eyes[1], eyes };
 }
 
 const EMPTY_ASSET: VoxelAsset = {

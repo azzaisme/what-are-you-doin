@@ -329,3 +329,51 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
     expect((await lab(page, (l) => l.stats())).voxel.objects).toBe(15);
     expect(problems).toEqual([]);
 });
+
+test('online co-op: a second device joins the host, plays as player 2 and renders the host world', async ({ page, context }) => {
+    // ?net=local links pages of one browser with BroadcastChannel; the same sessions run over the
+    // claude.ai room in the published artifact
+    const query = '?t=0.01&quality=low&net=local#cell100';
+    const problems = await boot(page, query);
+    const guest = await context.newPage();
+    const guestProblems: string[] = [];
+    guest.on('pageerror', (e) => guestProblems.push(e.message));
+    await guest.goto(`/${query}`);
+    await guest.waitForFunction(() => (window as unknown as { __riverLab?: Lab }).__riverLab?.ready === true, null, { timeout: 150_000 });
+    type Net = { net: { host(): Promise<void>; games(): { code: string }[]; join(c: string): Promise<void>; leave(): void; status(): { hosting: string | null; guests: number; guest: { slot: number; received: number } | null } } };
+    const net = (p: Page, src: string, arg?: unknown) => p.evaluate(([s, a]) => new Function('l', 'a', `return (${s})(l, a)`)((window as unknown as { __riverLab: Net }).__riverLab, a), [src, arg] as const);
+
+    await lab(page, (l) => l.action('pause'));
+    await net(page, '(l) => l.net.host()');
+    const code = ((await net(page, '(l) => l.net.status()')) as { hosting: string }).hosting;
+    expect(code).toMatch(/^[a-z0-9]{4}$/);
+    await guest.waitForFunction((c) => (window as unknown as { __riverLab: Net }).__riverLab.net.games().some((g) => g.code === c), code, { timeout: 30_000 });
+    await net(guest, '(l, c) => l.net.join(c)', code);
+    await guest.waitForFunction(() => ((window as unknown as { __riverLab: Net }).__riverLab.net.status().guest?.received ?? 0) > 5, null, { timeout: 120_000 });
+    const g = (await net(guest, '(l) => l.net.status()')) as { guest: { slot: number } };
+    expect(g.guest.slot).toBe(1);
+    expect(((await net(page, '(l) => l.net.status()')) as { guests: number }).guests).toBe(1);
+
+    // the guest's input moves player 2 on the host
+    const where = () => page.evaluate(() => (window as unknown as { __riverLab: { entities(): Record<string, { x: number; z: number; visible: boolean }> } }).__riverLab.entities()['avatar-1']);
+    const before = await where();
+    expect(before.visible).toBe(true);
+    for (let i = 0; i < 15; i++) {
+        await net(guest, '(l) => { l.look(3.14, -0.1); l.input({ moveZ: 1 }); }');
+        await guest.waitForTimeout(300);
+    }
+    const after = await where();
+    expect(Math.hypot(after.x - before.x, after.z - before.z)).toBeGreaterThan(0.3);
+    // the guest renders the host's world: both beaver bodies and every prop, all on the grid
+    // (voxel frames lag the snapshots in software GL, so wait for the frame that has both beavers)
+    await guest.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 17, null, { timeout: 60_000 });
+    const gs = await guest.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.stats());
+    expect(gs.voxel.rejected).toBe(0);
+    expect((await guest.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid())).misaligned).toBe(0);
+
+    // leaving frees the slot on the host
+    await net(guest, '(l) => l.net.leave()');
+    await page.waitForFunction(() => (window as unknown as { __riverLab: Net }).__riverLab.net.status().guests === 0, null, { timeout: 30_000 });
+    expect(problems).toEqual([]);
+    expect(guestProblems).toEqual([]);
+});

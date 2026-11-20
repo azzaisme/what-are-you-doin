@@ -143,7 +143,7 @@ describe('thin geometry over a full turn (§5.4, §5.9)', () => {
                 expect(r.min).toBeGreaterThan(0);
             }
         }
-    });
+    }, 30_000); // full turns under four policies: ~5 s at 5 cm on the sandbox CPU
 
     it('coverage50 keeps the 10 cm thick plank in one piece for a full turn about a skew axis', () => {
         const r = fullTurn(plank, 'coverage50', [0.3, 1, 0.2]);

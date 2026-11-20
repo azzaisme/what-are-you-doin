@@ -1,5 +1,30 @@
 # Progress log
 
+## Online co-op on phones (2026-11-20, owner request: "let two people join this on their phones")
+
+ADR 0010. One device hosts the game; phones (or any device) join over the claude.ai artifact's
+`room` capability — no server of ours.
+
+- **How to play:** share the artifact with the players (Share menu; they must be signed in — a
+  public link cannot join rooms). One person opens it and taps **Play online → Host a game**; the
+  others open the same link, tap **Play online** and join the listed game (4-letter code). Up to 4
+  players, including local split-screen players on the host.
+- **Phones:** touch controls appear in first person — left thumb moves (push to the edge to run),
+  right thumb looks, buttons Jump / Grab (Release) / Throw / Drop. Landscape works best.
+- **Netcode:** host-authoritative; guests send input as presence (with press counters), the host
+  sends 20 Hz pose snapshots (~600 bytes for the yard with two players), guests interpolate 150 ms
+  behind and rebuild voxels locally. Prompts, objective and messages come from the host.
+- **Also:** the sim now has 4 player slots (local and online share them).
+- **Tests:** 92 unit tests × 2 = 184 pass (new: codec precision, wrap, garbage; sessions over an
+  in-memory hub: lobby listing, slot assignment, guest movement on the host, snapshot fidelity,
+  render delay, allowed actions, full games, leaving). New browser test: two pages linked by
+  BroadcastChannel — host, join, guest drives player 2, guest renders 17 objects on the grid, leave
+  frees the slot (passed 3 runs in a row). Touch checked in a Pixel 7 landscape emulation (jump
+  button jumps 0.86 m; drag turns the view; layout clear of the dock).
+- **Not tested:** the real claude.ai room (only reachable in the viewer) and real phones/networks.
+  Latency feel, presence rate limits in practice and phone thermals are open. No prediction for a
+  guest's own movement yet (it lags by a round trip + 150 ms). The host must stay in front.
+
 ## Local co-op: two players, split screen, gamepads (2026-11-20, owner request)
 
 The owner will test two-player on a Steam Deck with two gamepads. ADR 0009 has the design.

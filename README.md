@@ -51,6 +51,7 @@ Query parameters (handy for comparisons and screenshots):
 | `?noui` | hide all UI |
 | `?level=lab` | the River Lab test scene instead of level 1, the Timber Yard |
 | `?view=orbit` | start the Timber Yard in the orbit view instead of first person |
+| `?net=local` | online co-op between tabs of one browser (development; the published page uses the claude.ai room) |
 | `?props=scripted` | River Lab only: Epic 1 scripted prop motion instead of physics props (also in the debug panel) |
 
 ## Controls
@@ -67,6 +68,8 @@ Query parameters (handy for comparisons and screenshots):
 | `Q` | drop |
 | `G` | put a plank in your hands (scripted mode: the Epic 1 comfort-test plank) |
 | `T` | launch the ragdoll dummy |
+| **Play online** (bottom left) | host a game, or join one: other devices on the same artifact link, up to 4 players |
+| **Touch** (phones) | left thumb move (edge: run) · right thumb look · Jump / Grab / Throw / Drop buttons |
 | **Gamepad** | press **A** to join (first pad: player 1, second pad: player 2 → split screen) |
 | left / right stick | move / look |
 | A · LT or L3 · RT · RB · B · X · Y · D-pad | jump · sprint · grab / release · throw · drop · ragdoll · plank · reach |

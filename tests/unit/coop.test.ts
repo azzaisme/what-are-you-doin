@@ -35,7 +35,7 @@ describe('local co-op: two players, one world', () => {
         solo.step(cmd(0));
         expect(solo.avatars.some((a) => a.visible)).toBe(false);
         const s = coop();
-        expect(s.avatars.every((a) => a.visible)).toBe(true);
+        expect(s.avatars.map((a) => a.visible)).toEqual([true, true, false, false]);
         const a0 = { ...s.players[0] };
         const b0 = { ...s.players[1] };
         // player 2 starts on player 1's right: walk apart (walking into each other, they bump)

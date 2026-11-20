@@ -520,3 +520,174 @@ body.ui-hidden .prompt-p2,
 body.ui-hidden .crosshair-p2 {
     display: none !important;
 }
+
+/* ---- online play ------------------------------------------------------------------------------ */
+
+.online-chip {
+    padding: 6px 10px;
+    font-size: 12px;
+    color: #f4f1ea;
+    border: 1px solid #ffffff30;
+    border-radius: 8px;
+    background: #10161cc0;
+    cursor: pointer;
+}
+
+.online-chip.live {
+    background: #1f4a2ae6;
+    border-color: #9fe39a80;
+}
+
+.online-panel {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(360px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    z-index: 40;
+    padding: 16px;
+    font-size: 14px;
+    border: 1px solid #ffffff22;
+    border-radius: 14px;
+    background: #0e1418f2;
+    box-shadow: 0 8px 40px #0008;
+}
+
+.online-title {
+    font-weight: 600;
+    font-size: 16px;
+    margin-bottom: 8px;
+}
+
+.online-note {
+    margin: 0 0 10px;
+    line-height: 1.4;
+    color: #d9d3c4;
+}
+
+.online-warn {
+    margin: 0 0 10px;
+    font-size: 12.5px;
+    color: #ffd27a;
+}
+
+.online-sub {
+    margin: 12px 0 6px;
+    font-size: 12px;
+    color: #9aa7b0;
+}
+
+.online-panel button {
+    display: block;
+    width: 100%;
+    min-height: 44px;
+    margin: 6px 0;
+    font-size: 14px;
+    color: inherit;
+    border: 1px solid #ffffff2a;
+    border-radius: 10px;
+    background: #24303a;
+    cursor: pointer;
+}
+
+.online-panel button.online-primary {
+    background: #2a5a3a;
+}
+
+.online-panel button:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+/* ---- touch controls (phones, first person) --------------------------------------------------- */
+
+.touch-ui {
+    display: none;
+}
+
+.touch-ui.on {
+    display: block;
+}
+
+body.touch-play,
+body.touch-play canvas {
+    touch-action: none;
+    overscroll-behavior: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* the voxel-size box would sit under the left thumb */
+body.touch-play .cell-size {
+    display: none;
+}
+
+.touch-stick {
+    position: fixed;
+    width: 112px;
+    height: 112px;
+    margin: -56px 0 0 -56px;
+    border-radius: 50%;
+    border: 2px solid #ffffff40;
+    background: #0003;
+    pointer-events: none;
+    opacity: 0;
+    z-index: 15;
+}
+
+.touch-stick.active {
+    opacity: 1;
+}
+
+.touch-knob {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 48px;
+    height: 48px;
+    margin: -24px 0 0 -24px;
+    border-radius: 50%;
+    background: #ffffffb0;
+}
+
+.touch-buttons {
+    position: fixed;
+    right: max(14px, env(safe-area-inset-right));
+    bottom: calc(var(--dock-h) + 6px);
+    display: grid;
+    grid-template-columns: repeat(2, 64px);
+    gap: 10px;
+    z-index: 15;
+}
+
+.touch-buttons button {
+    width: 64px;
+    height: 64px;
+    font: 600 13px ui-sans-serif, system-ui, sans-serif;
+    color: #f4f1ea;
+    border: 2px solid #ffffff50;
+    border-radius: 50%;
+    background: #10161ca6;
+    touch-action: none;
+}
+
+.touch-buttons button.down {
+    background: #ffd27ad0;
+    color: #10161c;
+}
+
+.touch-buttons .touch-jump {
+    background: #2a5a3aa6;
+}
+
+.touch-buttons .touch-grab {
+    background: #6a4a1aa6;
+}
+
+body.ui-hidden .touch-ui,
+body.ui-hidden .online-chip,
+body.ui-hidden .online-panel {
+    display: none !important;
+}

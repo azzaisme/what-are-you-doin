@@ -13,7 +13,12 @@ import { DebugPanel  } from './debug/panel.ts';
 import type { PanelHost } from './debug/panel.ts';
 import { FirstPersonInput } from './input/first-person.ts';
 import { PadManager } from './input/gamepad.ts';
+import { TouchControls, isTouchDevice } from './input/touch.ts';
 import { getLevel } from './levels/index.ts';
+import { GuestSession, HostSession, listGames } from './net/session.ts';
+import type { GameAd } from './net/session.ts';
+import { localTransport, roomTransport } from './net/transport.ts';
+import type { NetTransport } from './net/transport.ts';
 import { ReferenceRenderer } from './render/reference.ts';
 import { QUALITY, createLabScene  } from './render/scene.ts';
 import type { Quality } from './render/scene.ts';
@@ -28,6 +33,7 @@ import type { PropsMode } from './sim/lab-sim.ts';
 import { initPhysics } from './sim/physics/world.ts';
 import { ANIM_MAX } from './sim/snapshots.ts';
 import type { CameraControlsApi } from './types/engine-scripts.ts';
+import { OnlinePanel } from './ui/online-panel.ts';
 import { CELL_SIZE_MAX_CM, CELL_SIZE_MIN_CM, CELL_SIZE_STORAGE_KEY, GRID_SIZE, clampCellSizeCm } from './voxels/grid.ts';
 import { pose } from './voxels/math.ts';
 import { SAMPLING_POLICIES  } from './voxels/rasterizer.ts';
@@ -70,6 +76,28 @@ const reference = new ReferenceRenderer(app, sim, scene.worldLayer, scene.immedi
 const fpInput = new FirstPersonInput(canvas);
 // gamepads (local co-op): the first pad to press A drives player 1, the next one joins as player 2
 const pads = new PadManager();
+// touch controls (phones): shown in first person on touch devices, or after the first touch
+const touch = new TouchControls();
+let touchSeen = isTouchDevice();
+window.addEventListener('touchstart', () => {
+    if (!touchSeen) {
+        touchSeen = true;
+        updateTouch();
+    }
+}, { passive: true });
+function updateTouch(): void {
+    touch.show(touchSeen && state.mode === 'firstPerson' && !state.uiHidden);
+}
+
+// online co-op (room presence): one device hosts the simulation, guests render its snapshots
+let transport: NetTransport | null = null;
+let transportKind: 'room' | 'local' | 'none' = 'none';
+let hostSession: HostSession | null = null;
+let guestSession: GuestSession | null = null;
+let guestEventsSeen = 0;
+/** Slot of the local second player (split screen), or -1. */
+let localSlot2 = -1;
+
 /** Test hook: fields merged into player 2's next command (no real pad in headless tests). */
 let p2Injected: Partial<PlayerCommand> | null = null;
 const clock = new FixedStepClock();
@@ -209,6 +237,9 @@ class LabDirector extends Script {
             pad1.carry = state.carry;
         }
         pads.poll(dt);
+        const look = touch.takeLook(fpInput.yaw, fpInput.pitch);
+        fpInput.yaw = look.yaw;
+        fpInput.pitch = look.pitch;
         if (pad1 && pads.players[0] === pad1) {
             fpInput.yaw = pad1.yaw;
             fpInput.pitch = pad1.pitch;
@@ -218,12 +249,18 @@ class LabDirector extends Script {
             }
         }
 
-        // ---- fixed-step simulation
+        // ---- fixed-step simulation (a guest runs none: it renders the host's snapshots)
         fpInput.carry = state.carry;
-        if (!state.paused) {
+        if (guestSession) {
+            guestSession.sendInput(playerOneCommand());
+            renderTime = guestSession.renderTime();
+            if (guestSession.hostGone) leaveOnline('The host left the game.');
+        } else if (!state.paused) {
             const steps = clock.advance(dt);
             for (let s = 0; s < steps; s++) {
-                sim.step(playerOneCommand(), playerTwoCommand());
+                const c = slotCommands();
+                sim.step(playerOneCommand(), c[1], [c[2], c[3]]);
+                hostSession?.afterStep((slot) => sim.interactionIds(slot));
                 physTimes[physHead] = sim.physicsMs;
                 physHead = (physHead + 1) % physTimes.length;
                 physCount = Math.min(physTimes.length, physCount + 1);
@@ -236,7 +273,8 @@ class LabDirector extends Script {
 
         // ---- first-person camera: interpolated position, look applied at display rate
         if (state.mode === 'firstPerson') {
-            if (sim.ring.sample(sim.playerEntity.slot, renderTime, playerPose, playerAnim)) {
+            const myEye = guestSession ? sim.eyes[Math.max(0, guestSession.slot)] : sim.playerEntity;
+            if (sim.ring.sample(myEye.slot, renderTime, playerPose, playerAnim)) {
                 camera.setPosition(playerPose.p.x, playerPose.p.y, playerPose.p.z);
             } else {
                 camera.setPosition(sim.player.x, sim.player.y + EYE_HEIGHT, sim.player.z);
@@ -245,12 +283,12 @@ class LabDirector extends Script {
         }
         if (camera.camera!.fov !== state.fov) camera.camera!.fov = state.fov;
         // ---- player 2's view (split screen): interpolated eye, look at display rate
-        if (state.players > 1) {
+        if (state.players > 1 && localSlot2 > 0) {
             const c2 = scene.camera2;
             const p2 = pads.players[1];
-            if (sim.ring.sample(sim.player2Entity.slot, renderTime, playerPose, playerAnim)) c2.setPosition(playerPose.p.x, playerPose.p.y, playerPose.p.z);
-            const yaw2 = p2 ? p2.yaw : sim.players[1].yaw;
-            const pitch2 = p2 ? p2.pitch : sim.players[1].pitch;
+            if (sim.ring.sample(sim.eyes[localSlot2].slot, renderTime, playerPose, playerAnim)) c2.setPosition(playerPose.p.x, playerPose.p.y, playerPose.p.z);
+            const yaw2 = p2 ? p2.yaw : sim.players[localSlot2].yaw;
+            const pitch2 = p2 ? p2.pitch : sim.players[localSlot2].pitch;
             c2.setEulerAngles((pitch2 * 180) / Math.PI, (yaw2 * 180) / Math.PI, 0);
             if (c2.camera!.fov !== state.fov) c2.camera!.fov = state.fov;
         }
@@ -288,6 +326,18 @@ app.graphicsDevice.scope.resolve('uVoxelGridLines').setValue(0);
 /** Player 1: keyboard + mouse, merged with player 1's pad when one has joined. */
 function playerOneCommand() {
     const cmd = fpInput.command();
+    if (touch.enabled) {
+        const t = touch.take();
+        if (t.moveX || t.moveZ) {
+            cmd.moveX = t.moveX;
+            cmd.moveZ = t.moveZ;
+        }
+        cmd.sprint ||= t.sprint;
+        cmd.jump ||= t.jump;
+        cmd.grab ||= t.grab;
+        cmd.throw ||= t.throw;
+        if (t.action) cmd.action = t.action;
+    }
     const pad = pads.players[0];
     if (!pad) return cmd;
     const p = pad.take();
@@ -313,7 +363,8 @@ function playerOneCommand() {
 function playerTwoCommand() {
     if (state.players < 2) return undefined;
     const pad = pads.players[1];
-    const base = pad ? pad.command() : { ...neutralCommand(0, sim.players[1].yaw, sim.players[1].pitch) };
+    const p = sim.players[Math.max(1, localSlot2)];
+    const base = pad ? pad.command() : { ...neutralCommand(0, p.yaw, p.pitch) };
     if (p2Injected) {
         Object.assign(base, p2Injected);
         p2Injected = null;
@@ -321,17 +372,39 @@ function playerTwoCommand() {
     return base;
 }
 
-/** One player or two (split screen: player 1 on top, player 2 below). */
+/** Commands for slots 1..3 this tick: remote guests (when hosting) and the local second player. */
+function slotCommands(): (PlayerCommand | undefined)[] {
+    const out: (PlayerCommand | undefined)[] = [undefined, undefined, undefined, undefined];
+    for (let slot = 1; slot < 4; slot++) {
+        if (slot === localSlot2) out[slot] = playerTwoCommand();
+        else if (hostSession) out[slot] = hostSession.commandFor(slot);
+    }
+    return out;
+}
+
+/** One player or two on this device (split screen: player 1 on top, player 2 below). */
 function setPlayers(n: number): void {
-    const count = n >= 2 ? 2 : 1;
+    const count = n >= 2 && !guestSession ? 2 : 1;
     if (count === state.players) return;
+    if (count === 2) {
+        const slot = sim.freeSlot();
+        if (slot < 0) {
+            showToast('No free player slot (the online game is full)');
+            return;
+        }
+        localSlot2 = slot;
+    }
     state.players = count;
     if (count === 2 && state.mode !== 'firstPerson') setMode('firstPerson', false);
-    sim.setPlayerCount(count);
+    if (count === 2) sim.setSlotActive(localSlot2, true);
+    else if (localSlot2 > 0) {
+        sim.setSlotActive(localSlot2, false);
+        localSlot2 = -1;
+    }
     const p2 = pads.players[1];
-    if (p2) {
-        p2.yaw = sim.players[1].yaw;
-        p2.pitch = sim.players[1].pitch;
+    if (p2 && localSlot2 > 0) {
+        p2.yaw = sim.players[localSlot2].yaw;
+        p2.pitch = sim.players[localSlot2].pitch;
     }
     scene.setSplit(count === 2);
     document.body.classList.toggle('split', count === 2);
@@ -367,6 +440,7 @@ function drawColliders(): void {
 // ------------------------------------------------------------------------------------- actions
 
 function setPaused(p: boolean): void {
+    if (guestSession) return; // the host runs the game
     if (p && !state.paused) state.pausedTime = renderTime;
     if (!p && state.paused) {
         // resume from the paused instant
@@ -379,6 +453,7 @@ function setPaused(p: boolean): void {
 
 /** Advances exactly one voxel frame while paused. */
 function stepVoxelFrame(): void {
+    if (guestSession) return;
     if (!state.paused) setPaused(true);
     const next = voxelClock.frameAt(state.pausedTime) + 1;
     const t = voxelClock.timeOf(next);
@@ -398,6 +473,7 @@ function seek(t: number): void {
 }
 
 function resetScene(): void {
+    if (guestSession) return;
     sim.reset();
     clock.reset(0);
     state.pausedTime = 0;
@@ -719,6 +795,7 @@ new ResizeObserver(layoutVars).observe(dock);
 window.addEventListener('resize', layoutVars);
 
 function updateHud(): void {
+    updateTouch();
     const help = document.getElementById('hud-help')!;
     // long help for keyboard screens, short help for narrow / touch screens (chosen in CSS)
     const long =
@@ -728,6 +805,11 @@ function updateHud(): void {
               ? 'Click to look · <kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>LMB</kbd>/<kbd>E</kbd> grab / release · <kbd>RMB</kbd> throw · wheel reach · <kbd>Q</kbd> drop · <kbd>G</kbd> plank · <kbd>T</kbd> ragdoll · <kbd>Esc</kbd> release mouse · <kbd>V</kbd> orbit'
               : 'Click to look · <kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>G</kbd> carry plank · <kbd>Esc</kbd> release mouse · <kbd>V</kbd> orbit';
     const short = state.mode === 'orbit' ? 'Drag to orbit · two fingers to pan and zoom' : 'Click to look · WASD move · click grab · V orbit';
+    if (touchSeen && state.mode === 'firstPerson') {
+        help.innerHTML = 'Left thumb: move (push to the edge to run) · right thumb: look · buttons: jump, grab, throw, drop';
+        crosshair.style.display = !state.uiHidden ? '' : 'none';
+        return;
+    }
     if (state.players > 1 || pads.players[0]) {
         help.innerHTML = 'Pads: left stick move · right stick look · A jump · RT grab / release · RB throw · B drop · X ragdoll · D-pad reach';
         crosshair.style.display = state.mode === 'firstPerson' && !state.uiHidden ? '' : 'none';
@@ -765,10 +847,20 @@ function updateObjective(): void {
     const el = document.getElementById('hud-objective');
     if (!el) return;
     const r = level.rules;
-    el.textContent = r ? `${sim.progress.goalReached ? '✓' : '○'} ${r.objective}` : '';
-    el.classList.toggle('done', sim.progress.goalReached);
+    const done = guestSession ? guestSession.goal : sim.progress.goalReached;
+    el.textContent = r ? `${done ? '✓' : '○'} ${r.objective}` : '';
+    el.classList.toggle('done', done);
 }
 function pollEvents(): void {
+    if (guestSession) {
+        for (const e of guestSession.events) {
+            if (e.n <= guestEventsSeen) continue;
+            guestEventsSeen = e.n;
+            showToast(e.text, e.kind);
+        }
+        updateObjective();
+        return;
+    }
     if (sim.events.length < seenEvents) seenEvents = 0;
     while (seenEvents < sim.events.length) {
         const e = sim.events[seenEvents++];
@@ -780,20 +872,33 @@ let promptText = '';
 
 /** Context prompt (design doc §2.3): what a click (or a trigger) would do right now. */
 function interactionText(i: number, pad: boolean): string {
-    const it = sim.interaction(i);
+    const it = guestInteraction() ?? sim.interaction(i);
     const both = it.shared ? ' together' : '';
     if (it.holding) return pad ? `Holding ${propLabel(it.holding)}${both} · RT release · RB throw · B drop` : `Holding ${propLabel(it.holding)}${both} · click to release · right-click to throw · wheel to adjust reach`;
     if (it.target) return pad ? `RT to grab ${propLabel(it.target)}` : `Click to grab ${propLabel(it.target)}`;
     return '';
 }
 
+/** A guest's prompt comes from the host (guests run no physics). */
+function guestInteraction(): { holding: string | null; target: string | null; shared: boolean } | null {
+    if (!guestSession) return null;
+    const h = guestSession.hud[guestSession.slot];
+    if (!h) return { holding: null, target: null, shared: false };
+    const name = (id: number) => (id < 0 ? null : (sim.entities.find((e) => e.id === id)?.name ?? null));
+    return { holding: name(h.held), target: name(h.target), shared: h.shared };
+}
+
 function updatePrompt(): void {
     let t = '';
     if (state.mode === 'firstPerson') {
-        if (!fpInput.locked && !pads.players[0]) t = 'Click to look around';
+        if (touch.enabled) {
+            const it = guestInteraction() ?? sim.interaction(0);
+            touch.setHolding(!!it.holding);
+            t = it.holding ? `Holding ${propLabel(it.holding)}${it.shared ? ' together' : ''}` : it.target ? `Grab ${propLabel(it.target)}` : '';
+        } else if (!fpInput.locked && !pads.players[0]) t = 'Click to look around';
         else t = interactionText(0, !fpInput.locked);
     }
-    if (state.players > 1) prompt2.textContent = interactionText(1, true);
+    if (state.players > 1 && localSlot2 > 0) prompt2.textContent = interactionText(localSlot2, true);
     if (t !== promptText) {
         promptText = t;
         document.getElementById('hud-prompt')!.textContent = t;
@@ -944,6 +1049,87 @@ function statsText(): string {
     ].join('\n');
 }
 
+// ------------------------------------------------------------------------------------- online
+
+/** Starts the transport in the background (the platform answers within ~10 s, or never). */
+async function startTransport(): Promise<void> {
+    if (params.get('net') === 'local') {
+        transport = localTransport();
+    } else {
+        transport = await roomTransport();
+    }
+    transportKind = transport ? (transport.kind === 'room' ? 'room' : 'local') : 'none';
+    transport?.lobby.onChange(() => online.render());
+    online.render();
+}
+
+async function hostOnline(): Promise<void> {
+    if (!transport || hostSession || guestSession) return;
+    if (state.paused) setPaused(false);
+    if (state.mode !== 'firstPerson') {
+        setMode('firstPerson', false);
+        toSpawn();
+    }
+    hostSession = await HostSession.start(transport, sim, level.id);
+    hostSession.onGuestsChanged = (joined, left) => {
+        for (const s of joined) showToast(`Player ${s + 1} joined`);
+        for (const s of left) showToast(`Player ${s + 1} left`);
+        online.render();
+    };
+    showToast(`Hosting game ${hostSession.code}`);
+    online.render();
+}
+
+async function joinOnline(ad: GameAd): Promise<void> {
+    if (!transport || hostSession || guestSession) return;
+    setPlayers(1);
+    if (state.paused) setPaused(false);
+    guestSession = await GuestSession.join(transport, sim, ad);
+    guestEventsSeen = 0;
+    state.forceVoxel = true;
+    if (state.mode !== 'firstPerson') setMode('firstPerson', false);
+    showToast(`Joined game ${ad.code}`);
+    online.render();
+}
+
+/** Leaves the online game; a guest goes back to its own (solo) world. */
+function leaveOnline(message?: string): void {
+    if (hostSession) {
+        hostSession.stop();
+        hostSession = null;
+    }
+    if (guestSession) {
+        guestSession.leave();
+        guestSession = null;
+        sim.reset();
+        clock.reset(0);
+        state.forceVoxel = true;
+        if (state.mode === 'firstPerson') toSpawn();
+    }
+    if (message) showToast(message);
+    online.render();
+    updateObjective();
+}
+
+const online = new OnlinePanel(
+    {
+        available: () => transportKind,
+        games: () => (transport ? listGames(transport.lobby) : []),
+        level: level.id,
+        status: () =>
+            hostSession
+                ? { mode: 'host', code: hostSession.code, players: sim.playerCount }
+                : guestSession
+                  ? { mode: 'guest', code: guestSession.code, slot: guestSession.slot, waiting: guestSession.received === 0 }
+                  : { mode: 'off' },
+        host: hostOnline,
+        join: joinOnline,
+        leave: () => leaveOnline()
+    },
+    dock
+);
+void startTransport();
+
 // ------------------------------------------------------------------------------------- test API
 
 declare global {
@@ -985,14 +1171,30 @@ window.__riverLab = {
         clock.reset(sim.tick);
         state.forceVoxel = true;
     },
+    /** Online co-op (tests use ?net=local, which links tabs of one browser). */
+    net: {
+        host: () => hostOnline(),
+        games: () => (transport ? listGames(transport.lobby) : []),
+        join: (code: string) => {
+            const g = transport ? listGames(transport.lobby).find((x) => x.code === code) : undefined;
+            return g ? joinOnline(g) : Promise.resolve();
+        },
+        leave: () => leaveOnline(),
+        status: () => ({
+            kind: transportKind,
+            hosting: hostSession?.code ?? null,
+            guests: hostSession?.guestCount ?? 0,
+            guest: guestSession ? { code: guestSession.code, slot: guestSession.slot, received: guestSession.received } : null
+        })
+    },
     /** Two-player split screen without real pads (tests); player 2 commands via input2. */
     setPlayers: (n: number) => setPlayers(n),
     input2: (c: Record<string, unknown>) => {
         p2Injected = { ...p2Injected, ...c };
     },
     look2(yaw: number, pitch: number) {
-        sim.players[1].yaw = yaw;
-        sim.players[1].pitch = pitch;
+        sim.players[Math.max(1, localSlot2)].yaw = yaw;
+        sim.players[Math.max(1, localSlot2)].pitch = pitch;
         p2Injected = { ...p2Injected, yaw, pitch };
     },
     /** Merges fields into the next player command (grab / throw / move edges for tests). */
