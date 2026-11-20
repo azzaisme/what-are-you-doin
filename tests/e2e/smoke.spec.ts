@@ -310,8 +310,8 @@ test('level 1, the Timber Yard: starts in first person with the objective, and t
     expect(st.mode).toBe('firstPerson');
     await expect(page.locator('#hud-objective')).toContainText('bucket across the creek');
     const s = await lab(page, (l) => l.stats());
-    // beaver, ute, bucket, six planks, two beams, three logs, the crate
-    expect(s.voxel.objects).toBe(15);
+    // beaver, ute, bucket, six planks, two beams, three logs, the crate, the windsock
+    expect(s.voxel.objects).toBe(16);
     expect(s.voxel.rejected).toBe(0);
     const g = await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid());
     expect(g.misaligned).toBe(0);
@@ -355,7 +355,7 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
         Math.abs(rowBrightness(Math.floor(shot.height * 0.3)) - rowBrightness(Math.floor(shot.height * 0.8)))
     ).toBeGreaterThan(1);
     const s = await lab(page, (l) => l.stats());
-    expect(s.voxel.objects).toBe(17); // the yard's 15 plus two voxel beaver bodies
+    expect(s.voxel.objects).toBe(18); // the yard's 16 plus two voxel beaver bodies
     // player 2 walks on their own commands
     const before = await page.evaluate(
         () =>
@@ -379,7 +379,7 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
     // back to one player: one full view, bodies hidden
     await lab(page, (l) => (l as unknown as { setPlayers(n: number): void }).setPlayers(1));
     await page.waitForTimeout(2500);
-    expect((await lab(page, (l) => l.stats())).voxel.objects).toBe(15);
+    expect((await lab(page, (l) => l.stats())).voxel.objects).toBe(16);
     expect(problems).toEqual([]);
 });
 
@@ -454,7 +454,7 @@ test('online co-op: a second device joins the host, plays as player 2 and render
     // the guest renders the host's world: both beaver bodies and every prop, all on the grid
     // (voxel frames lag the snapshots in software GL, so wait for the frame that has both beavers)
     await guest.waitForFunction(
-        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 17,
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 18,
         null,
         { timeout: 60_000 }
     );

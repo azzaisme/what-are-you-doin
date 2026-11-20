@@ -41,6 +41,7 @@ import type { CameraControlsApi } from './types/engine-scripts.ts';
 import { OnlinePanel } from './ui/online-panel.ts';
 import {
     CELL_SIZE_MAX_CM,
+    CELL_SIZE_DEFAULT_CM,
     CELL_SIZE_MIN_CM,
     CELL_SIZE_STORAGE_KEY,
     GRID_SIZE,
@@ -831,6 +832,7 @@ cellUi.className = 'cell-size';
 cellUi.innerHTML = `
   <label>Voxel size <input type="range" min="${CELL_SIZE_MIN_CM}" max="${CELL_SIZE_MAX_CM}" step="0.5" value="${cellCm}"><output>${cellCm.toFixed(1)} cm</output></label>
   <button type="button" disabled>Apply</button>
+  <button type="button" class="cell-reset"${cellCm === CELL_SIZE_DEFAULT_CM ? ' hidden' : ''}>Reset to ${CELL_SIZE_DEFAULT_CM} cm</button>
   <small>finer = sharper, slower to load</small>`;
 dock.append(cellUi);
 const cellRange = cellUi.querySelector('input')!;
@@ -844,15 +846,19 @@ cellRange.addEventListener('input', () => {
     cellApply.disabled = v === cellCm;
 });
 cellApply.addEventListener('click', () => applyCellSize(Number(cellRange.value)));
+cellUi.querySelector('.cell-reset')!.addEventListener('click', () => applyCellSize(CELL_SIZE_DEFAULT_CM));
 
 function applyCellSize(cm: number): void {
     const v = clampCellSizeCm(cm);
+    // the default is stored as "no choice", so a saved size never hides a later default change
     try {
-        localStorage.setItem(CELL_SIZE_STORAGE_KEY, String(v));
+        if (v === CELL_SIZE_DEFAULT_CM) localStorage.removeItem(CELL_SIZE_STORAGE_KEY);
+        else localStorage.setItem(CELL_SIZE_STORAGE_KEY, String(v));
     } catch {
         // storage blocked: the hash below still carries the choice
     }
-    location.hash = `cell${Math.round(v * 10)}`;
+    if (v === CELL_SIZE_DEFAULT_CM) history.replaceState(null, '', location.pathname + location.search);
+    else location.hash = `cell${Math.round(v * 10)}`;
     location.reload();
 }
 

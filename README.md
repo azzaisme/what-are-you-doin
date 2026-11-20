@@ -24,6 +24,11 @@ What the demo proves:
 - **Separate clocks.** Fixed 60 Hz simulation, display-rate camera and lighting, and a global voxel
   clock (12/20/30/60 Hz, default 20 Hz).
 
+Also: wind, falling leaves and voxel particles (dust, chips, splashes); a step-by-step tutorial
+(the first level on a first visit); a level designer (**Levels → Level designer**: place, move and
+tune pieces, trees, ground and props, then build, playtest and copy the level as JSON); local
+split-screen co-op with gamepads; and online co-op on phones.
+
 See [`docs/progress.md`](docs/progress.md) for measured results, known issues and the questions for
 the owner's visual-approval gate.
 
@@ -73,6 +78,7 @@ Query parameters (handy for comparisons and screenshots):
 | **Gamepad**                                | press **A** to join (first pad: player 1, second pad: player 2 → split screen)      |
 | left / right stick                         | move / look                                                                         |
 | A · LT or L3 · RT · RB · B · X · Y · D-pad | jump · sprint · grab / release · throw · drop · ragdoll · plank · reach             |
+| **Levels** (bottom left)                   | tutorial, Timber Yard, River Lab, the level designer and your own level             |
 | `P` / `N`                                  | pause / step exactly one voxel frame                                                |
 | `Backspace`                                | reset the scene                                                                     |
 | `H`                                        | hide all UI (for screenshots)                                                       |

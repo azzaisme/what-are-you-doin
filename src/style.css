@@ -835,3 +835,7 @@ body.ui-hidden .designer {
         max-height: 45vh;
     }
 }
+
+.cell-size button[hidden] {
+    display: none;
+}

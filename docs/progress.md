@@ -1,5 +1,41 @@
 # Progress log
 
+## Wind, leaves, particles, the tutorial and the level designer (2026-11-20, owner request)
+
+Owner request: particle effects, falling leaves and wind; a level designer; a tutorial level; a
+5 cm default grid. Join codes / choosing to host and a settings menu were deferred by the owner.
+
+- **Wind:** one analytic field per level (`src/fx/wind.ts`: direction, base speed, gusts). It
+  drives a windsock in the Timber Yard, water ripples, leaf drift and a drag force on light bodies
+  that are moving or held (resting bodies are left asleep).
+- **Particles as voxel cells:** falling leaves from the oak crowns (60 leaf slots within 30 m of
+  the camera, resting on the ground or floating on the creek), dust when props land hard, wood
+  chips for timber, and splashes when anything (a player too) drops into the water. Every device
+  computes them from data it already has, so nothing extra goes over the network, and they stay on
+  the world grid. Cost: about +1.3 ms per voxel frame at 10 cm and +2 ms at 5 cm (SwiftShader).
+  The **Particles** toggle is in the debug panel's Physics section.
+- **Tutorial (the new first level):** 8 steps (look, walk to a sign, jump a log, grab a crate,
+  carry it onto a pad, throw a ball into a bin, bridge a ditch with a plank, deliver the bucket),
+  each shown as "Step k/8" in the HUD. A first visit starts here; the **Levels** menu lists the
+  Timber Yard and the River Lab.
+- **Level designer:** **Levels → Level designer**. Tools: box, post, pine, oak, rock, ditch (two
+  clicks), hill, plank / beam / log / crate / ball / bucket, start and goal. Click to place or
+  select; arrows move (Shift: 1 m), Q / E turn, Delete removes; the panel edits numbers and
+  materials. Changes show as outlines at once; **Build** rebuilds the voxel world (a reload, the
+  camera is kept), **Play** playtests in first person. The draft is saved in the browser;
+  **Copy JSON** / **Import** move levels in and out — paste one to Claude to add it to the game.
+  Levels are the same JSON format as the tutorial (`src/levels/data.ts`), validated and clamped
+  on load.
+- **5 cm grid:** 5 cm was already the default. A size chosen with the slider is saved and wins over
+  the default; the new **Reset to 5 cm** button (shown when another size is active) clears it, and
+  choosing 5 cm now stores "no choice", so a later default change is not hidden.
+- **Tests:** 212 unit tests pass (new: wind, particles, tutorial steps, designer data round trip,
+  clamping and a custom level that builds and plays). New browser tests: the tutorial on a first
+  visit, and the designer placing a box with a click.
+- **Not done yet:** undo in the designer, pieces other than boxes from the toolbar (cylinders and
+  ellipsoids work in JSON), sharing designed levels online (a guest needs the host's level data),
+  more than 6 planks / 2 beams / 3 logs per level (fixed entity pools).
+
 ## Online co-op on phones (2026-11-20, owner request: "let two people join this on their phones")
 
 ADR 0010. One device hosts the game; phones (or any device) join over the claude.ai artifact's
