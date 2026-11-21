@@ -190,12 +190,12 @@ const HEAD_PART_SET = new Set(
     })
 );
 /** Raised arms turn inward by up to this much (rad), so both hands come into view. */
-const ARM_INWARD = 0.18;
+const ARM_INWARD = 0.05;
 /**
  * First person (the player's own camera): the shoulders come forward a little and the arms rest
  * in a ready pose, hands low in the view. The long arms reach what you hold without more help.
  */
-const FP_SHOULDER = { x: 0.04, y: 0, z: 0.1 };
+const FP_SHOULDER = { x: -0.02, y: 0, z: 0.1 };
 const FP_SPINE_Z = -0.06;
 const FP_READY_RAISE = 1.25;
 

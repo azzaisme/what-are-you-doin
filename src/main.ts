@@ -451,7 +451,11 @@ class LabDirector extends Script {
                 );
                 // ?view=side (screenshots of the animation): from the beaver's right, level
                 if (sideView) {
-                    camera.setPosition(e.x + Math.cos(yaw) * 2.6, e.y - 0.35, e.z - Math.sin(yaw) * 2.6);
+                    camera.setPosition(
+                        e.x + Math.cos(yaw) * 2.1 * EYE_HEIGHT,
+                        e.y - 0.45 * EYE_HEIGHT,
+                        e.z - Math.sin(yaw) * 2.1 * EYE_HEIGHT
+                    );
                     camera.setEulerAngles(-5, (yaw * 180) / Math.PI + 90, 0);
                 }
             }
