@@ -80,8 +80,17 @@ export function bucketAsset(): VoxelAsset {
         },
         solid(M.Steel)
     );
+    // the water inside: fills the hollow up to the water level and pokes one cell above the rim's
+    // inner edge, so it shows as a blue disc in the opening even at 10 cm cells
+    const inner = (y: number) => 0.13 + 0.03 * (y / BUCKET_HEIGHT) - 0.08;
+    const water = implicit(
+        aabb(-0.11, 0.08, -0.11, 0.11, BUCKET_WATER_LEVEL, 0.11),
+        (x, y, z) => Math.hypot(x, z) < inner(y) + 0.02,
+        (x, y, z) => voxel(M.BucketWater, latticeShade(x, y, z, 0.1, 4))
+    );
     return rigid('bucket', [
         { name: 'bucket', volume: wall, priority: 2, refColor: 0xa9b0b4 },
+        { name: 'water', volume: water, priority: 3, policy: 'conservative', refColor: 0x3a9ee0 },
         { name: 'handle', volume: handle, priority: 3, policy: 'conservative', refColor: 0x9aa0a6 }
     ]);
 }
