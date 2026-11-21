@@ -80,6 +80,13 @@ describe('local co-op: two players, one world', () => {
         // alone: the log does not come up (or the grab breaks)
         expect(log.pose.p.y).toBeLessThan(ly + 0.25);
         s.physics.release(0);
+        // take off the log resting across this one and its neighbour in the pile, so the pair lift
+        // measures this log's 113 kg alone (how much of the top log it would also carry depends on
+        // how far the solo attempt happened to roll it)
+        for (const e of s.extras) {
+            const d = Math.hypot(e.pose.p.x - log.pose.p.x, e.pose.p.z - log.pose.p.z);
+            if (e.visible && e.pose.p.y > log.pose.p.y + 0.2 && d < 1) s.physics.setEnabled(e.id, false);
+        }
         s.step(cmd(200, { ...a, grab: true }), cmd(200, { ...b, grab: true }));
         expect(s.physics.holders(log.id)).toBe(2);
         const up0 = liftPitch(0, 1.16);

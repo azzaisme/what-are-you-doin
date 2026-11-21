@@ -1,5 +1,33 @@
 # Progress log
 
+## Balance: where you grip something is where it turns (2026-11-21, owner request)
+
+Owner: "Where I pick the logs up from should change their rotation point. Balance is a big part of
+this game".
+
+- **The grip was already the pivot:** the grab force acts at the point you grabbed. What was
+  missing was a wrist. Heavy angular damping (6) kept everything level wherever you held it.
+- **Now a wrist** (`wristTorque` in `src/sim/physics/grab.ts`, `applyWrist` in `world.ts`) holds
+  the object at the angle you picked it up at, relative to which way you face.
+    - It is a damped spring (2.2 Hz, critically damped), scaled by the body's inertia.
+    - It is capped at 70 N·m, so the weight's twist about your hand decides what happens.
+    - Angular damping on held things drops to 1.5. Things with a handle (the bucket) keep 6 and
+      have no wrist: they hang from the handle.
+- **Measured with the plank** (2.4 m), held up in front for two seconds:
+    - gripped at its middle, it stays as picked up (within 4°);
+    - 0.2 m off centre, it barely sags;
+    - 0.45 m off, it tips about 45°;
+    - by the end, it tips about 56° and hangs below the hand.
+- **Shared holds:** each grip gives half a wrist's strength. Two carriers balance a log between
+  them, and it doesn't roll in their hands.
+- **Animation:** the wrist's load feeds the carry strain, so an unbalanced hold makes the body
+  lean and tremble like a heavy one.
+- **Tests:** `tests/unit/balance.test.ts` covers the wrist maths (shortest way round, damping, the
+  cap, NaN safety) and the plank at four grips. It also checks the bucket has no wrist.
+    - Co-op log test: the log resting on the bottom log is now taken off before the two-player lift.
+      Before, whether the pair could lift the bottom log depended on how far the solo attempt had
+      rolled it out from under the top one.
+
 ## Tall lanky people stand in for the beavers (2026-11-21, owner request, temporary)
 
 Owner: "replace (temporarily) the beavers with people. But like tall lanky simple people. Think
