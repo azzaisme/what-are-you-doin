@@ -174,6 +174,8 @@ export class Rig {
     held: PhysBody | null = null;
     heldLocal = { x: 0, y: 0, z: 0 };
     holdDist = 1.5;
+    /** The hold distance was set with the wheel: it no longer eases in to the comfortable carry. */
+    holdSet = false;
     stretchTime = 0;
     prevTarget = { x: 0, y: 0, z: 0 };
     hasPrevTarget = false;
@@ -202,6 +204,11 @@ const AXIS_Y = { x: 0, y: 1, z: 0 };
 const AXIS_Z = { x: 0, y: 0, z: 1 };
 
 export class PhysicsWorld {
+    /**
+     * Things grabbed further away than this (m from the eye) are drawn in to it after the grab: the
+     * player body's comfortable carry. Infinity keeps the grab distance (the beavers).
+     */
+    comfortHold = Infinity;
     readonly world: RAPIER.World;
     readonly bodies = new Map<number, PhysBody>();
     private readonly byCollider = new Map<number, PhysBody>();
@@ -584,6 +591,7 @@ export class PhysicsWorld {
         } else inverseRotate(q, point.x - t.x, point.y - t.y, point.z - t.z, r.heldLocal);
         r.held = pb;
         r.holdDist = clampHold(holdDistance);
+        r.holdSet = false;
         r.stretchTime = 0;
         r.hasPrevTarget = false;
         const n = (this.holdCount.get(pb.id) ?? 0) + 1;
@@ -669,7 +677,9 @@ export class PhysicsWorld {
 
     adjustHold(delta: number, p = 0): void {
         const r = this.rigs[p];
-        if (r) r.holdDist = clampHold(r.holdDist + delta);
+        if (!r) return;
+        r.holdDist = clampHold(r.holdDist + delta);
+        r.holdSet = true;
     }
 
     /** Applies this tick's bounded grab force for a player. Call once per tick before step(). */
@@ -678,6 +688,10 @@ export class PhysicsWorld {
         const pb = r?.held;
         if (!r || !pb) return;
         const d = viewDir(yaw, pitch, _dir);
+        // grabbed from further away: ease in to the comfortable carrying distance (2 m/s). Not while
+        // shared: two carriers at either end of a log would pull it apart
+        if (!r.holdSet && r.holdDist > this.comfortHold && (this.holdCount.get(pb.id) ?? 1) === 1)
+            r.holdDist = Math.max(this.comfortHold, r.holdDist - 2 * SIM_DT);
         _target.x = eye.x + d.x * r.holdDist;
         _target.y = eye.y + d.y * r.holdDist;
         _target.z = eye.z + d.z * r.holdDist;

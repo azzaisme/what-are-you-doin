@@ -4,8 +4,8 @@
  */
 
 import type { VoxelAsset } from '../assets/asset.ts';
-import { beaverAsset, beaverFirstPersonAsset } from '../assets/beaver.ts';
 import { DUMMY_PARTS, dummyPartAsset } from '../assets/dummy.ts';
+import { BODY } from '../assets/player-body.ts';
 import {
     beamAsset,
     bucketAsset,
@@ -89,7 +89,7 @@ export function createLabEntities(): LabEntities {
         entities.push(e);
         return e;
     };
-    const beaver = add(1, 'beaver', beaverAsset, 3);
+    const beaver = add(1, 'beaver', BODY.asset, 3);
     const bucket = add(2, 'bucket', bucketAsset(), 4);
     const ute = add(3, 'ute', uteAsset, 2);
     const plank = add(4, 'plank', plankAsset(), 1);
@@ -118,12 +118,12 @@ export function createLabEntities(): LabEntities {
     for (let n = 0; n < EXTRA_LOGS; n++) extras.push(add(340 + n, `extra-log-${n}`, logAsset(), 1));
     const windsock = add(950, 'windsock', windsockAsset(), 2);
     const avatars: SimEntity[] = [];
-    for (let n = 0; n < MAX_PLAYERS; n++) avatars.push(add(910 + n, `avatar-${n}`, beaverAsset, 3));
+    for (let n = 0; n < MAX_PLAYERS; n++) avatars.push(add(910 + n, `avatar-${n}`, BODY.asset, 3));
     const eyes: SimEntity[] = [];
     for (let n = 0; n < MAX_PLAYERS; n++)
         eyes.push(add(900 + n, n === 0 ? 'player' : `player${n + 1}`, EMPTY_ASSET, 0));
     // your own limbs at 1 cm, drawn by the renderer in place of your beaver (never by the sim)
-    const fpBody = add(960, 'fp-body', beaverFirstPersonAsset, 3);
+    const fpBody = add(960, 'fp-body', BODY.firstPerson, 3);
     fpBody.visible = false;
     return {
         entities,

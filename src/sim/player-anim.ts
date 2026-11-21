@@ -18,10 +18,12 @@
  * lattice) rebuilt 20 times a second.
  */
 
+import { BODY } from '../assets/player-body.ts';
+
 /** Where a player's shoulders are, above their feet (m) - between the two shoulders. */
-export const SHOULDER_HEIGHT = 0.84;
+export const SHOULDER_HEIGHT = BODY.shoulderHeight;
 /** Arm length, shoulder to paw (m). */
-const ARM_LENGTH = 0.34;
+const ARM_LENGTH = BODY.armLength;
 
 export interface AnimEvents {
     grabbed: boolean;

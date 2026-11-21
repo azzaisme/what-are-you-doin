@@ -69,15 +69,24 @@ describe('local co-op: two players, one world', () => {
         const b = aim(s, 1, lx, ly, lz - 0.75);
         s.step(cmd(50, { ...a, grab: true }), cmd(50, { ...b }));
         expect(s.physics.heldIdOf(0)).toBe(log.id);
-        for (let n = 0; n < 90; n++) s.step(cmd(60 + n, { yaw: a.yaw, pitch: 0.1 }), cmd(60 + n, b));
+        // lift: the hold point about 1.2 m above the log, at the grab distance, from any eye height
+        // (for beavers, a slight upward look)
+        const liftPitch = (i: number, rise: number) =>
+            Math.asin(
+                Math.max(-1, Math.min(1, (ly + rise - (s.players[i].y + EYE_HEIGHT)) / s.physics.rig(i)!.holdDist))
+            );
+        const up = liftPitch(0, 1.3);
+        for (let n = 0; n < 90; n++) s.step(cmd(60 + n, { yaw: a.yaw, pitch: up }), cmd(60 + n, b));
         // alone: the log does not come up (or the grab breaks)
         expect(log.pose.p.y).toBeLessThan(ly + 0.25);
         s.physics.release(0);
         s.step(cmd(200, { ...a, grab: true }), cmd(200, { ...b, grab: true }));
         expect(s.physics.holders(log.id)).toBe(2);
+        const up0 = liftPitch(0, 1.16);
+        const up1 = liftPitch(1, 1.16);
         let maxForce = 0;
         for (let n = 0; n < 150; n++) {
-            s.step(cmd(201 + n, { yaw: a.yaw, pitch: 0.05 }), cmd(201 + n, { yaw: b.yaw, pitch: 0.05 }));
+            s.step(cmd(201 + n, { yaw: a.yaw, pitch: up0 }), cmd(201 + n, { yaw: b.yaw, pitch: up1 }));
             maxForce = Math.max(maxForce, s.physics.rig(0)!.grabForce, s.physics.rig(1)!.grabForce);
         }
         expect(s.physics.holders(log.id)).toBe(2);

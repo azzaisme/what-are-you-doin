@@ -22,9 +22,9 @@ import {
     BEAVER_FIRST_PERSON,
     BEAVER_HEAD_YAW,
     BEAVER_WALK_AMOUNT,
-    BEAVER_WALK_PHASE,
-    beaverLeftHand
+    BEAVER_WALK_PHASE
 } from '../assets/beaver.ts';
+import { BODY } from '../assets/player-body.ts';
 import { BUCKET_HANDLE_TOP, LOG_RADIUS } from '../assets/props.ts';
 import {
     UTE_ANIM_CHANNELS,
@@ -74,7 +74,8 @@ export type { PlayerCommand, SimEntity };
 export { MAX_PLAYERS, MAX_STRESS };
 export type PropsMode = 'physics' | 'scripted';
 
-export const EYE_HEIGHT = 1.22;
+/** The player body's eye height (2026-11-21: the lanky stand-in people, 1.86 m; beavers 1.22 m). */
+export const EYE_HEIGHT = BODY.eyeHeight;
 /** Stress bodies get a deterministic upward kick this often (ticks), so 25 bodies keep moving. */
 export const STRESS_KICK_TICKS = 150;
 
@@ -285,6 +286,7 @@ export class LabSim {
         this.players.forEach((pl, i) => pw.createCharacter(pl.x, pl.y, pl.z, i));
         pw.setCharacterEnabled(this.fpActive, 0);
         for (let i = 1; i < MAX_PLAYERS; i++) pw.setCharacterEnabled(this.slotActive[i], i);
+        pw.comfortHold = BODY.comfortHold;
         this.physics = pw;
     }
 
@@ -740,7 +742,7 @@ export class LabSim {
             b.pose.p.z = z;
             quatFromYawPitchRoll(Math.atan2(dx, dz), 0, 0, b.pose.q);
             const amount = beaverWalkAmount(t);
-            b.anim[BEAVER_WALK_PHASE] = (this.beaverDist / 0.95) * Math.PI * 2;
+            b.anim[BEAVER_WALK_PHASE] = (this.beaverDist / BODY.stride) * Math.PI * 2;
             b.anim[BEAVER_WALK_AMOUNT] = amount;
             // physics mode: the bucket is a free physics prop, so the beaver walks empty-handed
             b.anim[BEAVER_CARRY] = this.physicsProps ? 0 : 1;
@@ -754,7 +756,7 @@ export class LabSim {
             const dz = Math.cos(th);
             const amount = beaverWalkAmount(t);
 
-            const hand = beaverLeftHand(b.pose, b.anim, _hand);
+            const hand = BODY.leftHand(b.pose, b.anim, _hand);
             const swing = 0.16 * amount * Math.sin(b.anim[BEAVER_WALK_PHASE] + 0.9) + 0.03 * Math.sin(t * 2.3);
             const yaw = Math.atan2(dx, dz);
             quatFromYawPitchRoll(yaw, swing, 0.05 * Math.sin(t * 1.3), _q);
@@ -976,7 +978,7 @@ export class LabSim {
             // the beaver faces +Z at yaw 0, the camera -Z
             quatFromYawPitchRoll(p.yaw + Math.PI, 0, 0, a.pose.q);
             const walk = Math.min(1, p.speed / CHARACTER.walk);
-            a.anim[BEAVER_WALK_PHASE] = (p.walkDist / 0.95) * Math.PI * 2;
+            a.anim[BEAVER_WALK_PHASE] = (p.walkDist / BODY.stride) * Math.PI * 2;
             a.anim[BEAVER_WALK_AMOUNT] = p.grounded ? walk : 0.3;
             const holding = this.physics.heldInfo(i, _held);
             a.anim[BEAVER_CARRY] = holding ? 1 : 0;
