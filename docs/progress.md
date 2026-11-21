@@ -1,5 +1,30 @@
 # Progress log
 
+## Tall lanky people stand in for the beavers (2026-11-21, owner request, temporary)
+
+Owner: "replace (temporarily) the beavers with people. But like tall lanky simple people. Think
+Slenderman proportions".
+
+- **`src/assets/person.ts`:** a 2 m person.
+    - Small head, narrow torso, and very long thin arms and legs (fingertips just above the knee).
+    - Hard hat and hi-vis vest, like the beavers.
+    - Thin limbs use coverage25 sampling, so they stay solid on a 5–10 cm lattice.
+    - Three new palette colours: skin, workwear and boot.
+- **It uses the beaver's animation channels,** so grab, carry, throw, walk, the network and first
+  person all work unchanged. It replaces the players' bodies and the River Lab's walking NPC.
+- **One switch:** `PLAYER_BODY` in `src/assets/player-body.ts` picks the body, along with its eye
+  height (1.86 m vs 1.22 m), shoulders, arm length and stride. Set it to `'beaver'` to undo.
+- **Gameplay changes that come with the height:**
+    - the eye is 64 cm higher;
+    - things grabbed from further than 1.7 m ease in to 1.7 m (except while shared, or after a
+      mouse-wheel change);
+    - the collision capsule is unchanged (1.4 m).
+- **Long arms nearly reach what you hold:** the plank floats about 40 cm past the fingertips (the
+  beaver's gap was about a metre).
+- **Tests:** the first-person body tests now run for both bodies. Two physics tests now aim from
+  whatever eye height the body has. Measured with the person, the held bucket's tilt bound is 22°
+  (20.0° measured). The whole unit suite passes with either body.
+
 ## Grab, carry and throw animation (2026-11-21, owner request)
 
 Owner: "add some animation in for the carrying and grabbing of things… look and feel like a AAA game
