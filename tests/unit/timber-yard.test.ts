@@ -133,4 +133,40 @@ describe('level 1: the timber yard', () => {
         expect(Math.hypot(s.bucket.pose.p.x - BUCKET_STUMP.x, s.bucket.pose.p.z - BUCKET_STUMP.z)).toBeLessThan(0.2);
         expect(s.progress.goalReached).toBe(false);
     });
+
+    it('a held bucket hangs from its handle and stays steady (no per-tick shaking)', () => {
+        const s = yard();
+        for (let n = 0; n < 60; n++) s.step(cmd(n));
+        s.fpActive = true;
+        const b = s.bucket.pose.p;
+        s.placePlayer(b.x, b.z + 1.2, 0);
+        for (let n = 0; n < 30; n++) s.step(cmd(60 + n));
+        const pitch = -Math.atan2(s.player.y + EYE_HEIGHT - (b.y + 0.15), 1.2);
+        for (let n = 0; n < 10; n++) s.step(cmd(100 + n, { pitch }));
+        s.step(cmd(200, { grab: true, pitch }));
+        expect(s.physics.heldId).toBe(s.bucket.id);
+        // let the pickup swing settle, then stand still and turn slowly
+        for (let n = 0; n < 120; n++) s.step(cmd(300 + n, { pitch: -0.2 }));
+        const weight = s.physics.bodies.get(s.bucket.id)!.body.mass() * 9.81;
+        let prevVy = 0;
+        let flips = 0;
+        let maxTilt = 0;
+        let maxForce = 0;
+        let prevY = s.bucket.pose.p.y;
+        for (let n = 0; n < 240; n++) {
+            s.step(cmd(500 + n, { pitch: -0.2, yaw: n * 0.008 }));
+            const vy = s.bucket.pose.p.y - prevY;
+            prevY = s.bucket.pose.p.y;
+            if (Math.sign(vy) !== Math.sign(prevVy) && Math.abs(vy) > 2e-4) flips++;
+            prevVy = vy;
+            const q = s.bucket.pose.q;
+            maxTilt = Math.max(maxTilt, (Math.acos(Math.min(1, 1 - 2 * (q.x * q.x + q.z * q.z))) * 180) / Math.PI);
+            maxForce = Math.max(maxForce, s.physics.stats.grabForce);
+        }
+        expect(s.physics.heldId).toBe(s.bucket.id);
+        // before the fix: ~500 N on a 1.5 kg bucket, spinning at 30 rad/s, reversing every tick
+        expect(flips).toBeLessThan(6);
+        expect(maxForce).toBeLessThan(weight * 2);
+        expect(maxTilt).toBeLessThan(20);
+    });
 });

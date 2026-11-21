@@ -7,7 +7,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 
 import { DUMMY_PARTS, dummyRestPose } from '../assets/dummy.ts';
-import { BEAM_HALF, BUCKET_HEIGHT, LOG_RADIUS } from '../assets/props.ts';
+import { BEAM_HALF, BUCKET_HANDLE_TOP, BUCKET_HEIGHT, LOG_RADIUS } from '../assets/props.ts';
 import { OAK, PINE_TIERS, PINE_TRUNK_HEIGHT, ROCK_CENTRE_LIFT, oakCrown, pineTrunkRadius } from '../levels/common.ts';
 import type { LevelDef } from '../levels/level.ts';
 import { pose, quatFromYawPitchRoll, quatMul } from '../voxels/math.ts';
@@ -65,7 +65,14 @@ export function propBody(name: string): { shape: ShapeSpec; opts: BodyOptions } 
     if (name === 'bucket')
         return {
             shape: { type: 'cylinder', axis: 'y', r: 0.15, half: BUCKET_HEIGHT / 2, offsetY: BUCKET_HEIGHT / 2 },
-            opts: { density: 70, friction: 0.6, restitution: 0.1, ccd: true }
+            // held by the top of its handle, so it hangs upright and swings gently
+            opts: {
+                density: 70,
+                friction: 0.6,
+                restitution: 0.1,
+                ccd: true,
+                grabPoint: { x: 0, y: BUCKET_HANDLE_TOP, z: 0 }
+            }
         };
     return null;
 }

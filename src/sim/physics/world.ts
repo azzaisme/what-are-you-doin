@@ -12,7 +12,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import type { Pose } from '../../voxels/math.ts';
 import { SIM_DT } from '../clock.ts';
 
-import { GRAB, clampHold, grabForce, throwImpulse, viewDir } from './grab.ts';
+import { GRAB, clampHold, effectiveMassAlong, grabForce, throwImpulse, viewDir } from './grab.ts';
 import type { GrabForceResult, Vec3Like } from './grab.ts';
 
 let ready: Promise<void> | null = null;
@@ -73,6 +73,8 @@ export interface BodyOptions {
     angularDamping?: number;
     ccd?: boolean;
     grabbable?: boolean;
+    /** Body-local point always used as the grab anchor (a bucket is held by its handle). */
+    grabPoint?: { x: number; y: number; z: number };
 }
 
 export interface PhysBody {
@@ -87,6 +89,8 @@ export interface PhysBody {
     enabled: boolean;
     /** Average projected area (m^2) the wind acts on (surface area / 4 for convex shapes). */
     windArea: number;
+    /** Body-local grab anchor override (see BodyOptions.grabPoint). */
+    grabPoint?: { x: number; y: number; z: number };
 }
 
 /**
@@ -182,6 +186,10 @@ export class Rig {
         this.state = state;
     }
 }
+
+const AXIS_X = { x: 1, y: 0, z: 0 };
+const AXIS_Y = { x: 0, y: 1, z: 0 };
+const AXIS_Z = { x: 0, y: 0, z: 1 };
 
 export class PhysicsWorld {
     readonly world: RAPIER.World;
@@ -305,6 +313,7 @@ export class PhysicsWorld {
             colliders: [col],
             kind: 'dynamic',
             grabbable: o.grabbable ?? true,
+            grabPoint: o.grabPoint,
             spawn: { p: { ...spawn.p }, q: { ...spawn.q } },
             baseAngularDamping: o.angularDamping ?? 0.3,
             enabled: true,
@@ -558,7 +567,11 @@ export class PhysicsWorld {
         // anchor in body-local coordinates
         const t = pb.body.translation();
         const q = pb.body.rotation();
-        inverseRotate(q, point.x - t.x, point.y - t.y, point.z - t.z, r.heldLocal);
+        if (pb.grabPoint) {
+            r.heldLocal.x = pb.grabPoint.x;
+            r.heldLocal.y = pb.grabPoint.y;
+            r.heldLocal.z = pb.grabPoint.z;
+        } else inverseRotate(q, point.x - t.x, point.y - t.y, point.z - t.z, r.heldLocal);
         r.held = pb;
         r.holdDist = clampHold(holdDistance);
         r.stretchTime = 0;
@@ -658,9 +671,21 @@ export class PhysicsWorld {
         r.hasPrevTarget = true;
         // with two holders, each supports half the weight (each force stays under its own cap)
         const share = 1 / Math.max(1, this.holdCount.get(pb.id) ?? 1);
+        // the spring acts on the effective mass at the anchor (held by the rim, a light bucket
+        // mostly spins), which keeps the explicit spring stable for small props
+        const com = b.worldCom();
+        const lever = { x: anchor.x - com.x, y: anchor.y - com.y, z: anchor.z - com.z };
+        const invI = b.effectiveWorldInvInertia();
+        const m = b.mass();
+        const springMass = {
+            x: effectiveMassAlong(m, lever, invI, AXIS_X) * share,
+            y: effectiveMassAlong(m, lever, invI, AXIS_Y) * share,
+            z: effectiveMassAlong(m, lever, invI, AXIS_Z) * share
+        };
         const f = grabForce(
             {
                 mass: b.mass() * share,
+                springMass,
                 gravity: GRAVITY,
                 anchor,
                 anchorVelocity: av,
