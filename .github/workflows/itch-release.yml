@@ -1,0 +1,113 @@
+# Tests every pull request into main. Every push to main (a merged pull request) runs the same
+# tests and, if they pass, releases the build to itch.io with butler.
+#
+# One-time setup (see docs/releasing.md):
+#   - repository secret BUTLER_API_KEY: an itch.io API key (https://itch.io/user/settings/api-keys)
+#   - optional repository variable ITCH_TARGET to release somewhere else (default below)
+name: Test and release to itch.io
+
+on:
+    pull_request:
+        branches: [main]
+    push:
+        branches: [main]
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+# releases go out one at a time, in order; a newer pull request run replaces an older one
+concurrency:
+    group: ${{ github.workflow }}-${{ github.event_name == 'push' && 'release' || github.ref }}
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+    ITCH_TARGET: ${{ vars.ITCH_TARGET || 'azzaisme/water-you-doing' }}
+    ITCH_CHANNEL: html5
+
+jobs:
+    test:
+        name: Checks, unit tests, build, browser tests
+        runs-on: ubuntu-latest
+        timeout-minutes: 45
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+                  cache: npm
+
+            - run: npm ci
+            - run: npm run typecheck
+            - run: npm run lint
+            - run: npm run fmt
+            - run: npm test
+            # the itch.io build: everything bundled, relative URLs
+            - run: npm run build
+
+            # browser smoke tests against the built game (Google Chrome on the runner, software GL)
+            - name: Browser tests
+              run: npx playwright test --trace off
+
+            - name: Upload browser test results
+              if: failure()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: playwright-results
+                  path: test-results/
+                  retention-days: 7
+
+            - name: Keep the build for the release
+              uses: actions/upload-artifact@v4
+              with:
+                  name: web-build
+                  path: dist/
+                  retention-days: 7
+
+    release:
+        name: Release to itch.io
+        needs: test
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        environment:
+            name: itch.io
+            url: https://${{ steps.target.outputs.user }}.itch.io/${{ steps.target.outputs.game }}
+        steps:
+            - name: Target
+              id: target
+              run: |
+                  echo "user=${ITCH_TARGET%%/*}" >> "$GITHUB_OUTPUT"
+                  echo "game=${ITCH_TARGET#*/}" >> "$GITHUB_OUTPUT"
+
+            - uses: actions/download-artifact@v4
+              with:
+                  name: web-build
+                  path: dist
+
+            - name: Check the build
+              run: |
+                  test -f dist/index.html || { echo "::error::dist/index.html is missing"; exit 1; }
+                  # itch.io serves the game from a subfolder: asset URLs must be relative
+                  if grep -Eq '(src|href)="/' dist/index.html; then echo "::error::absolute asset URL in index.html"; exit 1; fi
+
+            - name: Install butler
+              run: |
+                  curl -fsSL -o butler.zip https://broth.itch.zone/butler/linux-amd64/LATEST/archive/default
+                  unzip -q butler.zip -d butler
+                  chmod +x butler/butler
+                  echo "$PWD/butler" >> "$GITHUB_PATH"
+                  butler/butler -V
+
+            - name: Push to itch.io
+              env:
+                  BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+              run: |
+                  if [ -z "$BUTLER_API_KEY" ]; then
+                      echo "::error::The BUTLER_API_KEY repository secret is not set (see docs/releasing.md)"
+                      exit 1
+                  fi
+                  version="${{ github.run_number }}-${GITHUB_SHA::7}"
+                  butler push dist "$ITCH_TARGET:$ITCH_CHANNEL" --userversion "$version"
+                  echo "Released $version to https://${ITCH_TARGET%%/*}.itch.io/${ITCH_TARGET#*/} ($ITCH_CHANNEL)" >> "$GITHUB_STEP_SUMMARY"

@@ -103,6 +103,9 @@ npm run test:e2e     # 9 Playwright browser tests against the production build (
 npm run check        # typecheck + lint + unit tests + build
 ```
 
+Merging into `main` runs all of these in GitHub Actions and releases the build to itch.io
+([`docs/releasing.md`](docs/releasing.md)).
+
 Measurement and evidence scripts:
 
 ```sh
