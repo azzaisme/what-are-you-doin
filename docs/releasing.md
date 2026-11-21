@@ -34,8 +34,8 @@ on the upload, and butler only uploads the files that changed.
 - The itch.io build is `npm run build`. It bundles everything, including the engine and Rapier,
   and uses relative URLs. The claude.ai artifact uses `npm run build:publish` instead, which loads
   the engine from a CDN.
-- **Online play doesn't work on itch.io yet.** It uses the claude.ai artifact's `room`, which only
-  exists inside claude.ai. On itch.io the game plays solo and in local split-screen co-op. Online
-  play there needs our own server (design doc §6).
+- **Online play on itch.io** is peer to peer (ADR 0012): WebRTC between the players' browsers, set
+  up through public Nostr relays. There is no server to run. Players on very strict networks may
+  fail to connect, because there is no TURN server.
 - The browser tests use software rendering on the GitHub runner, so they take about 10–15 minutes.
   If one fails, the run uploads its screenshots and traces as `playwright-results`.

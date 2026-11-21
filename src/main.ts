@@ -22,6 +22,7 @@ import { PadManager } from './input/gamepad.ts';
 import { TouchControls, isTouchDevice } from './input/touch.ts';
 import { levelFromData } from './levels/data.ts';
 import { LEVEL_MENU, getLevel } from './levels/index.ts';
+import type { P2PTransport } from './net/p2p.ts';
 import { GuestSession, HostSession, listGames } from './net/session.ts';
 import type { GameAd } from './net/session.ts';
 import { localTransport, roomTransport } from './net/transport.ts';
@@ -198,9 +199,12 @@ function updateTouch(): void {
     touch.show(touchSeen && state.mode === 'firstPerson' && !state.uiHidden);
 }
 
-// online co-op (room presence): one device hosts the simulation, guests render its snapshots
+// online co-op: one device hosts the simulation, guests render its snapshots. On claude.ai over the
+// artifact room; elsewhere (itch.io) peer to peer over WebRTC, connected when the panel first opens.
 let transport: NetTransport | null = null;
-let transportKind: 'room' | 'local' | 'none' = 'none';
+let transportKind: 'room' | 'local' | 'p2p' | 'none' = 'none';
+let p2p: P2PTransport | null = null;
+let p2pStarting: Promise<void> | null = null;
 let hostSession: HostSession | null = null;
 let guestSession: GuestSession | null = null;
 let guestEventsSeen = 0;
@@ -1264,12 +1268,43 @@ function statsText(): string {
 
 /** Starts the transport in the background (the platform answers within ~10 s, or never). */
 async function startTransport(): Promise<void> {
-    if (params.get('net') === 'local') {
-        transport = localTransport();
-    } else {
-        transport = await roomTransport();
+    const net = params.get('net');
+    if (net === 'local') transport = localTransport();
+    else if (net !== 'p2p' && net !== 'off') transport = await roomTransport();
+    if (transport) {
+        transportKind = transport.kind === 'room' ? 'room' : 'local';
+        watchLobby();
+    } else if (net !== 'off') {
+        // peer to peer: connect now only when arriving to join a game, else when the panel opens
+        transportKind = 'p2p';
+        if (params.has('join')) await connectP2P();
     }
-    transportKind = transport ? (transport.kind === 'room' ? 'room' : 'local') : 'none';
+    online.render();
+}
+
+/**
+ * Connects the peer-to-peer lobby (once). For tests: `?relays=ws://…,wss://…` replaces the public
+ * relays and `?ice=local` uses no STUN servers.
+ */
+function connectP2P(): Promise<void> {
+    if (transportKind !== 'p2p') return Promise.resolve();
+    p2pStarting ??= import('./net/p2p.ts')
+        .then(({ p2pTransport }) => {
+            const relays = params.get('relays')?.split(',').filter(Boolean);
+            p2p = p2pTransport({ relays, localOnly: params.get('ice') === 'local' });
+            transport = p2p;
+            watchLobby();
+            online.render();
+        })
+        .catch((e: unknown) => {
+            console.warn('online play could not start', e);
+            transportKind = 'none';
+            online.render();
+        });
+    return p2pStarting;
+}
+
+function watchLobby(): void {
     transport?.lobby.onChange(() => {
         online.render();
         // arrived with ?join=CODE (switched level to join a game): join as soon as it is listed
@@ -1282,11 +1317,11 @@ async function startTransport(): Promise<void> {
             }
         }
     });
-    online.render();
 }
 let autoJoinTried = false;
 
 async function hostOnline(): Promise<void> {
+    await connectP2P();
     if (!transport || hostSession || guestSession) return;
     if (state.paused) setPaused(false);
     if (state.mode !== 'firstPerson') {
@@ -1318,6 +1353,14 @@ async function joinOnline(ad: GameAd): Promise<void> {
     if (state.mode !== 'firstPerson') setMode('firstPerson', false);
     showToast(`Joined game ${ad.code}`);
     online.render();
+    if (transportKind === 'p2p') {
+        // peer to peer has no relay server for game data: a strict network can block the connection
+        const joined = guestSession;
+        setTimeout(() => {
+            if (guestSession === joined && joined.received === 0)
+                showToast("Can't reach the host yet: one of your networks may block direct connections");
+        }, 25_000);
+    }
 }
 
 /** Leaves the online game; a guest goes back to its own (solo) world. */
@@ -1342,6 +1385,8 @@ function leaveOnline(message?: string): void {
 const online = new OnlinePanel(
     {
         available: () => transportKind,
+        opened: () => void connectP2P(),
+        peersOnline: () => (p2p ? p2p.lobbyPeers() : null),
         games: () => (transport ? listGames(transport.lobby) : []),
         level: level.id,
         status: () =>
@@ -1492,8 +1537,9 @@ window.__riverLab = {
         clock.reset(sim.tick);
         state.forceVoxel = true;
     },
-    /** Online co-op (tests use ?net=local, which links tabs of one browser). */
+    /** Online co-op (tests use ?net=local, which links tabs of one browser, or ?net=p2p&relays=…). */
     net: {
+        connect: () => connectP2P(),
         host: () => hostOnline(),
         games: () => (transport ? listGames(transport.lobby) : []),
         join: (code: string) => {
@@ -1503,6 +1549,7 @@ window.__riverLab = {
         leave: () => leaveOnline(),
         status: () => ({
             kind: transportKind,
+            peers: p2p ? p2p.lobbyPeers() : null,
             hosting: hostSession?.code ?? null,
             guests: hostSession?.guestCount ?? 0,
             guest: guestSession
