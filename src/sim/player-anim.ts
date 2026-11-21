@@ -14,7 +14,8 @@
  * - Drop: the arms lift slightly as they let go, then fall.
  * - Landing from a fall: the body dips forward.
  *
- * Motions last a quarter of a second or more: the voxel body is rebuilt 20 times a second.
+ * Motions are exaggerated and last a quarter of a second or more, so they read in voxels (a 5-10 cm
+ * lattice) rebuilt 20 times a second.
  */
 
 /** Where a player's shoulders are, above their feet (m) - between the two shoulders. */
@@ -96,35 +97,35 @@ const OVERLAYS = {
         delay: 0,
         attack: 0.06,
         hold: 0.04,
-        release: 0.22,
+        release: 0.28,
         raise: 0.25,
         raiseHeavy: 0,
-        reach: 0.12,
-        lean: -0.12,
+        reach: 0.18,
+        lean: -0.2,
         leanHeavy: 0
     },
     // a quick swipe out and back
     miss: {
         delay: 0,
         attack: 0.07,
-        hold: 0.06,
-        release: 0.25,
-        raise: 1.1,
+        hold: 0.1,
+        release: 0.3,
+        raise: 1.2,
         raiseHeavy: 0,
-        reach: 0.1,
-        lean: -0.1,
+        reach: 0.16,
+        lean: -0.16,
         leanHeavy: 0
     },
     // fling up and forward, lunging into it
     throw: {
         delay: 0,
-        attack: 0.05,
-        hold: 0.08,
-        release: 0.4,
-        raise: 2.2,
+        attack: 0.06,
+        hold: 0.12,
+        release: 0.45,
+        raise: 2.4,
         raiseHeavy: 0,
-        reach: 0.16,
-        lean: -0.32,
+        reach: 0.22,
+        lean: -0.42,
         leanHeavy: 0
     },
     // a little lift as the paws let go
@@ -143,12 +144,12 @@ const OVERLAYS = {
     land: {
         delay: 0,
         attack: 0.04,
-        hold: 0.04,
-        release: 0.3,
-        raise: 0.5,
+        hold: 0.06,
+        release: 0.35,
+        raise: 0.6,
         raiseHeavy: 0,
         reach: 0,
-        lean: -0.32,
+        lean: -0.4,
         leanHeavy: 0
     },
     // the weight coming on, a moment after the grab's lunge: more for heavy things
@@ -156,12 +157,12 @@ const OVERLAYS = {
         delay: 0.08,
         attack: 0.07,
         hold: 0.05,
-        release: 0.35,
-        raise: -0.2,
-        raiseHeavy: -0.45,
+        release: 0.4,
+        raise: -0.25,
+        raiseHeavy: -0.55,
         reach: 0,
         lean: 0.03,
-        leanHeavy: 0.15
+        leanHeavy: 0.22
     }
 } as const;
 type OverlayKind = keyof typeof OVERLAYS;
@@ -218,10 +219,10 @@ export class PlayerAnimator {
             // wide things are held at their sides; small ones with both paws in front
             spreadT = clamp((h.halfWidth - 0.18) * 0.9, -0.15, 0.3);
             // lean back against the load; strain shakes the arms a little
-            leanT = 0.05 + 0.14 * Math.max(heavy, h.strain);
+            leanT = 0.08 + 0.2 * Math.max(heavy, h.strain);
             raiseT += 0.022 * h.strain * Math.sin(this.time * Math.PI * 2 * 9);
             // what you carry bobs with your step
-            raiseT += 0.07 * i.walkAmount * Math.sin(2 * i.walkPhase);
+            raiseT += 0.1 * i.walkAmount * Math.sin(2 * i.walkPhase);
         }
 
         // events start timed pose overlays (attack, hold, release), which the springs then smooth
@@ -258,9 +259,9 @@ export class PlayerAnimator {
         this.head.step(clamp(i.pitch, -0.7, 0.55), dt);
 
         out.raise = clamp(this.raise.x, 0, 2.7);
-        out.reach = clamp(this.reach.x, -0.05, 0.2);
+        out.reach = clamp(this.reach.x, -0.05, 0.26);
         out.spread = clamp(this.spread.x, -0.3, 0.45);
-        out.lean = clamp(this.lean.x, -0.45, 0.3);
+        out.lean = clamp(this.lean.x, -0.5, 0.35);
         out.headPitch = this.head.x;
         return out;
     }

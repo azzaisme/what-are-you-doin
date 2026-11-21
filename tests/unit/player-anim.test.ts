@@ -147,9 +147,9 @@ describe('player animation (grab, carry, throw)', () => {
             (o) => {
                 for (const v of Object.values(o)) expect(Number.isFinite(v)).toBe(true);
                 expect(o.raise).toBeLessThanOrEqual(2.7);
-                expect(o.lean).toBeGreaterThanOrEqual(-0.45);
+                expect(o.lean).toBeGreaterThanOrEqual(-0.5);
             }
         );
-        expect(o.reach).toBeLessThanOrEqual(0.2);
+        expect(o.reach).toBeLessThanOrEqual(0.26);
     });
 });

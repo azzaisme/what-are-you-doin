@@ -1,5 +1,51 @@
 # Progress log
 
+## Grab, carry and throw animation (2026-11-21, owner request)
+
+Owner: "add some animation in for the carrying and grabbing of things… look and feel like a AAA game
+that also just so happens to have this cool voxel pixel effect".
+
+- **A body animator in the sim** (`src/sim/player-anim.ts`): springs towards pose targets, plus timed
+  overlays on events. It runs at the fixed tick, so it is deterministic, and every player sees
+  everyone's animation through four new beaver channels: reach, spread, lean and head pitch
+  (`ANIM_MAX` is now 10).
+- **Holding:**
+    - the arms aim at the actual grip point, so a heavy log that sags pulls them down, and they
+      spread for wide things;
+    - the body leans back against the load, with a slight tremor under strain;
+    - what you carry bobs with your step.
+- **Grab:** a lunge towards the object, then a dip as its weight comes on (more for heavy things).
+- **Other events:**
+    - a missed grab swipes out and back;
+    - a throw flings the arms up and lunges forward (the throw itself stays instant);
+    - a drop lifts the paws slightly;
+    - a hard landing dips the body forward.
+- **The head follows where you look,** for other players to see.
+- **First-person camera:** a small walk bob, and kicks on throws, landings and heavy loads, taken
+  from your beaver's channels. _Camera bob & kick_ in the panel, or `?bob=off`, turns it off.
+- **Seeing yourself:**
+    - `C` watches your beaver from over its shoulder in first person;
+    - `?view=side` gives a side-on view for screenshots.
+- **Motions are exaggerated** (up to ~20 cm of lean or reach, 0.3–0.6 s) so they read on a 5–10 cm
+  lattice rebuilt 20 times a second. Anything faster or smaller doesn't show.
+- **Tests:** `tests/unit/player-anim.test.ts` (7 tests: aim, weight, spread, throw, miss, landing,
+  bounded under random events).
+- **Known limit:** things are held 1.3–1.5 m out (the grab distance), while the beaver's arms are
+  34 cm long. The arms point at what you hold rather than touching it. Holding things closer would
+  change how carrying plays, so that is the owner's call.
+
+## Pixel look prototype (2026-11-21, owner request)
+
+`?look=pixel`, `L`, or _Look_ in the debug panel's lighting section (`src/render/pixel-look.ts`):
+
+- a quarter-resolution render with a nearest-neighbour upscale;
+- silhouette outlines from depth, fading out between 25 and 60 m;
+- posterized colour;
+- lone sparkles and one-texel cracks filled in;
+- bloom, vignette and MSAA turned off.
+
+It is off by default.
+
 ## First person: your limbs at 1 cm (2026-11-21, owner report)
 
 Owner, with a phone screenshot: looking down and walking backwards showed a few huge blocks; "can we
