@@ -1,5 +1,23 @@
 # Progress log
 
+## First person: your limbs at 1 cm (2026-11-21, owner report)
+
+Owner, with a phone screenshot: looking down and walking backwards showed a few huge blocks; "can we
+shrink the voxel size for the player's arms?"
+
+- **Your own limbs are drawn on the 1 cm lattice.** That's your arms, legs and feet, as a
+  renderer-only entity (`fp-body`, `beaverFirstPersonAsset`, `cellTier: 'fine'`). It replaces your
+  beaver for your own camera. Other players still see your normal beaver.
+- **The torso is left out in first person.** At 5–10 cm it filled the lower view a hand's width from
+  the camera.
+- **No more trailing:** voxel frames reach the screen a frame or two after their time. Your limbs
+  are now sampled that much later (a measured, smoothed lead, up to 250 ms), so they keep up when
+  you walk. Before, the body ended up in front of you when walking backwards.
+- **Assets can choose their lattice** (`VoxelAsset.cellTier`). Your limbs use one sample per 1 cm
+  cell.
+- **Cost (SwiftShader container, slow CPU):** the voxel frame median goes from 24 ms to 39–45 ms in
+  first person. The 1 cm lane becomes the slowest of the parallel lanes. Unmeasured on phones.
+
 ## Online co-op diagnosis: relays fine, direct connections fail (2026-11-21, owner report)
 
 Owner: "It never showed up" (a hosted game, on the same network). ADR 0012 has the full write-up.

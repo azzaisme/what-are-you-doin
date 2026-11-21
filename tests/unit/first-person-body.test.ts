@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { BEAVER_ARM_RAISE, BEAVER_FIRST_PERSON, beaverAsset } from '../../src/assets/beaver.ts';
+import { BEAVER_ARM_RAISE, BEAVER_FIRST_PERSON, beaverAsset, beaverFirstPersonAsset } from '../../src/assets/beaver.ts';
+import { assetTier } from '../../src/assets/cell-tier.ts';
 import { EYE_HEIGHT } from '../../src/sim/lab-sim.ts';
 import { pose } from '../../src/voxels/math.ts';
 
@@ -56,5 +57,34 @@ describe('your own body in first person', () => {
             // other players' view of you: arms hang at your sides unless you hold something
             expect(handInView(0, false, arm).below).toBeGreaterThan(60);
         }
+    });
+
+    it('draws your own limbs on the 1 cm lattice, posed like your first-person beaver', () => {
+        expect(assetTier(beaverFirstPersonAsset)).toBe('fine');
+        expect(beaverFirstPersonAsset.parts.map((p) => p.name)).toEqual([
+            'armL',
+            'armR',
+            'legL',
+            'legR',
+            'footL',
+            'footR'
+        ]);
+        const anim = new Float64Array(beaverAsset.animChannels);
+        anim[BEAVER_ARM_RAISE] = 1.9;
+        anim[1] = 0.7; // walking
+        const limbs = beaverFirstPersonAsset.parts.map(() => pose());
+        beaverFirstPersonAsset.evaluate(pose(1, 0, 2), anim, limbs);
+        const whole = beaverAsset.parts.map(() => pose());
+        beaverAsset.evaluate(
+            pose(1, 0, 2),
+            Float64Array.from(anim, (v, i) => (i === BEAVER_FIRST_PERSON ? 1 : v)),
+            whole
+        );
+        beaverFirstPersonAsset.parts.forEach((p, k) => {
+            const w = whole[index(p.name)];
+            expect(Math.hypot(limbs[k].p.x - w.p.x, limbs[k].p.y - w.p.y, limbs[k].p.z - w.p.z), p.name).toBeLessThan(
+                1e-12
+            );
+        });
     });
 });

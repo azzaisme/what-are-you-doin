@@ -134,6 +134,8 @@ export class LabSim {
     readonly extras: SimEntity[];
     readonly windsock: SimEntity;
     readonly avatars: SimEntity[];
+    /** Your own limbs in first person, drawn by the renderer only (never visible in snapshots). */
+    readonly fpBody: SimEntity;
     readonly player2Entity: SimEntity;
     /** Every player's eye entity, by slot. */
     readonly eyes: SimEntity[];
@@ -168,6 +170,7 @@ export class LabSim {
         this.extras = c.extras;
         this.windsock = c.windsock;
         this.avatars = c.avatars;
+        this.fpBody = c.fpBody;
         this.playerEntity = c.player;
         this.player2Entity = c.player2;
         this.eyes = c.eyes;

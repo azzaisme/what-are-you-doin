@@ -256,6 +256,33 @@ function poseRig(root: Pose, anim: ArrayLike<number>): void {
     rig.evaluate(_root);
 }
 
+/**
+ * Your own limbs in first person, on the 1 cm lattice: arms, legs and feet, posed exactly like the
+ * player's beaver in first person (shoulders forward, paws in view). The renderer draws it in place
+ * of your own beaver, for your camera only; the torso is left out, since it would fill the lower
+ * view a hand's width from the camera.
+ */
+const FP_LIMBS = ['armL', 'armR', 'legL', 'legR', 'footL', 'footR'].map((n) => parts.findIndex((p) => p.name === n));
+const _fpAnim = new Float64Array(BEAVER_ANIM_CHANNELS);
+export const beaverFirstPersonAsset: VoxelAsset = {
+    schema: ASSET_SCHEMA_VERSION,
+    name: 'beaver-first-person',
+    // one sample per 1 cm cell is plenty for 13 cm limbs, and several times cheaper (they are rebuilt
+    // every voxel frame)
+    parts: FP_LIMBS.map((i) => ({ ...parts[i], policy: 'center' as const })),
+    animChannels: BEAVER_ANIM_CHANNELS,
+    cellTier: 'fine',
+    evaluate(root: Pose, anim: ArrayLike<number>, out: Pose[]) {
+        for (let c = 0; c < BEAVER_ANIM_CHANNELS; c++) _fpAnim[c] = anim[c] ?? 0;
+        _fpAnim[BEAVER_FIRST_PERSON] = 1;
+        poseRig(root, _fpAnim);
+        for (let k = 0; k < FP_LIMBS.length; k++) {
+            const a = attachments[FP_LIMBS[k]];
+            composePose(rig.world[a.joint], a.offset, out[k]);
+        }
+    }
+};
+
 /** World pose of the left hand (bucket grip), for attaching carried items. */
 export function beaverLeftHand(root: Pose, anim: ArrayLike<number>, out: Pose): Pose {
     poseRig(root, anim);

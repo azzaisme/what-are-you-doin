@@ -69,6 +69,13 @@ export class VoxelClient {
      * out, BEAVER_FIRST_PERSON), or -1.
      */
     firstPersonSlot = -1;
+    /** Sim slot of the 1 cm first-person limbs drawn in its place (beaverFirstPersonAsset), or -1. */
+    firstPersonBodySlot = -1;
+    /**
+     * How far ahead (s) of a voxel frame's time its meshes are on screen, on average: your own limbs
+     * are sampled that much later, so they keep up with the camera instead of trailing it.
+     */
+    firstPersonLead = 0;
     build: BuildInfo | null = null;
     lastStats: FrameStats | null = null;
     /** The last voxel frame's stats per lane (same order as the lanes). */
@@ -221,6 +228,30 @@ export class VoxelClient {
             states[o + 7] = this.root.q.w;
             for (let c = 0; c < ANIM_MAX; c++) states[o + 8 + c] = this.anim[c];
             if (this.slots[n] === this.firstPersonSlot) states[o + 8 + BEAVER_FIRST_PERSON] = 1;
+        }
+        // first person: your own beaver gives way to your 1 cm limbs, sampled closer to the camera
+        if (this.firstPersonSlot >= 0 && this.firstPersonBodySlot >= 0) {
+            const a = this.slots.indexOf(this.firstPersonSlot);
+            const b = this.slots.indexOf(this.firstPersonBodySlot);
+            if (a >= 0 && b >= 0) {
+                const visible = this.sim.ring.sample(
+                    this.firstPersonSlot,
+                    time + this.firstPersonLead,
+                    this.root,
+                    this.anim
+                );
+                const o = b * STATE_STRIDE;
+                states[o] = visible ? 1 : 0;
+                states[o + 1] = this.root.p.x;
+                states[o + 2] = this.root.p.y;
+                states[o + 3] = this.root.p.z;
+                states[o + 4] = this.root.q.x;
+                states[o + 5] = this.root.q.y;
+                states[o + 6] = this.root.q.z;
+                states[o + 7] = this.root.q.w;
+                for (let c = 0; c < ANIM_MAX; c++) states[o + 8 + c] = this.anim[c];
+                states[a * STATE_STRIDE] = 0;
+            }
         }
         this.busy = true;
         const fx = this.particles?.(time);

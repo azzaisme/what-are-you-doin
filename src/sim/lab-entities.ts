@@ -4,7 +4,7 @@
  */
 
 import type { VoxelAsset } from '../assets/asset.ts';
-import { beaverAsset } from '../assets/beaver.ts';
+import { beaverAsset, beaverFirstPersonAsset } from '../assets/beaver.ts';
 import { DUMMY_PARTS, dummyPartAsset } from '../assets/dummy.ts';
 import {
     beamAsset,
@@ -62,6 +62,8 @@ export interface LabEntities {
     windsock: SimEntity;
     /** Voxel beaver bodies for the players (shown in two-player mode). */
     avatars: SimEntity[];
+    /** Your own limbs in first person (1 cm); drawn by the renderer only. */
+    fpBody: SimEntity;
     /** Not voxelized: carries the character's eye pose through the snapshot ring. */
     player: SimEntity;
     /** Not voxelized: player 2's eye pose. */
@@ -120,6 +122,9 @@ export function createLabEntities(): LabEntities {
     const eyes: SimEntity[] = [];
     for (let n = 0; n < MAX_PLAYERS; n++)
         eyes.push(add(900 + n, n === 0 ? 'player' : `player${n + 1}`, EMPTY_ASSET, 0));
+    // your own limbs at 1 cm, drawn by the renderer in place of your beaver (never by the sim)
+    const fpBody = add(960, 'fp-body', beaverFirstPersonAsset, 3);
+    fpBody.visible = false;
     return {
         entities,
         beaver,
@@ -135,6 +140,7 @@ export function createLabEntities(): LabEntities {
         extras,
         windsock,
         avatars,
+        fpBody,
         player: eyes[0],
         player2: eyes[1],
         eyes

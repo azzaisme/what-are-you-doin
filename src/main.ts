@@ -421,13 +421,21 @@ class LabDirector extends Script {
             state.mode === 'firstPerson' && localSlot2 < 0 && ownSlot >= 0 && ownSlot < sim.avatars.length
                 ? sim.avatars[ownSlot].slot
                 : -1;
+        pipeline.firstPersonBodySlot = sim.fpBody.slot;
         if (frame !== voxelClock.frame || state.forceVoxel) {
             voxelClock.frame = frame;
             state.forceVoxel = false;
             pipeline.request(frame, voxelClock.timeOf(frame));
         }
         // apply a finished voxel frame (all its meshes at once) before this frame renders
-        pipeline.poll();
+        if (pipeline.poll()) {
+            // how late voxel frames reach the screen: shown from now until the next one lands
+            const lead = Math.min(
+                0.25,
+                Math.max(0, renderTime - (pipeline.lastStats?.time ?? renderTime) + 0.5 / voxelClock.hz)
+            );
+            pipeline.firstPersonLead += (lead - pipeline.firstPersonLead) * 0.2;
+        }
         reference.update(renderTime);
         if (state.colliders) drawColliders();
         // gusts stir the water
