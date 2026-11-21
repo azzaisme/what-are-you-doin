@@ -1,10 +1,12 @@
 /**
  * Network transports. The game only needs "presence": each participant keeps one small JSON state
  * object current; everyone in the same room sees everyone's latest state; it disappears when they
- * leave. Two implementations:
+ * leave. Implementations:
  *
  * - RoomTransport: the claude.ai artifact `room` capability (presence, coalesced ~30 Hz, 4 KiB per
  *   participant, named rooms per game). No server of ours.
+ * - P2PTransport (`p2p.ts`): WebRTC between the players' browsers, set up through public Nostr relays.
+ *   Used outside claude.ai (itch.io). No server of ours either.
  * - LocalTransport: BroadcastChannel between tabs of one browser (development and browser tests;
  *   `?net=local`), with the same semantics.
  * - MemoryHub: in-process (unit tests).
@@ -31,7 +33,7 @@ export interface NetChannel {
 }
 
 export interface NetTransport {
-    readonly kind: 'room' | 'local' | 'memory';
+    readonly kind: 'room' | 'local' | 'p2p' | 'memory';
     /** The shared lobby everyone with the page open is in (games are advertised here). */
     readonly lobby: NetChannel;
     join(name: string): Promise<NetChannel>;

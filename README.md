@@ -49,44 +49,45 @@ npm run start        # serve the production build
 
 Query parameters (handy for comparisons and screenshots):
 
-| Parameter            | Effect                                                                                             |
-| -------------------- | -------------------------------------------------------------------------------------------------- |
-| `?debug` or `#debug` | show the debug panel in a production build (always shown in `npm run dev`)                         |
-| `#cell75`            | voxel size 7.5 cm (any 50–100, i.e. 5–10 cm); the slider saves the choice and reloads              |
-| `?quality=low`       | low preset: no MSAA, 1024 shadows, 2 cascades, 25% reflection, no refraction                       |
-| `?hz=12\|20\|30\|60` | voxel reconstruction rate                                                                          |
-| `?t=4.5`             | start paused at an exact simulation time                                                           |
-| `?view=fp`           | start in first person                                                                              |
-| `?noui`              | hide all UI                                                                                        |
-| `?level=lab`         | the River Lab test scene instead of level 1, the Timber Yard                                       |
-| `?view=orbit`        | start the Timber Yard in the orbit view instead of first person                                    |
-| `?net=local`         | online co-op between tabs of one browser (development; the published page uses the claude.ai room) |
-| `?props=scripted`    | River Lab only: Epic 1 scripted prop motion instead of physics props (also in the debug panel)     |
+| Parameter               | Effect                                                                                             |
+| ----------------------- | -------------------------------------------------------------------------------------------------- |
+| `?debug` or `#debug`    | show the debug panel in a production build (always shown in `npm run dev`)                         |
+| `#cell75`               | voxel size 7.5 cm (any 50–100, i.e. 5–10 cm); the slider saves the choice and reloads              |
+| `?quality=low`          | low preset: no MSAA, 1024 shadows, 2 cascades, 25% reflection, no refraction                       |
+| `?hz=12\|20\|30\|60`    | voxel reconstruction rate                                                                          |
+| `?t=4.5`                | start paused at an exact simulation time                                                           |
+| `?view=fp`              | start in first person                                                                              |
+| `?noui`                 | hide all UI                                                                                        |
+| `?level=lab`            | the River Lab test scene instead of level 1, the Timber Yard                                       |
+| `?view=orbit`           | start the Timber Yard in the orbit view instead of first person                                    |
+| `?net=local`            | online co-op between tabs of one browser (development; the published page uses the claude.ai room) |
+| `?net=p2p` / `?net=off` | online co-op peer to peer (the default outside claude.ai, e.g. itch.io) / no online play           |
+| `?props=scripted`       | River Lab only: Epic 1 scripted prop motion instead of physics props (also in the debug panel)     |
 
 ## Controls
 
-| Input                                      | Action                                                                              |
-| ------------------------------------------ | ----------------------------------------------------------------------------------- |
-| Drag / right-drag / wheel                  | orbit / pan / zoom (orbit view)                                                     |
-| `V`                                        | toggle orbit / first-person view                                                    |
-| Click, then mouse                          | look (first person; `Esc` releases the pointer)                                     |
-| `W A S D`, `Shift`, `Space`                | walk, run, jump (first person; steps up 0.3 m, slides on steep slopes)              |
-| Left click or `E`                          | grab what the crosshair points at / release it (the prompt says what)               |
-| Right click                                | throw what you hold                                                                 |
-| Mouse wheel                                | hold closer / further                                                               |
-| `Q`                                        | drop                                                                                |
-| `G`                                        | put a plank in your hands (scripted mode: the Epic 1 comfort-test plank)            |
-| `T`                                        | launch the ragdoll dummy                                                            |
-| **Play online** (bottom left)              | host a game, or join one: other devices on the same artifact link, up to 4 players  |
-| **Touch** (phones)                         | left thumb move (edge: run) · right thumb look · Jump / Grab / Throw / Drop buttons |
-| **Gamepad**                                | press **A** to join (first pad: player 1, second pad: player 2 → split screen)      |
-| left / right stick                         | move / look                                                                         |
-| A · LT or L3 · RT · RB · B · X · Y · D-pad | jump · sprint · grab / release · throw · drop · ragdoll · plank · reach             |
-| **Levels** (bottom left)                   | tutorial, Timber Yard, River Lab, the level designer and your own level             |
-| `P` / `N`                                  | pause / step exactly one voxel frame                                                |
-| `Backspace`                                | reset the scene                                                                     |
-| `H`                                        | hide all UI (for screenshots)                                                       |
-| `F3` or the corner chip                    | debug panel                                                                         |
+| Input                                      | Action                                                                                     |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| Drag / right-drag / wheel                  | orbit / pan / zoom (orbit view)                                                            |
+| `V`                                        | toggle orbit / first-person view                                                           |
+| Click, then mouse                          | look (first person; `Esc` releases the pointer)                                            |
+| `W A S D`, `Shift`, `Space`                | walk, run, jump (first person; steps up 0.3 m, slides on steep slopes)                     |
+| Left click or `E`                          | grab what the crosshair points at / release it (the prompt says what)                      |
+| Right click                                | throw what you hold                                                                        |
+| Mouse wheel                                | hold closer / further                                                                      |
+| `Q`                                        | drop                                                                                       |
+| `G`                                        | put a plank in your hands (scripted mode: the Epic 1 comfort-test plank)                   |
+| `T`                                        | launch the ragdoll dummy                                                                   |
+| **Play online** (bottom left)              | host a game, or join one, up to 4 players (claude.ai: same artifact link; itch.io: anyone) |
+| **Touch** (phones)                         | left thumb move (edge: run) · right thumb look · Jump / Grab / Throw / Drop buttons        |
+| **Gamepad**                                | press **A** to join (first pad: player 1, second pad: player 2 → split screen)             |
+| left / right stick                         | move / look                                                                                |
+| A · LT or L3 · RT · RB · B · X · Y · D-pad | jump · sprint · grab / release · throw · drop · ragdoll · plank · reach                    |
+| **Levels** (bottom left)                   | tutorial, Timber Yard, River Lab, the level designer and your own level                    |
+| `P` / `N`                                  | pause / step exactly one voxel frame                                                       |
+| `Backspace`                                | reset the scene                                                                            |
+| `H`                                        | hide all UI (for screenshots)                                                              |
+| `F3` or the corner chip                    | debug panel                                                                                |
 
 The debug panel (design doc §7.3) has: pause, step voxel frame, reset, voxel rate, sampling policy
 (center / coverage50 / coverage25 / conservative), grid-line overlay, continuous source bounds,

@@ -6,7 +6,11 @@
 import type { GameAd } from '../net/session.ts';
 
 export interface OnlinePanelHost {
-    available(): 'room' | 'local' | 'none';
+    available(): 'room' | 'local' | 'p2p' | 'none';
+    /** The panel was opened (the peer-to-peer lobby connects then). */
+    opened?(): void;
+    /** Peer to peer: other players connected in the lobby, or null while connecting. */
+    peersOnline?(): number | null;
     games(): (GameAd & { full: boolean })[];
     level: string;
     status(): { mode: 'off' | 'host' | 'guest'; code?: string; players?: number; slot?: number; waiting?: boolean };
@@ -45,7 +49,10 @@ export class OnlinePanel {
     toggle(force?: boolean): void {
         this.open = force ?? !this.open;
         this.el.style.display = this.open ? '' : 'none';
-        if (this.open) this.render();
+        if (this.open) {
+            this.host.opened?.();
+            this.render();
+        }
     }
 
     get visible(): boolean {
@@ -86,9 +93,7 @@ export class OnlinePanel {
         };
         const avail = this.host.available();
         if (avail === 'none') {
-            note(
-                'Online play works when this page is open on claude.ai and shared with the people you play with (they sign in and open the same link).'
-            );
+            note('Online play could not start in this browser. Split-screen co-op still works: plug in a controller.');
             button('Close', () => this.toggle(false));
             return;
         }
@@ -128,6 +133,14 @@ export class OnlinePanel {
             b.disabled = !same || g.full;
         }
         if (avail === 'local') note('Local test mode: tabs of this browser only.', 'online-warn');
+        if (avail === 'p2p') {
+            const n = this.host.peersOnline?.() ?? null;
+            note(
+                n === null
+                    ? 'Connecting…'
+                    : `Online, browser to browser. ${n === 0 ? 'No one else here right now.' : `${n} other player${n === 1 ? '' : 's'} here.`} Games show up a few seconds after they start.`
+            );
+        }
         button('Close', () => this.toggle(false));
     }
 }

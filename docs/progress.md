@@ -1,5 +1,21 @@
 # Progress log
 
+## Online co-op on itch.io (2026-11-21, owner request)
+
+Owner: "I should be able to do multiplayer from itch.io". ADR 0012 has the design.
+
+- **Peer to peer:** outside claude.ai, "Play online" now connects the players' browsers directly
+  over WebRTC. Public Nostr relays carry only the handshake, through Trystero 0.26.0. There is no
+  server or account of ours. Hosting, the games list, joining, slots and snapshots are the same as
+  over the claude.ai room.
+- The lobby connects when the panel is first opened. The code loads only then (27 KB gzipped).
+- **Tests:** the online browser test now also runs over WebRTC between two pages, through a small
+  local Nostr relay (`tests/e2e/nostr-relay.ts`).
+- **Open:**
+    - no TURN server, so players on very strict networks can't connect;
+    - not yet tried against the real public relays, which this container can't reach;
+    - latency on real networks is unmeasured.
+
 ## Per-item voxel sizes, and water in the bucket (2026-11-21, owner request)
 
 Owner: "I can't tell the bucket has anything in it. What if we adjust the resolution of the voxel

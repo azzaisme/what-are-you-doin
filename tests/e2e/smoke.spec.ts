@@ -2,6 +2,8 @@ import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import pngjs from 'pngjs';
 
+import { startRelay } from './nostr-relay.ts';
+
 const { PNG } = pngjs;
 
 // Browser smoke and invariants. Runs against the production build (vite preview) in headless
@@ -410,100 +412,117 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
     expect(problems).toEqual([]);
 });
 
-test('online co-op: a second device joins the host, plays as player 2 and renders the host world', async ({
-    page,
-    context
-}) => {
-    // ?net=local links pages of one browser with BroadcastChannel; the same sessions run over the
-    // claude.ai room in the published artifact
-    const query = '?level=yard&t=0.01&quality=low&net=local#cell100';
-    const problems = await boot(page, query);
-    const guest = await context.newPage();
-    const guestProblems: string[] = [];
-    guest.on('pageerror', (e) => guestProblems.push(e.message));
-    await guest.goto(`/${query}`);
-    await guest.waitForFunction(() => (window as unknown as { __riverLab?: Lab }).__riverLab?.ready === true, null, {
-        timeout: 150_000
-    });
-    type Net = {
-        net: {
-            host(): Promise<void>;
-            games(): { code: string }[];
-            join(c: string): Promise<void>;
-            leave(): void;
-            status(): { hosting: string | null; guests: number; guest: { slot: number; received: number } | null };
+// ?net=local links pages of one browser with BroadcastChannel (the same sessions run over the
+// claude.ai room in the published artifact); ?net=p2p is the itch.io transport, WebRTC between the
+// pages, signalled through a local Nostr relay instead of the public ones
+for (const transport of ['local', 'p2p'] as const)
+    test(`online co-op (${transport}): a second device joins the host, plays as player 2 and renders the host world`, async ({
+        page,
+        context
+    }) => {
+        const relay = transport === 'p2p' ? await startRelay() : null;
+        const query =
+            transport === 'p2p'
+                ? `?level=yard&t=0.01&quality=low&net=p2p&ice=local&relays=${encodeURIComponent(relay!.url)}#cell100`
+                : '?level=yard&t=0.01&quality=low&net=local#cell100';
+        const problems = await boot(page, query);
+        const guest = await context.newPage();
+        const guestProblems: string[] = [];
+        guest.on('pageerror', (e) => guestProblems.push(e.message));
+        await guest.goto(`/${query}`);
+        await guest.waitForFunction(
+            () => (window as unknown as { __riverLab?: Lab }).__riverLab?.ready === true,
+            null,
+            {
+                timeout: 150_000
+            }
+        );
+        type Net = {
+            net: {
+                host(): Promise<void>;
+                games(): { code: string }[];
+                join(c: string): Promise<void>;
+                connect(): Promise<void>;
+                leave(): void;
+                status(): { hosting: string | null; guests: number; guest: { slot: number; received: number } | null };
+            };
         };
-    };
-    const net = (p: Page, src: string, arg?: unknown) =>
-        p.evaluate(
-            ([s, a]) =>
-                new Function('l', 'a', `return (${s})(l, a)`)((window as unknown as { __riverLab: Net }).__riverLab, a),
-            [src, arg] as const
+        const net = (p: Page, src: string, arg?: unknown) =>
+            p.evaluate(
+                ([s, a]) =>
+                    new Function('l', 'a', `return (${s})(l, a)`)(
+                        (window as unknown as { __riverLab: Net }).__riverLab,
+                        a
+                    ),
+                [src, arg] as const
+            );
+
+        await lab(page, (l) => l.action('pause'));
+        // the peer-to-peer lobby connects when the online panel opens (here: by hand)
+        await Promise.all([net(page, '(l) => l.net.connect()'), net(guest, '(l) => l.net.connect()')]);
+        await net(page, '(l) => l.net.host()');
+        const code = ((await net(page, '(l) => l.net.status()')) as { hosting: string }).hosting;
+        expect(code).toMatch(/^[a-z0-9]{4}$/);
+        await guest.waitForFunction(
+            (c) => (window as unknown as { __riverLab: Net }).__riverLab.net.games().some((g) => g.code === c),
+            code,
+            { timeout: 120_000 }
         );
-
-    await lab(page, (l) => l.action('pause'));
-    await net(page, '(l) => l.net.host()');
-    const code = ((await net(page, '(l) => l.net.status()')) as { hosting: string }).hosting;
-    expect(code).toMatch(/^[a-z0-9]{4}$/);
-    await guest.waitForFunction(
-        (c) => (window as unknown as { __riverLab: Net }).__riverLab.net.games().some((g) => g.code === c),
-        code,
-        { timeout: 30_000 }
-    );
-    await net(guest, '(l, c) => l.net.join(c)', code);
-    await guest.waitForFunction(
-        () => ((window as unknown as { __riverLab: Net }).__riverLab.net.status().guest?.received ?? 0) > 5,
-        null,
-        { timeout: 120_000 }
-    );
-    const g = (await net(guest, '(l) => l.net.status()')) as { guest: { slot: number } };
-    expect(g.guest.slot).toBe(1);
-    expect(((await net(page, '(l) => l.net.status()')) as { guests: number }).guests).toBe(1);
-
-    // the guest's input moves player 2 on the host
-    const where = () =>
-        page.evaluate(
-            () =>
-                (
-                    window as unknown as {
-                        __riverLab: { entities(): Record<string, { x: number; z: number; visible: boolean }> };
-                    }
-                ).__riverLab.entities()['avatar-1']
+        await net(guest, '(l, c) => l.net.join(c)', code);
+        await guest.waitForFunction(
+            () => ((window as unknown as { __riverLab: Net }).__riverLab.net.status().guest?.received ?? 0) > 5,
+            null,
+            { timeout: 120_000 }
         );
-    const before = await where();
-    expect(before.visible).toBe(true);
-    // keep walking until player 2 has moved on the host (slow CI runners simulate less per second)
-    let moved = 0;
-    for (let i = 0; i < 300 && moved <= 0.3; i++) {
-        await net(guest, '(l) => { l.look(3.14, -0.1); l.input({ moveZ: 1 }); }');
-        await guest.waitForTimeout(300);
-        const after = await where();
-        moved = Math.hypot(after.x - before.x, after.z - before.z);
-    }
-    expect(moved).toBeGreaterThan(0.3);
-    // the guest renders the host's world: both beaver bodies and every prop, all on the grid
-    // (voxel frames lag the snapshots in software GL, so wait for the frame that has both beavers)
-    await guest.waitForFunction(
-        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 18,
-        null,
-        { timeout: 60_000 }
-    );
-    const gs = await guest.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.stats());
-    expect(gs.voxel.rejected).toBe(0);
-    expect(
-        (await guest.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid())).misaligned
-    ).toBe(0);
+        const g = (await net(guest, '(l) => l.net.status()')) as { guest: { slot: number } };
+        expect(g.guest.slot).toBe(1);
+        expect(((await net(page, '(l) => l.net.status()')) as { guests: number }).guests).toBe(1);
 
-    // leaving frees the slot on the host
-    await net(guest, '(l) => l.net.leave()');
-    await page.waitForFunction(
-        () => (window as unknown as { __riverLab: Net }).__riverLab.net.status().guests === 0,
-        null,
-        { timeout: 30_000 }
-    );
-    expect(problems).toEqual([]);
-    expect(guestProblems).toEqual([]);
-});
+        // the guest's input moves player 2 on the host
+        const where = () =>
+            page.evaluate(
+                () =>
+                    (
+                        window as unknown as {
+                            __riverLab: { entities(): Record<string, { x: number; z: number; visible: boolean }> };
+                        }
+                    ).__riverLab.entities()['avatar-1']
+            );
+        const before = await where();
+        expect(before.visible).toBe(true);
+        // keep walking until player 2 has moved on the host (slow CI runners simulate less per second)
+        let moved = 0;
+        for (let i = 0; i < 300 && moved <= 0.3; i++) {
+            await net(guest, '(l) => { l.look(3.14, -0.1); l.input({ moveZ: 1 }); }');
+            await guest.waitForTimeout(300);
+            const after = await where();
+            moved = Math.hypot(after.x - before.x, after.z - before.z);
+        }
+        expect(moved).toBeGreaterThan(0.3);
+        // the guest renders the host's world: both beaver bodies and every prop, all on the grid
+        // (voxel frames lag the snapshots in software GL, so wait for the frame that has both beavers)
+        await guest.waitForFunction(
+            () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 18,
+            null,
+            { timeout: 60_000 }
+        );
+        const gs = await guest.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.stats());
+        expect(gs.voxel.rejected).toBe(0);
+        expect(
+            (await guest.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid())).misaligned
+        ).toBe(0);
+
+        // leaving frees the slot on the host
+        await net(guest, '(l) => l.net.leave()');
+        await page.waitForFunction(
+            () => (window as unknown as { __riverLab: Net }).__riverLab.net.status().guests === 0,
+            null,
+            { timeout: 30_000 }
+        );
+        await relay?.close();
+        expect(problems).toEqual([]);
+        expect(guestProblems).toEqual([]);
+    });
 
 test('a first visit starts the tutorial: step-by-step objective, the Levels menu lists the rest', async ({ page }) => {
     const problems = await boot(page, '?t=0.01&quality=low#cell100');
