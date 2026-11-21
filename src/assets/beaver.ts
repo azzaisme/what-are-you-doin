@@ -30,7 +30,15 @@ export const BEAVER_HEAD_YAW = 3;
 export const BEAVER_ARM_RAISE = 4;
 /** 1: drawn for its own player's camera, so the head (which the camera sits inside) is left out. */
 export const BEAVER_FIRST_PERSON = 5;
-export const BEAVER_ANIM_CHANNELS = 6;
+/** Shoulders reaching forward (m): grabbing, throwing (src/sim/player-anim.ts). */
+export const BEAVER_ARM_REACH = 6;
+/** Arms turned outward (rad; negative turns them in): wide things are held at their sides. */
+export const BEAVER_ARM_SPREAD = 7;
+/** Torso lean (rad; positive leans back): against a load, into a throw, on landing. */
+export const BEAVER_LEAN = 8;
+/** Head pitch (rad; positive looks up): where the player looks. */
+export const BEAVER_HEAD_PITCH = 9;
+export const BEAVER_ANIM_CHANNELS = 10;
 
 export const BEAVER_HEIGHT = 1.4;
 
@@ -218,15 +226,21 @@ function poseRig(root: Pose, anim: ArrayLike<number>): void {
     const carry = anim[BEAVER_CARRY] ?? 0;
     const headYaw = anim[BEAVER_HEAD_YAW] ?? 0;
     const fp = (anim[BEAVER_FIRST_PERSON] ?? 0) > 0.5;
-    const raise = Math.max(fp ? FP_READY_RAISE : 0, Math.min(2.6, anim[BEAVER_ARM_RAISE] ?? 0));
-    // the torso leans back out of the lower view; the shoulders come forward and in
+    const raise = Math.max(fp ? FP_READY_RAISE : 0, Math.min(2.7, anim[BEAVER_ARM_RAISE] ?? 0));
+    const reach = anim[BEAVER_ARM_REACH] ?? 0;
+    const spread = anim[BEAVER_ARM_SPREAD] ?? 0;
+    const lean = anim[BEAVER_LEAN] ?? 0;
+    const headPitch = anim[BEAVER_HEAD_PITCH] ?? 0;
+    // the torso leans back out of the lower view; the shoulders come forward and in. Reaching
+    // brings the shoulders forward and a little up
     rig.setShift(J.spine, 0, 0, fp ? FP_SPINE_Z : 0);
-    const sz = fp ? FP_SHOULDER.z - FP_SPINE_Z : 0;
-    rig.setShift(J.shoulderL, fp ? -FP_SHOULDER.x : 0, fp ? FP_SHOULDER.y : 0, sz);
-    rig.setShift(J.shoulderR, fp ? FP_SHOULDER.x : 0, fp ? FP_SHOULDER.y : 0, sz);
+    const sz = (fp ? FP_SHOULDER.z - FP_SPINE_Z : 0) + reach;
+    const sy = (fp ? FP_SHOULDER.y : 0) + 0.3 * Math.max(0, reach);
+    rig.setShift(J.shoulderL, fp ? -FP_SHOULDER.x : 0, sy, sz);
+    rig.setShift(J.shoulderR, fp ? FP_SHOULDER.x : 0, sy, sz);
     // raised arms stop swinging; hanging arms swing fully
     const hang = Math.max(0, 1 - raise / 0.6);
-    const inward = ARM_INWARD * Math.min(1, raise);
+    const inward = ARM_INWARD * Math.min(1, raise) - spread;
     const s = Math.sin(phase);
     const s2 = Math.sin(2 * phase);
 
@@ -239,8 +253,11 @@ function poseRig(root: Pose, anim: ArrayLike<number>): void {
     _root.q.w = root.q.w;
 
     rig.setRot(J.pelvis, 0.06 * amount * s, 0, 0.035 * amount * s);
-    rig.setRot(J.spine, 0, 0.05 * amount, 0);
-    rig.setRot(J.head, headYaw, -0.05 * amount * s2, 0);
+    // positive spine pitch leans forward: walking, reaching; the lean channel leans back
+    const spinePitch = 0.05 * amount + 0.6 * Math.max(0, reach) - lean;
+    rig.setRot(J.spine, 0, spinePitch, 0);
+    // the head follows the look, less the torso's lean (looking down pitches it forward)
+    rig.setRot(J.head, headYaw, -0.05 * amount * s2 - 0.7 * headPitch - 0.6 * spinePitch, 0);
     rig.setRot(J.hipL, 0, 0.5 * amount * s, 0);
     rig.setRot(J.hipR, 0, -0.5 * amount * s, 0);
     // the right arm swings; the left arm holds the bucket out a little when carrying

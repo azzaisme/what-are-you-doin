@@ -159,6 +159,16 @@ const _force: GrabForceResult = { fx: 0, fy: 0, fz: 0, requested: 0, error: 0, s
 
 const EMPTY_STATE: CharacterState = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, grounded: false };
 
+/** What a player holds, for animation (see PhysicsWorld.heldInfo). */
+export interface HeldInfo {
+    x: number;
+    y: number;
+    z: number;
+    mass: number;
+    halfWidth: number;
+    strain: number;
+}
+
 /** One player's physical presence: capsule, controller and what they hold. */
 export class Rig {
     held: PhysBody | null = null;
@@ -589,6 +599,26 @@ export class PhysicsWorld {
     grabById(id: number, point: Vec3Like, holdDistance: number, p = 0): void {
         const pb = this.bodies.get(id);
         if (pb && pb.kind === 'dynamic' && pb.enabled) this.grabAt(pb, point, holdDistance, p);
+    }
+
+    /**
+     * Read-only, for animation: where a player's grip is on what they hold (world), the body's mass,
+     * a rough half width (from its wind area) and how hard the grab is pulling (0-1 of the cap).
+     * Returns false when the player holds nothing.
+     */
+    heldInfo(p: number, out: HeldInfo): boolean {
+        const r = this.rigs[p];
+        const pb = r?.held;
+        if (!r || !pb) return false;
+        const t = pb.body.translation();
+        rotate(pb.body.rotation(), r.heldLocal.x, r.heldLocal.y, r.heldLocal.z, _v);
+        out.x = t.x + _v.x;
+        out.y = t.y + _v.y;
+        out.z = t.z + _v.z;
+        out.mass = pb.body.mass();
+        out.halfWidth = Math.min(0.6, Math.sqrt(Math.max(0, pb.windArea)) * 0.5);
+        out.strain = Math.min(1, r.grabForce / GRAB.maxForce);
+        return true;
     }
 
     /** Releases whatever a player holds. */

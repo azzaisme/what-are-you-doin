@@ -10,7 +10,7 @@ import type { Pose } from '../voxels/math.ts';
 import { SIM_DT } from './clock.ts';
 
 /** Per-entity layout: px py pz qx qy qz qw visible anim[0..ANIM_MAX). */
-export const ANIM_MAX = 6;
+export const ANIM_MAX = 10;
 export const STRIDE = 8 + ANIM_MAX;
 
 export class SnapshotRing {

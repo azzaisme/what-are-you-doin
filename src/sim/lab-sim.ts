@@ -14,6 +14,10 @@
 import {
     BEAVER_ANIM_CHANNELS,
     BEAVER_ARM_RAISE,
+    BEAVER_ARM_REACH,
+    BEAVER_ARM_SPREAD,
+    BEAVER_HEAD_PITCH,
+    BEAVER_LEAN,
     BEAVER_CARRY,
     BEAVER_FIRST_PERSON,
     BEAVER_HEAD_YAW,
@@ -61,7 +65,9 @@ import { MAX_PLAYERS, MAX_STRESS, createLabEntities } from './lab-entities.ts';
 import type { SimEntity } from './lab-entities.ts';
 import { addDummy, addLabKinematics, buildLabPhysics, launchDummy, propBody, stressDef } from './lab-physics.ts';
 import { CHARACTER } from './physics/world.ts';
-import type { PhysicsWorld } from './physics/world.ts';
+import type { HeldInfo, PhysicsWorld } from './physics/world.ts';
+import { PlayerAnimator } from './player-anim.ts';
+import type { AnimEvents, AnimOutput } from './player-anim.ts';
 import { ANIM_MAX, SnapshotRing, writeEntity } from './snapshots.ts';
 
 export type { PlayerCommand, SimEntity };
@@ -108,6 +114,15 @@ export class LabSim {
 
     // player state (feet position; `eyeLift` smooths step-ups for the camera). Player 1 is `player`.
     readonly players: PlayerState[] = Array.from({ length: MAX_PLAYERS }, (_, i) => newPlayerState(i * 1.2, 6.5));
+    /** Body animation per player (grab, carry, throw, landing): src/sim/player-anim.ts. */
+    private readonly animators = Array.from({ length: MAX_PLAYERS }, () => new PlayerAnimator());
+    private readonly animEvents: AnimEvents[] = Array.from({ length: MAX_PLAYERS }, () => ({
+        grabbed: false,
+        missed: false,
+        thrown: false,
+        dropped: false
+    }));
+    private readonly landingVy = new Float64Array(MAX_PLAYERS);
     readonly player = this.players[0];
     /**
      * Which slots play (slot 0 follows `fpActive`). Local split screen uses slot 1; networked guests
@@ -425,8 +440,10 @@ export class LabSim {
         const fz = -Math.cos(p.yaw);
         const rx = Math.cos(p.yaw);
         const rz = -Math.sin(p.yaw);
+        const vyBefore = p.vy;
         pw.moveCharacter((fx * mz + rx * mx) * run, (fz * mz + rz * mx) * run, cmd.jump, i);
         const c = pw.rig(i)!.state;
+        this.landingVy[i] = vyBefore;
         // smooth step-ups (and only step-ups) for the camera
         const dy = c.y - p.y;
         p.eyeLift = c.grounded && dy > 0.04 && dy < CHARACTER.stepHeight + 0.05 ? p.eyeLift - dy : p.eyeLift;
@@ -441,6 +458,8 @@ export class LabSim {
         p.grounded = c.grounded;
 
         if (!this.physicsProps) return;
+        const ev = this.animEvents[i];
+        const heldBefore = pw.heldIdOf(i);
         // carry (G, player 1): the rising edge puts the carry plank in your grip, the falling edge drops it
         if (i === 0) {
             if (cmd.carry && !p.prevCarry) this.summonCarryPlank();
@@ -450,12 +469,17 @@ export class LabSim {
         if (cmd.reach) pw.adjustHold(cmd.reach, i);
         const eye = { x: p.x, y: p.y + EYE_HEIGHT, z: p.z };
         if (cmd.action === ACTION_DROP) pw.release(i);
-        if (cmd.throw) pw.throwHeld(cmd.yaw, cmd.pitch, i);
-        else if (cmd.grab) {
+        if (cmd.throw) {
+            if (pw.heldIdOf(i) >= 0) ev.thrown = true;
+            pw.throwHeld(cmd.yaw, cmd.pitch, i);
+        } else if (cmd.grab) {
             if (pw.heldIdOf(i) >= 0) pw.release(i);
-            else pw.tryGrab(eye, cmd.yaw, cmd.pitch, i);
+            else if (!pw.tryGrab(eye, cmd.yaw, cmd.pitch, i)) ev.missed = true;
         }
         pw.applyGrab(eye, cmd.yaw, cmd.pitch, i);
+        const heldAfter = pw.heldIdOf(i);
+        if (heldAfter >= 0 && heldAfter !== heldBefore) ev.grabbed = true;
+        if (heldBefore >= 0 && heldAfter < 0 && !ev.thrown) ev.dropped = true;
     }
 
     /**
@@ -954,10 +978,33 @@ export class LabSim {
             const walk = Math.min(1, p.speed / CHARACTER.walk);
             a.anim[BEAVER_WALK_PHASE] = (p.walkDist / 0.95) * Math.PI * 2;
             a.anim[BEAVER_WALK_AMOUNT] = p.grounded ? walk : 0.3;
-            const holding = this.physics.heldIdOf(i) >= 0;
+            const holding = this.physics.heldInfo(i, _held);
             a.anim[BEAVER_CARRY] = holding ? 1 : 0;
-            // arms reach toward what you hold, following your look a little
-            a.anim[BEAVER_ARM_RAISE] = holding ? Math.max(1.3, Math.min(2.5, 2.0 + 0.5 * p.pitch)) : 0;
+            // arms aim at the grip, lunge, dip under weight, fling on throws (player-anim.ts)
+            const ev = this.animEvents[i];
+            const o = this.animators[i].step(
+                {
+                    x: p.x,
+                    y: p.y,
+                    z: p.z,
+                    yaw: p.yaw,
+                    pitch: p.pitch,
+                    grounded: p.grounded,
+                    vy: this.landingVy[i],
+                    walkAmount: walk,
+                    walkPhase: a.anim[BEAVER_WALK_PHASE],
+                    held: holding ? _held : null,
+                    events: ev
+                },
+                SIM_DT,
+                _animOut
+            );
+            ev.grabbed = ev.missed = ev.thrown = ev.dropped = false;
+            a.anim[BEAVER_ARM_RAISE] = o.raise;
+            a.anim[BEAVER_ARM_REACH] = o.reach;
+            a.anim[BEAVER_ARM_SPREAD] = o.spread;
+            a.anim[BEAVER_LEAN] = o.lean;
+            a.anim[BEAVER_HEAD_PITCH] = o.headPitch;
             a.anim[BEAVER_FIRST_PERSON] = 0;
             a.anim[BEAVER_HEAD_YAW] = 0;
         }
@@ -1039,6 +1086,9 @@ const _target = pose();
 const _offset = pose();
 
 export { BEAVER_ANIM_CHANNELS, UTE_ANIM_CHANNELS };
+
+const _held: HeldInfo = { x: 0, y: 0, z: 0, mass: 0, halfWidth: 0, strain: 0 };
+const _animOut: AnimOutput = { raise: 0, reach: 0, spread: 0, lean: 0, headPitch: 0 };
 
 export interface PlayerState {
     x: number;
