@@ -31,6 +31,14 @@ export function clampCellSizeCm(cm: number): number {
     return Math.min(CELL_SIZE_MAX_CM, Math.max(CELL_SIZE_MIN_CM, Math.round(cm * 2) / 2));
 }
 
+/** Any lattice a voxel worker may run (per-item sizes: fine 1 cm up to coarse 20 cm). */
+export const LATTICE_MIN_CM = 1;
+export const LATTICE_MAX_CM = 20;
+export function clampLatticeCm(cm: number): number {
+    if (!Number.isFinite(cm)) return CELL_SIZE_DEFAULT_CM;
+    return Math.min(LATTICE_MAX_CM, Math.max(LATTICE_MIN_CM, Math.round(cm * 2) / 2));
+}
+
 function configuredCellSizeCm(): number {
     const g = globalThis as {
         __UE_CELL_CM__?: number;
@@ -38,8 +46,8 @@ function configuredCellSizeCm(): number {
         process?: { env?: Record<string, string | undefined> };
     };
     try {
-        // set by the voxel worker before it imports any voxel module
-        if (typeof g.__UE_CELL_CM__ === 'number') return clampCellSizeCm(g.__UE_CELL_CM__);
+        // set by a voxel worker before it imports any voxel module; per-item tiers use 1-20 cm
+        if (typeof g.__UE_CELL_CM__ === 'number') return clampLatticeCm(g.__UE_CELL_CM__);
         const env = g.process?.env?.UE_CELL_CM;
         if (env) return clampCellSizeCm(Number(env));
         // '#cell75' = 7.5 cm (works where storage is blocked, e.g. sandboxed pages)

@@ -215,13 +215,17 @@ test('UI boxes never overlap: portrait phone, portrait tablet, desktop and lands
         await page.setViewportSize({ width: w, height: h });
         await page.waitForTimeout(400);
         await lab(page, (l) => (l as unknown as { showPanel(v: boolean): void }).showPanel(true));
-        await page.waitForTimeout(200);
-        const open = await assertLayout(`${w}x${h} panel open`, w, h);
-        expect(open['.debug-panel']).not.toBeNull();
-        expect(open['.hud']).not.toBeNull();
+        // the layout follows the HUD and dock sizes a frame after a resize (ResizeObserver); slow
+        // software-GL frames on CI can take longer than a fixed wait, so retry until it settles
+        await expect(async () => {
+            const open = await assertLayout(`${w}x${h} panel open`, w, h);
+            expect(open['.debug-panel']).not.toBeNull();
+            expect(open['.hud']).not.toBeNull();
+        }).toPass({ timeout: 20_000 });
         await lab(page, (l) => (l as unknown as { showPanel(v: boolean): void }).showPanel(false));
-        await page.waitForTimeout(200);
-        await assertLayout(`${w}x${h} panel closed`, w, h);
+        await expect(async () => {
+            await assertLayout(`${w}x${h} panel closed`, w, h);
+        }).toPass({ timeout: 20_000 });
     }
     // narrow screens get >= 40 px touch targets
     await page.setViewportSize({ width: 390, height: 844 });
@@ -264,8 +268,13 @@ test('physics sandbox: grab and carry the plank, launch the ragdoll, switch to s
     );
     await page.waitForTimeout(500);
     await lab(page, (l) => l.input({ grab: true }));
-    await page.waitForTimeout(3000);
-    expect((await lab(page, (l) => l.player())).holding).toBe(4);
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.player().holding === 4,
+        null,
+        {
+            timeout: 60_000
+        }
+    );
     // look ahead: the hold point follows the view, so the plank is lifted to chest height
     await lab(page, (l) => l.look(0, 0));
     // lifted off the ground (software GL runs ~1 fps, so wait on sim progress, not wall time)
@@ -291,7 +300,12 @@ test('physics sandbox: grab and carry the plank, launch the ragdoll, switch to s
         null,
         { timeout: 60_000 }
     );
-    await page.waitForTimeout(3000);
+    // the ragdoll's parts reach the voxel frames (wait on it, not wall time)
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects >= 14,
+        null,
+        { timeout: 60_000 }
+    );
     const e = await lab(page, (l) => l.entities());
     expect(e['dummy-body'].visible).toBe(true);
     let s = await lab(page, (l) => l.stats());
@@ -387,8 +401,12 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
     expect(moved).toBeGreaterThan(0.1);
     // back to one player: one full view, bodies hidden
     await lab(page, (l) => (l as unknown as { setPlayers(n: number): void }).setPlayers(1));
-    await page.waitForTimeout(2500);
-    expect((await lab(page, (l) => l.stats())).voxel.objects).toBe(16);
+    // the bodies leave with the next applied voxel frame (wait on it: slow CI runners lag)
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 16,
+        null,
+        { timeout: 60_000 }
+    );
     expect(problems).toEqual([]);
 });
 

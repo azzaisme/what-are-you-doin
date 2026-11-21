@@ -82,7 +82,8 @@ export const M = {
     LeafRed: 45,
     Splash: 46,
     Dust: 47,
-    WindSock: 48
+    WindSock: 48,
+    BucketWater: 49
 } as const;
 
 const defs: MaterialDef[] = [];
@@ -144,6 +145,8 @@ def(M.LeafRed, 'leaf-red', R, 0xc4542a, 0xb84c25, 0xd06032, 0xa94420);
 def(M.Splash, 'splash', S, 0xd8eef0, 0xc6e4e8, 0xe6f6f7, 0xb6dbe0);
 def(M.Dust, 'dust', R, 0xb39f80, 0xa89577, 0xbeab8b, 0x9d8a6d);
 def(M.WindSock, 'wind-sock', R, 0xf26a1b, 0xe8e8cf, 0xf26a1b, 0xe8e8cf);
+// water carried in the bucket: a clear, bright blue so it reads against the galvanised wall
+def(M.BucketWater, 'bucket-water', S, 0x3a9ee0, 0x2f8fd2, 0x52b4ee, 0x2a82c2);
 
 // details that must survive sub-cell placement
 for (const [m, p] of [
@@ -154,7 +157,8 @@ for (const [m, p] of [
     [M.Taillight, 6],
     [M.HiVisStripe, 5],
     [M.Glass, 3],
-    [M.HardHat, 2]
+    [M.HardHat, 2],
+    [M.BucketWater, 4]
 ] as const) {
     defs[m].precedence = p;
 }

@@ -8,6 +8,11 @@
  * a lower effective voxel rate instead of growing latency. Results are applied by the frame
  * director (poll), never from the message handler, so a voxel frame always lands between frames
  * and every render pass of a frame sees the same completed voxel frame.
+ *
+ * Per-item cell sizes (src/assets/cell-tier.ts): one worker per lattice ("lane"), each drawing its
+ * own objects; the base lane also holds the static world and the particles. A voxel frame goes to
+ * every lane at once and is applied only when every lane has finished it, so a 1 cm bucket never
+ * lags the 5 cm beaver carrying it.
  */
 
 import type { LabSim } from '../sim/lab-sim.ts';
@@ -19,11 +24,49 @@ import type { BuildInfo, FrameStats, FromWorker, ToWorker, UnitMesh } from '../w
 
 import type { VoxelRenderer } from './voxel-renderer.ts';
 
+/** One lattice: its worker, its renderer, and what it draws. */
+export interface LaneSpec {
+    worker: Worker;
+    renderer: VoxelRenderer;
+    cellCm: number;
+    /** Entity ids drawn on this lattice; every entity when absent. */
+    objects?: number[];
+    /** Static world and particles (exactly one lane). */
+    world: boolean;
+}
+
+interface Lane extends LaneSpec {
+    inbox: { units: UnitMesh[]; stats: FrameStats } | null;
+    staticUnits: UnitMesh[] | null;
+    build: BuildInfo | null;
+}
+
+/** Stats summed over lanes (counts), or the slowest lane (times). */
+const SUMMED: (keyof FrameStats)[] = [
+    'objects',
+    'parts',
+    'candidates',
+    'samples',
+    'occupied',
+    'rejected',
+    'changedCells',
+    'dirtyCells',
+    'dynDynOverlaps',
+    'dynStaticOverlaps',
+    'staticRebuilt',
+    'dynamicRebuilt',
+    'dynamicCells',
+    'chunks'
+];
+const SLOWEST: (keyof FrameStats)[] = ['rasterMs', 'resolveMs', 'meshMs', 'totalMs'];
+
 export class VoxelClient {
     policy: SamplingPolicy = 'coverage50';
     reference = false;
     build: BuildInfo | null = null;
     lastStats: FrameStats | null = null;
+    /** The last voxel frame's stats per lane (same order as the lanes). */
+    laneStats: (FrameStats | null)[] = [];
     /** Voxel frames requested but superseded before they could be sent. */
     skippedFrames = 0;
     appliedFrame = -1;
@@ -31,47 +74,61 @@ export class VoxelClient {
     /** Particle cells for a voxel time (leaves, dust, splashes); optional. */
     particles: ((time: number) => { buffer: Float32Array; count: number }) | null = null;
 
-    private readonly worker: Worker;
-    private readonly renderer: VoxelRenderer;
+    readonly lanes: Lane[];
     private readonly sim: LabSim;
     private readonly slots: number[];
     private busy = false;
     private pending: { frame: number; time: number } | null = null;
-    private inbox: { units: UnitMesh[]; stats: FrameStats } | null = null;
     private queryId = 0;
     private readonly queries = new Map<number, (v: unknown) => void>();
+    private readyCount = 0;
     private readyResolve: ((b: BuildInfo) => void) | null = null;
     private readyReject: ((e: Error) => void) | null = null;
     private readonly root = pose();
     private readonly anim = new Float64Array(ANIM_MAX);
-    private staticUnits: UnitMesh[] | null = null;
 
-    constructor(worker: Worker, renderer: VoxelRenderer, sim: LabSim) {
-        this.worker = worker;
-        this.renderer = renderer;
+    constructor(lanes: LaneSpec[], sim: LabSim) {
+        if (lanes.filter((l) => l.world).length !== 1) throw new Error('exactly one voxel lane holds the world');
+        this.lanes = lanes.map((l) => ({ ...l, inbox: null, staticUnits: null, build: null }));
+        this.laneStats = lanes.map(() => null);
         this.sim = sim;
         this.slots = sim.entities.filter((e) => e.asset.parts.length > 0).map((e) => e.slot);
-        worker.onmessage = (e: MessageEvent<FromWorker>) => this.receive(e.data);
-        worker.onerror = (e) => {
-            console.error('voxel worker error', e.message);
-            this.readyReject?.(new Error(e.message));
-        };
+        for (const lane of this.lanes) {
+            lane.worker.onmessage = (e: MessageEvent<FromWorker>) => this.receive(lane, e.data);
+            lane.worker.onerror = (e) => {
+                console.error(`voxel worker (${lane.cellCm} cm) error`, e.message);
+                this.readyReject?.(new Error(e.message));
+            };
+        }
     }
 
-    /** Builds the static world in the worker; resolves once its meshes are ready to apply. */
-    init(cellCm: number, seed: number, level: string, data?: unknown): Promise<BuildInfo> {
+    /** The renderers of every lane (stats, grid checks). */
+    get renderers(): VoxelRenderer[] {
+        return this.lanes.map((l) => l.renderer);
+    }
+
+    private get worldLane(): Lane {
+        return this.lanes.find((l) => l.world)!;
+    }
+
+    /** Builds the static world (and each lane's objects); resolves once every lane is ready. */
+    init(seed: number, level: string, data?: unknown): Promise<BuildInfo> {
         return new Promise((resolve, reject) => {
             this.readyResolve = resolve;
             this.readyReject = reject;
-            this.send({ type: 'init', cellCm, seed, level, data });
+            this.readyCount = 0;
+            for (const l of this.lanes)
+                this.send(l, { type: 'init', cellCm: l.cellCm, seed, level, data, objects: l.objects, world: l.world });
         });
     }
 
     /** Applies the initial static meshes (call from the main thread when ready). */
     applyStatic(): void {
-        if (this.staticUnits) {
-            this.renderer.apply(this.staticUnits);
-            this.staticUnits = null;
+        for (const l of this.lanes) {
+            if (l.staticUnits) {
+                l.renderer.apply(l.staticUnits);
+                l.staticUnits = null;
+            }
         }
     }
 
@@ -85,15 +142,19 @@ export class VoxelClient {
         this.dispatch(frame, time);
     }
 
-    /** Applies a finished voxel frame, if one arrived. Returns true when meshes changed. */
+    /** Applies a finished voxel frame once every lane has it. Returns true when meshes changed. */
     poll(): boolean {
-        const r = this.inbox;
-        if (!r) return false;
-        this.inbox = null;
-        const up = this.renderer.apply(r.units);
-        this.uploadMs = up.uploadMs;
-        this.lastStats = r.stats;
-        this.appliedFrame = r.stats.frame;
+        if (!this.busy || this.lanes.some((l) => !l.inbox)) return false;
+        let uploadMs = 0;
+        this.lanes.forEach((l, i) => {
+            const r = l.inbox!;
+            l.inbox = null;
+            uploadMs += l.renderer.apply(r.units).uploadMs;
+            this.laneStats[i] = r.stats;
+        });
+        this.uploadMs = uploadMs;
+        this.lastStats = this.combine();
+        this.appliedFrame = this.lastStats.frame;
         this.busy = false;
         if (this.pending) {
             const p = this.pending;
@@ -103,11 +164,35 @@ export class VoxelClient {
         return true;
     }
 
-    query<T>(what: 'hash' | 'verify'): Promise<T> {
+    private combine(): FrameStats {
+        const base = this.laneStats[this.lanes.indexOf(this.worldLane)]!;
+        const out = { ...base };
+        for (const k of SUMMED) out[k] = 0;
+        for (const st of this.laneStats) {
+            if (!st) continue;
+            for (const k of SUMMED) out[k] += st[k];
+            for (const k of SLOWEST) out[k] = Math.max(out[k], st[k]);
+        }
+        return out;
+    }
+
+    /** `hash`: dynamic content of every lane combined; `verify`: grid checks summed over lanes. */
+    async query<T>(what: 'hash' | 'verify'): Promise<T> {
+        const results = await Promise.all(this.lanes.map((l) => this.queryLane(l, what)));
+        if (what === 'hash') return results.reduce((h: number, r) => (Math.imul(h, 31) + (r as number)) >>> 0, 17) as T;
+        const v = { vertices: 0, misaligned: 0 };
+        for (const r of results as { vertices: number; misaligned: number }[]) {
+            v.vertices += r.vertices;
+            v.misaligned += r.misaligned;
+        }
+        return v as T;
+    }
+
+    private queryLane(lane: Lane, what: 'hash' | 'verify'): Promise<unknown> {
         const id = ++this.queryId;
         return new Promise((resolve) => {
-            this.queries.set(id, resolve as (v: unknown) => void);
-            this.send({ type: 'query', id, what });
+            this.queries.set(id, resolve);
+            this.send(lane, { type: 'query', id, what });
         });
     }
 
@@ -132,37 +217,42 @@ export class VoxelClient {
         }
         this.busy = true;
         const fx = this.particles?.(time);
-        const particles = fx && fx.count > 0 ? fx.buffer.slice(0, fx.count * 4) : undefined;
-        const transfer: ArrayBuffer[] = [states.buffer as ArrayBuffer];
-        if (particles) transfer.push(particles.buffer as ArrayBuffer);
-        this.send(
-            {
-                type: 'frame',
-                frame,
-                time,
-                policy: this.policy,
-                reference: this.reference,
-                states,
-                particles,
-                particleCount: fx?.count ?? 0
-            },
-            transfer
-        );
+        for (const l of this.lanes) {
+            const st = l === this.lanes[this.lanes.length - 1] ? states : states.slice();
+            const particles = l.world && fx && fx.count > 0 ? fx.buffer.slice(0, fx.count * 4) : undefined;
+            const transfer: ArrayBuffer[] = [st.buffer as ArrayBuffer];
+            if (particles) transfer.push(particles.buffer as ArrayBuffer);
+            this.send(
+                l,
+                {
+                    type: 'frame',
+                    frame,
+                    time,
+                    policy: this.policy,
+                    reference: this.reference,
+                    states: st,
+                    particles,
+                    particleCount: particles ? fx!.count : 0
+                },
+                transfer
+            );
+        }
     }
 
-    private send(msg: ToWorker, transfer: ArrayBuffer[] = []): void {
-        this.worker.postMessage(msg, transfer);
+    private send(lane: Lane, msg: ToWorker, transfer: ArrayBuffer[] = []): void {
+        lane.worker.postMessage(msg, transfer);
     }
 
-    private receive(msg: FromWorker): void {
+    private receive(lane: Lane, msg: FromWorker): void {
         switch (msg.type) {
             case 'ready':
-                this.build = msg.build;
-                this.staticUnits = msg.units;
-                this.readyResolve?.(msg.build);
+                lane.build = msg.build;
+                lane.staticUnits = msg.units;
+                if (lane.world) this.build = msg.build;
+                if (++this.readyCount === this.lanes.length) this.readyResolve?.(this.build!);
                 break;
             case 'frame':
-                this.inbox = { units: msg.units, stats: msg.stats };
+                lane.inbox = { units: msg.units, stats: msg.stats };
                 break;
             case 'query': {
                 const q = this.queries.get(msg.id);
@@ -171,7 +261,7 @@ export class VoxelClient {
                 break;
             }
             case 'error':
-                console.error('voxel worker:', msg.message);
+                console.error(`voxel worker (${lane.cellCm} cm):`, msg.message);
                 this.readyReject?.(new Error(msg.message));
                 break;
         }

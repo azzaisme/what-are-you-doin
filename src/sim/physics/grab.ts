@@ -41,6 +41,14 @@ export const GRAB = {
 
 export interface GrabForceInput {
     mass: number;
+    /**
+     * Mass the spring-damper acts on: the body's effective mass at the anchor (smaller than its
+     * mass when the anchor is off the centre of mass, because a push there also spins it). Scaling
+     * the spring by the full mass makes small, light props held by the rim (the bucket) overshoot
+     * every tick and shake. Per world axis (see effectiveMassAlong); defaults to `mass`. Gravity
+     * support always uses `mass`.
+     */
+    springMass?: Vec3Like;
     gravity: number;
     anchor: Vec3Like;
     anchorVelocity: Vec3Like;
@@ -74,9 +82,12 @@ export function grabForce(i: GrabForceInput, out: GrabForceResult, maxForce: num
     const vz = i.targetVelocity.z - i.anchorVelocity.z;
     // spring-damper part and gravity support, combined under the cap with support taking priority:
     // a saturated grab still holds the object up instead of letting it sag while it catches up
-    const sx = i.mass * (k * ex + c * vx);
-    const sy = i.mass * (k * ey + c * vy);
-    const sz = i.mass * (k * ez + c * vz);
+    const msx = Math.min(i.mass, i.springMass?.x ?? i.mass);
+    const msy = Math.min(i.mass, i.springMass?.y ?? i.mass);
+    const msz = Math.min(i.mass, i.springMass?.z ?? i.mass);
+    const sx = msx * (k * ex + c * vx);
+    const sy = msy * (k * ey + c * vy);
+    const sz = msz * (k * ez + c * vz);
     const g = i.mass * i.gravity;
     let fx = sx;
     let fy = sy + g;
@@ -111,6 +122,32 @@ export function grabForce(i: GrabForceInput, out: GrabForceResult, maxForce: num
     out.fz = fz;
     out.error = Math.hypot(ex, ey, ez);
     return out;
+}
+
+/** Symmetric 3x3 matrix (world inverse inertia tensor). */
+export interface Sym3 {
+    m11: number;
+    m12: number;
+    m13: number;
+    m22: number;
+    m23: number;
+    m33: number;
+}
+
+/**
+ * Effective mass of a body for a push along unit direction `n` at offset `r` from its centre of
+ * mass: 1 / (1/m + (r x n) . I^-1 (r x n)), with I^-1 the world inverse inertia tensor.
+ */
+export function effectiveMassAlong(mass: number, r: Vec3Like, invI: Sym3, n: Vec3Like): number {
+    if (!(mass > 0)) return 0;
+    const cx = r.y * n.z - r.z * n.y;
+    const cy = r.z * n.x - r.x * n.z;
+    const cz = r.x * n.y - r.y * n.x;
+    const ix = invI.m11 * cx + invI.m12 * cy + invI.m13 * cz;
+    const iy = invI.m12 * cx + invI.m22 * cy + invI.m23 * cz;
+    const iz = invI.m13 * cx + invI.m23 * cy + invI.m33 * cz;
+    const inv = 1 / mass + Math.max(0, cx * ix + cy * iy + cz * iz);
+    return Number.isFinite(inv) && inv > 0 ? 1 / inv : mass;
 }
 
 /** Throw impulse magnitude for a body of a mass: light things fly fast, heavy things barely move. */

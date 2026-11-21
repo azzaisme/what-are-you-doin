@@ -3,6 +3,7 @@
  * Sizes are multiples of 0.1 m where the design doc proposes them (§2.5).
  */
 
+import { GRID_SIZE } from '../voxels/grid.ts';
 import { aabb, composePose, copyPose, pose, quatFromYawPitchRoll } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
 import { M, voxel } from '../voxels/palette.ts';
@@ -67,21 +68,37 @@ export const BUCKET_HANDLE_TOP = 0.46;
 export const BUCKET_WATER_LEVEL = 0.22;
 export const BUCKET_INNER_RADIUS = 0.08;
 export function bucketAsset(): VoxelAsset {
-    const wall = cup(0.13, 0.16, BUCKET_HEIGHT, 0.08, 0.08, (x, y, z) =>
-        voxel(M.Galvanised, y > 0.3 ? 2 : latticeShade(x, y, z, 0.1, 6))
+    // The wall and handle are drawn as thick as the lattice needs to show them: on the 1 cm lattice
+    // (per-item cell sizes, src/assets/cell-tier.ts) they are real thicknesses, on 5-10 cm cells
+    // they are exaggerated so the bucket still reads as a bucket.
+    const fine = GRID_SIZE < 0.03;
+    const wallT = fine ? 0.015 : 0.08;
+    const baseT = fine ? 0.02 : 0.08;
+    const wall = cup(0.13, 0.16, BUCKET_HEIGHT, wallT, baseT, (x, y, z) =>
+        voxel(M.Galvanised, y > BUCKET_HEIGHT - (fine ? 0.02 : 0.0) ? 2 : latticeShade(x, y, z, fine ? 0.04 : 0.1, 6))
     );
-    // the handle: a thick arc over the top, along X
+    // the handle: an arc over the top, along X
+    const [hIn, hOut, hHalf] = fine ? [0.155, 0.17, 0.008] : [0.12, 0.18, 0.05];
     const handle = implicit(
-        aabb(-0.18, BUCKET_HEIGHT - 0.05, -0.05, 0.18, BUCKET_HANDLE_TOP + 0.02, 0.05),
+        aabb(-0.18, BUCKET_HEIGHT - 0.05, -hHalf, 0.18, BUCKET_HANDLE_TOP + 0.02, hHalf),
         (x, y) => {
             const cy = BUCKET_HEIGHT - 0.04;
             const r = Math.hypot(x, y - cy);
-            return y >= cy && r > 0.12 && r < 0.18;
+            return y >= cy && r > hIn && r < hOut;
         },
         solid(M.Steel)
     );
+    // the water inside: fills the hollow up to the water level (on coarse cells it also reaches
+    // into the wall a little, so it shows as a blue disc in the narrow opening)
+    const inner = (y: number) => 0.13 + 0.03 * (y / BUCKET_HEIGHT) - wallT;
+    const water = implicit(
+        aabb(-0.16, baseT, -0.16, 0.16, BUCKET_WATER_LEVEL, 0.16),
+        (x, y, z) => Math.hypot(x, z) < inner(y) + (fine ? 0 : 0.02),
+        (x, y, z) => voxel(M.BucketWater, latticeShade(x, y, z, fine ? 0.03 : 0.1, 4))
+    );
     return rigid('bucket', [
         { name: 'bucket', volume: wall, priority: 2, refColor: 0xa9b0b4 },
+        { name: 'water', volume: water, priority: 3, policy: fine ? 'coverage50' : 'conservative', refColor: 0x3a9ee0 },
         { name: 'handle', volume: handle, priority: 3, policy: 'conservative', refColor: 0x9aa0a6 }
     ]);
 }

@@ -70,7 +70,17 @@ export interface BuildInfo {
 }
 
 export type ToWorker =
-    | { type: 'init'; cellCm: number; seed: number; level: string; data?: unknown }
+    | {
+          type: 'init';
+          cellCm: number;
+          seed: number;
+          level: string;
+          data?: unknown;
+          /** Entity ids this worker draws (per-item cell sizes); all when absent. */
+          objects?: number[];
+          /** Build the static world and draw particles (the base lattice only). Default true. */
+          world?: boolean;
+      }
     | {
           type: 'frame';
           frame: number;

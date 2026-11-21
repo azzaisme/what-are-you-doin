@@ -9,6 +9,8 @@
 import { Color, Entity, Script, Vec2, Vec3 } from 'playcanvas';
 import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs';
 
+import { CELL_TIERS, assetTier, tierCellCm } from './assets/cell-tier.ts';
+import type { CellTier } from './assets/cell-tier.ts';
 import { DebugPanel } from './debug/panel.ts';
 import type { PanelHost } from './debug/panel.ts';
 import { DESIGN_KEY, Designer, loadDraft } from './editor/designer.ts';
@@ -28,6 +30,7 @@ import { ReferenceRenderer } from './render/reference.ts';
 import { QUALITY, createLabScene } from './render/scene.ts';
 import type { Quality } from './render/scene.ts';
 import { VoxelClient } from './render/voxel-pipeline.ts';
+import type { LaneSpec } from './render/voxel-pipeline.ts';
 import { VoxelRenderer } from './render/voxel-renderer.ts';
 import { FixedStepClock, SIM_DT, VOXEL_RATES, VoxelClock } from './sim/clock.ts';
 import type { VoxelRate } from './sim/clock.ts';
@@ -113,11 +116,31 @@ setLoading(`Rasterizing the ${level.name} into the ${cellCm} cm grid…`);
 await nextFrame();
 await initPhysics();
 const sim = new LabSim({ level, props: params.get('props') === 'scripted' ? 'scripted' : 'physics' });
-const renderer = new VoxelRenderer(app, scene.worldLayer);
-// the voxel world lives in a worker: static build, rasterization and meshing all happen there
-const worker = new Worker(new URL('./workers/voxel-worker.ts', import.meta.url), { type: 'module', name: 'voxels' });
-const pipeline = new VoxelClient(worker, renderer, sim);
-const build = await pipeline.init(cellCm, 1, level.id, level.data);
+// the voxel world lives in workers: static build, rasterization and meshing all happen there.
+// Per-item cell sizes: one worker per lattice (fine 1 cm, base, coarse), each drawing the objects
+// of its tier (src/assets/cell-tier.ts); ?tiers=off draws everything on the base grid.
+const tiersOn = params.get('tiers') !== 'off';
+const tierObjects = new Map<CellTier, number[]>(CELL_TIERS.map((t) => [t, []]));
+for (const e of sim.entities)
+    if (e.asset.parts.length > 0) tierObjects.get(tiersOn ? assetTier(e.asset) : 'base')!.push(e.id);
+const lanes: LaneSpec[] = [];
+for (const tier of CELL_TIERS) {
+    const objects = tierObjects.get(tier)!;
+    if (tier !== 'base' && objects.length === 0) continue;
+    const laneCm = tierCellCm(tier, cellCm);
+    lanes.push({
+        worker: new Worker(new URL('./workers/voxel-worker.ts', import.meta.url), {
+            type: 'module',
+            name: `voxels-${tier}`
+        }),
+        renderer: new VoxelRenderer(app, scene.worldLayer, laneCm / 100),
+        cellCm: laneCm,
+        objects,
+        world: tier === 'base'
+    });
+}
+const pipeline = new VoxelClient(lanes, sim);
+const build = await pipeline.init(1, level.id, level.data);
 setLoading('Uploading meshes…');
 await nextFrame();
 const tUpload = performance.now();
@@ -1141,7 +1164,17 @@ const EMPTY_FRAME_STATS = {
 
 function collectStats() {
     const v = { ...(pipeline.lastStats ?? EMPTY_FRAME_STATS), uploadMs: pipeline.uploadMs };
-    const t = renderer.totals();
+    // every lattice's meshes together
+    const t = pipeline.renderers
+        .map((r) => r.totals())
+        .reduce((a, b) => ({
+            staticUnits: a.staticUnits + b.staticUnits,
+            dynamicUnits: a.dynamicUnits + b.dynamicUnits,
+            quads: a.quads + b.quads,
+            quadsDynamic: a.quadsDynamic + b.quadsDynamic,
+            triangles: a.triangles + b.triangles,
+            drawables: a.drawables + b.drawables
+        }));
     const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
     const n = frameTimeCount;
     let sum = 0;
@@ -1418,8 +1451,10 @@ window.__riverLab = {
     async verifyGrid() {
         const w = await pipeline.query<{ vertices: number; misaligned: number }>('verify');
         return {
-            vertices: w.vertices + renderer.verifiedVertices,
-            misaligned: w.misaligned + renderer.misalignedVertices + (renderer.unitsAtIdentity() ? 0 : 1)
+            vertices: w.vertices + pipeline.renderers.reduce((n, r) => n + r.verifiedVertices, 0),
+            misaligned:
+                w.misaligned +
+                pipeline.renderers.reduce((n, r) => n + r.misalignedVertices + (r.unitsAtIdentity() ? 0 : 1), 0)
         };
     },
     dynamicHash: () => pipeline.query<number>('hash'),

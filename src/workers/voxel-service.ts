@@ -15,7 +15,7 @@ import type { SimEntity } from '../sim/lab-entities.ts';
 import { ANIM_MAX } from '../sim/snapshots.ts';
 import { DYNAMIC_REGION, STATIC_REGION, collectDirty, unpackRegion } from '../voxels/dirty.ts';
 import type { DirtyWork } from '../voxels/dirty.ts';
-import { CHUNK_SIZE, GRID_SIZE } from '../voxels/grid.ts';
+import { CHUNK_COORD_LIMIT, CHUNK_SIZE, GRID_SIZE } from '../voxels/grid.ts';
 import { pose } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
 import { MeshOutput, meshRegionBlocked } from '../voxels/mesher.ts';
@@ -28,8 +28,13 @@ import type { PartInstance } from '../voxels/world.ts';
 import { PARTICLE_OBJECT_ID, STATE_STRIDE } from './protocol.ts';
 import type { BuildInfo, ClassMesh, FrameStats, UnitMesh } from './protocol.ts';
 
+/** How far from the origin this lattice's chunks reach (m), with a margin for object size. */
+const LATTICE_REACH = CHUNK_COORD_LIMIT * CHUNK_SIZE * GRID_SIZE - 4;
+
 interface Tracked {
     id: number;
+    /** False: tracked for the state layout only, drawn by another lattice's service. */
+    drawn: boolean;
     evaluate: (root: Pose, anim: ArrayLike<number>, out: Pose[]) => void;
     root: Pose;
     anim: Float64Array;
@@ -50,15 +55,24 @@ export class VoxelService {
     private readonly work: DirtyWork = { staticRegions: [], dynamicRegions: [], dynamicHasContent: [] };
     /** Dynamic regions that have ever held content (and so have a render unit). */
     private readonly knownDynamic = new Set<number>();
+    /** Static world and particles (the base lattice); other lattices draw objects only. */
+    private withWorld = true;
 
-    constructor() {
+    /**
+     * `objects`: the entity ids this service draws (per-item cell sizes run one service per
+     * lattice); every entity with voxel parts when absent. The frame states still cover every
+     * tracked entity in sim order; the others are skipped.
+     */
+    constructor(objects?: Set<number>) {
         this.world.addObject(PARTICLE_OBJECT_ID, 0);
         for (const e of createLabEntities().entities) {
             if (e.asset.parts.length === 0) continue;
-            this.world.addObject(e.id, e.priority);
+            const drawn = !objects || objects.has(e.id);
+            if (drawn) this.world.addObject(e.id, e.priority);
             const poses = e.asset.parts.map(() => pose());
             this.tracked.push({
                 id: e.id,
+                drawn,
                 evaluate: e.asset.evaluate.bind(e.asset),
                 root: pose(),
                 anim: new Float64Array(ANIM_MAX),
@@ -77,10 +91,11 @@ export class VoxelService {
         return this.tracked.length;
     }
 
-    build(seed: number, level = 'yard', data?: unknown): { build: BuildInfo; units: UnitMesh[] } {
+    build(seed: number, level = 'yard', data?: unknown, withWorld = true): { build: BuildInfo; units: UnitMesh[] } {
         // designer levels arrive as data (validated again here: the worker trusts nothing)
         const def = data ? levelFromData(parseLevelData(data)) : getLevel(level);
-        const r = def.build(this.world, seed);
+        this.withWorld = withWorld;
+        const r = withWorld ? def.build(this.world, seed) : { columns: 0, staticCells: 0, trees: 0, ms: 0 };
         const t0 = performance.now();
         const units = this.meshDirty();
         return {
@@ -111,8 +126,14 @@ export class VoxelService {
         let objects = 0;
         for (let n = 0; n < this.tracked.length; n++) {
             const t = this.tracked[n];
+            if (!t.drawn) continue;
             const o = n * STATE_STRIDE;
-            const visible = !reference && states[o] > 0.5;
+            // beyond the lattice's chunk range (fine lattices reach about +-80 m): not drawn
+            const inRange =
+                Math.abs(states[o + 1]) < LATTICE_REACH &&
+                Math.abs(states[o + 2]) < LATTICE_REACH &&
+                Math.abs(states[o + 3]) < LATTICE_REACH;
+            const visible = !reference && states[o] > 0.5 && inRange;
             if (!visible) {
                 if (this.world.objectCellCount(t.id) > 0) this.world.clearObject(t.id);
                 continue;
@@ -130,7 +151,8 @@ export class VoxelService {
             objects++;
         }
         // particles: single cells on the global grid, behind every object
-        const pc = particles && !reference ? Math.min(particleCount, Math.floor(particles.length / 4)) : 0;
+        const pc =
+            particles && !reference && this.withWorld ? Math.min(particleCount, Math.floor(particles.length / 4)) : 0;
         if (pc > 0) this.world.rasterizePoints(PARTICLE_OBJECT_ID, particles!, pc, 0);
         else if (this.world.objectCellCount(PARTICLE_OBJECT_ID) > 0) this.world.clearObject(PARTICLE_OBJECT_ID);
         const t1 = performance.now();
