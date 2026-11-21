@@ -51,6 +51,9 @@ import { Water } from 'playcanvas/scripts/esm/water.mjs';
 import type { LevelDef } from '../levels/level.ts';
 import type { WaterApi } from '../types/engine-scripts.ts';
 
+import { addPixelLook } from './pixel-look.ts';
+import type { PixelLook } from './pixel-look.ts';
+
 export interface Quality {
     name: 'high' | 'low';
     samples: number;
@@ -103,6 +106,9 @@ export interface LabScene {
     camera2: Entity;
     split: boolean;
     setQuality(q: Quality): void;
+    /** The prototype pixel-game look (`src/render/pixel-look.ts`). */
+    pixelLook: boolean;
+    setPixelLook(on: boolean): void;
     sunElevation: number;
     sunAzimuth: number;
 }
@@ -194,6 +200,8 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
     sky.luminance = 1.0;
     sky.starBrightness = 0;
     cameraFrame.addEffect(sky);
+    const pixel1 = addPixelLook(device, cameraFrame, () => scene.quality.samples);
+    let pixel2: PixelLook | null = null;
     app.scene.exposure = 0.95;
     // the sky's ambient is bright and blue; keep it as fill so the low warm sun carries the image
     app.scene.skyboxIntensity = 0.45;
@@ -293,7 +301,9 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
         k.elevation = sky.elevation;
         k.azimuth = sky.azimuth;
         f.addEffect(k);
+        pixel2 = addPixelLook(device, f, () => scene.quality.samples);
         f.update();
+        pixel2.set(scene.pixelLook);
         frame2 = f;
         sky2 = k;
     };
@@ -348,6 +358,12 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
     const scene: LabScene = {
         camera2,
         split: false,
+        pixelLook: false,
+        setPixelLook(on: boolean) {
+            scene.pixelLook = on;
+            pixel1.set(on);
+            pixel2?.set(on);
+        },
         setSplit(split: boolean) {
             if (split === scene.split) return;
             scene.split = split;
@@ -401,10 +417,11 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
             scene.quality = q;
             device.maxPixelRatio = Math.min(window.devicePixelRatio, q.pixelRatio);
             app.resizeCanvas();
-            cameraFrame.rendering.samples = q.samples;
+            const samples = scene.pixelLook ? 1 : q.samples;
+            cameraFrame.rendering.samples = samples;
             cameraFrame.update();
             if (frame2) {
-                frame2.rendering.samples = q.samples;
+                frame2.rendering.samples = samples;
                 frame2.update();
             }
             sun.light!.shadowResolution = q.shadowResolution;

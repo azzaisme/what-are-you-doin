@@ -93,7 +93,7 @@ function goToLevel(id: string, extra: Record<string, string> = {}): void {
         // storage blocked: the URL carries the choice
     }
     const q = new URLSearchParams({ level: id, ...extra });
-    for (const k of ['quality', 'net', 'debug']) {
+    for (const k of ['quality', 'net', 'debug', 'look']) {
         const v = params.get(k);
         if (v !== null) q.set(k, v);
     }
@@ -243,6 +243,7 @@ interface State {
     colliders: boolean;
     players: number;
     particles: boolean;
+    look: 'default' | 'pixel';
 }
 
 const state: State = {
@@ -270,8 +271,10 @@ const state: State = {
     props: sim.propsMode,
     colliders: false,
     players: 1,
-    particles: true
+    particles: true,
+    look: params.get('look') === 'pixel' ? 'pixel' : 'default'
 };
+scene.setPixelLook(state.look === 'pixel');
 
 const rateParam = Number(params.get('hz'));
 if ((VOXEL_RATES as readonly number[]).includes(rateParam)) state.hz = rateParam as VoxelRate;
@@ -705,6 +708,10 @@ const host: PanelHost = {
                 applyWater();
                 panel.sync();
                 break;
+            case 'look':
+                state.look = v === 'pixel' ? 'pixel' : 'default';
+                scene.setPixelLook(state.look === 'pixel');
+                break;
             case 'mode':
                 setMode(v as State['mode']);
                 break;
@@ -835,6 +842,15 @@ const panel = new DebugPanel(host, [
                 options: [
                     { value: 'high', label: 'High' },
                     { value: 'low', label: 'Low' }
+                ]
+            },
+            {
+                kind: 'select',
+                id: 'look',
+                label: 'Look (L)',
+                options: [
+                    { value: 'default', label: 'Default' },
+                    { value: 'pixel', label: 'Pixel (prototype)' }
                 ]
             }
         ]
@@ -1119,6 +1135,11 @@ window.addEventListener('keydown', (e) => {
             break;
         case 'KeyG':
             state.carry = !state.carry;
+            panel.sync();
+            break;
+        case 'KeyL':
+            state.look = state.look === 'pixel' ? 'default' : 'pixel';
+            scene.setPixelLook(state.look === 'pixel');
             panel.sync();
             break;
         case 'F3':
