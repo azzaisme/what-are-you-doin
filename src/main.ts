@@ -278,8 +278,9 @@ const state: State = {
     particles: true,
     look: params.get('look') === 'pixel' ? 'pixel' : 'default',
     cameraFeel: params.get('bob') !== 'off',
-    chase: params.get('view') === 'chase'
+    chase: params.get('view') === 'chase' || params.get('view') === 'side'
 };
+const sideView = params.get('view') === 'side';
 scene.setPixelLook(state.look === 'pixel');
 
 const rateParam = Number(params.get('hz'));
@@ -448,6 +449,11 @@ class LabDirector extends Script {
                     e.y - Math.sin(fpInput.pitch) * back * 0.35 + 0.45,
                     e.z + Math.cos(yaw) * cp * back - Math.sin(yaw) * 0.7
                 );
+                // ?view=side (screenshots of the animation): from the beaver's right, level
+                if (sideView) {
+                    camera.setPosition(e.x + Math.cos(yaw) * 2.6, e.y - 0.35, e.z - Math.sin(yaw) * 2.6);
+                    camera.setEulerAngles(-5, (yaw * 180) / Math.PI + 90, 0);
+                }
             }
         }
         if (camera.camera!.fov !== state.fov) camera.camera!.fov = state.fov;
