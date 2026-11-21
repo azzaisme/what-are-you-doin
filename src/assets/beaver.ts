@@ -23,7 +23,14 @@ export const BEAVER_WALK_PHASE = 0;
 export const BEAVER_WALK_AMOUNT = 1;
 export const BEAVER_CARRY = 2;
 export const BEAVER_HEAD_YAW = 3;
-export const BEAVER_ANIM_CHANNELS = 4;
+/**
+ * Both arms raised forward by this angle (radians; 0 hangs, pi/2 points straight ahead): the player
+ * beavers lift their arms toward what they hold, so the hands show in first person.
+ */
+export const BEAVER_ARM_RAISE = 4;
+/** 1: drawn for its own player's camera, so the head (which the camera sits inside) is left out. */
+export const BEAVER_FIRST_PERSON = 5;
+export const BEAVER_ANIM_CHANNELS = 6;
 
 export const BEAVER_HEIGHT = 1.4;
 
@@ -168,6 +175,26 @@ part(
     attach(J.tail, 0, 0, -0.24)
 );
 
+/** Parts left out in first person: everything on the head joint. */
+const HEAD_PARTS = ['head', 'muzzle', 'earL', 'earR', 'hatDome', 'hatBrim'].map((n) => {
+    const i = parts.findIndex((p) => p.name === n);
+    if (i < 0) throw new Error(`beaver part ${n} missing`);
+    return i;
+});
+const HEAD_PART_SET = new Set(HEAD_PARTS);
+/** Raised arms also turn inward by up to this much (radians), so both hands come into view. */
+const ARM_INWARD = 0.15;
+/**
+ * First person only (the player's own camera): the beaver's short arms hang 38 cm below the eye and
+ * could never reach into view, so for that one camera the shoulders move up and forward (spine
+ * frame, m) and the arms rest in a ready pose at the bottom corners of the view. Every other camera
+ * sees the normal beaver.
+ */
+const FP_SHOULDER = { x: 0.08, y: 0.1, z: 0.25 };
+/** First person: the torso sits this far back (m), so it shows only when you look well down. */
+const FP_SPINE_Z = -0.12;
+const FP_READY_RAISE = 1.55;
+
 const _root = pose();
 const _hand = pose(0, -0.34, 0.02);
 
@@ -179,6 +206,9 @@ export const beaverAsset: VoxelAsset = {
     evaluate(root: Pose, anim: ArrayLike<number>, out: Pose[]) {
         poseRig(root, anim);
         evaluateAttachments(rig, attachments, out);
+    },
+    partHidden(anim: ArrayLike<number>, part: number) {
+        return (anim[BEAVER_FIRST_PERSON] ?? 0) > 0.5 && HEAD_PART_SET.has(part);
     }
 };
 
@@ -187,6 +217,16 @@ function poseRig(root: Pose, anim: ArrayLike<number>): void {
     const amount = anim[BEAVER_WALK_AMOUNT] ?? 0;
     const carry = anim[BEAVER_CARRY] ?? 0;
     const headYaw = anim[BEAVER_HEAD_YAW] ?? 0;
+    const fp = (anim[BEAVER_FIRST_PERSON] ?? 0) > 0.5;
+    const raise = Math.max(fp ? FP_READY_RAISE : 0, Math.min(2.6, anim[BEAVER_ARM_RAISE] ?? 0));
+    // the torso leans back out of the lower view; the shoulders come forward and in
+    rig.setShift(J.spine, 0, 0, fp ? FP_SPINE_Z : 0);
+    const sz = fp ? FP_SHOULDER.z - FP_SPINE_Z : 0;
+    rig.setShift(J.shoulderL, fp ? -FP_SHOULDER.x : 0, fp ? FP_SHOULDER.y : 0, sz);
+    rig.setShift(J.shoulderR, fp ? FP_SHOULDER.x : 0, fp ? FP_SHOULDER.y : 0, sz);
+    // raised arms stop swinging; hanging arms swing fully
+    const hang = Math.max(0, 1 - raise / 0.6);
+    const inward = ARM_INWARD * Math.min(1, raise);
     const s = Math.sin(phase);
     const s2 = Math.sin(2 * phase);
 
@@ -204,8 +244,14 @@ function poseRig(root: Pose, anim: ArrayLike<number>): void {
     rig.setRot(J.hipL, 0, 0.5 * amount * s, 0);
     rig.setRot(J.hipR, 0, -0.5 * amount * s, 0);
     // the right arm swings; the left arm holds the bucket out a little when carrying
-    rig.setRot(J.shoulderR, 0, -0.4 * amount * s, -0.05);
-    rig.setRot(J.shoulderL, 0, (1 - carry) * 0.4 * amount * s - carry * 0.12, 0.05 + carry * 0.12);
+    // (negative pitch swings an arm forward)
+    rig.setRot(J.shoulderR, inward, -0.4 * amount * s * hang - raise, -0.05 * hang);
+    rig.setRot(
+        J.shoulderL,
+        -inward,
+        ((1 - carry) * 0.4 * amount * s - carry * 0.12) * hang - raise,
+        (0.05 + carry * 0.12) * hang
+    );
     rig.setRot(J.tail, 0.22 * amount * s, -0.38 + 0.06 * amount * s2, 0);
     rig.evaluate(_root);
 }

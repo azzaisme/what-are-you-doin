@@ -35,7 +35,28 @@ on the upload, and butler only uploads the files that changed.
   and uses relative URLs. The claude.ai artifact uses `npm run build:publish` instead, which loads
   the engine from a CDN.
 - **Online play on itch.io** is peer to peer (ADR 0012): WebRTC between the players' browsers, set
-  up through public Nostr relays. There is no server to run. Players on very strict networks may
-  fail to connect, because there is no TURN server.
+  up through public Nostr relays. Without a TURN relay, players connect only when a direct route
+  exists. That often fails for two devices on one Wi-Fi, and behind strict NATs.
+
+## Optional: a TURN relay for online play
+
+A TURN server carries game data when the players' browsers can't connect directly. Any provider
+works, as long as it gives static credentials, for example:
+
+- Metered (Open Relay);
+- ExpressTURN;
+- a self-hosted coturn.
+
+Add three repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret            | Example                                                                            |
+| ----------------- | ---------------------------------------------------------------------------------- |
+| `TURN_URLS`       | `turn:relay.example.com:80,turn:relay.example.com:443,turns:relay.example.com:443` |
+| `TURN_USERNAME`   | the username the provider gives you                                                |
+| `TURN_CREDENTIAL` | the password the provider gives you                                                |
+
+The next release builds them in. They end up in the published game (every browser needs them), so
+use a free or capped plan. A guest uses about 12 KB/s, roughly 45 MB an hour.
+
 - The browser tests use software rendering on the GitHub runner, so they take about 10–15 minutes.
   If one fails, the run uploads its screenshots and traces as `playwright-results`.

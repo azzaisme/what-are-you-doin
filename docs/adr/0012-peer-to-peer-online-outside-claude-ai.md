@@ -55,3 +55,22 @@ have none, and nothing to host one on.
 - **Untested here against the real relays:** the development container cannot reach them.
   Signalling, connection, hosting, joining, play and leaving were tested end to end against the
   local relay.
+
+## Update (2026-11-21, after the owner's first try: "It never showed up")
+
+- **Measured against the real public relays**, with two browser profiles on one machine. The
+  relays worked: both pages found each other and exchanged offers within seconds.
+    - The direct connection then failed for minutes ("could not connect to peer after exchanging
+      SDP"). Neither device could resolve the other's mDNS-hidden local address, and no other route
+      existed.
+    - With local addresses exposed, it connected first time.
+    - This is the same failure as two devices on one Wi-Fi whose router filters mDNS and can't loop
+      traffic back through its public address.
+- **Relays:** Trystero's own pick for our app id was five small relays; one was on port 8443, which
+  some networks block. We now use ten relays together, all on port 443: the four of those five that
+  answered, plus six large public relays.
+- **TURN support:** an optional relay for game data. It is built in from the repository secrets
+  `TURN_URLS`, `TURN_USERNAME` and `TURN_CREDENTIAL` (`docs/releasing.md`).
+- **The panel shows the connection state:** relays connected, players connected, and a plain
+  message when a direct connection fails.
+- Turning off trickle ICE made connections worse, so it stays on.

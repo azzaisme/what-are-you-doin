@@ -13,7 +13,9 @@
 
 import {
     BEAVER_ANIM_CHANNELS,
+    BEAVER_ARM_RAISE,
     BEAVER_CARRY,
+    BEAVER_FIRST_PERSON,
     BEAVER_HEAD_YAW,
     BEAVER_WALK_AMOUNT,
     BEAVER_WALK_PHASE,
@@ -927,7 +929,6 @@ export class LabSim {
 
     private publishPlayer(): void {
         const eyes = this.eyes;
-        const many = this.playerCount > 1;
         for (let i = 0; i < MAX_PLAYERS; i++) {
             const p = this.players[i];
             const e = eyes[i];
@@ -935,10 +936,12 @@ export class LabSim {
             e.pose.p.y = p.y + p.eyeLift + EYE_HEIGHT;
             e.pose.p.z = p.z;
             e.visible = this.playerActive(i);
-            // voxel beaver bodies: seen by the other player (and your own feet when you look down;
-            // from inside your own head every face points away, so it never blocks your view)
+            // voxel beaver bodies, your own included: each device draws its own player's beaver
+            // without the head (BEAVER_FIRST_PERSON, set by the renderer), so you see your body,
+            // arms and hands. In split screen the heads stay: from inside your own head every face
+            // points away, so it never blocks your view.
             const a = this.avatars[i];
-            a.visible = many && this.playerActive(i);
+            a.visible = this.playerActive(i);
             if (!a.visible) continue;
             a.pose.p.x = p.x;
             a.pose.p.y = p.y;
@@ -948,7 +951,11 @@ export class LabSim {
             const walk = Math.min(1, p.speed / CHARACTER.walk);
             a.anim[BEAVER_WALK_PHASE] = (p.walkDist / 0.95) * Math.PI * 2;
             a.anim[BEAVER_WALK_AMOUNT] = p.grounded ? walk : 0.3;
-            a.anim[BEAVER_CARRY] = this.physics.heldIdOf(i) >= 0 ? 1 : 0;
+            const holding = this.physics.heldIdOf(i) >= 0;
+            a.anim[BEAVER_CARRY] = holding ? 1 : 0;
+            // arms reach toward what you hold, following your look a little
+            a.anim[BEAVER_ARM_RAISE] = holding ? Math.max(1.3, Math.min(2.5, 2.0 + 0.5 * p.pitch)) : 0;
+            a.anim[BEAVER_FIRST_PERSON] = 0;
             a.anim[BEAVER_HEAD_YAW] = 0;
         }
     }

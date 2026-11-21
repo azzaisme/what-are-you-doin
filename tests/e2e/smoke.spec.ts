@@ -401,11 +401,12 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
         moved = Math.hypot(after.x - before.x, after.z - before.z);
     }
     expect(moved).toBeGreaterThan(0.1);
-    // back to one player: one full view, bodies hidden
+    // back to one player: one full view, player 2's body gone (player 1 keeps theirs, drawn
+    // without the head for their own camera)
     await lab(page, (l) => (l as unknown as { setPlayers(n: number): void }).setPlayers(1));
-    // the bodies leave with the next applied voxel frame (wait on it: slow CI runners lag)
+    // player 2's body leaves with the next applied voxel frame (wait on it: slow CI runners lag)
     await page.waitForFunction(
-        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 16,
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 17,
         null,
         { timeout: 60_000 }
     );

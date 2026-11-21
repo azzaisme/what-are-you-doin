@@ -415,6 +415,12 @@ class LabDirector extends Script {
 
         // ---- voxel clock: one reconstruction per voxel frame, committed before any pass renders
         const frame = voxelClock.frameAt(renderTime);
+        // your own beaver, without its head, when yours is the only camera on this device
+        const ownSlot = guestSession ? guestSession.slot : 0;
+        pipeline.firstPersonSlot =
+            state.mode === 'firstPerson' && localSlot2 < 0 && ownSlot >= 0 && ownSlot < sim.avatars.length
+                ? sim.avatars[ownSlot].slot
+                : -1;
         if (frame !== voxelClock.frame || state.forceVoxel) {
             voxelClock.frame = frame;
             state.forceVoxel = false;
@@ -1291,7 +1297,18 @@ function connectP2P(): Promise<void> {
     p2pStarting ??= import('./net/p2p.ts')
         .then(({ p2pTransport }) => {
             const relays = params.get('relays')?.split(',').filter(Boolean);
-            p2p = p2pTransport({ relays, localOnly: params.get('ice') === 'local' });
+            const turnUrls = (import.meta.env.VITE_TURN_URLS ?? '').split(',').filter(Boolean);
+            p2p = p2pTransport({
+                relays,
+                localOnly: params.get('ice') === 'local',
+                turn: turnUrls.length
+                    ? {
+                          urls: turnUrls,
+                          username: import.meta.env.VITE_TURN_USERNAME,
+                          credential: import.meta.env.VITE_TURN_CREDENTIAL
+                      }
+                    : undefined
+            });
             transport = p2p;
             watchLobby();
             online.render();
@@ -1386,7 +1403,7 @@ const online = new OnlinePanel(
     {
         available: () => transportKind,
         opened: () => void connectP2P(),
-        peersOnline: () => (p2p ? p2p.lobbyPeers() : null),
+        p2pStatus: () => (transportKind === 'p2p' ? (p2p ? p2p.status() : null) : null),
         games: () => (transport ? listGames(transport.lobby) : []),
         level: level.id,
         status: () =>
@@ -1550,6 +1567,7 @@ window.__riverLab = {
         status: () => ({
             kind: transportKind,
             peers: p2p ? p2p.lobbyPeers() : null,
+            p2p: p2p ? p2p.status() : null,
             hosting: hostSession?.code ?? null,
             guests: hostSession?.guestCount ?? 0,
             guest: guestSession

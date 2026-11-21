@@ -3,14 +3,15 @@
  * the sessions. Text from other devices (game codes, levels) is shown with textContent only.
  */
 
+import type { P2PStatus } from '../net/p2p.ts';
 import type { GameAd } from '../net/session.ts';
 
 export interface OnlinePanelHost {
     available(): 'room' | 'local' | 'p2p' | 'none';
     /** The panel was opened (the peer-to-peer lobby connects then). */
     opened?(): void;
-    /** Peer to peer: other players connected in the lobby, or null while connecting. */
-    peersOnline?(): number | null;
+    /** Peer to peer: relay and lobby status, or null while starting. */
+    p2pStatus?(): P2PStatus | null;
     games(): (GameAd & { full: boolean })[];
     level: string;
     status(): { mode: 'off' | 'host' | 'guest'; code?: string; players?: number; slot?: number; waiting?: boolean };
@@ -24,6 +25,7 @@ export class OnlinePanel {
     readonly el: HTMLDivElement;
     private readonly host: OnlinePanelHost;
     private open = false;
+    private ticker: ReturnType<typeof setInterval> | undefined;
 
     constructor(host: OnlinePanelHost, dock: HTMLElement) {
         this.host = host;
@@ -53,6 +55,9 @@ export class OnlinePanel {
             this.host.opened?.();
             this.render();
         }
+        // the connection status changes without lobby events: refresh it while open
+        clearInterval(this.ticker);
+        if (this.open && this.host.p2pStatus) this.ticker = setInterval(() => this.render(), 1000);
     }
 
     get visible(): boolean {
@@ -134,12 +139,30 @@ export class OnlinePanel {
         }
         if (avail === 'local') note('Local test mode: tabs of this browser only.', 'online-warn');
         if (avail === 'p2p') {
-            const n = this.host.peersOnline?.() ?? null;
-            note(
-                n === null
-                    ? 'Connecting…'
-                    : `Online, browser to browser. ${n === 0 ? 'No one else here right now.' : `${n} other player${n === 1 ? '' : 's'} here.`} Games show up a few seconds after they start.`
-            );
+            const st = this.host.p2pStatus?.() ?? null;
+            if (!st) note('Connecting…');
+            else if (st.relaysOpen === 0)
+                note(
+                    `Can't reach the matchmaking relays yet (0/${st.relays}). If this stays, a firewall, VPN or ad blocker may be blocking them.`,
+                    'online-warn'
+                );
+            else if (st.peers === 0)
+                note(
+                    `Looking for other players… (relays ${st.relaysOpen}/${st.relays}). The others need this panel open too; finding each other can take up to a minute.`
+                );
+            else
+                note(
+                    `${st.peers} other player${st.peers === 1 ? '' : 's'} connected (relays ${st.relaysOpen}/${st.relays}). Games show up a few seconds after they start.`
+                );
+            if (st?.error && st.peers === 0)
+                note(
+                    /could not connect to peer/.test(st.error)
+                        ? st.turn
+                            ? 'Found another player but could not connect, even through the relay server. Trying again…'
+                            : 'Found another player but could not connect directly: one of your networks blocks it (common on one shared Wi-Fi). Trying again… A relay server (TURN) would fix this.'
+                        : `Connection problem: ${st.error}`,
+                    'online-warn'
+                );
         }
         button('Close', () => this.toggle(false));
     }

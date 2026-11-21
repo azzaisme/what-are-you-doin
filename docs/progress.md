@@ -1,5 +1,38 @@
 # Progress log
 
+## Online co-op diagnosis: relays fine, direct connections fail (2026-11-21, owner report)
+
+Owner: "It never showed up" (a hosted game, on the same network). ADR 0012 has the full write-up.
+
+- **Measured against the real public relays:** they work. The direct WebRTC connection is what
+  fails when local addresses can't be resolved and the router can't loop traffic back. That fits
+  two devices on one Wi-Fi.
+- **Changes:**
+    - ten relays together, all on port 443;
+    - a connection-status line in the online panel;
+    - optional TURN support, read from repository secrets at build time.
+- **Needs the owner:** an account with a TURN provider, and its credentials as secrets.
+
+## Your own body in first person (2026-11-21, owner request)
+
+Owner: "why can't I see my hands/arms/body". Your own beaver wasn't drawn when playing alone. In
+co-op it was drawn for the others to see, but its short arms hang 38 cm below the eye, so they were
+never in view.
+
+- **Your beaver is drawn in solo too.** Each device draws its own player's beaver without the head,
+  through a new `BEAVER_FIRST_PERSON` animation channel set by the renderer. The camera sits inside
+  the head. Other players, and split screen, see the whole beaver.
+- **Hands in view:** for your own camera only, the shoulders move forward and the torso back. Both
+  arms rest in a ready pose with the paws at the bottom corners of the view.
+- **Arms reach when holding:** a new `BEAVER_ARM_RAISE` channel lifts both arms toward what you hold
+  and follows your look. Other players see it too.
+- **Engine:** assets can leave a part out of a frame (`VoxelAsset.partHidden`), and rig joints can
+  be translated as well as rotated (`Rig.setShift`). Cubes still never rotate.
+- **Tests:** new unit tests check that the head is hidden only for your own camera, and that both
+  paws land inside the default view and higher while holding. The co-op test now expects a body in
+  solo play.
+- **Open:** the arms follow the voxel frames (20–30 Hz), so they lag a little behind fast turns.
+
 ## Online co-op on itch.io (2026-11-21, owner request)
 
 Owner: "I should be able to do multiplayer from itch.io". ADR 0012 has the design.

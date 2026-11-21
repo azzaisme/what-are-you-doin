@@ -21,6 +21,8 @@ export class Rig {
     readonly world: Pose[];
     /** Animated local rotation per joint, set by the asset before evaluate(). */
     readonly rot: Quat[];
+    /** Animated extra translation per joint (parent frame), added to the rest offset. */
+    readonly shift: { x: number; y: number; z: number }[];
     private readonly local: Pose[];
 
     constructor(joints: JointDef[]) {
@@ -31,6 +33,14 @@ export class Rig {
         this.world = joints.map(() => pose());
         this.local = joints.map((j) => pose(j.x, j.y, j.z));
         this.rot = joints.map(() => quatIdentity());
+        this.shift = joints.map(() => ({ x: 0, y: 0, z: 0 }));
+    }
+
+    setShift(index: number, x: number, y: number, z: number): void {
+        const s = this.shift[index];
+        s.x = x;
+        s.y = y;
+        s.z = z;
     }
 
     setRot(index: number, yaw: number, pitch: number, roll: number): void {
@@ -41,9 +51,10 @@ export class Rig {
         for (let i = 0; i < this.joints.length; i++) {
             const j = this.joints[i];
             const l = this.local[i];
-            l.p.x = j.x;
-            l.p.y = j.y;
-            l.p.z = j.z;
+            const sh = this.shift[i];
+            l.p.x = j.x + sh.x;
+            l.p.y = j.y + sh.y;
+            l.p.z = j.z + sh.z;
             const r = this.rot[i];
             l.q.x = r.x;
             l.q.y = r.y;

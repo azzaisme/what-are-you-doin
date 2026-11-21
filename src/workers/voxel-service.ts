@@ -36,6 +36,7 @@ interface Tracked {
     /** False: tracked for the state layout only, drawn by another lattice's service. */
     drawn: boolean;
     evaluate: (root: Pose, anim: ArrayLike<number>, out: Pose[]) => void;
+    hidden?: (anim: ArrayLike<number>, part: number) => boolean;
     root: Pose;
     anim: Float64Array;
     poses: Pose[];
@@ -74,6 +75,7 @@ export class VoxelService {
                 id: e.id,
                 drawn,
                 evaluate: e.asset.evaluate.bind(e.asset),
+                hidden: e.asset.partHidden?.bind(e.asset),
                 root: pose(),
                 anim: new Float64Array(ANIM_MAX),
                 poses,
@@ -147,6 +149,7 @@ export class VoxelService {
             t.root.q.w = states[o + 7];
             for (let c = 0; c < ANIM_MAX; c++) t.anim[c] = states[o + 8 + c];
             t.evaluate(t.root, t.anim, t.poses);
+            if (t.hidden) for (let i = 0; i < t.parts.length; i++) t.parts[i].hidden = t.hidden(t.anim, i);
             this.world.rasterizeObject(t.id, t.parts, policy, this.raster);
             objects++;
         }

@@ -30,10 +30,14 @@ function aim(s: LabSim, i: number, x: number, y: number, z: number): { yaw: numb
 }
 
 describe('local co-op: two players, one world', () => {
-    it('both players walk independently; voxel beaver bodies appear only with two players', () => {
+    it('both players walk independently; each player has a voxel beaver body, solo too', () => {
         const solo = new LabSim({ level: timberYardLevel });
         solo.step(cmd(0));
+        // the orbit view has no player body
         expect(solo.avatars.some((a) => a.visible)).toBe(false);
+        solo.fpActive = true;
+        solo.step(cmd(1));
+        expect(solo.avatars.map((a) => a.visible)).toEqual([true, false, false, false]);
         const s = coop();
         expect(s.avatars.map((a) => a.visible)).toEqual([true, true, false, false]);
         const a0 = { ...s.players[0] };
@@ -48,7 +52,7 @@ describe('local co-op: two players, one world', () => {
         );
         s.setPlayerCount(1);
         s.step(cmd(500));
-        expect(s.avatars.some((a) => a.visible)).toBe(false);
+        expect(s.avatars.map((a) => a.visible)).toEqual([true, false, false, false]);
     });
 
     it('one beaver cannot lift the 113 kg log; two beavers together can', () => {
