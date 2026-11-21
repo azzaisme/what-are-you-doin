@@ -43,8 +43,14 @@ jobs:
             - run: npm run lint
             - run: npm run fmt
             - run: npm test
-            # the itch.io build: everything bundled, relative URLs
+            # the itch.io build: everything bundled, relative URLs. The optional TURN relay for online
+            # play is built in from repository secrets (see docs/releasing.md); without them, players
+            # connect directly or not at all.
             - run: npm run build
+              env:
+                  VITE_TURN_URLS: ${{ secrets.TURN_URLS }}
+                  VITE_TURN_USERNAME: ${{ secrets.TURN_USERNAME }}
+                  VITE_TURN_CREDENTIAL: ${{ secrets.TURN_CREDENTIAL }}
 
             # browser smoke tests against the built game (Google Chrome on the runner, software GL)
             - name: Browser tests

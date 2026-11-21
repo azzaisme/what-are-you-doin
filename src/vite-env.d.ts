@@ -1,5 +1,12 @@
 /// <reference types="vite/client" />
 
+interface ImportMetaEnv {
+    /** TURN relay for online play outside claude.ai: comma-separated turn:/turns: URLs (build time). */
+    readonly VITE_TURN_URLS?: string;
+    readonly VITE_TURN_USERNAME?: string;
+    readonly VITE_TURN_CREDENTIAL?: string;
+}
+
 declare module 'playcanvas/scripts/esm/camera-controls.mjs' {
     import type { Script } from 'playcanvas';
 

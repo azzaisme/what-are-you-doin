@@ -1,5 +1,18 @@
 # Progress log
 
+## Online co-op diagnosis: relays fine, direct connections fail (2026-11-21, owner report)
+
+Owner: "It never showed up" (a hosted game, on the same network). ADR 0012 has the full write-up.
+
+- **Measured against the real public relays:** they work. The direct WebRTC connection is what
+  fails when local addresses can't be resolved and the router can't loop traffic back. That fits
+  two devices on one Wi-Fi.
+- **Changes:**
+    - ten relays together, all on port 443;
+    - a connection-status line in the online panel;
+    - optional TURN support, read from repository secrets at build time.
+- **Needs the owner:** an account with a TURN provider, and its credentials as secrets.
+
 ## Your own body in first person (2026-11-21, owner request)
 
 Owner: "why can't I see my hands/arms/body". Your own beaver wasn't drawn when playing alone. In

@@ -10,7 +10,7 @@
  * Loaded with a dynamic import, so the claude.ai build (which uses the room) does not carry it.
  */
 
-import { joinRoom, selfId } from 'trystero/nostr';
+import { getRelaySockets, joinRoom, selfId } from 'trystero/nostr';
 import type { JoinRoomConfig, JsonValue, MessageAction, Room } from 'trystero/nostr';
 
 import type { NetChannel, NetPeer, NetState, NetTransport } from './transport.ts';
@@ -19,6 +19,23 @@ import type { NetChannel, NetPeer, NetState, NetTransport } from './transport.ts
 const APP_ID = 'uncivil-engineers.v1';
 /** A state larger than this is dropped (the room capability allows 4 KiB). */
 const MAX_STATE_BYTES = 16 * 1024;
+/**
+ * Relays used together (any one that both players reach is enough). Trystero would pick five small
+ * relays from its own list by app id; we use the four of those that answered on 2026-11-21 plus six
+ * large public relays, all on port 443 (some networks block other ports).
+ */
+export const DEFAULT_RELAYS = [
+    'wss://nostr.christiansass.de',
+    'wss://nostr.rblb.it',
+    'wss://relay.degmods.com',
+    'wss://relay.piazza.today',
+    'wss://nos.lol',
+    'wss://relay.damus.io',
+    'wss://relay.primal.net',
+    'wss://nostr.mom',
+    'wss://relay.nostr.net',
+    'wss://offchain.pub'
+];
 /** Coalesce state sends to ~30 Hz, like the room's presence. */
 const SEND_INTERVAL_MS = 33;
 
@@ -27,6 +44,11 @@ export interface P2POptions {
     relays?: string[];
     /** No STUN servers: local candidates only (tests on one machine with no internet). */
     localOnly?: boolean;
+    /**
+     * A TURN relay for when no direct route exists (strict NATs; devices on one network that can't
+     * see each other's local addresses). Game data then goes through it.
+     */
+    turn?: { urls: string[]; username?: string; credential?: string };
 }
 
 class P2PChannel implements NetChannel {
@@ -40,8 +62,13 @@ class P2PChannel implements NetChannel {
     private lastSent = 0;
     private left = false;
 
-    constructor(config: JoinRoomConfig, name: string) {
-        this.room = joinRoom(config, name);
+    constructor(config: JoinRoomConfig, name: string, onError?: (e: string) => void) {
+        this.room = joinRoom(config, name, {
+            onJoinError: (d) => {
+                console.warn('online:', d.error);
+                onError?.(d.error);
+            }
+        });
         this.action = this.room.makeAction<JsonValue>('state');
         this.action.onMessage = (data, ctx) => {
             if (this.left || !isState(data)) return;
@@ -119,20 +146,50 @@ function isState(v: unknown): v is NetState {
     }
 }
 
+export interface P2PStatus {
+    /** Relays with an open connection, of those configured. */
+    relaysOpen: number;
+    relays: number;
+    /** Players connected in the lobby right now (not counting this one). */
+    peers: number;
+    /** The last error the library reported, if any. */
+    error: string | null;
+    /** A TURN relay is configured. */
+    turn: boolean;
+}
+
 export interface P2PTransport extends NetTransport {
     /** Players connected in the lobby right now (not counting this one). */
     lobbyPeers(): number;
+    status(): P2PStatus;
 }
 
 export function p2pTransport(opts: P2POptions = {}): P2PTransport {
-    const config: JoinRoomConfig = { appId: APP_ID, maxReceiveBytes: MAX_STATE_BYTES * 2 };
-    if (opts.relays?.length) config.relayConfig = { urls: opts.relays, redundancy: opts.relays.length };
+    const urls = opts.relays?.length ? opts.relays : DEFAULT_RELAYS;
+    const config: JoinRoomConfig = {
+        appId: APP_ID,
+        maxReceiveBytes: MAX_STATE_BYTES * 2,
+        relayConfig: { urls, redundancy: urls.length, warnOnRelayFailure: false }
+    };
     if (opts.localOnly) config.rtcConfig = { iceServers: [] };
-    const lobby = new P2PChannel(config, 'lobby');
+    else if (opts.turn?.urls.length)
+        config.turnConfig = [{ urls: opts.turn.urls, username: opts.turn.username, credential: opts.turn.credential }];
+    let error: string | null = null;
+    const lobby = new P2PChannel(config, 'lobby', (e) => (error = e));
     return {
         kind: 'p2p',
         lobby,
         lobbyPeers: () => lobby.connected(),
+        status() {
+            let relaysOpen = 0;
+            try {
+                const sockets = getRelaySockets() as Record<string, WebSocket | undefined>;
+                for (const ws of Object.values(sockets)) if (ws?.readyState === 1) relaysOpen++;
+            } catch {
+                // not connected yet
+            }
+            return { relaysOpen, relays: urls.length, peers: lobby.connected(), error, turn: !!config.turnConfig };
+        },
         async join(name: string) {
             return new P2PChannel(config, `room-${name}`);
         }
