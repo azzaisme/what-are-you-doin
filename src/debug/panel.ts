@@ -44,7 +44,8 @@ export class DebugPanel {
         this.statsEl.className = 'debug-stats';
         el.append(this.statsEl);
         // keep clicks in the panel from reaching the canvas (no accidental pointer lock or orbit)
-        for (const ev of ['pointerdown', 'mousedown', 'wheel', 'click']) el.addEventListener(ev, (e) => e.stopPropagation());
+        for (const ev of ['pointerdown', 'mousedown', 'wheel', 'click'])
+            el.addEventListener(ev, (e) => e.stopPropagation());
         document.body.append(el);
         this.el = el;
         this.visible = false;
@@ -124,6 +125,8 @@ export class DebugPanel {
     set visible(v: boolean) {
         this._visible = v;
         this.el.style.display = v ? '' : 'none';
+        // the HUD and the bottom dock lay themselves out around an open panel (style.css)
+        document.body.classList.toggle('debug-open', v);
         if (v) this.sync();
     }
 }

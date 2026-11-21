@@ -14,7 +14,12 @@ canvas {
 body {
     background: #1a2026;
     color: #f4f1ea;
-    font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    font-family:
+        ui-sans-serif,
+        system-ui,
+        -apple-system,
+        'Segoe UI',
+        sans-serif;
 }
 
 canvas {
@@ -33,10 +38,17 @@ canvas {
     z-index: 30;
 }
 
+:root {
+    --panel-w: 318px;
+    --hud-bottom: 72px;
+    --dock-h: 54px;
+}
+
 .hud {
     position: fixed;
     left: 18px;
     top: 16px;
+    max-width: calc(100vw - 36px);
     z-index: 10;
     pointer-events: none;
     text-shadow: 0 1px 3px #0009;
@@ -65,7 +77,9 @@ canvas {
 }
 
 kbd {
-    font: 11px ui-monospace, monospace;
+    font:
+        11px ui-monospace,
+        monospace;
     padding: 1px 5px;
     border: 1px solid #ffffff40;
     border-radius: 4px;
@@ -86,11 +100,41 @@ kbd {
     z-index: 10;
 }
 
-.debug-chip {
+.crosshair-active {
+    width: 12px;
+    height: 12px;
+    margin: -6px 0 0 -6px;
+    background: transparent;
+    border: 2px solid #ffd27a;
+    box-shadow: 0 0 0 1.5px #0006;
+}
+
+/* the action prompt sits under the crosshair in first person */
+.hud-prompt:not(:empty) {
     position: fixed;
-    right: 14px;
-    bottom: 14px;
-    z-index: 20;
+    left: 50%;
+    top: calc(50% + 22px);
+    transform: translateX(-50%);
+    margin: 0;
+    padding: 3px 9px;
+    max-width: calc(100vw - 32px);
+    text-align: center;
+    border-radius: 6px;
+    background: #0008;
+}
+
+/* with the debug panel open the prompt moves back into the HUD block, which stays clear of it */
+body.debug-open .hud-prompt:not(:empty) {
+    position: static;
+    transform: none;
+    margin-top: 10px;
+    padding: 0;
+    text-align: left;
+    background: none;
+}
+
+.debug-chip {
+    margin-left: auto;
     padding: 6px 10px;
     font-size: 12px;
     color: #f4f1ea;
@@ -104,8 +148,11 @@ kbd {
     position: fixed;
     right: 12px;
     top: 12px;
-    bottom: 54px;
-    width: 318px;
+    bottom: var(--dock-h);
+    width: var(--panel-w);
+    max-width: calc(100vw - 24px);
+    display: flex;
+    flex-direction: column;
     overflow-y: auto;
     z-index: 20;
     padding: 12px;
@@ -192,11 +239,16 @@ kbd {
 
 .debug-stats {
     margin: 8px 0 0;
-    font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+    font:
+        11px/1.45 ui-monospace,
+        SFMono-Regular,
+        Menlo,
+        monospace;
     white-space: pre-wrap;
     color: #cfe3da;
 }
 
+body.ui-hidden .ui-dock,
 body.ui-hidden .cell-size,
 body.ui-hidden .hud,
 body.ui-hidden .debug-panel,
@@ -208,15 +260,11 @@ body.ui-hidden .inspector-hint {
 }
 
 .cell-size {
-    position: fixed;
-    left: 14px;
-    bottom: 14px;
-    z-index: 20;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 4px 10px;
-    max-width: calc(100vw - 190px);
+    min-width: 0;
     padding: 7px 10px;
     font-size: 12px;
     border: 1px solid #ffffff30;
@@ -257,4 +305,537 @@ body.ui-hidden .inspector-hint {
 .cell-size small {
     color: #ffffff90;
     font-size: 11px;
+}
+
+/* ---- layout: HUD top-left, dock along the bottom, panel between them ----------------------- */
+
+.ui-dock {
+    position: fixed;
+    left: 14px;
+    right: 14px;
+    bottom: 0;
+    z-index: 20;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 8px;
+    padding-bottom: 14px;
+    pointer-events: none;
+}
+
+.ui-dock > * {
+    pointer-events: auto;
+}
+
+/* the dock's height includes an 8 px gap above it, so the panel never touches the boxes */
+.debug-panel {
+    margin-bottom: 8px;
+}
+
+.hud-help .help-short {
+    display: none;
+}
+
+/* wide screens: keep the HUD clear of the side panel */
+@media (min-width: 701px) {
+    body.debug-open .hud {
+        max-width: calc(100vw - var(--panel-w) - 18px - 12px - 16px);
+    }
+}
+
+/* narrow screens (portrait phones): the panel is a bottom sheet between the HUD and the dock,
+   stats first so the numbers are visible without scrolling */
+@media (max-width: 700px) {
+    .hud-title span {
+        display: block;
+        margin: 2px 0 0;
+    }
+
+    .hud-help .help-long {
+        display: none;
+    }
+
+    .hud-help .help-short {
+        display: inline;
+    }
+
+    .debug-panel {
+        left: 8px;
+        right: 8px;
+        width: auto;
+        max-width: none;
+        top: max(calc(var(--hud-bottom) + 8px), 38vh);
+    }
+
+    /* the debug bottom sheet covers the screen centre, and the crosshair with it */
+    body.debug-open .crosshair {
+        display: none !important;
+    }
+
+    .debug-stats {
+        order: -1;
+        margin: 0 0 10px;
+    }
+
+    .cell-size input {
+        width: 96px;
+    }
+}
+
+/* touch: at least 40 px targets */
+@media (max-width: 700px), (pointer: coarse) {
+    .debug-chip,
+    .cell-size button,
+    .debug-grid button,
+    .debug-control select {
+        min-height: 40px;
+        min-width: 40px;
+    }
+
+    .debug-control input[type='checkbox'] {
+        width: 22px;
+        height: 22px;
+    }
+
+    .debug-toggle,
+    .debug-range {
+        min-height: 40px;
+    }
+
+    .cell-size input[type='range'] {
+        height: 40px;
+    }
+}
+
+.hud-objective {
+    margin-top: 6px;
+    font-size: 13.5px;
+    color: #ffe2a8;
+}
+
+.hud-objective:empty {
+    display: none;
+}
+
+.hud-objective.done {
+    color: #9fe39a;
+}
+
+.toast {
+    position: fixed;
+    left: 50%;
+    top: 22%;
+    transform: translate(-50%, -8px);
+    max-width: calc(100vw - 32px);
+    padding: 10px 18px;
+    border-radius: 10px;
+    background: #0e1418d9;
+    color: #f4f1ea;
+    font-size: 15px;
+    text-align: center;
+    opacity: 0;
+    pointer-events: none;
+    transition:
+        opacity 0.25s,
+        transform 0.25s;
+    z-index: 25;
+}
+
+.toast.show {
+    opacity: 1;
+    transform: translate(-50%, 0);
+}
+
+.toast-goal {
+    background: #1f4a2ae6;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+body.ui-hidden .toast {
+    display: none;
+}
+
+/* ---- split screen (local co-op): player 1 on top, player 2 below ------------------------------ */
+
+.crosshair-p2,
+.prompt-p2,
+.player-tag {
+    display: none;
+}
+
+body.split .crosshair {
+    top: 25%;
+}
+
+body.split .crosshair-p2 {
+    display: block;
+    top: 75%;
+}
+
+body.split .hud-prompt:not(:empty) {
+    top: calc(25% + 22px);
+}
+
+body.split .prompt-p2:not(:empty) {
+    display: block;
+    position: fixed;
+    left: 50%;
+    top: calc(75% + 22px);
+    transform: translateX(-50%);
+    padding: 3px 9px;
+    max-width: calc(100vw - 32px);
+    font-size: 13px;
+    color: #ffd27a;
+    text-align: center;
+    border-radius: 6px;
+    background: #0008;
+    pointer-events: none;
+    z-index: 10;
+}
+
+body.split::after {
+    content: '';
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: calc(50% - 1px);
+    height: 2px;
+    background: #0e1418;
+    z-index: 9;
+    pointer-events: none;
+}
+
+body.split .player-tag {
+    display: block;
+    position: fixed;
+    right: 14px;
+    padding: 2px 8px;
+    font:
+        600 13px ui-sans-serif,
+        system-ui,
+        sans-serif;
+    border-radius: 6px;
+    color: #10161c;
+    pointer-events: none;
+    z-index: 10;
+}
+
+body.split .player-tag-1 {
+    top: 12px;
+    background: #ffd27a;
+}
+
+body.split .player-tag-2 {
+    top: calc(50% + 10px);
+    background: #8fd3ff;
+}
+
+body.ui-hidden .player-tag,
+body.ui-hidden .prompt-p2,
+body.ui-hidden .crosshair-p2 {
+    display: none !important;
+}
+
+/* ---- online play ------------------------------------------------------------------------------ */
+
+.online-chip {
+    padding: 6px 10px;
+    font-size: 12px;
+    color: #f4f1ea;
+    border: 1px solid #ffffff30;
+    border-radius: 8px;
+    background: #10161cc0;
+    cursor: pointer;
+}
+
+.online-chip.live {
+    background: #1f4a2ae6;
+    border-color: #9fe39a80;
+}
+
+.online-panel {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(360px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    z-index: 40;
+    padding: 16px;
+    font-size: 14px;
+    border: 1px solid #ffffff22;
+    border-radius: 14px;
+    background: #0e1418f2;
+    box-shadow: 0 8px 40px #0008;
+}
+
+.online-title {
+    font-weight: 600;
+    font-size: 16px;
+    margin-bottom: 8px;
+}
+
+.online-note {
+    margin: 0 0 10px;
+    line-height: 1.4;
+    color: #d9d3c4;
+}
+
+.online-warn {
+    margin: 0 0 10px;
+    font-size: 12.5px;
+    color: #ffd27a;
+}
+
+.online-sub {
+    margin: 12px 0 6px;
+    font-size: 12px;
+    color: #9aa7b0;
+}
+
+.online-panel button {
+    display: block;
+    width: 100%;
+    min-height: 44px;
+    margin: 6px 0;
+    font-size: 14px;
+    color: inherit;
+    border: 1px solid #ffffff2a;
+    border-radius: 10px;
+    background: #24303a;
+    cursor: pointer;
+}
+
+.online-panel button.online-primary {
+    background: #2a5a3a;
+}
+
+.online-panel button:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+/* ---- touch controls (phones, first person) --------------------------------------------------- */
+
+.touch-ui {
+    display: none;
+}
+
+.touch-ui.on {
+    display: block;
+}
+
+body.touch-play,
+body.touch-play canvas {
+    touch-action: none;
+    overscroll-behavior: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* the voxel-size box would sit under the left thumb */
+body.touch-play .cell-size {
+    display: none;
+}
+
+.touch-stick {
+    position: fixed;
+    width: 112px;
+    height: 112px;
+    margin: -56px 0 0 -56px;
+    border-radius: 50%;
+    border: 2px solid #ffffff40;
+    background: #0003;
+    pointer-events: none;
+    opacity: 0;
+    z-index: 15;
+}
+
+.touch-stick.active {
+    opacity: 1;
+}
+
+.touch-knob {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 48px;
+    height: 48px;
+    margin: -24px 0 0 -24px;
+    border-radius: 50%;
+    background: #ffffffb0;
+}
+
+.touch-buttons {
+    position: fixed;
+    right: max(14px, env(safe-area-inset-right));
+    bottom: calc(var(--dock-h) + 6px);
+    display: grid;
+    grid-template-columns: repeat(2, 64px);
+    gap: 10px;
+    z-index: 15;
+}
+
+.touch-buttons button {
+    width: 64px;
+    height: 64px;
+    font:
+        600 13px ui-sans-serif,
+        system-ui,
+        sans-serif;
+    color: #f4f1ea;
+    border: 2px solid #ffffff50;
+    border-radius: 50%;
+    background: #10161ca6;
+    touch-action: none;
+}
+
+.touch-buttons button.down {
+    background: #ffd27ad0;
+    color: #10161c;
+}
+
+.touch-buttons .touch-jump {
+    background: #2a5a3aa6;
+}
+
+.touch-buttons .touch-grab {
+    background: #6a4a1aa6;
+}
+
+body.ui-hidden .touch-ui,
+body.ui-hidden .online-chip,
+body.ui-hidden .online-panel {
+    display: none !important;
+}
+
+.levels-panel .online-note {
+    margin: -2px 0 8px;
+    font-size: 12px;
+    color: #9aa7b0;
+}
+
+body.ui-hidden .levels-chip,
+body.ui-hidden .levels-panel {
+    display: none !important;
+}
+
+/* ---- level designer */
+.designer {
+    position: fixed;
+    right: 12px;
+    top: 12px;
+    z-index: 35;
+    width: min(300px, calc(100vw - 32px));
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
+    padding: 12px;
+    font-size: 13px;
+    border: 1px solid #ffffff22;
+    border-radius: 12px;
+    background: #0e1418ee;
+    box-shadow: 0 8px 30px #0008;
+}
+
+.designer button {
+    font: inherit;
+    color: inherit;
+    padding: 5px 8px;
+    border: 1px solid #ffffff2a;
+    border-radius: 7px;
+    background: #ffffff10;
+    cursor: pointer;
+}
+
+.designer button.on {
+    background: #3aa86b;
+    border-color: #5fd393;
+}
+
+.designer-name {
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 8px;
+    font: inherit;
+    color: inherit;
+    padding: 5px 8px;
+    border: 1px solid #ffffff2a;
+    border-radius: 7px;
+    background: #0006;
+}
+
+.designer-tools,
+.designer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 6px 0;
+}
+
+.designer-props {
+    display: grid;
+    gap: 4px;
+    margin: 8px 0;
+    padding: 8px;
+    border-radius: 8px;
+    background: #ffffff0a;
+}
+
+.designer-props label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+}
+
+.designer-props input,
+.designer-props select {
+    width: 90px;
+    font: inherit;
+    color: inherit;
+    background: #0006;
+    border: 1px solid #ffffff2a;
+    border-radius: 5px;
+    padding: 2px 4px;
+}
+
+.designer-sel {
+    font-weight: 600;
+}
+
+.designer-json {
+    width: 100%;
+    box-sizing: border-box;
+    height: 140px;
+    margin: 6px 0;
+    font:
+        11px ui-monospace,
+        monospace;
+    color: inherit;
+    background: #0008;
+    border: 1px solid #ffffff2a;
+    border-radius: 6px;
+}
+
+body.designing .hud-objective,
+body.designing .crosshair {
+    display: none;
+}
+
+body.ui-hidden .designer {
+    display: none;
+}
+
+@media (max-width: 700px) {
+    .designer {
+        top: auto;
+        bottom: 12px;
+        max-height: 45vh;
+    }
+}
+
+.cell-size button[hidden] {
+    display: none;
 }

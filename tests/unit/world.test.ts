@@ -15,7 +15,12 @@ describe('VoxelWorld static layer', () => {
         const stats = createRasterStats();
         const v = box(0.15, 0.15, 0.15, solid(M.TestOrange));
         for (let n = 0; n < 100; n++) {
-            world.rasterizeObject(1, [{ volume: v, pose: pose(-0.6 + n * 0.012, 0.05, 0.05), priority: 0 }], 'center', stats);
+            world.rasterizeObject(
+                1,
+                [{ volume: v, pose: pose(-0.6 + n * 0.012, 0.05, 0.05), priority: 0 }],
+                'center',
+                stats
+            );
             world.resolve();
         }
         world.rasterizeObject(1, [], 'center', stats);
@@ -40,7 +45,12 @@ describe('VoxelWorld static layer', () => {
         for (const c of world.chunks) c.dynDirty = false;
         world.addObject(1);
         const h = GRID_SIZE / 2;
-        world.rasterizeObject(1, [{ volume: box(0.8 * h, 0.8 * h, 0.8 * h, solid(M.Rock)), pose: pose(h, h, h), priority: 0 }], 'center', createRasterStats());
+        world.rasterizeObject(
+            1,
+            [{ volume: box(0.8 * h, 0.8 * h, 0.8 * h, solid(M.Rock)), pose: pose(h, h, h), priority: 0 }],
+            'center',
+            createRasterStats()
+        );
         world.resolve();
         expect(left.dynDirty).toBe(true);
     });
@@ -62,8 +72,24 @@ describe('long run stability (§5.9)', () => {
         for (let f = 0; f < 3000; f++) {
             const t = (2 * Math.PI * (f % PERIOD)) / PERIOD;
             const r = 2;
-            world.rasterizeObject(1, [{ volume: plank, pose: pose(Math.cos(t) * r, 1, Math.sin(t) * r, quatFromYawPitchRoll(t, 2 * t, 3 * t)), priority: 0 }], 'coverage50', stats);
-            world.rasterizeObject(2, [{ volume: log, pose: pose(Math.sin(t) * r, 0.5, 0, quatFromYawPitchRoll(0, 0, t * 2)), priority: 0 }], 'coverage50', stats);
+            world.rasterizeObject(
+                1,
+                [
+                    {
+                        volume: plank,
+                        pose: pose(Math.cos(t) * r, 1, Math.sin(t) * r, quatFromYawPitchRoll(t, 2 * t, 3 * t)),
+                        priority: 0
+                    }
+                ],
+                'coverage50',
+                stats
+            );
+            world.rasterizeObject(
+                2,
+                [{ volume: log, pose: pose(Math.sin(t) * r, 0.5, 0, quatFromYawPitchRoll(0, 0, t * 2)), priority: 0 }],
+                'coverage50',
+                stats
+            );
             world.resolve();
             expect(world.pendingDirtyCells).toBe(0);
             maxCells = Math.max(maxCells, world.objectCellCount(1) + world.objectCellCount(2));

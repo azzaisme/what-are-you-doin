@@ -1,4 +1,5 @@
 # (Un)civil Engineers
+
 ## Game design, visual technology specification & Claude Code handover
 
 **Tagline:** Civil engineering. Uncivil physics.
@@ -39,14 +40,14 @@ A bridge is not an inventory recipe or a cutscene. It is a collection of actual 
 
 ### Pillars
 
-| Pillar | Design consequence |
-|---|---|
-| Engineering by hand | Carry, place, fasten and test real objects; no mandatory blueprint puzzle solution. |
-| Cooperative chaos | Two people on one log, multiple useful parallel jobs, no hard requirement for friends to finish. |
-| Malicious but learnable world | Hazards target engineering plans; clear tells, recoverable failures and exploitable rules. |
-| One silly objective | Protect and deliver a real bucket of water; the flower is the payoff, not a lore-heavy quest. |
-| Matter is pixelated | All ordinary visible solid geometry occupies common fixed 10 cm cells. |
-| Light is not pixelated | Beautiful water, material response, fog, shadows, reflections and a smooth camera. |
+| Pillar                        | Design consequence                                                                               |
+| ----------------------------- | ------------------------------------------------------------------------------------------------ |
+| Engineering by hand           | Carry, place, fasten and test real objects; no mandatory blueprint puzzle solution.              |
+| Cooperative chaos             | Two people on one log, multiple useful parallel jobs, no hard requirement for friends to finish. |
+| Malicious but learnable world | Hazards target engineering plans; clear tells, recoverable failures and exploitable rules.       |
+| One silly objective           | Protect and deliver a real bucket of water; the flower is the payoff, not a lore-heavy quest.    |
+| Matter is pixelated           | All ordinary visible solid geometry occupies common fixed 10 cm cells.                           |
+| Light is not pixelated        | Beautiful water, material response, fog, shadows, reflections and a smooth camera.               |
 
 ### Non-goals
 
@@ -76,19 +77,19 @@ Freeform construction must allow multiple plausible solutions. Progress is spati
 
 ### 2.3 Proposed controls (remappable)
 
-| Input | Action |
-|---|---|
-| WASD / mouse | Move / look |
-| Space / Shift / Ctrl | Jump / sprint / crouch |
-| E | Interact, enter/exit seat, operate machine |
-| Left mouse | Grab/release or tool primary action, context permitting |
-| Right mouse | Secondary hand / hold orientation control |
-| Mouse wheel | Adjust held-object reach within limits |
-| R | Rotate held object while in placement mode |
-| F | Fasten with equipped tool when valid |
-| Q | Drop or cancel |
-| Tab | Quick tools / status |
-| Esc | Pause solo or open settings; releases pointer lock |
+| Input                | Action                                                  |
+| -------------------- | ------------------------------------------------------- |
+| WASD / mouse         | Move / look                                             |
+| Space / Shift / Ctrl | Jump / sprint / crouch                                  |
+| E                    | Interact, enter/exit seat, operate machine              |
+| Left mouse           | Grab/release or tool primary action, context permitting |
+| Right mouse          | Secondary hand / hold orientation control               |
+| Mouse wheel          | Adjust held-object reach within limits                  |
+| R                    | Rotate held object while in placement mode              |
+| F                    | Fasten with equipped tool when valid                    |
+| Q                    | Drop or cancel                                          |
+| Tab                  | Quick tools / status                                    |
+| Esc                  | Pause solo or open settings; releases pointer lock      |
 
 Explicit action prompts must explain which context is active. Vehicle uses WASD, space brake, E exit. Controller mappings for local co-op are to be designed later; two people should not be forced to share mouse input.
 
@@ -110,7 +111,7 @@ Construction is a joint graph, not a fixed building grid. Visual cells are grid-
 
 Start with a rigid/fixed joint between timber pieces and explicit breakage logic. Determine how to obtain or estimate joint loading using the installed Rapier API; do not assume native break thresholds or solver impulses are exposed. If direct forces are unavailable, prototype a calibrated approximation using relative strain, reaction estimates, impact impulses and sustained load. Show creaks, bent/shifted pieces and warning sounds before typical failure. Remove joints safely after the physics step, replicate topology change and allow debris to settle. Limit collision between attached pieces where necessary; test wake/sleep behavior and secondary failures.
 
-**Important vehicle constraint:** raycast wheel suspension must detect load-bearing *dynamic* bridge pieces, not just terrain. Test force transfer both directions; a vehicle resting on a plank must load the plank, not merely receive support from a one-way raycast. If the installed controller cannot do this adequately, implement reciprocal suspension/contact forces or evaluate wheel colliders. This is a gate, not assumed solved.
+**Important vehicle constraint:** raycast wheel suspension must detect load-bearing _dynamic_ bridge pieces, not just terrain. Test force transfer both directions; a vehicle resting on a plank must load the plank, not merely receive support from a one-way raycast. If the installed controller cannot do this adequately, implement reciprocal suspension/contact forces or evaluate wheel colliders. This is a gate, not assumed solved.
 
 ### 2.7 Ute
 
@@ -126,15 +127,15 @@ Proposed victory requires any meaningful amount (e.g. 0.25 L, tune after tests) 
 
 The jam theme matters: not just natural chaos. The world must respond maliciously to attempts at success. A deterministic or server-seeded hazard director schedules authored events from gameplay conditions, not arbitrary per-frame random destruction.
 
-| Hazard | Tell | Counterplay |
-|---|---|---|
-| Rising river after construction | Siren, level marks, upstream rumble | Elevate bridge, act quickly, add supports |
-| Wind aimed at carried plank | Leaves, wind sock, warning gust | Lower plank, carry together, brace |
-| Tree falls towards ute | Lean and cracking before release | Cut from safe position, move ute, use rope |
-| Handbrake prank on slope | Ratchet click / dashboard warning | Chock wheels, park flat, secure line |
-| Overweight vehicle approaches | Horn and warning sign | Block lane, reinforce bridge, wait |
-| Road closure sign swaps | Mechanical clunk and readable sign | Find side route / manually move barrier |
-| Goose attacks bucket bearer (optional) | Honk and visible approach | Put bucket down, distract, dodge |
+| Hazard                                 | Tell                                | Counterplay                                |
+| -------------------------------------- | ----------------------------------- | ------------------------------------------ |
+| Rising river after construction        | Siren, level marks, upstream rumble | Elevate bridge, act quickly, add supports  |
+| Wind aimed at carried plank            | Leaves, wind sock, warning gust     | Lower plank, carry together, brace         |
+| Tree falls towards ute                 | Lean and cracking before release    | Cut from safe position, move ute, use rope |
+| Handbrake prank on slope               | Ratchet click / dashboard warning   | Chock wheels, park flat, secure line       |
+| Overweight vehicle approaches          | Horn and warning sign               | Block lane, reinforce bridge, wait         |
+| Road closure sign swaps                | Mechanical clunk and readable sign  | Find side route / manually move barrier    |
+| Goose attacks bucket bearer (optional) | Honk and visible approach           | Put bucket down, distract, dodge           |
 
 One event must create a meaningful response, rather than automatically deleting the player's work. Give cooldowns, severity budget and safe windows; disable overlapping events that remove every recovery option. World events can be comically impossible, but should have consistent rules. Implement two strong hazards first.
 
@@ -150,15 +151,15 @@ Use authored checkpoint regions after crossings, not arbitrary rewind each failu
 
 One continuous scenic mountain valley, viewed in first person. Start at a timber yard or peaceful village with the goal silhouetted on distant ridge. A coherent route follows rivers, forestry roads, bridges and machinery. No procedurally generated roguelike run.
 
-| Area | New engineering skill | Signature view | Escalation |
-|---|---|---|---|
-| Timber yard | Grab, sawmill, fastening, load ute | Early sunrise over river | Small rolling log |
-| Shallow creek | Simple beam-and-plank span | Clear water and reeds | Rising water |
-| Forest road | Transport long beams | shafts of sunlight, moss | falling trees/wind |
-| Gorge | Braced long span, winch | deep ravine and waterfall | strong gusts |
-| Old industrial works | Heavy cargo, movable platforms | warm metal reflections | machinery interference |
-| Mountain approach | Combined skills | alpine fog, distant summit | selected compound hazards |
-| Flower summit | Protect final drops | golden-hour payoff | final comic beat, then relief |
+| Area                 | New engineering skill              | Signature view             | Escalation                    |
+| -------------------- | ---------------------------------- | -------------------------- | ----------------------------- |
+| Timber yard          | Grab, sawmill, fastening, load ute | Early sunrise over river   | Small rolling log             |
+| Shallow creek        | Simple beam-and-plank span         | Clear water and reeds      | Rising water                  |
+| Forest road          | Transport long beams               | shafts of sunlight, moss   | falling trees/wind            |
+| Gorge                | Braced long span, winch            | deep ravine and waterfall  | strong gusts                  |
+| Old industrial works | Heavy cargo, movable platforms     | warm metal reflections     | machinery interference        |
+| Mountain approach    | Combined skills                    | alpine fog, distant summit | selected compound hazards     |
+| Flower summit        | Protect final drops                | golden-hour payoff         | final comic beat, then relief |
 
 First vertical slice is just the timber yard and shallow creek. Later areas are options, not scope promises. Aim for gameplay that works in ten minutes before expanding to a full one-hour journey. Keep roads large enough for turning and maneuvering, banks accessible, and fallen materials recoverable.
 
@@ -270,14 +271,14 @@ Pseudocode (logic, not exact library API):
 
 ```ts
 function rasterize(part: VolumePart, pose: Pose, out: Occupancy): void {
-  const aabb = transformBounds(part.bounds, pose);
-  const range = candidateCells(aabb, GRID_SIZE, GRID_ORIGIN);
-  const inverse = invertPose(pose);
-  for (const cell of range) {
-    const p = toLocal(cellCenter(cell), inverse);
-    const sample = part.volume.sample(p);
-    if (sample.occupied) out.write(cell, sample.material, part.priority);
-  }
+    const aabb = transformBounds(part.bounds, pose);
+    const range = candidateCells(aabb, GRID_SIZE, GRID_ORIGIN);
+    const inverse = invertPose(pose);
+    for (const cell of range) {
+        const p = toLocal(cellCenter(cell), inverse);
+        const sample = part.volume.sample(p);
+        if (sample.occupied) out.write(cell, sample.material, part.priority);
+    }
 }
 ```
 
@@ -311,19 +312,20 @@ Start with golden-hour sun, cool skylight, contact shadows, gentle distance fog 
 
 ### 5.9 Validation matrix
 
-| Case | Expected evidence |
-|---|---|
-| Negative coordinates / chunk seams | Unit tests; no missing or duplicated cells at origin/chunk boundaries |
-| Translation 0 to 0.1 m | Cell count and identities change only at occupancy transitions |
-| 0°, 15°, 45°, 89°, 90° rotation | All output faces axis-aligned; silhouette approximates shape, no holes above tolerance |
-| Repeated identical pose | Identical occupancy/material hashes, no GPU buffer churn |
-| Moving two overlapping parts | Deterministic winner; removing winner restores underlying material |
-| Thin plank and wheel | No complete disappearance; reasonable thickness/silhouette over full turn |
-| Shadow and mirror | Reflect and cast shadows from same reconstructed shape; no hidden smooth mesh |
-| First-person moving hand/log | Camera smooth; object remains readable, controllable |
-| Long run | Stable object count, buffers, memory; no allocation leak |
+| Case                               | Expected evidence                                                                      |
+| ---------------------------------- | -------------------------------------------------------------------------------------- |
+| Negative coordinates / chunk seams | Unit tests; no missing or duplicated cells at origin/chunk boundaries                  |
+| Translation 0 to 0.1 m             | Cell count and identities change only at occupancy transitions                         |
+| 0°, 15°, 45°, 89°, 90° rotation    | All output faces axis-aligned; silhouette approximates shape, no holes above tolerance |
+| Repeated identical pose            | Identical occupancy/material hashes, no GPU buffer churn                               |
+| Moving two overlapping parts       | Deterministic winner; removing winner restores underlying material                     |
+| Thin plank and wheel               | No complete disappearance; reasonable thickness/silhouette over full turn              |
+| Shadow and mirror                  | Reflect and cast shadows from same reconstructed shape; no hidden smooth mesh          |
+| First-person moving hand/log       | Camera smooth; object remains readable, controllable                                   |
+| Long run                           | Stable object count, buffers, memory; no allocation leak                               |
 
 ---
+
 ## 6. Simulation, networking and production risks
 
 ### 6.1 Physics model
@@ -452,19 +454,19 @@ Keep interface minimal: crosshair, context action, carried-object state, bucket 
 
 ## 10. Validation and scope controls
 
-| Risk | Mitigation / gate |
-|---|---|
-| Voxel reconstruction too slow | CPU reference then dirty chunks, batches, worker only if measured; test before content |
-| Visually noisy or uncomfortable | Same-grid test, temporal sampling tuning, continuous camera, low-noise palette; owner approval |
-| Tiny solids vanish | Analytic/thicker proxies, coverage rules, documented exceptions if approved |
-| Reflection and shadow passes too expensive | One primary planar camera, resolution presets, coherent occupancy, benchmark |
-| Physics/render mismatch | Continuous collision proxy, visible extent tests, bounded grab error, debug overlay |
-| Vehicle cannot load dynamic bridge | Reciprocal forces test early, change controller if needed |
-| Structural solver inaccurate | Calibrated break logic and repeatable load tests; no unsupported API assumptions |
-| Two-player grab under latency | Server authority, damped bounded forces, latency testing before world production |
-| Endless debris and structures | sleeping, budgets, chunk activation, save/recovery rules |
-| Local/online combined modes expensive | validate separately, preserve architecture without promising launch feature |
-| Jam rules and browser hosting constraints | verify current organizer rules, licensing, team/AI/eligibility and external server permissions before submission; deadline not design constraint |
+| Risk                                       | Mitigation / gate                                                                                                                                |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Voxel reconstruction too slow              | CPU reference then dirty chunks, batches, worker only if measured; test before content                                                           |
+| Visually noisy or uncomfortable            | Same-grid test, temporal sampling tuning, continuous camera, low-noise palette; owner approval                                                   |
+| Tiny solids vanish                         | Analytic/thicker proxies, coverage rules, documented exceptions if approved                                                                      |
+| Reflection and shadow passes too expensive | One primary planar camera, resolution presets, coherent occupancy, benchmark                                                                     |
+| Physics/render mismatch                    | Continuous collision proxy, visible extent tests, bounded grab error, debug overlay                                                              |
+| Vehicle cannot load dynamic bridge         | Reciprocal forces test early, change controller if needed                                                                                        |
+| Structural solver inaccurate               | Calibrated break logic and repeatable load tests; no unsupported API assumptions                                                                 |
+| Two-player grab under latency              | Server authority, damped bounded forces, latency testing before world production                                                                 |
+| Endless debris and structures              | sleeping, budgets, chunk activation, save/recovery rules                                                                                         |
+| Local/online combined modes expensive      | validate separately, preserve architecture without promising launch feature                                                                      |
+| Jam rules and browser hosting constraints  | verify current organizer rules, licensing, team/AI/eligibility and external server permissions before submission; deadline not design constraint |
 
 ### Release checklist
 

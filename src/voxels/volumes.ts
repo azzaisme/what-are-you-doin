@@ -41,7 +41,11 @@ export interface Volume {
 
 /** 32-bit integer hash of three integers. Deterministic across platforms. */
 export function hash3(i: number, j: number, k: number, seed = 0): number {
-    let h = Math.imul(i | 0, 0x8da6b343) ^ Math.imul(j | 0, 0xd8163841) ^ Math.imul(k | 0, 0xcb1ab31f) ^ Math.imul(seed | 0, 0x165667b1);
+    let h =
+        Math.imul(i | 0, 0x8da6b343) ^
+        Math.imul(j | 0, 0xd8163841) ^
+        Math.imul(k | 0, 0xcb1ab31f) ^
+        Math.imul(seed | 0, 0x165667b1);
     h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
     h = Math.imul(h ^ (h >>> 12), 0x297a2d39);
     return (h ^ (h >>> 15)) >>> 0;
@@ -65,8 +69,10 @@ export function solid(material: number, shade = 0): MaterialField {
 
 /** Wood grain: stripes running along one local axis (shade from the two other axes). */
 export function grain(material: number, along: Axis, scale = GRID_SIZE, seed = 0): MaterialField {
-    if (along === 'x') return (_x, y, z) => voxel(material, hash3(Math.floor(y / scale), Math.floor(z / scale), 0, seed) & 3);
-    if (along === 'y') return (x, _y, z) => voxel(material, hash3(Math.floor(x / scale), Math.floor(z / scale), 1, seed) & 3);
+    if (along === 'x')
+        return (_x, y, z) => voxel(material, hash3(Math.floor(y / scale), Math.floor(z / scale), 0, seed) & 3);
+    if (along === 'y')
+        return (x, _y, z) => voxel(material, hash3(Math.floor(x / scale), Math.floor(z / scale), 1, seed) & 3);
     return (x, y) => voxel(material, hash3(Math.floor(x / scale), Math.floor(y / scale), 2, seed) & 3);
 }
 
@@ -140,7 +146,14 @@ export function cylinder(axis: Axis, radius: number, halfLength: number, field: 
  * Open-topped tube along +Y with a closed bottom (a bucket wall). Origin at the bottom centre.
  * Material from `field`; the interior is empty.
  */
-export function cup(radiusBottom: number, radiusTop: number, height: number, wall: number, base: number, field: MaterialField): Volume {
+export function cup(
+    radiusBottom: number,
+    radiusTop: number,
+    height: number,
+    wall: number,
+    base: number,
+    field: MaterialField
+): Volume {
     assertPositive(radiusBottom, height, wall);
     const rMax = Math.max(radiusBottom, radiusTop);
     return {
@@ -175,12 +188,24 @@ export function cone(radius: number, height: number, field: MaterialField): Volu
 }
 
 /** Arbitrary implicit volume: `inside` decides occupancy, `field` the material. */
-export function implicit(bounds: AABB, inside: (x: number, y: number, z: number) => boolean, field: MaterialField): Volume {
+export function implicit(
+    bounds: AABB,
+    inside: (x: number, y: number, z: number) => boolean,
+    field: MaterialField
+): Volume {
     return {
         bounds,
         shape: { type: 'custom' },
         sample(x, y, z) {
-            if (x < bounds.minX || x >= bounds.maxX || y < bounds.minY || y >= bounds.maxY || z < bounds.minZ || z >= bounds.maxZ) return 0;
+            if (
+                x < bounds.minX ||
+                x >= bounds.maxX ||
+                y < bounds.minY ||
+                y >= bounds.maxY ||
+                z < bounds.minZ ||
+                z >= bounds.maxZ
+            )
+                return 0;
             return inside(x, y, z) ? field(x, y, z) : 0;
         }
     };

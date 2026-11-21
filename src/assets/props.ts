@@ -3,12 +3,12 @@
  * Sizes are multiples of 0.1 m where the design doc proposes them (§2.5).
  */
 
-import { aabb, composePose, copyPose, pose, quatFromYawPitchRoll  } from '../voxels/math.ts';
+import { aabb, composePose, copyPose, pose, quatFromYawPitchRoll } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
 import { M, voxel } from '../voxels/palette.ts';
 import { box, cup, ellipsoid, grain, implicit, latticeShade, solid } from '../voxels/volumes.ts';
 
-import { ASSET_SCHEMA_VERSION   } from './asset.ts';
+import { ASSET_SCHEMA_VERSION } from './asset.ts';
 import type { AssetPart, VoxelAsset } from './asset.ts';
 
 /** Asset whose parts all share the root pose, optionally with fixed local offsets. */
@@ -29,8 +29,20 @@ function rigid(name: string, parts: AssetPart[], offsets?: Pose[]): VoxelAsset {
 export const PLANK_LENGTH = 2.4;
 export function plankAsset(name = 'plank'): VoxelAsset {
     const g = grain(M.Timber, 'x', 0.1, 5);
-    const v = box(1.2, 0.1, 0.05, (x, y, z) => (Math.abs(x) > 1.12 ? voxel(M.TimberEnd, latticeShade(x, y, z, 0.1, 2)) : g(x, y, z)));
+    const v = box(1.2, 0.1, 0.05, (x, y, z) =>
+        Math.abs(x) > 1.12 ? voxel(M.TimberEnd, latticeShade(x, y, z, 0.1, 2)) : g(x, y, z)
+    );
     return rigid(name, [{ name: 'plank', volume: v, priority: 1, refColor: 0xc48d55 }]);
+}
+
+/** 3.2 x 0.2 x 0.15 m beam (long enough to span the timber yard's 2.7 m creek gap), long axis X. */
+export const BEAM_HALF = { x: 1.6, y: 0.1, z: 0.075 };
+export function beamAsset(name = 'beam'): VoxelAsset {
+    const g = grain(M.Timber, 'x', 0.15, 11);
+    const v = box(BEAM_HALF.x, BEAM_HALF.y, BEAM_HALF.z, (x, y, z) =>
+        Math.abs(x) > BEAM_HALF.x - 0.07 ? voxel(M.TimberEnd, latticeShade(x, y, z, 0.1, 3)) : g(x, y, z)
+    );
+    return rigid(name, [{ name: 'beam', volume: v, priority: 1, refColor: 0xa8743f }]);
 }
 
 /** Log: radius 0.2 m, length 2.0 m, long axis X. Bark with ring end grain. */
@@ -55,7 +67,9 @@ export const BUCKET_HANDLE_TOP = 0.46;
 export const BUCKET_WATER_LEVEL = 0.22;
 export const BUCKET_INNER_RADIUS = 0.08;
 export function bucketAsset(): VoxelAsset {
-    const wall = cup(0.13, 0.16, BUCKET_HEIGHT, 0.08, 0.08, (x, y, z) => voxel(M.Galvanised, y > 0.3 ? 2 : latticeShade(x, y, z, 0.1, 6)));
+    const wall = cup(0.13, 0.16, BUCKET_HEIGHT, 0.08, 0.08, (x, y, z) =>
+        voxel(M.Galvanised, y > 0.3 ? 2 : latticeShade(x, y, z, 0.1, 6))
+    );
     // the handle: a thick arc over the top, along X
     const handle = implicit(
         aabb(-0.18, BUCKET_HEIGHT - 0.05, -0.05, 0.18, BUCKET_HANDLE_TOP + 0.02, 0.05),
@@ -74,12 +88,35 @@ export function bucketAsset(): VoxelAsset {
 
 export function cubeAsset(size = 0.5, material: number = M.TestOrange): VoxelAsset {
     const h = size / 2;
-    return rigid('cube', [{ name: 'cube', volume: box(h, h, h, (x, y, z) => voxel(material, (Math.floor((x + h) / (h / 2)) + Math.floor((y + h) / (h / 2)) + Math.floor((z + h) / (h / 2))) & 1 ? 0 : 2)), priority: 1, refColor: 0xe5732a }]);
+    return rigid('cube', [
+        {
+            name: 'cube',
+            volume: box(h, h, h, (x, y, z) =>
+                voxel(
+                    material,
+                    (Math.floor((x + h) / (h / 2)) + Math.floor((y + h) / (h / 2)) + Math.floor((z + h) / (h / 2))) & 1
+                        ? 0
+                        : 2
+                )
+            ),
+            priority: 1,
+            refColor: 0xe5732a
+        }
+    ]);
 }
 
 export function sphereAsset(radius = 0.3, material: number = M.TestBlue): VoxelAsset {
     // a beach-ball-like band pattern makes rotation visible
-    return rigid('sphere', [{ name: 'sphere', volume: ellipsoid(radius, radius, radius, (x, y, z) => voxel(Math.abs(y) < radius * 0.25 ? M.HiVisStripe : material, latticeShade(x, y, z, 0.2, 1) & 1)), priority: 1, refColor: 0x2f7fc4 }]);
+    return rigid('sphere', [
+        {
+            name: 'sphere',
+            volume: ellipsoid(radius, radius, radius, (x, y, z) =>
+                voxel(Math.abs(y) < radius * 0.25 ? M.HiVisStripe : material, latticeShade(x, y, z, 0.2, 1) & 1)
+            ),
+            priority: 1,
+            refColor: 0x2f7fc4
+        }
+    ]);
 }
 
 /** Helper for scripted motion: a yaw-pitch-roll pose. */
@@ -92,3 +129,27 @@ export function yprPose(x: number, y: number, z: number, yaw: number, pitch: num
 }
 
 export { copyPose };
+
+/** Windsock: a tapered striped tube along +X from its mount (the pole top). */
+export function windsockAsset(): VoxelAsset {
+    const segs = [
+        { x: 0.13, h: 0.13 },
+        { x: 0.39, h: 0.11 },
+        { x: 0.63, h: 0.09 },
+        { x: 0.85, h: 0.07 }
+    ];
+    const parts = segs.map((g, i) => ({
+        name: `sock-${i}`,
+        volume: box(0.12, g.h, g.h, solid(i % 2 ? M.HiVisStripe : M.HiVis)),
+        priority: 2,
+        refColor: i % 2 ? 0xe8e8cf : 0xf26a1b
+    }));
+    const offsets = segs.map((g) => pose(g.x, 0, 0));
+    const ring = {
+        name: 'sock-ring',
+        volume: box(0.02, 0.15, 0.15, solid(M.Steel, 1)),
+        priority: 3,
+        refColor: 0x9aa0a6
+    };
+    return rigid('windsock', [ring, ...parts], [pose(0, 0, 0), ...offsets]);
+}

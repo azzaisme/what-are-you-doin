@@ -24,12 +24,13 @@ import {
     CHUNK_MASK,
     CHUNK_SIZE,
     CHUNK_VOLUME,
+    GRID_SIZE,
     chunkCoordInRange,
     localIndex,
     packChunkCoord
 } from './grid.ts';
 import type { Pose } from './math.ts';
-import { rasterizeVolume    } from './rasterizer.ts';
+import { rasterizeVolume } from './rasterizer.ts';
 import type { CellSink, RasterStats, SamplingPolicy } from './rasterizer.ts';
 import type { Volume } from './volumes.ts';
 
@@ -119,7 +120,12 @@ export class VoxelWorld {
     private readonly dirtyCells = new Set<number>();
 
     /** Composite telemetry from the last resolve(). */
-    readonly lastComposite: CompositeStats = { dirtyCells: 0, changedCells: 0, dynDynOverlaps: 0, dynStaticOverlaps: 0 };
+    readonly lastComposite: CompositeStats = {
+        dirtyCells: 0,
+        changedCells: 0,
+        dynDynOverlaps: 0,
+        dynStaticOverlaps: 0
+    };
     /** Running totals of overlap cells currently present. */
     dynStaticOverlapCells = 0;
 
@@ -184,7 +190,13 @@ export class VoxelWorld {
     }
 
     /** Rasterizes a static volume once into the static layer. */
-    rasterizeStatic(volume: Volume, worldPose: Pose, policy: SamplingPolicy, priority: number, stats: RasterStats): void {
+    rasterizeStatic(
+        volume: Volume,
+        worldPose: Pose,
+        policy: SamplingPolicy,
+        priority: number,
+        stats: RasterStats
+    ): void {
         this.staticSink.priority = priority;
         rasterizeVolume(volume, worldPose, policy, priority, this.staticSink, stats);
     }
@@ -296,6 +308,48 @@ export class VoxelWorld {
         e.cells = next;
         e.count = next.size;
 
+        let changed = 0;
+        const dirty = this.dirtyCells;
+        for (const [key, v] of next) {
+            const old = prev.get(key);
+            if (old === undefined || (old & 0xffff) !== (v & 0xffff)) {
+                dirty.add(key);
+                changed++;
+            }
+        }
+        for (const key of prev.keys()) {
+            if (!next.has(key)) {
+                dirty.add(key);
+                changed++;
+            }
+        }
+        return changed;
+    }
+
+    /**
+     * Writes an object made of single cells (particles: leaves, chips, splashes). `points` holds
+     * x, y, z (metres) and a voxel value per point; each point fills the one cell containing it, on
+     * the global grid like everything else. Marks changed cells dirty; returns how many changed.
+     */
+    rasterizePoints(id: number, points: Float32Array, count: number, priority = 0): number {
+        const e = this.objects.get(id);
+        if (!e) throw new Error(`Unknown dynamic object ${id}`);
+        const prev = e.cells;
+        const next = e.prev;
+        next.clear();
+        const inv = 1 / GRID_SIZE;
+        for (let n = 0; n < count; n++) {
+            const o = n * 4;
+            const x = points[o];
+            const y = points[o + 1];
+            const z = points[o + 2];
+            if (!Number.isFinite(x + y + z)) continue;
+            const key = this.cellKey(Math.floor(x * inv), Math.floor(y * inv), Math.floor(z * inv));
+            if (!next.has(key)) next.set(key, (points[o + 3] & 0xffff) | (priority << 16));
+        }
+        e.prev = prev;
+        e.cells = next;
+        e.count = next.size;
         let changed = 0;
         const dirty = this.dirtyCells;
         for (const [key, v] of next) {

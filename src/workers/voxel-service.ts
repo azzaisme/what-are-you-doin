@@ -8,8 +8,10 @@
  * finished buffers. The main thread only uploads them, all at once.
  */
 
-import { buildRiverLab } from '../levels/river-lab.ts';
-import { LabSim } from '../sim/lab-sim.ts';
+import { parseLevelData, levelFromData } from '../levels/data.ts';
+import { getLevel } from '../levels/index.ts';
+import { createLabEntities } from '../sim/lab-entities.ts';
+import type { SimEntity } from '../sim/lab-entities.ts';
 import { ANIM_MAX } from '../sim/snapshots.ts';
 import { DYNAMIC_REGION, STATIC_REGION, collectDirty, unpackRegion } from '../voxels/dirty.ts';
 import type { DirtyWork } from '../voxels/dirty.ts';
@@ -23,7 +25,7 @@ import type { SamplingPolicy } from '../voxels/rasterizer.ts';
 import { VoxelWorld } from '../voxels/world.ts';
 import type { PartInstance } from '../voxels/world.ts';
 
-import { STATE_STRIDE } from './protocol.ts';
+import { PARTICLE_OBJECT_ID, STATE_STRIDE } from './protocol.ts';
 import type { BuildInfo, ClassMesh, FrameStats, UnitMesh } from './protocol.ts';
 
 interface Tracked {
@@ -36,7 +38,7 @@ interface Tracked {
 }
 
 /** Order of tracked objects: every sim entity that has voxel parts, in sim order. */
-export function trackedEntityOrder(sim: LabSim): number[] {
+export function trackedEntityOrder(sim: { entities: SimEntity[] }): number[] {
     return sim.entities.filter((e) => e.asset.parts.length > 0).map((e) => e.slot);
 }
 
@@ -50,8 +52,8 @@ export class VoxelService {
     private readonly knownDynamic = new Set<number>();
 
     constructor() {
-        const sim = new LabSim();
-        for (const e of sim.entities) {
+        this.world.addObject(PARTICLE_OBJECT_ID, 0);
+        for (const e of createLabEntities().entities) {
             if (e.asset.parts.length === 0) continue;
             this.world.addObject(e.id, e.priority);
             const poses = e.asset.parts.map(() => pose());
@@ -61,7 +63,12 @@ export class VoxelService {
                 root: pose(),
                 anim: new Float64Array(ANIM_MAX),
                 poses,
-                parts: e.asset.parts.map((p, i) => ({ volume: p.volume, pose: poses[i], priority: p.priority, policy: p.policy }))
+                parts: e.asset.parts.map((p, i) => ({
+                    volume: p.volume,
+                    pose: poses[i],
+                    priority: p.priority,
+                    policy: p.policy
+                }))
             });
         }
     }
@@ -70,8 +77,10 @@ export class VoxelService {
         return this.tracked.length;
     }
 
-    build(seed: number): { build: BuildInfo; units: UnitMesh[] } {
-        const r = buildRiverLab(this.world, seed);
+    build(seed: number, level = 'yard', data?: unknown): { build: BuildInfo; units: UnitMesh[] } {
+        // designer levels arrive as data (validated again here: the worker trusts nothing)
+        const def = data ? levelFromData(parseLevelData(data)) : getLevel(level);
+        const r = def.build(this.world, seed);
         const t0 = performance.now();
         const units = this.meshDirty();
         return {
@@ -88,7 +97,15 @@ export class VoxelService {
         };
     }
 
-    frame(frame: number, time: number, policy: SamplingPolicy, reference: boolean, states: Float64Array): { units: UnitMesh[]; stats: FrameStats } {
+    frame(
+        frame: number,
+        time: number,
+        policy: SamplingPolicy,
+        reference: boolean,
+        states: Float64Array,
+        particles?: Float32Array,
+        particleCount = 0
+    ): { units: UnitMesh[]; stats: FrameStats } {
         const t0 = performance.now();
         resetRasterStats(this.raster);
         let objects = 0;
@@ -112,6 +129,10 @@ export class VoxelService {
             this.world.rasterizeObject(t.id, t.parts, policy, this.raster);
             objects++;
         }
+        // particles: single cells on the global grid, behind every object
+        const pc = particles && !reference ? Math.min(particleCount, Math.floor(particles.length / 4)) : 0;
+        if (pc > 0) this.world.rasterizePoints(PARTICLE_OBJECT_ID, particles!, pc, 0);
+        else if (this.world.objectCellCount(PARTICLE_OBJECT_ID) > 0) this.world.clearObject(PARTICLE_OBJECT_ID);
         const t1 = performance.now();
         const comp = this.world.resolve();
         const t2 = performance.now();
@@ -141,6 +162,7 @@ export class VoxelService {
                 meshMs: t3 - t2,
                 totalMs: t3 - t0,
                 dynamicCells: this.world.dynamicCellCount(),
+                particles: pc,
                 chunks: this.world.chunkCount
             }
         };
@@ -152,7 +174,18 @@ export class VoxelService {
         const units: UnitMesh[] = [];
         for (const key of work.staticRegions) {
             const [x, y, z] = unpackRegion(key);
-            units.push(this.meshUnit(key, 'static', x * STATIC_REGION.x, y * STATIC_REGION.y, z * STATIC_REGION.z, STATIC_REGION.x, STATIC_REGION.y, STATIC_REGION.z));
+            units.push(
+                this.meshUnit(
+                    key,
+                    'static',
+                    x * STATIC_REGION.x,
+                    y * STATIC_REGION.y,
+                    z * STATIC_REGION.z,
+                    STATIC_REGION.x,
+                    STATIC_REGION.y,
+                    STATIC_REGION.z
+                )
+            );
         }
         for (let n = 0; n < work.dynamicRegions.length; n++) {
             const key = work.dynamicRegions[n];
@@ -161,15 +194,46 @@ export class VoxelService {
                 this.knownDynamic.add(key);
             }
             const [x, y, z] = unpackRegion(key);
-            units.push(this.meshUnit(key, 'dynamic', x * DYNAMIC_REGION, y * DYNAMIC_REGION, z * DYNAMIC_REGION, DYNAMIC_REGION, DYNAMIC_REGION, DYNAMIC_REGION));
+            units.push(
+                this.meshUnit(
+                    key,
+                    'dynamic',
+                    x * DYNAMIC_REGION,
+                    y * DYNAMIC_REGION,
+                    z * DYNAMIC_REGION,
+                    DYNAMIC_REGION,
+                    DYNAMIC_REGION,
+                    DYNAMIC_REGION
+                )
+            );
         }
         return units;
     }
 
-    private meshUnit(key: number, mode: MeshMode, minI: number, minJ: number, minK: number, sx: number, sy: number, sz: number): UnitMesh {
+    private meshUnit(
+        key: number,
+        mode: MeshMode,
+        minI: number,
+        minJ: number,
+        minK: number,
+        sx: number,
+        sy: number,
+        sz: number
+    ): UnitMesh {
         const out = this.out;
         out.reset();
-        meshRegionBlocked(this.world, mode, minI, minJ, minK, sx, sy, sz, mode === 'static' ? DYNAMIC_REGION : CHUNK_SIZE, out);
+        meshRegionBlocked(
+            this.world,
+            mode,
+            minI,
+            minJ,
+            minK,
+            sx,
+            sy,
+            sz,
+            mode === 'static' ? DYNAMIC_REGION : CHUNK_SIZE,
+            out
+        );
         const classes: ClassMesh[] = out.classes.map((b) => ({
             positions: b.positions.slice(0, b.vertexCount * 3),
             normals: b.normals.slice(0, b.vertexCount * 3),
@@ -185,9 +249,28 @@ export class VoxelService {
     verifyGrid(): { vertices: number; misaligned: number } {
         let vertices = 0;
         let misaligned = 0;
-        const check = (mode: MeshMode, minI: number, minJ: number, minK: number, sx: number, sy: number, sz: number) => {
+        const check = (
+            mode: MeshMode,
+            minI: number,
+            minJ: number,
+            minK: number,
+            sx: number,
+            sy: number,
+            sz: number
+        ) => {
             this.out.reset();
-            meshRegionBlocked(this.world, mode, minI, minJ, minK, sx, sy, sz, mode === 'static' ? DYNAMIC_REGION : CHUNK_SIZE, this.out);
+            meshRegionBlocked(
+                this.world,
+                mode,
+                minI,
+                minJ,
+                minK,
+                sx,
+                sy,
+                sz,
+                mode === 'static' ? DYNAMIC_REGION : CHUNK_SIZE,
+                this.out
+            );
             for (const b of this.out.classes) {
                 for (let v = 0; v < b.vertexCount * 3; v++) {
                     const g = b.positions[v] / GRID_SIZE;
@@ -198,7 +281,15 @@ export class VoxelService {
         };
         for (const key of this.knownDynamic) {
             const [x, y, z] = unpackRegion(key);
-            check('dynamic', x * DYNAMIC_REGION, y * DYNAMIC_REGION, z * DYNAMIC_REGION, DYNAMIC_REGION, DYNAMIC_REGION, DYNAMIC_REGION);
+            check(
+                'dynamic',
+                x * DYNAMIC_REGION,
+                y * DYNAMIC_REGION,
+                z * DYNAMIC_REGION,
+                DYNAMIC_REGION,
+                DYNAMIC_REGION,
+                DYNAMIC_REGION
+            );
         }
         // a sample of static regions near the lab centre
         for (const [x, z] of [
@@ -207,7 +298,16 @@ export class VoxelService {
             [0, -1],
             [-1, 0]
         ]) {
-            for (let y = -1; y <= 1; y++) check('static', x * STATIC_REGION.x, y * STATIC_REGION.y, z * STATIC_REGION.z, STATIC_REGION.x, STATIC_REGION.y, STATIC_REGION.z);
+            for (let y = -1; y <= 1; y++)
+                check(
+                    'static',
+                    x * STATIC_REGION.x,
+                    y * STATIC_REGION.y,
+                    z * STATIC_REGION.z,
+                    STATIC_REGION.x,
+                    STATIC_REGION.y,
+                    STATIC_REGION.z
+                );
         }
         return { vertices, misaligned };
     }

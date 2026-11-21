@@ -1,5 +1,5 @@
 import { CHUNK_BITS, CHUNK_MASK, CHUNK_VOLUME, GRID_SIZE } from '../../src/voxels/grid.ts';
-import { MeshOutput, meshRegion  } from '../../src/voxels/mesher.ts';
+import { MeshOutput, meshRegion } from '../../src/voxels/mesher.ts';
 import type { MeshMode } from '../../src/voxels/mesher.ts';
 import type { VoxelWorld } from '../../src/voxels/world.ts';
 
@@ -104,7 +104,17 @@ export function meshFaces(out: MeshOutput): Face[] {
     return faces;
 }
 
-export function meshAll(world: VoxelWorld, mode: MeshMode, minI: number, minJ: number, minK: number, sx: number, sy: number, sz: number, greedy = true): MeshOutput {
+export function meshAll(
+    world: VoxelWorld,
+    mode: MeshMode,
+    minI: number,
+    minJ: number,
+    minK: number,
+    sx: number,
+    sy: number,
+    sz: number,
+    greedy = true
+): MeshOutput {
     const out = new MeshOutput();
     meshRegion(world, mode, minI, minJ, minK, sx, sy, sz, out, { greedy, ao: true });
     return out;

@@ -14,5 +14,10 @@ await page.waitForTimeout(Number(wait));
 await page.screenshot({ path: out });
 const stats = await page.evaluate(() => window.__riverLab.stats());
 console.log(JSON.stringify(stats));
-console.log(logs.filter((l) => !l.includes('Powered by')).slice(0, 30).join('\n'));
+console.log(
+    logs
+        .filter((l) => !l.includes('Powered by'))
+        .slice(0, 30)
+        .join('\n')
+);
 await browser.close();

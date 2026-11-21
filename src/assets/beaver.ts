@@ -8,14 +8,14 @@
  * specks, and they never require smaller voxels.
  */
 
-import { aabb, composePose, pose  } from '../voxels/math.ts';
+import { aabb, composePose, pose } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
 import { M, voxel } from '../voxels/palette.ts';
 import { box, ellipsoid, implicit, latticeShade, solid, speckled } from '../voxels/volumes.ts';
 
-import { ASSET_SCHEMA_VERSION   } from './asset.ts';
+import { ASSET_SCHEMA_VERSION } from './asset.ts';
 import type { AssetPart, VoxelAsset } from './asset.ts';
-import { attach, evaluateAttachments, Rig  } from './rig.ts';
+import { attach, evaluateAttachments, Rig } from './rig.ts';
 import type { Attachment } from './rig.ts';
 
 /** Animation channels. */
@@ -78,7 +78,8 @@ const EYE_X = 0.145;
 const EYE_Y = 0.035;
 const EYE_HALF = 0.046;
 const headField = (x: number, y: number, z: number) => {
-    if (z > 0.05 && Math.abs(y - EYE_Y) < EYE_HALF + 0.006 && Math.abs(Math.abs(x) - EYE_X) < EYE_HALF) return voxel(M.Eye);
+    if (z > 0.05 && Math.abs(y - EYE_Y) < EYE_HALF + 0.006 && Math.abs(Math.abs(x) - EYE_X) < EYE_HALF)
+        return voxel(M.Eye);
     return fur(x, y, z);
 };
 const muzzleBase = speckled(M.Muzzle, 0.1, 9);
@@ -89,8 +90,14 @@ const muzzleField = (x: number, y: number, z: number) => {
     if (z > -0.03 && y < -0.05 && Math.abs(x) < 0.055) return voxel(M.Tooth, x < 0 ? 0 : 1);
     return muzzleBase(x, y, z);
 };
-const arm = implicit(aabb(-0.065, -0.18, -0.07, 0.065, 0.18, 0.07), () => true, (x, y, z) => (y < -0.1 ? voxel(M.FurDark) : fur(x, y, z)));
-const tail = box(0.15, 0.05, 0.26, (x, _y, z) => voxel(M.Tail, (Math.floor(x / 0.07) + Math.floor(z / 0.07)) & 1 ? 1 : 2));
+const arm = implicit(
+    aabb(-0.065, -0.18, -0.07, 0.065, 0.18, 0.07),
+    () => true,
+    (x, y, z) => (y < -0.1 ? voxel(M.FurDark) : fur(x, y, z))
+);
+const tail = box(0.15, 0.05, 0.26, (x, _y, z) =>
+    voxel(M.Tail, (Math.floor(x / 0.07) + Math.floor(z / 0.07)) & 1 ? 1 : 2)
+);
 
 const parts: AssetPart[] = [];
 const attachments: Attachment[] = [];
@@ -99,25 +106,67 @@ function part(p: AssetPart, a: Attachment): void {
     attachments.push(a);
 }
 
-part({ name: 'body', volume: ellipsoid(0.3, 0.36, 0.27, fur), priority: 2, refColor: 0x8a5a33 }, attach(J.spine, 0, 0, 0));
-part({ name: 'belly', volume: ellipsoid(0.19, 0.27, 0.12, speckled(M.Muzzle, 0.1, 5)), priority: 3, refColor: 0xd9b58a }, attach(J.spine, 0, -0.04, 0.19));
+part(
+    { name: 'body', volume: ellipsoid(0.3, 0.36, 0.27, fur), priority: 2, refColor: 0x8a5a33 },
+    attach(J.spine, 0, 0, 0)
+);
+part(
+    { name: 'belly', volume: ellipsoid(0.19, 0.27, 0.12, speckled(M.Muzzle, 0.1, 5)), priority: 3, refColor: 0xd9b58a },
+    attach(J.spine, 0, -0.04, 0.19)
+);
 part({ name: 'vest', volume: vest, priority: 4, refColor: 0xf26a1b }, attach(J.spine, 0, 0.05, 0));
-part({ name: 'head', volume: ellipsoid(0.24, 0.21, 0.22, headField), priority: 3, refColor: 0x8a5a33 }, attach(J.head, 0, 0, 0));
+part(
+    { name: 'head', volume: ellipsoid(0.24, 0.21, 0.22, headField), priority: 3, refColor: 0x8a5a33 },
+    attach(J.head, 0, 0, 0)
+);
 // Face layout for a 10 cm grid (head-local y, top to bottom): dome, brim, eyes, muzzle with nose,
 // teeth - one cell row each, so features stay legible while the head bobs and nods by sub-cell
 // amounts. The eye windows are 0.21 m apart, so a fur cell always separates the two eyes.
-part({ name: 'muzzle', volume: ellipsoid(0.16, 0.11, 0.115, muzzleField), priority: 5, refColor: 0xd9b58a }, attach(J.head, 0, -0.1, 0.15));
-part({ name: 'earL', volume: box(0.05, 0.05, 0.045, solid(M.FurDark)), priority: 4, refColor: 0x5e3b22 }, attach(J.head, 0.18, 0.12, -0.03));
-part({ name: 'earR', volume: box(0.05, 0.05, 0.045, solid(M.FurDark)), priority: 4, refColor: 0x5e3b22 }, attach(J.head, -0.18, 0.12, -0.03));
+part(
+    { name: 'muzzle', volume: ellipsoid(0.16, 0.11, 0.115, muzzleField), priority: 5, refColor: 0xd9b58a },
+    attach(J.head, 0, -0.1, 0.15)
+);
+part(
+    { name: 'earL', volume: box(0.05, 0.05, 0.045, solid(M.FurDark)), priority: 4, refColor: 0x5e3b22 },
+    attach(J.head, 0.18, 0.12, -0.03)
+);
+part(
+    { name: 'earR', volume: box(0.05, 0.05, 0.045, solid(M.FurDark)), priority: 4, refColor: 0x5e3b22 },
+    attach(J.head, -0.18, 0.12, -0.03)
+);
 part({ name: 'hatDome', volume: hatDome, priority: 7, refColor: 0xf2c230 }, attach(J.head, 0, 0.12, 0));
-part({ name: 'hatBrim', volume: box(0.26, 0.05, 0.26, solid(M.HardHat, 1)), priority: 7, policy: 'coverage25', refColor: 0xf2c230 }, attach(J.head, 0, 0.135, 0.01));
+part(
+    {
+        name: 'hatBrim',
+        volume: box(0.26, 0.05, 0.26, solid(M.HardHat, 1)),
+        priority: 7,
+        policy: 'coverage25',
+        refColor: 0xf2c230
+    },
+    attach(J.head, 0, 0.135, 0.01)
+);
 part({ name: 'armL', volume: arm, priority: 2, refColor: 0x8a5a33 }, attach(J.shoulderL, 0, -0.15, 0));
 part({ name: 'armR', volume: arm, priority: 2, refColor: 0x8a5a33 }, attach(J.shoulderR, 0, -0.15, 0));
-part({ name: 'legL', volume: box(0.08, 0.15, 0.09, fur), priority: 2, refColor: 0x8a5a33 }, attach(J.hipL, 0, -0.16, 0));
-part({ name: 'legR', volume: box(0.08, 0.15, 0.09, fur), priority: 2, refColor: 0x8a5a33 }, attach(J.hipR, 0, -0.16, 0));
-part({ name: 'footL', volume: box(0.085, 0.045, 0.14, solid(M.FurDark)), priority: 3, refColor: 0x5e3b22 }, attach(J.hipL, 0, -0.295, 0.05));
-part({ name: 'footR', volume: box(0.085, 0.045, 0.14, solid(M.FurDark)), priority: 3, refColor: 0x5e3b22 }, attach(J.hipR, 0, -0.295, 0.05));
-part({ name: 'tail', volume: tail, priority: 1, policy: 'coverage25', refColor: 0x3e2e26 }, attach(J.tail, 0, 0, -0.24));
+part(
+    { name: 'legL', volume: box(0.08, 0.15, 0.09, fur), priority: 2, refColor: 0x8a5a33 },
+    attach(J.hipL, 0, -0.16, 0)
+);
+part(
+    { name: 'legR', volume: box(0.08, 0.15, 0.09, fur), priority: 2, refColor: 0x8a5a33 },
+    attach(J.hipR, 0, -0.16, 0)
+);
+part(
+    { name: 'footL', volume: box(0.085, 0.045, 0.14, solid(M.FurDark)), priority: 3, refColor: 0x5e3b22 },
+    attach(J.hipL, 0, -0.295, 0.05)
+);
+part(
+    { name: 'footR', volume: box(0.085, 0.045, 0.14, solid(M.FurDark)), priority: 3, refColor: 0x5e3b22 },
+    attach(J.hipR, 0, -0.295, 0.05)
+);
+part(
+    { name: 'tail', volume: tail, priority: 1, policy: 'coverage25', refColor: 0x3e2e26 },
+    attach(J.tail, 0, 0, -0.24)
+);
 
 const _root = pose();
 const _hand = pose(0, -0.34, 0.02);

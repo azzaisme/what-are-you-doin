@@ -7,7 +7,16 @@
  * shadow or reflection pass renders, so every pass sees the same completed voxel frame.
  */
 
-import { BoundingBox, Entity, Mesh, MeshInstance, PRIMITIVE_TRIANGLES, SHADERLANGUAGE_GLSL, StandardMaterial, Vec3 } from 'playcanvas';
+import {
+    BoundingBox,
+    Entity,
+    Mesh,
+    MeshInstance,
+    PRIMITIVE_TRIANGLES,
+    SHADERLANGUAGE_GLSL,
+    StandardMaterial,
+    Vec3
+} from 'playcanvas';
 import type { AppBase, Layer } from 'playcanvas';
 
 import { GRID_SIZE } from '../voxels/grid.ts';
@@ -126,9 +135,23 @@ export class VoxelRenderer {
             meshes.push(mesh);
             instances.push(mi);
         }
-        entity.addComponent('render', { meshInstances: instances, layers: [this.layer.id], castShadows: true, receiveShadows: true });
+        entity.addComponent('render', {
+            meshInstances: instances,
+            layers: [this.layer.id],
+            castShadows: true,
+            receiveShadows: true
+        });
         this.root.addChild(entity);
-        return { key: m.key, mode: m.mode, entity, meshes, instances, caps: new Array(SURFACE_CLASS_COUNT).fill(INITIAL_CAPACITY), quads: 0, triangles: 0 };
+        return {
+            key: m.key,
+            mode: m.mode,
+            entity,
+            meshes,
+            instances,
+            caps: new Array(SURFACE_CLASS_COUNT).fill(INITIAL_CAPACITY),
+            quads: 0,
+            triangles: 0
+        };
     }
 
     private upload(u: Unit, cls: number, b: ClassMesh): void {
@@ -164,7 +187,14 @@ export class VoxelRenderer {
         for (const u of this.dynUnits.values()) u.entity.enabled = v;
     }
 
-    totals(): { staticUnits: number; dynamicUnits: number; quads: number; quadsDynamic: number; triangles: number; drawables: number } {
+    totals(): {
+        staticUnits: number;
+        dynamicUnits: number;
+        quads: number;
+        quadsDynamic: number;
+        triangles: number;
+        drawables: number;
+    } {
         let quads = 0;
         let quadsDynamic = 0;
         let triangles = 0;
@@ -179,7 +209,14 @@ export class VoxelRenderer {
             triangles += u.triangles;
             for (const m of u.instances) if (m.visible) drawables++;
         }
-        return { staticUnits: this.staticUnits.size, dynamicUnits: this.dynUnits.size, quads: quads + quadsDynamic, quadsDynamic, triangles, drawables };
+        return {
+            staticUnits: this.staticUnits.size,
+            dynamicUnits: this.dynUnits.size,
+            quads: quads + quadsDynamic,
+            quadsDynamic,
+            triangles,
+            drawables
+        };
     }
 
     /** Render units must stay at the origin with identity rotation. */

@@ -27,7 +27,7 @@ Do not start Epic 3 or later. Do not rewrite working Epic 1 systems unless a tas
 
 - **Voxel size is a per-player quality setting, 5–10 cm, default 5 cm** (slider bottom-left,
   `#cell75` hash, saved in local storage, applied by reload). The design doc's fixed 10 cm is
-  superseded for *rendering*. Gameplay snapping (§2.4) is a separate grid and still 10 cm unless the
+  superseded for _rendering_. Gameplay snapping (§2.4) is a separate grid and still 10 cm unless the
   owner says otherwise. Below 5 cm was measured as infeasible (ADR 0007) — don't extend the range.
 - **Epic 1 approved** on 2026-11-20. The owner tests on an **Android phone (Adreno 840)**: 5 cm,
   High preset ran at ~60 fps (p95 19 ms), voxel worker 28 ms per frame, no skipped voxel frames.
@@ -62,11 +62,12 @@ On the owner's phone in portrait (canvas 768 × 1408), the bottom-left **Voxel s
 bottom of the **debug panel** stats, and the HUD title/help text is clipped behind the panel.
 
 Fix so that nothing overlaps in portrait or landscape, on phones and desktop:
+
 - narrow screens: collapse the debug panel to the bottom sheet or make it toggle full-height above
   the voxel box; wrap or shorten the HUD help; keep touch targets ≥ 40 px;
 - keep `H` (hide all UI) and the F3 / corner-chip toggle working.
-Verify with Playwright screenshots at 390 × 844, 768 × 1408 (DPR 1) and 1280 × 720 (add a test
-that checks the boxes' bounding rectangles do not intersect). Commit separately.
+  Verify with Playwright screenshots at 390 × 844, 768 × 1408 (DPR 1) and 1280 × 720 (add a test
+  that checks the boxes' bounding rectangles do not intersect). Commit separately.
 
 ## Task 2 — Epic 2: Physical sandbox (offline)
 
@@ -89,6 +90,7 @@ Scope, from `docs/GAME_DESIGN.md` §8 and §6.1:
 - Touch controls are not in scope unless the owner asks; keyboard/mouse first.
 
 **Gate** (report actual numbers, not estimates):
+
 - 10-minute interactive playground: responsive movement, held props never explode, stable fixed tick
   (record dropped ticks), no physics/render coupling;
 - a scripted, deterministic physics test that moves and drops an object and captures the voxel grid

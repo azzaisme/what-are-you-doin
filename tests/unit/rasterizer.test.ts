@@ -3,17 +3,21 @@ import { describe, expect, it } from 'vitest';
 import { GRID_SIZE, cellIndexY } from '../../src/voxels/grid.ts';
 import { DEG, pose, quatFromAxisAngle, quatFromYawPitchRoll } from '../../src/voxels/math.ts';
 import { M, voxel } from '../../src/voxels/palette.ts';
-import { SAMPLING_POLICIES, createRasterStats  } from '../../src/voxels/rasterizer.ts';
+import { SAMPLING_POLICIES, createRasterStats } from '../../src/voxels/rasterizer.ts';
 import type { SamplingPolicy } from '../../src/voxels/rasterizer.ts';
 import { box, cylinder, grain, solid } from '../../src/voxels/volumes.ts';
-import { VoxelWorld  } from '../../src/voxels/world.ts';
+import { VoxelWorld } from '../../src/voxels/world.ts';
 import type { PartInstance } from '../../src/voxels/world.ts';
 
 import { components, objectCellSet } from './helpers.ts';
 
 const STATS = createRasterStats();
 
-function rasterOnce(volume: PartInstance['volume'], p: ReturnType<typeof pose>, policy: SamplingPolicy = 'center'): { world: VoxelWorld; cells: Set<string> } {
+function rasterOnce(
+    volume: PartInstance['volume'],
+    p: ReturnType<typeof pose>,
+    policy: SamplingPolicy = 'center'
+): { world: VoxelWorld; cells: Set<string> } {
     const world = new VoxelWorld();
     world.addObject(1);
     world.rasterizeObject(1, [{ volume, pose: p, priority: 0 }], policy, STATS);
@@ -143,7 +147,7 @@ describe('thin geometry over a full turn (§5.4, §5.9)', () => {
                 expect(r.min).toBeGreaterThan(0);
             }
         }
-    });
+    }, 30_000); // full turns under four policies: ~5 s at 5 cm on the sandbox CPU
 
     it('coverage50 keeps the 10 cm thick plank in one piece for a full turn about a skew axis', () => {
         const r = fullTurn(plank, 'coverage50', [0.3, 1, 0.2]);
@@ -205,8 +209,18 @@ describe('overlapping objects (§5.9)', () => {
         const world = new VoxelWorld();
         world.addObject(7);
         world.addObject(3);
-        world.rasterizeObject(7, [{ volume: box(H, H, H, solid(M.TestOrange)), pose: pose(H, H, H), priority: 0 }], 'center', STATS);
-        world.rasterizeObject(3, [{ volume: box(H, H, H, solid(M.TestBlue)), pose: pose(H, H, H), priority: 0 }], 'center', STATS);
+        world.rasterizeObject(
+            7,
+            [{ volume: box(H, H, H, solid(M.TestOrange)), pose: pose(H, H, H), priority: 0 }],
+            'center',
+            STATS
+        );
+        world.rasterizeObject(
+            3,
+            [{ volume: box(H, H, H, solid(M.TestBlue)), pose: pose(H, H, H), priority: 0 }],
+            'center',
+            STATS
+        );
         world.resolve();
         expect(world.valueAt(0, 0, 0)).toBe(voxel(M.TestBlue));
     });

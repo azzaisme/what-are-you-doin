@@ -5,21 +5,22 @@
     "description": "A PlayCanvas TypeScript project",
     "type": "module",
     "scripts": {
-    "build": "vite build",
-    "build:publish": "vite build -c vite.publish.config.ts",
-    "check": "npm run typecheck && npm run lint && npm run test && npm run build",
-    "dev": "vite --open",
-    "fmt": "prettier --check .",
-    "fmt:fix": "prettier --write .",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
-    "start": "vite preview --open",
-    "test": "vitest run",
-    "test:e2e": "playwright test",
-    "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
-  },
+        "build": "vite build",
+        "build:publish": "vite build -c vite.publish.config.ts",
+        "check": "npm run typecheck && npm run lint && npm run test && npm run build",
+        "dev": "vite --open",
+        "fmt": "prettier --check .",
+        "fmt:fix": "prettier --write .",
+        "lint": "eslint .",
+        "lint:fix": "eslint . --fix",
+        "start": "vite preview --open",
+        "test": "vitest run",
+        "test:e2e": "playwright test",
+        "test:watch": "vitest",
+        "typecheck": "tsc --noEmit"
+    },
     "dependencies": {
+        "@dimforge/rapier3d-compat": "0.21.0",
         "playcanvas": "^2.24.1"
     },
     "devDependencies": {

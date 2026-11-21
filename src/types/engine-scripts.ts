@@ -20,6 +20,8 @@ export interface WaterApi extends Script {
     depthFade: number;
     opacity: number;
     foam: boolean;
+    rippleSpeed: number;
+    bumpiness: number;
 }
 
 export interface CameraControlsApi extends Script {

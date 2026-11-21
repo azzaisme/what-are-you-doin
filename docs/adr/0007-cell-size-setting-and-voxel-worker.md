@@ -3,11 +3,13 @@
 Status: accepted (owner request after gate 1) · Date: 2026-11-19
 
 ## Context
+
 After approving gate 1 at 10 cm, the owner asked for 5 cm voxels, then for the cell size to be a
 quality slider (asked range 0.5–10 cm). Rendering is never gameplay authority (design doc §4.2), so
 the reconstruction lattice can differ per player; gameplay snapping (§2.4) is a separate, fixed grid.
 
 ## Decision
+
 - `GRID_SIZE` is read once at startup from (in order): the value injected into the voxel worker,
   `UE_CELL_CM` (Node), a `#cellNN` hash (`#cell75` = 7.5 cm; works in sandboxed pages), local
   storage, default **5 cm**. Changing it saves and reloads, because many sizes derive from it at
@@ -29,6 +31,7 @@ the reconstruction lattice can differ per player; gameplay snapping (§2.4) is a
 - Unit tests are written in terms of the cell size and run at both 5 and 10 cm (Vitest projects).
 
 ## Consequences
+
 At 5 cm the worker needs ~50 ms (Node) / ~76 ms (browser, contended) per voxel frame on the sandbox
 CPU, so moving props update at roughly 13–20 Hz depending on the device; main-thread upload is a
 median 3.6 ms. Shown voxel frames lag the requested voxel time by about one worker round trip.

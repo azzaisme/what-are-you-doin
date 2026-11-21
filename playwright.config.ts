@@ -21,7 +21,20 @@ export default defineConfig({
         viewport: { width: 1280, height: 720 },
         launchOptions: {
             executablePath,
-            args: software ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'] : ['--ignore-gpu-blocklist', '--enable-webgl']
+            // background tabs keep rendering: the online co-op test runs a host and a guest page at once
+            args: [
+                ...(software
+                    ? [
+                          '--use-angle=swiftshader',
+                          '--enable-unsafe-swiftshader',
+                          '--ignore-gpu-blocklist',
+                          '--enable-webgl'
+                      ]
+                    : ['--ignore-gpu-blocklist', '--enable-webgl']),
+                '--disable-background-timer-throttling',
+                '--disable-renderer-backgrounding',
+                '--disable-backgrounding-occluded-windows'
+            ]
         }
     },
     webServer: {

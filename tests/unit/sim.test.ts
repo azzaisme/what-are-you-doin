@@ -1,11 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import { BEAVER_HEIGHT, BEAVER_WALK_AMOUNT, BEAVER_WALK_PHASE, beaverAsset } from '../../src/assets/beaver.ts';
 import { BUCKET_HANDLE_TOP } from '../../src/assets/props.ts';
 import { UTE_WHEEL_RADIUS, uteAsset } from '../../src/assets/ute.ts';
 import { PLATEAU_Y } from '../../src/levels/river-lab.ts';
 import { FixedStepClock, MAX_CATCHUP_STEPS, SIM_DT, VoxelClock } from '../../src/sim/clock.ts';
+import { neutralCommand } from '../../src/sim/commands.ts';
 import { LabSim } from '../../src/sim/lab-sim.ts';
+import { initPhysics } from '../../src/sim/physics/world.ts';
 import { ANIM_MAX, SnapshotRing, writeEntity } from '../../src/sim/snapshots.ts';
 import { GRID_SIZE } from '../../src/voxels/grid.ts';
 import { DEG, pose, quatFromYawPitchRoll } from '../../src/voxels/math.ts';
@@ -59,6 +61,8 @@ describe('snapshot interpolation', () => {
 });
 
 describe('lab simulation', () => {
+    beforeAll(() => initPhysics());
+
     it('is deterministic: seeking to the same tick twice gives identical states', () => {
         const a = new LabSim();
         const b = new LabSim();
@@ -79,13 +83,15 @@ describe('lab simulation', () => {
         const s = new LabSim();
         s.stressCount = 25;
         for (let n = 0; n < 60 * 120; n++) {
-            s.step({ seq: n, moveX: 0, moveZ: 0, sprint: false, jump: false, yaw: 0, pitch: 0, carry: false });
-            if (n % 97 === 0) for (const e of s.entities) expect(Number.isFinite(e.pose.p.x + e.pose.p.y + e.pose.p.z + e.pose.q.w)).toBe(true);
+            s.step(neutralCommand(n));
+            if (n % 97 === 0)
+                for (const e of s.entities)
+                    expect(Number.isFinite(e.pose.p.x + e.pose.p.y + e.pose.p.z + e.pose.q.w)).toBe(true);
         }
-    });
+    }, 120_000);
 
-    it('hangs the bucket below the beaver hand, above the ground', () => {
-        const s = new LabSim();
+    it('hangs the bucket below the beaver hand, above the ground (scripted props)', () => {
+        const s = new LabSim({ props: 'scripted' });
         for (const tick of [10, 200, 450, 700]) {
             s.runTo(tick);
             const bk = s.bucket.pose.p;
@@ -111,7 +117,10 @@ function rasterAsset(asset: typeof beaverAsset, root: ReturnType<typeof pose>, a
     );
     world.resolve();
     expect(stats.rejected).toBe(0);
-    const cells = [...world.objectCells(1).entries()].map(([k, v]) => ({ ...keyToCell(world, k), m: voxelMaterial(v) }));
+    const cells = [...world.objectCells(1).entries()].map(([k, v]) => ({
+        ...keyToCell(world, k),
+        m: voxelMaterial(v)
+    }));
     return cells;
 }
 
@@ -145,7 +154,13 @@ describe('beaver asset (§2.2, §3.2)', () => {
                 let right = 0;
                 for (const c of cells) {
                     if (c.m !== M.Eye) continue;
-                    const exposed = !has(c.i + 1, c.j, c.k) || !has(c.i - 1, c.j, c.k) || !has(c.i, c.j + 1, c.k) || !has(c.i, c.j - 1, c.k) || !has(c.i, c.j, c.k + 1) || !has(c.i, c.j, c.k - 1);
+                    const exposed =
+                        !has(c.i + 1, c.j, c.k) ||
+                        !has(c.i - 1, c.j, c.k) ||
+                        !has(c.i, c.j + 1, c.k) ||
+                        !has(c.i, c.j - 1, c.k) ||
+                        !has(c.i, c.j, c.k + 1) ||
+                        !has(c.i, c.j, c.k - 1);
                     if (!exposed) continue;
                     const cx = (c.i + 0.5) * GRID_SIZE - ox;
                     const cz = (c.k + 0.5) * GRID_SIZE - oz;
@@ -185,7 +200,12 @@ describe('ute asset (§2.7)', () => {
         expect(tyreTop - groundJ + 1).toBeLessThanOrEqual(Math.ceil((2 * UTE_WHEEL_RADIUS) / GRID_SIZE) + 1);
         anim[0] = 0.4; // wheel spin
         const b = rasterAsset(uteAsset, pose(0.05, PLATEAU_Y, 0.05), anim);
-        const sig = (cells: typeof a) => cells.filter((c) => c.m === M.Chrome || c.m === M.Tyre).map((c) => `${c.i},${c.j},${c.k},${c.m}`).sort().join('|');
+        const sig = (cells: typeof a) =>
+            cells
+                .filter((c) => c.m === M.Chrome || c.m === M.Tyre)
+                .map((c) => `${c.i},${c.j},${c.k},${c.m}`)
+                .sort()
+                .join('|');
         expect(sig(b)).not.toBe(sig(a));
     });
 });

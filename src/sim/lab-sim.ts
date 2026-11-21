@@ -1,59 +1,102 @@
 /**
- * The River Lab simulation: deterministic scripted motion for the test props (no physics yet -
- * Epic 2), plus a command-driven first-person walker and a spring-held plank for the first-person
- * comfort test. Runs only in fixed ticks and publishes snapshots; it never touches the renderer.
+ * The River Lab simulation (Epic 2): a Rapier physics world (static terrain, trees, rocks; dynamic
+ * props, a ragdoll dummy and stress bodies; kinematic colliders for the scripted beaver and ute) and
+ * a command-driven first-person character with grab / release / throw. The Epic 1 scripted prop
+ * motion stays available as a mode (`props: 'scripted'`) for visual comparisons.
  *
- * Commands are plain data (sequenced input), shaped so a network adapter can carry them later.
+ * Runs only in fixed ticks and publishes snapshots; it never touches the renderer, and nothing from
+ * the renderer or the voxel grid flows back in. Commands are plain sequenced data (commands.ts) and
+ * are sanitized before use, so a network adapter can carry them later.
+ *
+ * Rapier must be initialized (await initPhysics()) before constructing a LabSim.
  */
 
-import type { VoxelAsset } from '../assets/asset.ts';
-import { BEAVER_ANIM_CHANNELS, BEAVER_CARRY, BEAVER_HEAD_YAW, BEAVER_WALK_AMOUNT, BEAVER_WALK_PHASE, beaverAsset, beaverLeftHand } from '../assets/beaver.ts';
-import { BUCKET_HANDLE_TOP, LOG_RADIUS, bucketAsset, cubeAsset, logAsset, plankAsset, sphereAsset } from '../assets/props.ts';
-import { UTE_ANIM_CHANNELS, UTE_PITCH, UTE_ROLL, UTE_STEER, UTE_SUSPENSION, UTE_WHEELBASE_HALF, UTE_WHEEL_RADIUS, UTE_WHEEL_SPIN, uteAsset } from '../assets/ute.ts';
-import { BEAVER_LOOP, PLATEAU_Y, UTE_TRACK, groundSurfaceY, terrainHeight } from '../levels/river-lab.ts';
-import { composePose, pose, quatFromAxisAngle, quatFromYawPitchRoll, quatMul, quatRotate, quatSlerp, vec3  } from '../voxels/math.ts';
-import type { Pose } from '../voxels/math.ts';
-import { M } from '../voxels/palette.ts';
+import {
+    BEAVER_ANIM_CHANNELS,
+    BEAVER_CARRY,
+    BEAVER_HEAD_YAW,
+    BEAVER_WALK_AMOUNT,
+    BEAVER_WALK_PHASE,
+    beaverLeftHand
+} from '../assets/beaver.ts';
+import { BUCKET_HANDLE_TOP, LOG_RADIUS } from '../assets/props.ts';
+import {
+    UTE_ANIM_CHANNELS,
+    UTE_PITCH,
+    UTE_ROLL,
+    UTE_STEER,
+    UTE_SUSPENSION,
+    UTE_WHEELBASE_HALF,
+    UTE_WHEEL_RADIUS,
+    UTE_WHEEL_SPIN
+} from '../assets/ute.ts';
+import { windAt } from '../fx/wind.ts';
+import type { WindSample } from '../fx/wind.ts';
+import type { LevelDef } from '../levels/level.ts';
+import { BEAVER_LOOP, PLATEAU_Y, UTE_TRACK, groundSurfaceY, riverLabLevel } from '../levels/river-lab.ts';
+import {
+    composePose,
+    pose,
+    quatFromAxisAngle,
+    quatFromYawPitchRoll,
+    quatMul,
+    quatRotate,
+    quatSlerp,
+    vec3
+} from '../voxels/math.ts';
 
 import { SIM_DT } from './clock.ts';
+import {
+    ACTION_DROP,
+    ACTION_DROP_TEST,
+    ACTION_RAGDOLL,
+    ACTION_RESET_PROPS,
+    neutralCommand,
+    sanitizeCommand
+} from './commands.ts';
+import type { PlayerCommand } from './commands.ts';
+import { MAX_PLAYERS, MAX_STRESS, createLabEntities } from './lab-entities.ts';
+import type { SimEntity } from './lab-entities.ts';
+import { addDummy, addLabKinematics, buildLabPhysics, launchDummy, propBody, stressDef } from './lab-physics.ts';
+import { CHARACTER } from './physics/world.ts';
+import type { PhysicsWorld } from './physics/world.ts';
 import { ANIM_MAX, SnapshotRing, writeEntity } from './snapshots.ts';
 
-export interface SimEntity {
-    /** Stable identity, also the voxel object id. */
-    id: number;
-    name: string;
-    asset: VoxelAsset;
-    /** Cross-object overlap priority (higher wins). */
-    priority: number;
-    pose: Pose;
-    anim: Float64Array;
-    visible: boolean;
-    /** Index in snapshot buffers. */
-    slot: number;
-}
+export type { PlayerCommand, SimEntity };
+export { MAX_PLAYERS, MAX_STRESS };
+export type PropsMode = 'physics' | 'scripted';
 
-export interface PlayerCommand {
-    seq: number;
-    /** Desired move in player space: x right, z forward, each -1..1. */
-    moveX: number;
-    moveZ: number;
-    sprint: boolean;
-    jump: boolean;
-    /** Look yaw/pitch in radians (absolute, from the client's mouse look). */
-    yaw: number;
-    pitch: number;
-    carry: boolean;
-}
-
-export const MAX_STRESS = 25;
 export const EYE_HEIGHT = 1.22;
+/** Stress bodies get a deterministic upward kick this often (ticks), so 25 bodies keep moving. */
+export const STRESS_KICK_TICKS = 150;
+
+export interface LabSimOptions {
+    props?: PropsMode;
+    /** The level to simulate (default: the River Lab test scene). */
+    level?: LevelDef;
+}
+
+/** Something the player should be told (objective reached, fell in the creek, ...). */
+export interface SimEvent {
+    tick: number;
+    kind: 'goal' | 'fell' | 'recovered' | 'step';
+    text: string;
+}
 
 export class LabSim {
-    readonly entities: SimEntity[] = [];
+    readonly entities: SimEntity[];
     readonly ring: SnapshotRing;
     tick = 0;
     stressCount = 0;
     fpActive = false;
+    propsMode: PropsMode;
+    /** The Rapier world; rebuilt on reset so replays are deterministic. */
+    physics!: PhysicsWorld;
+    /** This tick's wind (zero in calm levels) and the largest wind force on a body (N). */
+    readonly wind: WindSample = { x: 0, z: 0, speed: 0, gustiness: 0 };
+    windForce = 0;
+    /** Wall time of the last fixed tick's physics work (ms), for the debug panel. */
+    physicsMs = 0;
 
     // scripted state
     private beaverDist = 0;
@@ -61,10 +104,20 @@ export class LabSim {
     private uteTheta = 0;
     private uteSpin = 0;
 
-    // player state
-    readonly player = { x: 0, y: 0.5, z: 6.5, vy: 0, yaw: 0, pitch: 0, grounded: true };
-    private lastCmd: PlayerCommand = { seq: 0, moveX: 0, moveZ: 0, sprint: false, jump: false, yaw: 0, pitch: 0, carry: false };
+    // player state (feet position; `eyeLift` smooths step-ups for the camera). Player 1 is `player`.
+    readonly players: PlayerState[] = Array.from({ length: MAX_PLAYERS }, (_, i) => newPlayerState(i * 1.2, 6.5));
+    readonly player = this.players[0];
+    /**
+     * Which slots play (slot 0 follows `fpActive`). Local split screen uses slot 1; networked guests
+     * take any free slot. Extra players are always in first person.
+     */
+    private readonly slotActive: boolean[] = Array.from({ length: MAX_PLAYERS }, () => false);
+    private readonly lastCmds: PlayerCommand[] = Array.from({ length: MAX_PLAYERS }, () => neutralCommand());
+    private lastCmd: PlayerCommand = neutralCommand();
     private heldInit = false;
+    private prevFp = false;
+    /** Ticks at which stress bodies were enabled (their kick schedule starts there). */
+    private readonly stressEnabled = new Int32Array(MAX_STRESS).fill(-1);
 
     readonly beaver: SimEntity;
     readonly bucket: SimEntity;
@@ -74,34 +127,63 @@ export class LabSim {
     readonly cube: SimEntity;
     readonly sphere: SimEntity;
     readonly held: SimEntity;
-    readonly stress: SimEntity[] = [];
+    readonly stress: SimEntity[];
+    readonly dummy: SimEntity[];
+    readonly extras: SimEntity[];
+    readonly windsock: SimEntity;
+    readonly avatars: SimEntity[];
+    readonly player2Entity: SimEntity;
+    /** Every player's eye entity, by slot. */
+    readonly eyes: SimEntity[];
+    readonly level: LevelDef;
+    /** Level progress (rules): the objective, once reached, stays reached until reset. */
+    readonly progress = { goalReached: false, goalTick: -1, falls: 0, recoveries: 0, step: 0 };
+    private lookAccum = 0;
+    private lastLookYaw: number | null = null;
+    private jumped = false;
+    /** Events since reset, newest last (the client shows them as toasts). */
+    readonly events: SimEvent[] = [];
+    private lostTicks = 0;
+    private goalTicks = 0;
     /** Not voxelized: carries the walker's pose through the snapshot ring for interpolation. */
     readonly playerEntity: SimEntity;
 
-    constructor() {
-        this.beaver = this.add(1, 'beaver', beaverAsset, 3);
-        this.bucket = this.add(2, 'bucket', bucketAsset(), 4);
-        this.ute = this.add(3, 'ute', uteAsset, 2);
-        this.plank = this.add(4, 'plank', plankAsset(), 1);
-        this.log = this.add(5, 'log', logAsset(), 1);
-        this.cube = this.add(6, 'cube', cubeAsset(), 1);
-        this.sphere = this.add(7, 'sphere', sphereAsset(), 1);
-        this.held = this.add(8, 'held-plank', plankAsset('held-plank'), 5);
-        for (let n = 0; n < MAX_STRESS; n++) {
-            const kind = n % 3;
-            const asset = kind === 0 ? plankAsset(`stress-plank-${n}`) : kind === 1 ? cubeAsset(0.4, n % 2 ? M.TestBlue : M.TestOrange) : logAsset();
-            this.stress.push(this.add(100 + n, `stress-${n}`, asset, 0));
+    constructor(opts: LabSimOptions = {}) {
+        this.level = opts.level ?? riverLabLevel;
+        this.propsMode = this.level.scriptedProps ? (opts.props ?? 'physics') : 'physics';
+        const c = createLabEntities();
+        this.entities = c.entities;
+        this.beaver = c.beaver;
+        this.bucket = c.bucket;
+        this.ute = c.ute;
+        this.plank = c.plank;
+        this.log = c.log;
+        this.cube = c.cube;
+        this.sphere = c.sphere;
+        this.held = c.held;
+        this.stress = c.stress;
+        this.dummy = c.dummy;
+        this.extras = c.extras;
+        this.windsock = c.windsock;
+        this.avatars = c.avatars;
+        this.playerEntity = c.player;
+        this.player2Entity = c.player2;
+        this.eyes = c.eyes;
+        const sp = this.level.spawn;
+        this.player.x = sp.x;
+        this.player.z = sp.z;
+        this.player.y = this.level.terrainHeight(sp.x, sp.z);
+        this.player.yaw = sp.yaw;
+        for (let i = 1; i < MAX_PLAYERS; i++) {
+            const pi = this.players[i];
+            // a row to player 1's right
+            pi.x = sp.x + Math.cos(sp.yaw) * 1.2 * i;
+            pi.z = sp.z - Math.sin(sp.yaw) * 1.2 * i;
+            pi.y = this.level.terrainHeight(pi.x, pi.z);
+            pi.yaw = sp.yaw;
         }
-        this.playerEntity = this.add(900, 'player', EMPTY_ASSET, 0);
         this.ring = new SnapshotRing(this.entities.length, 32);
         this.reset();
-    }
-
-    private add(id: number, name: string, asset: VoxelAsset, priority: number): SimEntity {
-        if (asset.animChannels > ANIM_MAX) throw new Error(`${name}: too many animation channels`);
-        const e: SimEntity = { id, name, asset, priority, pose: pose(), anim: new Float64Array(ANIM_MAX), visible: true, slot: this.entities.length };
-        this.entities.push(e);
-        return e;
     }
 
     reset(): void {
@@ -111,27 +193,153 @@ export class LabSim {
         this.uteTheta = 0;
         this.uteSpin = 0;
         this.heldInit = false;
+        this.player.prevCarry = false;
+        this.stressEnabled.fill(-1);
+        Object.assign(this.progress, { goalReached: false, goalTick: -1, falls: 0, recoveries: 0, step: 0 });
+        this.lookAccum = 0;
+        this.lastLookYaw = null;
+        this.jumped = false;
+        this.events.length = 0;
+        this.lostTicks = this.goalTicks = 0;
+        for (const pl of this.players) {
+            pl.fallTicks = 0;
+            pl.safe.valid = false;
+        }
         this.ring.clear();
         this.evaluate();
+        this.buildPhysics();
+        this.readPhysics();
         this.publish();
+    }
+
+    /** Switches between physics props and the Epic 1 scripted props (resets the scene). */
+    setPropsMode(mode: PropsMode): void {
+        if (mode === this.propsMode || !this.level.scriptedProps) return;
+        this.propsMode = mode;
+        this.reset();
+    }
+
+    get physicsProps(): boolean {
+        return this.propsMode === 'physics';
+    }
+
+    /** Physics-driven props (everything dynamic), in a fixed order. */
+    private get propEntities(): SimEntity[] {
+        return [
+            this.plank,
+            this.log,
+            this.cube,
+            this.sphere,
+            this.bucket,
+            this.held,
+            ...this.extras,
+            ...this.stress,
+            ...this.dummy
+        ];
+    }
+
+    private buildPhysics(): void {
+        this.physics?.free();
+        const pw = buildLabPhysics(this.level);
+        addLabKinematics(pw, this.beaver.id, this.ute.id, this.beaver.pose, this.ute.pose);
+        if (this.physicsProps) {
+            // the level places its props by entity name; entities it does not place stay hidden
+            for (const placement of this.level.props) {
+                const e = this.entities.find((x) => x.name === placement.name);
+                const body = propBody(placement.name);
+                if (e && body) pw.addDynamic(e.id, body.shape, placement.pose, body.opts);
+            }
+            pw.setEnabled(this.held.id, false);
+            for (const e of [this.plank, this.log, this.cube, this.sphere, this.bucket, ...this.extras])
+                if (!pw.bodies.has(e.id)) e.visible = false;
+            for (let n = 0; n < this.stress.length; n++) {
+                const d = stressDef(this.level, this.stress[n].id, n);
+                pw.addDynamic(d.id, d.shape, d.spawn, d.opts);
+                pw.setEnabled(d.id, false);
+            }
+            addDummy(
+                pw,
+                this.dummy.map((e) => e.id)
+            );
+        }
+        this.players.forEach((pl, i) => pw.createCharacter(pl.x, pl.y, pl.z, i));
+        pw.setCharacterEnabled(this.fpActive, 0);
+        for (let i = 1; i < MAX_PLAYERS; i++) pw.setCharacterEnabled(this.slotActive[i], i);
+        this.physics = pw;
     }
 
     /** Runs the simulation up to (at least) a tick, for deterministic seeking. */
     runTo(tick: number): void {
         if (tick < this.tick) this.reset();
-        while (this.tick < tick) this.step(this.lastCmd);
+        // replay holds the look and carry state but repeats no edge-triggered request
+        const c = this.lastCmd;
+        const others = this.lastCmds.slice(1).map((x) => neutralCommand(x.seq, x.yaw, x.pitch));
+        while (this.tick < tick)
+            this.step({ ...neutralCommand(c.seq, c.yaw, c.pitch), carry: c.carry }, others[0], others.slice(1));
     }
 
-    step(cmd: PlayerCommand): void {
+    /**
+     * One fixed tick. `input2` is slot 1's command, `rest` slots 2.. (each ignored when its slot is
+     * not playing; a missing command means "no input, keep looking the same way").
+     */
+    step(input: PlayerCommand, input2?: PlayerCommand, rest: (PlayerCommand | undefined)[] = []): void {
+        const cmds: PlayerCommand[] = [sanitizeCommand(input)];
+        for (let i = 1; i < MAX_PLAYERS; i++) {
+            const raw = i === 1 ? input2 : rest[i - 2];
+            const p = this.players[i];
+            cmds.push(sanitizeCommand(raw ?? neutralCommand(0, p.yaw, p.pitch)));
+        }
+        const cmd = cmds[0];
         this.lastCmd = cmd;
+        for (let i = 1; i < MAX_PLAYERS; i++) {
+            this.lastCmds[i] = cmds[i];
+            this.players[i].yaw = cmds[i].yaw;
+            this.players[i].pitch = cmds[i].pitch;
+        }
         this.tick++;
         this.integrate(cmd);
         this.evaluate();
+        this.stepPhysics(cmds);
         this.publish();
     }
 
-    get time(): number {
-        return this.tick * SIM_DT;
+    /** Number of players playing (slot 0 counts when in first person). */
+    get playerCount(): number {
+        let n = 1;
+        for (let i = 1; i < MAX_PLAYERS; i++) if (this.slotActive[i]) n++;
+        return n;
+    }
+
+    isSlotActive(i: number): boolean {
+        return i === 0 ? this.fpActive : !!this.slotActive[i];
+    }
+
+    /** First free slot (1..), or -1. */
+    freeSlot(): number {
+        for (let i = 1; i < MAX_PLAYERS; i++) if (!this.slotActive[i]) return i;
+        return -1;
+    }
+
+    /** Starts or stops a player slot (1..); a starting player appears beside player 1. */
+    setSlotActive(i: number, active: boolean): void {
+        if (i < 1 || i >= MAX_PLAYERS || this.slotActive[i] === active) return;
+        this.slotActive[i] = active;
+        const pw = this.physics;
+        if (active) {
+            const p1 = this.player;
+            const pi = this.players[i];
+            this.placePlayer(p1.x + Math.cos(p1.yaw) * 1.2 * i, p1.z - Math.sin(p1.yaw) * 1.2 * i, p1.yaw, i);
+            pi.pitch = p1.pitch;
+            pi.walkDist = 0;
+            pw.setCharacterEnabled(true, i);
+        } else {
+            pw.setCharacterEnabled(false, i);
+        }
+    }
+
+    /** Local split screen: 1 or 2 players (slot 1 on or off). */
+    setPlayerCount(n: number): void {
+        this.setSlotActive(1, n >= 2);
     }
 
     // ------------------------------------------------------------------------------- integrate
@@ -152,46 +360,310 @@ export class LabSim {
         this.uteTheta += (v / dpdtheta) * dt;
         this.uteSpin += (v / UTE_WHEEL_RADIUS) * dt;
 
-        // first-person walker (camera control for Epic 1; not physics)
-        const p = this.player;
-        p.yaw = cmd.yaw;
-        p.pitch = cmd.pitch;
-        if (this.fpActive) {
-            const run = cmd.sprint ? 4.2 : 2.2;
-            let mx = cmd.moveX;
-            let mz = cmd.moveZ;
-            const len = Math.hypot(mx, mz);
-            if (len > 1) {
-                mx /= len;
-                mz /= len;
+        this.player.yaw = cmd.yaw;
+        this.player.pitch = cmd.pitch;
+    }
+
+    private stepPhysics(cmds: PlayerCommand[]): void {
+        const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        const pw = this.physics;
+        const cmd = cmds[0];
+        // kinematic colliders follow this tick's scripted poses
+        pw.setKinematicTarget(this.beaver.id, this.beaver.pose);
+        pw.setKinematicTarget(this.ute.id, this.ute.pose);
+
+        if (this.fpActive !== this.prevFp) {
+            pw.setCharacterEnabled(this.fpActive, 0);
+            if (!this.fpActive) this.player.prevCarry = false;
+            this.prevFp = this.fpActive;
+        }
+        for (let i = 0; i < this.players.length; i++) {
+            if (this.playerActive(i)) this.stepPlayer(i, cmds[i]);
+        }
+
+        if (this.physicsProps) {
+            if (cmd.action === ACTION_RAGDOLL) this.launchRagdoll();
+            else if (cmd.action === ACTION_DROP_TEST) this.dropTest();
+            else if (cmd.action === ACTION_RESET_PROPS) for (const e of this.propEntities) pw.respawn(e.id);
+            this.updateStress();
+        }
+
+        if (this.level.wind && this.physicsProps) {
+            windAt(this.tick * SIM_DT, this.level.wind, this.wind);
+            this.windForce = pw.applyWind(this.wind.x, this.wind.z, SIM_DT);
+        }
+        pw.step();
+        this.readPhysics();
+        this.applyRules();
+        const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        this.physicsMs = t1 - t0;
+    }
+
+    private playerActive(i: number): boolean {
+        return this.isSlotActive(i);
+    }
+
+    /** Movement, carry, grab, throw for one player (first person). */
+    private stepPlayer(i: number, cmd: PlayerCommand): void {
+        const pw = this.physics;
+        const p = this.players[i];
+        const run = cmd.sprint ? CHARACTER.run : CHARACTER.walk;
+        let mx = cmd.moveX;
+        let mz = cmd.moveZ;
+        const len = Math.hypot(mx, mz);
+        if (len > 1) {
+            mx /= len;
+            mz /= len;
+        }
+        // camera looks along -Z at yaw 0 (engine convention); forward = (-sin yaw, -cos yaw)
+        const fx = -Math.sin(p.yaw);
+        const fz = -Math.cos(p.yaw);
+        const rx = Math.cos(p.yaw);
+        const rz = -Math.sin(p.yaw);
+        pw.moveCharacter((fx * mz + rx * mx) * run, (fz * mz + rz * mx) * run, cmd.jump, i);
+        const c = pw.rig(i)!.state;
+        // smooth step-ups (and only step-ups) for the camera
+        const dy = c.y - p.y;
+        p.eyeLift = c.grounded && dy > 0.04 && dy < CHARACTER.stepHeight + 0.05 ? p.eyeLift - dy : p.eyeLift;
+        p.eyeLift *= Math.exp(-SIM_DT * 14);
+        if (Math.abs(p.eyeLift) < 1e-4) p.eyeLift = 0;
+        p.walkDist += Math.hypot(c.x - p.x, c.z - p.z);
+        p.speed = Math.hypot(c.vx, c.vz);
+        p.x = c.x;
+        p.y = c.y;
+        p.z = c.z;
+        p.vy = c.vy;
+        p.grounded = c.grounded;
+
+        if (!this.physicsProps) return;
+        // carry (G, player 1): the rising edge puts the carry plank in your grip, the falling edge drops it
+        if (i === 0) {
+            if (cmd.carry && !p.prevCarry) this.summonCarryPlank();
+            else if (!cmd.carry && p.prevCarry && pw.heldIdOf(0) === this.held.id) pw.release(0);
+            p.prevCarry = cmd.carry;
+        }
+        if (cmd.reach) pw.adjustHold(cmd.reach, i);
+        const eye = { x: p.x, y: p.y + EYE_HEIGHT, z: p.z };
+        if (cmd.action === ACTION_DROP) pw.release(i);
+        if (cmd.throw) pw.throwHeld(cmd.yaw, cmd.pitch, i);
+        else if (cmd.grab) {
+            if (pw.heldIdOf(i) >= 0) pw.release(i);
+            else pw.tryGrab(eye, cmd.yaw, cmd.pitch, i);
+        }
+        pw.applyGrab(eye, cmd.yaw, cmd.pitch, i);
+    }
+
+    /**
+     * Level rules, once per tick after the physics step: the objective (bucket resting in the goal
+     * area), falling into the creek (put back on the last safe ground), and losing the bucket in the
+     * creek (it returns to its start). Pure sim state; the client only reads `events`.
+     */
+    private applyRules(): void {
+        const rules = this.level.rules;
+        if (!rules || !this.physicsProps) return;
+        const pw = this.physics;
+        for (let i = 0; i < this.players.length; i++) {
+            if (!this.playerActive(i)) continue;
+            const p = this.players[i];
+            if (p.grounded && p.y > rules.fallY + 0.3 && rules.isSafe(p.x, p.z)) {
+                p.safe.x = p.x;
+                p.safe.z = p.z;
+                p.safe.valid = true;
             }
-            // camera looks along -Z at yaw 0 (engine convention); forward = (-sin yaw, -cos yaw)
+            p.fallTicks = p.y < rules.fallY ? p.fallTicks + 1 : 0;
+            if (p.fallTicks > 45) {
+                p.fallTicks = 0;
+                this.progress.falls++;
+                const sp = p.safe.valid ? p.safe : { x: this.level.spawn.x + i * 1.2, z: this.level.spawn.z };
+                this.placePlayer(sp.x, sp.z, p.yaw, i);
+                const who = this.playerCount > 1 ? `Player ${i + 1}: splash!` : 'Splash!';
+                this.events.push({
+                    tick: this.tick,
+                    kind: 'fell',
+                    text: `${who} Fished out and put back on the bank.`
+                });
+            }
+        }
+        const bk = this.bucket;
+        const body = pw.bodies.get(bk.id);
+        if (!body) {
+            this.applySteps(rules);
+            return;
+        }
+        // essential item: lost in the creek for 1.5 s -> back on its stump
+        this.lostTicks = bk.pose.p.y < rules.lostY && pw.holders(bk.id) === 0 ? this.lostTicks + 1 : 0;
+        if (this.lostTicks > 90) {
+            this.lostTicks = 0;
+            this.progress.recoveries++;
+            pw.respawn(bk.id);
+            this.events.push({
+                tick: this.tick,
+                kind: 'recovered',
+                text: 'The bucket floated off. A spare one is back on the stump.'
+            });
+        }
+        if (!this.progress.goalReached) {
+            const g = rules.goal;
+            const v = body.body.linvel();
+            const inside = bk.pose.p.x > g.minX && bk.pose.p.x < g.maxX && bk.pose.p.z > g.minZ && bk.pose.p.z < g.maxZ;
+            const resting = Math.hypot(v.x, v.y, v.z) < 0.4 && pw.holders(bk.id) === 0;
+            this.goalTicks = inside && resting ? this.goalTicks + 1 : 0;
+            if (this.goalTicks > 30) {
+                this.progress.goalReached = true;
+                this.progress.goalTick = this.tick;
+                const steps = rules.steps;
+                this.events.push({
+                    tick: this.tick,
+                    kind: 'goal',
+                    text: steps ? 'Bucket delivered!' : 'Bucket delivered across the creek!'
+                });
+            }
+        }
+        this.applySteps(rules);
+    }
+
+    /** The current tutorial step's text ("" when the level has none or all are done). */
+    get stepText(): string {
+        const steps = this.level.rules?.steps;
+        if (!steps || this.progress.step >= steps.length) return '';
+        return steps[this.progress.step].text;
+    }
+
+    /** Tutorial steps, in order, judged on player 1 (and any player for reach/jump/grab). */
+    private applySteps(rules: NonNullable<LevelDef['rules']>): void {
+        const steps = rules.steps;
+        if (!steps || this.progress.step >= steps.length) return;
+        const p = this.player;
+        if (this.fpActive) {
+            if (this.lastLookYaw !== null) this.lookAccum += Math.abs(p.yaw - this.lastLookYaw) + 0;
+            this.lastLookYaw = p.yaw;
+            if (!p.grounded && p.y > this.level.terrainHeight(p.x, p.z) + 0.35) this.jumped = true;
+        }
+        const st = steps[this.progress.step];
+        const inRect = (r: { minX: number; maxX: number; minZ: number; maxZ: number }, x: number, z: number) =>
+            x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ;
+        const anyPlayer = (f: (i: number) => boolean) => this.players.some((_, i) => this.playerActive(i) && f(i));
+        let done = false;
+        switch (st.kind) {
+            case 'look':
+                done = this.lookAccum > 1.2;
+                break;
+            case 'reach':
+                done = anyPlayer((i) => inRect(st.rect, this.players[i].x, this.players[i].z));
+                break;
+            case 'jump':
+                done = this.jumped;
+                break;
+            case 'grab': {
+                const want = st.entity ? this.entities.find((e) => e.name === st.entity)?.id : undefined;
+                done = anyPlayer((i) => {
+                    const h = this.physics.heldIdOf(i);
+                    return h >= 0 && (want === undefined || h === want);
+                });
+                break;
+            }
+            case 'place': {
+                const e = this.entities.find((x) => x.name === st.entity);
+                const b = e ? this.physics.bodies.get(e.id) : undefined;
+                if (e && b) {
+                    const v = b.body.linvel();
+                    done =
+                        inRect(st.rect, e.pose.p.x, e.pose.p.z) &&
+                        Math.hypot(v.x, v.y, v.z) < 0.5 &&
+                        this.physics.holders(e.id) === 0;
+                }
+                break;
+            }
+            case 'goal':
+                done = this.progress.goalReached;
+                break;
+        }
+        if (!done) return;
+        this.progress.step++;
+        const last = this.progress.step >= steps.length;
+        this.events.push({
+            tick: this.tick,
+            kind: last ? 'goal' : 'step',
+            text: last ? 'Tutorial complete! Now try the Timber Yard.' : `✓ ${st.text.replace(/\.$/, '')}`
+        });
+        this.jumped = false;
+    }
+
+    /** Copies dynamic body poses into their entities (physics props mode). */
+    private readPhysics(): void {
+        if (!this.physicsProps) return;
+        const pw = this.physics;
+        for (const e of this.propEntities) {
+            const b = pw.bodies.get(e.id);
+            if (!b) {
+                e.visible = false;
+                continue;
+            }
+            e.visible = b.enabled;
+            if (b.enabled) pw.readPose(e.id, e.pose);
+        }
+    }
+
+    private summonCarryPlank(): void {
+        const pw = this.physics;
+        const p = this.player;
+        const eyeY = p.y + EYE_HEIGHT;
+        // across the body, 1.3 m ahead and 0.45 m below the eye
+        const fx = -Math.sin(p.yaw);
+        const fz = -Math.cos(p.yaw);
+        const q = quatFromYawPitchRoll(p.yaw, Math.PI / 2, 0);
+        const at = pose(p.x + fx * 1.3, eyeY - 0.45, p.z + fz * 1.3, q);
+        pw.setEnabled(this.held.id, true);
+        pw.place(this.held.id, at);
+        pw.grabById(this.held.id, at.p, Math.hypot(1.3, 0.45));
+    }
+
+    private launchRagdoll(): void {
+        const p = this.player;
+        const ids = this.dummy.map((e) => e.id);
+        if (this.fpActive) {
             const fx = -Math.sin(p.yaw);
             const fz = -Math.cos(p.yaw);
-            const rx = Math.cos(p.yaw);
-            const rz = -Math.sin(p.yaw);
-            p.x += (fx * mz + rx * mx) * run * dt;
-            p.z += (fz * mz + rz * mx) * run * dt;
-            p.x = Math.max(-26, Math.min(26, p.x));
-            p.z = Math.max(-20, Math.min(13, p.z));
-            const ground = Math.max(terrainHeight(p.x, p.z), -0.62);
-            if (p.grounded && cmd.jump) {
-                p.vy = 4.2;
-                p.grounded = false;
+            launchDummy(this.physics, ids, p.x + fx * 1.6, p.y + 0.6, p.z + fz * 1.6, p.yaw, 6);
+        } else {
+            // from the near bank towards the river
+            launchDummy(this.physics, ids, 0.5, 2.2, 5.2, 0, 5);
+        }
+    }
+
+    /**
+     * Scripted, deterministic drop test: the main plank is placed 2.5 m above the near bank with a
+     * fixed tilt and spin and released. Used by the debug panel and by the drop test in tests/.
+     */
+    dropTest(): void {
+        const x = 0.6;
+        const z = 3.6;
+        const at = pose(x, this.level.terrainHeight(x, z) + 2.5, z, quatFromYawPitchRoll(0.4, 0.6, 0.2));
+        this.physics.setEnabled(this.plank.id, true);
+        this.physics.place(this.plank.id, at, { x: 0, y: 0, z: 0 }, { x: 1.5, y: 3.0, z: 0.8 });
+    }
+
+    private updateStress(): void {
+        const pw = this.physics;
+        for (let n = 0; n < this.stress.length; n++) {
+            const e = this.stress[n];
+            const on = n < this.stressCount;
+            const was = this.stressEnabled[n] >= 0;
+            if (on && !was) {
+                pw.setEnabled(e.id, true);
+                pw.respawn(e.id);
+                this.stressEnabled[n] = this.tick;
+            } else if (!on && was) {
+                pw.setEnabled(e.id, false);
+                this.stressEnabled[n] = -1;
             }
-            p.vy -= 12 * dt;
-            p.y += p.vy * dt;
-            if (p.y <= ground) {
-                // step-up is smoothed so stepped terrain does not jolt the camera
-                p.y = p.grounded ? p.y + (ground - p.y) * Math.min(1, dt * 14) : ground;
-                if (ground - p.y < 0.01) p.y = ground;
-                p.vy = 0;
-                p.grounded = true;
-            } else if (p.grounded && p.y - ground < 0.35) {
-                p.y += (ground - p.y) * Math.min(1, dt * 14);
-                p.vy = 0;
-            } else {
-                p.grounded = false;
+            // a deterministic fountain keeps every stress body moving (for the 25-body measurement)
+            if (on && (this.tick - this.stressEnabled[n]) % STRESS_KICK_TICKS === STRESS_KICK_TICKS - 1) {
+                const b = pw.bodies.get(e.id)!.body;
+                const m = b.mass();
+                const a = n * 2.399;
+                b.applyImpulse({ x: Math.cos(a) * m * 1.2, y: m * 5.5, z: Math.sin(a) * m * 1.2 }, true);
+                b.applyTorqueImpulse({ x: m * 0.05, y: m * 0.08 * (n % 2 ? 1 : -1), z: 0 }, true);
             }
         }
     }
@@ -201,8 +673,33 @@ export class LabSim {
     private evaluate(): void {
         const t = this.tick * SIM_DT;
 
+        const actors = this.level.actors;
+        if (actors.beaver.mode === 'none') {
+            const b = this.beaver;
+            b.visible = false;
+            b.pose.p.x = 0;
+            b.pose.p.y = -100;
+            b.pose.p.z = 0;
+        }
+        if (actors.beaver.mode === 'idle') {
+            // a co-worker standing about, looking around
+            const b = this.beaver;
+            const ip = actors.beaver.pose;
+            b.pose.p.x = ip.p.x;
+            b.pose.p.y = ip.p.y;
+            b.pose.p.z = ip.p.z;
+            b.pose.q.x = ip.q.x;
+            b.pose.q.y = ip.q.y;
+            b.pose.q.z = ip.q.z;
+            b.pose.q.w = ip.q.w;
+            b.anim[BEAVER_WALK_PHASE] = 0;
+            b.anim[BEAVER_WALK_AMOUNT] = 0;
+            b.anim[BEAVER_CARRY] = 0;
+            b.anim[BEAVER_HEAD_YAW] = 0.6 * Math.sin(t * 0.45) + 0.15 * Math.sin(t * 1.3);
+            b.visible = true;
+        }
         // ---- beaver + bucket
-        {
+        if (actors.beaver.mode === 'loop') {
             const b = this.beaver;
             const th = this.beaverTheta;
             const x = BEAVER_LOOP.cx + BEAVER_LOOP.r * Math.cos(th);
@@ -216,9 +713,17 @@ export class LabSim {
             const amount = beaverWalkAmount(t);
             b.anim[BEAVER_WALK_PHASE] = (this.beaverDist / 0.95) * Math.PI * 2;
             b.anim[BEAVER_WALK_AMOUNT] = amount;
-            b.anim[BEAVER_CARRY] = 1;
+            // physics mode: the bucket is a free physics prop, so the beaver walks empty-handed
+            b.anim[BEAVER_CARRY] = this.physicsProps ? 0 : 1;
             b.anim[BEAVER_HEAD_YAW] = (1 - amount) * 0.55 * Math.sin(t * 1.7);
             b.visible = true;
+        }
+        if (!this.physicsProps && actors.beaver.mode === 'loop') {
+            const b = this.beaver;
+            const th = this.beaverTheta;
+            const dx = -Math.sin(th);
+            const dz = Math.cos(th);
+            const amount = beaverWalkAmount(t);
 
             const hand = beaverLeftHand(b.pose, b.anim, _hand);
             const swing = 0.16 * amount * Math.sin(b.anim[BEAVER_WALK_PHASE] + 0.9) + 0.03 * Math.sin(t * 2.3);
@@ -237,6 +742,51 @@ export class LabSim {
             bk.visible = true;
         }
 
+        this.evaluateUte(t);
+        this.evaluateWindsock(t);
+        if (!this.physicsProps) this.evaluateScriptedProps(t);
+    }
+
+    /** The windsock turns downwind and lifts with the wind speed (limp when calm). */
+    private evaluateWindsock(t: number): void {
+        const ws = this.windsock;
+        const spot = this.level.windsock;
+        ws.visible = !!spot && !!this.level.wind;
+        if (!spot || !this.level.wind) return;
+        const w = windAt(t, this.level.wind, _windTmp);
+        const a = Math.atan2(w.z, w.x) + 0.06 * Math.sin(t * 5.3) * w.gustiness;
+        const droop = (1 - Math.min(1, w.speed / 5.5)) * 1.15 + 0.04 * Math.sin(t * 7.1);
+        ws.pose.p.x = spot.x;
+        ws.pose.p.y = this.level.terrainHeight(spot.x, spot.z) + spot.height;
+        ws.pose.p.z = spot.z;
+        // +X points downwind (a rotation of -a about Y), then the tip droops (about local Z)
+        quatFromAxisAngle(0, 1, 0, -a, _q);
+        quatFromAxisAngle(0, 0, 1, -droop, _q2);
+        quatMul(_q, _q2, ws.pose.q);
+    }
+
+    private evaluateUte(t: number): void {
+        const ute = this.level.actors.ute;
+        if (ute.mode === 'none') {
+            this.ute.visible = false;
+            this.ute.pose.p.x = 0;
+            this.ute.pose.p.y = -100;
+            this.ute.pose.p.z = 0;
+            return;
+        }
+        if (ute.mode === 'parked') {
+            const u = this.ute;
+            u.pose.p.x = ute.pose.p.x;
+            u.pose.p.y = ute.pose.p.y;
+            u.pose.p.z = ute.pose.p.z;
+            u.pose.q.x = ute.pose.q.x;
+            u.pose.q.y = ute.pose.q.y;
+            u.pose.q.z = ute.pose.q.z;
+            u.pose.q.w = ute.pose.q.w;
+            for (const c of [UTE_WHEEL_SPIN, UTE_STEER, UTE_SUSPENSION, UTE_PITCH, UTE_ROLL]) u.anim[c] = 0;
+            u.visible = true;
+            return;
+        }
         // ---- ute on its oval
         {
             const u = this.ute;
@@ -262,7 +812,10 @@ export class LabSim {
             u.anim[UTE_ROLL] = Math.max(-0.07, Math.min(0.07, -curvature * v * v * 0.035));
             u.visible = true;
         }
+    }
 
+    /** Epic 1 scripted motion for the props (the `scripted` comparison mode). */
+    private evaluateScriptedProps(t: number): void {
         // ---- plank: a hovering specimen, translating and continuously rotating
         {
             const p = this.plank;
@@ -373,11 +926,31 @@ export class LabSim {
     }
 
     private publishPlayer(): void {
-        const e = this.playerEntity;
-        e.pose.p.x = this.player.x;
-        e.pose.p.y = this.player.y + EYE_HEIGHT;
-        e.pose.p.z = this.player.z;
-        e.visible = this.fpActive;
+        const eyes = this.eyes;
+        const many = this.playerCount > 1;
+        for (let i = 0; i < MAX_PLAYERS; i++) {
+            const p = this.players[i];
+            const e = eyes[i];
+            e.pose.p.x = p.x;
+            e.pose.p.y = p.y + p.eyeLift + EYE_HEIGHT;
+            e.pose.p.z = p.z;
+            e.visible = this.playerActive(i);
+            // voxel beaver bodies: seen by the other player (and your own feet when you look down;
+            // from inside your own head every face points away, so it never blocks your view)
+            const a = this.avatars[i];
+            a.visible = many && this.playerActive(i);
+            if (!a.visible) continue;
+            a.pose.p.x = p.x;
+            a.pose.p.y = p.y;
+            a.pose.p.z = p.z;
+            // the beaver faces +Z at yaw 0, the camera -Z
+            quatFromYawPitchRoll(p.yaw + Math.PI, 0, 0, a.pose.q);
+            const walk = Math.min(1, p.speed / CHARACTER.walk);
+            a.anim[BEAVER_WALK_PHASE] = (p.walkDist / 0.95) * Math.PI * 2;
+            a.anim[BEAVER_WALK_AMOUNT] = p.grounded ? walk : 0.3;
+            a.anim[BEAVER_CARRY] = this.physics.heldIdOf(i) >= 0 ? 1 : 0;
+            a.anim[BEAVER_HEAD_YAW] = 0;
+        }
     }
 
     private publish(): void {
@@ -386,16 +959,50 @@ export class LabSim {
         for (const e of this.entities) writeEntity(buf, e.slot, e.pose, e.visible, e.anim, ANIM_MAX);
     }
 
-    /** Places the walker (e.g. when entering first-person mode). */
-    placePlayer(x: number, z: number, yaw: number): void {
-        const p = this.player;
-        p.x = x;
-        p.z = z;
-        p.y = Math.max(terrainHeight(x, z), -0.62);
+    /** Places the character (e.g. when entering first-person mode), on the ground, inside the play area. */
+    placePlayer(x: number, z: number, yaw: number, i = 0): void {
+        const p = this.players[i];
+        const A = this.level.playArea;
+        p.x = Math.max(A.minX + 0.5, Math.min(A.maxX - 0.5, x));
+        p.z = Math.max(A.minZ + 0.5, Math.min(A.maxZ - 0.5, z));
+        // cast from just above the terrain, so roofs and tree tops are never "the ground"
+        const th = this.level.terrainHeight(p.x, p.z);
+        const g = this.physics.groundY(p.x, p.z, th + 0.6) ?? th;
+        p.y = g + 0.05;
         p.vy = 0;
         p.yaw = yaw;
         p.grounded = true;
-        this.lastCmd = { ...this.lastCmd, yaw };
+        p.eyeLift = 0;
+        this.physics.placeCharacter(p.x, p.y, p.z, i);
+        if (i === 0) this.lastCmd = { ...this.lastCmd, yaw };
+        else this.lastCmds[i] = { ...this.lastCmds[i], yaw };
+    }
+
+    /** Read-only, for UI: what the player is holding and what the crosshair would grab. */
+    interaction(i = 0): { holding: string | null; target: string | null; shared: boolean } {
+        if (!this.playerActive(i) || !this.physicsProps) return { holding: null, target: null, shared: false };
+        const pw = this.physics;
+        const p = this.players[i];
+        const name = (id: number) => (id < 0 ? null : (this.entities.find((e) => e.id === id)?.name ?? null));
+        const heldId = pw.heldIdOf(i);
+        const holding = name(heldId);
+        const target = holding ? null : name(pw.probe({ x: p.x, y: p.y + EYE_HEIGHT, z: p.z }, p.yaw, p.pitch, i));
+        return { holding, target, shared: heldId >= 0 && pw.holders(heldId) > 1 };
+    }
+
+    /** Like `interaction`, as entity ids (-1 for none): what the host sends to guests for their prompts. */
+    interactionIds(i: number): { held: number; target: number; shared: boolean } {
+        if (!this.playerActive(i) || !this.physicsProps) return { held: -1, target: -1, shared: false };
+        const pw = this.physics;
+        const p = this.players[i];
+        const held = pw.heldIdOf(i);
+        const target = held >= 0 ? -1 : pw.probe({ x: p.x, y: p.y + EYE_HEIGHT, z: p.z }, p.yaw, p.pitch, i);
+        return { held, target, shared: held >= 0 && pw.holders(held) > 1 };
+    }
+
+    /** True when the voxelized dummy is in the world. */
+    get dummyActive(): boolean {
+        return this.dummy[0].visible;
     }
 }
 
@@ -413,17 +1020,8 @@ function smooth(x: number): number {
     return x * x * (3 - 2 * x);
 }
 
-const EMPTY_ASSET: VoxelAsset = {
-    schema: 1,
-    name: 'empty',
-    parts: [],
-    animChannels: 0,
-    evaluate() {
-        // no parts to pose
-    }
-};
-
 const _hand = pose();
+const _windTmp: WindSample = { x: 0, z: 0, speed: 0, gustiness: 0 };
 const _q = { x: 0, y: 0, z: 0, w: 1 };
 const _q2 = { x: 0, y: 0, z: 0, w: 1 };
 const _v = vec3();
@@ -431,3 +1029,38 @@ const _target = pose();
 const _offset = pose();
 
 export { BEAVER_ANIM_CHANNELS, UTE_ANIM_CHANNELS };
+
+export interface PlayerState {
+    x: number;
+    y: number;
+    z: number;
+    vy: number;
+    yaw: number;
+    pitch: number;
+    grounded: boolean;
+    eyeLift: number;
+    /** Horizontal speed and distance walked (for the voxel beaver's walk cycle). */
+    speed: number;
+    walkDist: number;
+    prevCarry: boolean;
+    fallTicks: number;
+    safe: { x: number; z: number; valid: boolean };
+}
+
+function newPlayerState(x: number, z: number): PlayerState {
+    return {
+        x,
+        y: 0.5,
+        z,
+        vy: 0,
+        yaw: 0,
+        pitch: 0,
+        grounded: true,
+        eyeLift: 0,
+        speed: 0,
+        walkDist: 0,
+        prevCarry: false,
+        fallTicks: 0,
+        safe: { x, z, valid: false }
+    };
+}

@@ -40,13 +40,15 @@ import {
     TextureHandler,
     Vec2,
     Vec3,
+    Vec4,
+    ASPECT_AUTO,
+    ASPECT_MANUAL,
     createGraphicsDevice
-    
 } from 'playcanvas';
 import type { GraphicsDevice } from 'playcanvas';
 import { Water } from 'playcanvas/scripts/esm/water.mjs';
 
-import { LAB_MAX_X, LAB_MIN_X, WATER_Y } from '../levels/river-lab.ts';
+import type { LevelDef } from '../levels/level.ts';
 import type { WaterApi } from '../types/engine-scripts.ts';
 
 export interface Quality {
@@ -60,8 +62,24 @@ export interface Quality {
 }
 
 export const QUALITY: Record<Quality['name'], Quality> = {
-    high: { name: 'high', samples: 4, shadowResolution: 2048, cascades: 3, reflectionScale: 0.5, refraction: true, pixelRatio: 2 },
-    low: { name: 'low', samples: 1, shadowResolution: 1024, cascades: 2, reflectionScale: 0.25, refraction: false, pixelRatio: 1 }
+    high: {
+        name: 'high',
+        samples: 4,
+        shadowResolution: 2048,
+        cascades: 3,
+        reflectionScale: 0.5,
+        refraction: true,
+        pixelRatio: 2
+    },
+    low: {
+        name: 'low',
+        samples: 1,
+        shadowResolution: 1024,
+        cascades: 2,
+        reflectionScale: 0.25,
+        refraction: false,
+        pixelRatio: 1
+    }
 };
 
 export interface LabScene {
@@ -77,19 +95,31 @@ export interface LabScene {
     immediateLayer: Layer;
     quality: Quality;
     setSun(elevationDeg: number, azimuthDeg: number): void;
+    /**
+     * Split screen (local co-op): player 1 on top, player 2's camera below. In split screen the
+     * water uses its sky reflection: the engine's planar reflection follows one camera only.
+     */
+    setSplit(split: boolean): void;
+    camera2: Entity;
+    split: boolean;
     setQuality(q: Quality): void;
     sunElevation: number;
     sunAzimuth: number;
 }
 
-export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality): Promise<LabScene> {
+export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality, level: LevelDef): Promise<LabScene> {
     // WebGL2 baseline (design doc §4.1). WebGPU is an optional, measured extension for later.
     const device = await createGraphicsDevice(canvas, { deviceTypes: [DEVICETYPE_WEBGL2], antialias: false });
     device.maxPixelRatio = Math.min(window.devicePixelRatio, quality.pixelRatio);
 
     const options = new AppOptions();
     options.graphicsDevice = device;
-    options.componentSystems = [RenderComponentSystem, CameraComponentSystem, LightComponentSystem, ScriptComponentSystem];
+    options.componentSystems = [
+        RenderComponentSystem,
+        CameraComponentSystem,
+        LightComponentSystem,
+        ScriptComponentSystem
+    ];
     options.resourceHandlers = [TextureHandler];
 
     const app = new AppBase(canvas);
@@ -174,8 +204,11 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
     app.scene.fog.end = 120;
 
     // ---- the river: one smooth surface exception (design doc §3.3 item 5)
-    const riverLength = LAB_MAX_X - LAB_MIN_X;
-    const waterMesh = Mesh.fromGeometry(device, new PlaneGeometry({ halfExtents: new Vec2(riverLength / 2, 4.9), widthSegments: 1, lengthSegments: 1 }));
+    const W = level.water;
+    const waterMesh = Mesh.fromGeometry(
+        device,
+        new PlaneGeometry({ halfExtents: new Vec2(W.halfX, W.halfZ), widthSegments: 1, lengthSegments: 1 })
+    );
     const waterEntity = new Entity('River');
     waterEntity.addComponent('render', {
         meshInstances: [new MeshInstance(waterMesh, new StandardMaterial())],
@@ -183,7 +216,7 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
         castShadows: false,
         receiveShadows: false
     });
-    waterEntity.setLocalPosition((LAB_MIN_X + LAB_MAX_X) / 2, WATER_Y, 0);
+    waterEntity.setLocalPosition(W.cx, W.y, W.cz);
     app.root.addChild(waterEntity);
     waterEntity.addComponent('script');
     const water = waterEntity.script!.create(Water, {
@@ -221,7 +254,120 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
         }
     }) as unknown as WaterApi;
 
+    // ---- second view for split screen: same layers and look, its own HDR frame and sky (the sky of
+    // the main camera alone lights the scene)
+    const camera2 = new Entity('Player2Camera');
+    camera2.addComponent('camera', {
+        fov: 52,
+        nearClip: 0.05,
+        farClip: 600,
+        layers: [worldLayer.id, LAYERID_DEPTH, skyboxLayer.id, waterLayer.id, immediateLayer.id, uiLayer.id]
+    });
+    camera2.enabled = false;
+    app.root.addChild(camera2);
+    let frame2: CameraFrame | null = null;
+    let sky2: DynamicSkyEffect | null = null;
+    const ensureSecondFrame = () => {
+        if (frame2) return;
+        const f = new CameraFrame(app, camera2.camera!);
+        f.rendering.toneMapping = TONEMAP_ACES2;
+        f.rendering.sceneDepthMap = true;
+        f.rendering.samples = scene.quality.samples;
+        f.bloom.intensity = cameraFrame.bloom.intensity;
+        f.bloom.blurLevel = cameraFrame.bloom.blurLevel;
+        f.vignette.intensity = cameraFrame.vignette.intensity;
+        f.vignette.inner = cameraFrame.vignette.inner;
+        f.vignette.outer = cameraFrame.vignette.outer;
+        f.grading.enabled = true;
+        f.grading.contrast = cameraFrame.grading.contrast;
+        f.grading.saturation = cameraFrame.grading.saturation;
+        f.grading.brightness = cameraFrame.grading.brightness;
+        f.grading.tint = cameraFrame.grading.tint.clone();
+        const k = new DynamicSkyEffect(device);
+        k.lighting = false;
+        k.sunIntensity = sky.sunIntensity;
+        k.turbidity = sky.turbidity;
+        k.rayleigh = sky.rayleigh;
+        k.luminance = sky.luminance;
+        k.starBrightness = 0;
+        k.elevation = sky.elevation;
+        k.azimuth = sky.azimuth;
+        f.addEffect(k);
+        f.update();
+        frame2 = f;
+        sky2 = k;
+    };
+
+    // Split screen with CameraFrame: the frame renders its scene into a full-size target and composes
+    // over the whole back buffer, ignoring camera.rect (measured: the last camera covered both
+    // halves). So in split screen both cameras keep a full rect with the half-screen aspect ratio,
+    // their scene targets are half height (no wasted pixels), and each compose pass is limited to its
+    // half by viewport and scissor, with its clear off. The engine rebuilds these passes when settings
+    // change, so this is re-applied every frame while split.
+    type SplitPass = { scaleY: number } | null | undefined;
+    type ComposePass = {
+        viewport?: Vec4;
+        scissor?: Vec4;
+        setClearColor(c?: Color): void;
+        setClearDepth(d?: number): void;
+        setClearStencil(s?: number): void;
+    };
+    type FrameInternals = {
+        renderPassCamera?: { scenePass?: SplitPass; prePass?: SplitPass; composePass?: ComposePass };
+    };
+    const topRect = new Vec4();
+    const bottomRect = new Vec4();
+    const applySplit = (f: CameraFrame | null, rect: Vec4) => {
+        const rp = (f as unknown as FrameInternals | null)?.renderPassCamera;
+        if (!rp) return;
+        const scale = f!.rendering.renderTargetScale ?? 1;
+        if (rp.scenePass) rp.scenePass.scaleY = scale * 0.5;
+        if (rp.prePass) rp.prePass.scaleY = scale * 0.5;
+        const cp = rp.composePass;
+        if (!cp) return;
+        cp.viewport = rect;
+        cp.scissor = rect;
+        cp.setClearColor(undefined);
+        cp.setClearDepth(undefined);
+        cp.setClearStencil(undefined);
+    };
+    app.on('prerender', () => {
+        if (!scene.split) return;
+        const w = device.width;
+        const h = device.height;
+        const half = Math.floor(h / 2);
+        topRect.set(0, h - half, w, half);
+        bottomRect.set(0, 0, w, half);
+        const aspect = w / Math.max(1, half);
+        camera.camera!.aspectRatio = aspect;
+        camera2.camera!.aspectRatio = aspect;
+        applySplit(cameraFrame, topRect);
+        applySplit(frame2, bottomRect);
+    });
+
     const scene: LabScene = {
+        camera2,
+        split: false,
+        setSplit(split: boolean) {
+            if (split === scene.split) return;
+            scene.split = split;
+            if (split) ensureSecondFrame();
+            camera2.enabled = split;
+            camera2.camera!.priority = -1;
+            camera.camera!.aspectRatioMode = split ? ASPECT_MANUAL : ASPECT_AUTO;
+            camera2.camera!.aspectRatioMode = ASPECT_MANUAL;
+            if (!split) {
+                // back to one full-screen frame: rebuild its passes with full-size targets
+                const cp = (cameraFrame as unknown as FrameInternals).renderPassCamera?.composePass;
+                if (cp) {
+                    cp.viewport = undefined;
+                    cp.scissor = undefined;
+                }
+                cameraFrame.update();
+            }
+            water.reflectionSource = split ? 'sky' : 'planar';
+            water.refraction = split ? false : scene.quality.refraction;
+        },
         app,
         device,
         camera,
@@ -233,14 +379,19 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
         worldLayer,
         immediateLayer,
         quality,
-        sunElevation: 5,
-        sunAzimuth: 30,
+        sunElevation: level.sun.elevation,
+        sunAzimuth: level.sun.azimuth,
         setSun(elevation: number, azimuth: number) {
             scene.sunElevation = elevation;
             scene.sunAzimuth = azimuth;
             sky.elevation = elevation;
             sky.azimuth = azimuth;
             cameraFrame.update();
+            if (sky2 && frame2) {
+                sky2.elevation = elevation;
+                sky2.azimuth = azimuth;
+                frame2.update();
+            }
             // fog takes the sky colour near the horizon in the main viewing direction (towards -Z)
             const c = sky.getSkyColor(new Vec3(0, 0.04, -1));
             const k = 0.5;
@@ -252,9 +403,13 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
             app.resizeCanvas();
             cameraFrame.rendering.samples = q.samples;
             cameraFrame.update();
+            if (frame2) {
+                frame2.rendering.samples = q.samples;
+                frame2.update();
+            }
             sun.light!.shadowResolution = q.shadowResolution;
             sun.light!.numCascades = q.cascades;
-            water.refraction = q.refraction;
+            water.refraction = scene.split ? false : q.refraction;
             water.textureScale = q.reflectionScale;
         }
     };

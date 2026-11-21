@@ -1,7 +1,7 @@
 /**
  * Headless CPU benchmark of the voxel reconstruction path (no GPU upload): fixed-step sim ->
  * interpolated sample at voxel time -> pose evaluation -> rasterize -> resolve -> mesh dirty units.
- * Usage: node scripts/bench-voxels.ts [minutes=10] [hz=20]
+ * Usage: node scripts/bench-voxels.ts [minutes=10] [hz=20]   (PROPS=scripted for the Epic 1 motion)
  * Runs every policy and stress level briefly, then one long run for memory/allocation stability.
  */
 import os from 'node:os';
@@ -9,17 +9,20 @@ import os from 'node:os';
 import { buildRiverLab } from '../src/levels/river-lab.ts';
 import { SIM_DT } from '../src/sim/clock.ts';
 import { LabSim } from '../src/sim/lab-sim.ts';
+import { initPhysics } from '../src/sim/physics/world.ts';
 import { ANIM_MAX } from '../src/sim/snapshots.ts';
 import { DYNAMIC_REGION, STATIC_REGION, collectDirty, unpackRegion } from '../src/voxels/dirty.ts';
 import type { DirtyWork } from '../src/voxels/dirty.ts';
 import { CHUNK_SIZE } from '../src/voxels/grid.ts';
 import { pose } from '../src/voxels/math.ts';
 import { MeshOutput, meshRegionBlocked } from '../src/voxels/mesher.ts';
-import { SAMPLING_POLICIES, createRasterStats, resetRasterStats  } from '../src/voxels/rasterizer.ts';
+import { SAMPLING_POLICIES, createRasterStats, resetRasterStats } from '../src/voxels/rasterizer.ts';
 import type { SamplingPolicy } from '../src/voxels/rasterizer.ts';
-import { VoxelWorld  } from '../src/voxels/world.ts';
+import { VoxelWorld } from '../src/voxels/world.ts';
 import type { PartInstance } from '../src/voxels/world.ts';
 
+await initPhysics();
+const PROPS = process.env.PROPS === 'scripted' ? 'scripted' : 'physics';
 const minutes = Number(process.argv[2] ?? 10);
 const hz = Number(process.argv[3] ?? 20);
 
@@ -34,25 +37,56 @@ function setup() {
         for (const key of work.staticRegions) {
             const [x, y, z] = unpackRegion(key);
             out.reset();
-            meshRegionBlocked(world, 'static', x * STATIC_REGION.x, y * STATIC_REGION.y, z * STATIC_REGION.z, STATIC_REGION.x, STATIC_REGION.y, STATIC_REGION.z, DYNAMIC_REGION, out);
+            meshRegionBlocked(
+                world,
+                'static',
+                x * STATIC_REGION.x,
+                y * STATIC_REGION.y,
+                z * STATIC_REGION.z,
+                STATIC_REGION.x,
+                STATIC_REGION.y,
+                STATIC_REGION.z,
+                DYNAMIC_REGION,
+                out
+            );
             quads += out.quads;
         }
         for (const key of work.dynamicRegions) {
             const [x, y, z] = unpackRegion(key);
             out.reset();
-            meshRegionBlocked(world, 'dynamic', x * DYNAMIC_REGION, y * DYNAMIC_REGION, z * DYNAMIC_REGION, DYNAMIC_REGION, DYNAMIC_REGION, DYNAMIC_REGION, CHUNK_SIZE, out);
+            meshRegionBlocked(
+                world,
+                'dynamic',
+                x * DYNAMIC_REGION,
+                y * DYNAMIC_REGION,
+                z * DYNAMIC_REGION,
+                DYNAMIC_REGION,
+                DYNAMIC_REGION,
+                DYNAMIC_REGION,
+                CHUNK_SIZE,
+                out
+            );
             quads += out.quads;
         }
         return { quads, staticRegions: work.staticRegions.length, dynChunks: work.dynamicRegions.length };
     };
     meshAll(); // initial static meshing
-    const sim = new LabSim();
+    const sim = new LabSim({ props: PROPS });
     const tracked = sim.entities
         .filter((e) => e.asset.parts.length > 0)
         .map((e) => {
             world.addObject(e.id, e.priority);
             const poses = e.asset.parts.map(() => pose());
-            return { e, root: pose(), anim: new Float64Array(ANIM_MAX), poses, parts: e.asset.parts.map((p, i) => ({ volume: p.volume, pose: poses[i], priority: p.priority, policy: p.policy }) as PartInstance) };
+            return {
+                e,
+                root: pose(),
+                anim: new Float64Array(ANIM_MAX),
+                poses,
+                parts: e.asset.parts.map(
+                    (p, i) =>
+                        ({ volume: p.volume, pose: poses[i], priority: p.priority, policy: p.policy }) as PartInstance
+                )
+            };
         });
     return { world, sim, tracked, meshAll };
 }
@@ -108,6 +142,7 @@ function run(policy: SamplingPolicy, stress: number, frames: number, sampleMemor
         }
         if (f === 200) chunksAt = world.chunkCount;
     }
+    sim.physics.free();
     const n = total.length;
     return {
         policy,
@@ -119,15 +154,20 @@ function run(policy: SamplingPolicy, stress: number, frames: number, sampleMemor
             mesh: { p50: pct(mesh, 0.5), p95: pct(mesh, 0.95) },
             total: { p50: pct(total, 0.5), p95: pct(total, 0.95), max: Math.max(...total) }
         },
-        perFrame: { samples: Math.round(samples / n), occupiedCells: Math.round(cells / n), dynChunksMeshed: +(dyn / n).toFixed(1) },
+        perFrame: {
+            samples: Math.round(samples / n),
+            occupiedCells: Math.round(cells / n),
+            dynChunksMeshed: +(dyn / n).toFixed(1)
+        },
         chunks: { at200: chunksAt, end: world.chunkCount },
         heapMB: mem.map((x) => +x.toFixed(1))
     };
 }
 
-console.log(`CPU: ${os.cpus()[0].model} x${os.cpus().length}, node ${process.version}, voxel ${hz} Hz`);
+console.log(`CPU: ${os.cpus()[0].model} x${os.cpus().length}, node ${process.version}, voxel ${hz} Hz, props ${PROPS}`);
 const results = [];
-for (const policy of process.env.QUICK ? ['coverage50' as SamplingPolicy] : SAMPLING_POLICIES) results.push(run(policy, 0, 300));
+for (const policy of process.env.QUICK ? ['coverage50' as SamplingPolicy] : SAMPLING_POLICIES)
+    results.push(run(policy, 0, 300));
 for (const stress of process.env.QUICK ? [] : [10, 25]) results.push(run('coverage50', stress, 300));
 for (const r of results) console.log(JSON.stringify(r));
 const long = run('coverage50', 0, Math.round(minutes * 60 * hz), true);
