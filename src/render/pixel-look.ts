@@ -10,6 +10,7 @@
  *   with distance so the background does not turn into noise.
  * - Hairline cracks between voxel faces, which the nearest upscale would blow up into big bright
  *   pixels, are filled from their neighbours.
+ * - Lone sparkles (sub-pixel specular glints) are replaced by their neighbours, for the same reason.
  * - Flatter colour: posterized to a few levels per channel after gamma.
  *
  * Bloom, vignette and MSAA are switched off while it is on (they blur the pixel edges).
@@ -40,12 +41,26 @@ const outlineGLSL = /* glsl */ `
             col = texture2DLod(sceneTexture, c - vec2(0.0, texel.y), 0.0);
             d = min(b, t);
         }
-        // this texel is nearer than the line through its neighbours: it sits on a silhouette
+        // this texel is nearer than the line through its neighbours: it sits on a silhouette. The
+        // surface behind must be at least two texels deep, so one-texel holes get no outline ring
+        float l2 = min(l, getLinearScreenDepth(c - vec2(2.0 * texel.x, 0.0)));
+        float r2 = min(r, getLinearScreenDepth(c + vec2(2.0 * texel.x, 0.0)));
+        float b2 = min(b, getLinearScreenDepth(c - vec2(0.0, 2.0 * texel.y)));
+        float t2 = min(t, getLinearScreenDepth(c + vec2(0.0, 2.0 * texel.y)));
         float thr = pixelOutline.y * d + 0.04;
         float edge = max(
-            step(thr, max(l, r) - d) * step(thr * 0.5, (l + r) * 0.5 - d),
-            step(thr, max(b, t) - d) * step(thr * 0.5, (b + t) * 0.5 - d)
+            step(thr, max(l2, r2) - d) * step(thr * 0.5, (l2 + r2) * 0.5 - d),
+            step(thr, max(b2, t2) - d) * step(thr * 0.5, (b2 + t2) * 0.5 - d)
         );
+        // a lone texel much brighter than all four neighbours is a sparkle (a sub-pixel specular
+        // glint the full-size image hides): the nearest upscale would make it a big bright pixel
+        vec3 n0 = texture2DLod(sceneTexture, c - vec2(texel.x, 0.0), 0.0).rgb;
+        vec3 n1 = texture2DLod(sceneTexture, c + vec2(texel.x, 0.0), 0.0).rgb;
+        vec3 n2 = texture2DLod(sceneTexture, c - vec2(0.0, texel.y), 0.0).rgb;
+        vec3 n3 = texture2DLod(sceneTexture, c + vec2(0.0, texel.y), 0.0).rgb;
+        vec3 lw = vec3(0.3, 0.6, 0.1);
+        float nmax = max(max(dot(n0, lw), dot(n1, lw)), max(dot(n2, lw), dot(n3, lw)));
+        if (dot(col.rgb, lw) > nmax * 1.25 + 0.01) col.rgb = (n0 + n1 + n2 + n3) * 0.25;
         float fade = 1.0 - smoothstep(pixelOutline.z, pixelOutline.w, d);
         col.rgb *= 1.0 - pixelOutline.x * edge * fade;
         return col;
@@ -72,11 +87,24 @@ const outlineWGSL = /* wgsl */ `
             col = textureSampleLevel(sceneTexture, sceneTextureSampler, c - vec2f(0.0, texel.y), 0.0);
             d = min(b, t);
         }
+        let l2 = min(l, getLinearScreenDepth(c - vec2f(2.0 * texel.x, 0.0)));
+        let r2 = min(r, getLinearScreenDepth(c + vec2f(2.0 * texel.x, 0.0)));
+        let b2 = min(b, getLinearScreenDepth(c - vec2f(0.0, 2.0 * texel.y)));
+        let t2 = min(t, getLinearScreenDepth(c + vec2f(0.0, 2.0 * texel.y)));
         let thr = uniform.pixelOutline.y * d + 0.04;
         let edge = max(
-            step(thr, max(l, r) - d) * step(thr * 0.5, (l + r) * 0.5 - d),
-            step(thr, max(b, t) - d) * step(thr * 0.5, (b + t) * 0.5 - d)
+            step(thr, max(l2, r2) - d) * step(thr * 0.5, (l2 + r2) * 0.5 - d),
+            step(thr, max(b2, t2) - d) * step(thr * 0.5, (b2 + t2) * 0.5 - d)
         );
+        let n0 = textureSampleLevel(sceneTexture, sceneTextureSampler, c - vec2f(texel.x, 0.0), 0.0).rgb;
+        let n1 = textureSampleLevel(sceneTexture, sceneTextureSampler, c + vec2f(texel.x, 0.0), 0.0).rgb;
+        let n2 = textureSampleLevel(sceneTexture, sceneTextureSampler, c - vec2f(0.0, texel.y), 0.0).rgb;
+        let n3 = textureSampleLevel(sceneTexture, sceneTextureSampler, c + vec2f(0.0, texel.y), 0.0).rgb;
+        let lw = vec3f(0.3, 0.6, 0.1);
+        let nmax = max(max(dot(n0, lw), dot(n1, lw)), max(dot(n2, lw), dot(n3, lw)));
+        if (dot(col.rgb, lw) > nmax * 1.25 + 0.01) {
+            col = vec4f((n0 + n1 + n2 + n3) * 0.25, col.a);
+        }
         let fade = 1.0 - smoothstep(uniform.pixelOutline.z, uniform.pixelOutline.w, d);
         col = vec4f(col.rgb * (1.0 - uniform.pixelOutline.x * edge * fade), col.a);
         return col;
