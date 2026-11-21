@@ -415,6 +415,12 @@ class LabDirector extends Script {
 
         // ---- voxel clock: one reconstruction per voxel frame, committed before any pass renders
         const frame = voxelClock.frameAt(renderTime);
+        // your own beaver, without its head, when yours is the only camera on this device
+        const ownSlot = guestSession ? guestSession.slot : 0;
+        pipeline.firstPersonSlot =
+            state.mode === 'firstPerson' && localSlot2 < 0 && ownSlot >= 0 && ownSlot < sim.avatars.length
+                ? sim.avatars[ownSlot].slot
+                : -1;
         if (frame !== voxelClock.frame || state.forceVoxel) {
             voxelClock.frame = frame;
             state.forceVoxel = false;

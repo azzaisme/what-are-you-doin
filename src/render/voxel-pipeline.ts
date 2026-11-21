@@ -15,6 +15,7 @@
  * lags the 5 cm beaver carrying it.
  */
 
+import { BEAVER_FIRST_PERSON } from '../assets/beaver.ts';
 import type { LabSim } from '../sim/lab-sim.ts';
 import { ANIM_MAX } from '../sim/snapshots.ts';
 import { pose } from '../voxels/math.ts';
@@ -63,6 +64,11 @@ const SLOWEST: (keyof FrameStats)[] = ['rasterMs', 'resolveMs', 'meshMs', 'total
 export class VoxelClient {
     policy: SamplingPolicy = 'coverage50';
     reference = false;
+    /**
+     * Sim slot of the beaver drawn for this device's only camera in first person (its head is left
+     * out, BEAVER_FIRST_PERSON), or -1.
+     */
+    firstPersonSlot = -1;
     build: BuildInfo | null = null;
     lastStats: FrameStats | null = null;
     /** The last voxel frame's stats per lane (same order as the lanes). */
@@ -214,6 +220,7 @@ export class VoxelClient {
             states[o + 6] = this.root.q.z;
             states[o + 7] = this.root.q.w;
             for (let c = 0; c < ANIM_MAX; c++) states[o + 8 + c] = this.anim[c];
+            if (this.slots[n] === this.firstPersonSlot) states[o + 8 + BEAVER_FIRST_PERSON] = 1;
         }
         this.busy = true;
         const fx = this.particles?.(time);

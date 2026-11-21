@@ -69,6 +69,8 @@ export interface PartInstance {
     priority: number;
     /** Optional per-asset-class sampling policy override. */
     policy?: SamplingPolicy;
+    /** Left out of this frame (see VoxelAsset.partHidden). */
+    hidden?: boolean;
 }
 
 interface DynamicEntry {
@@ -300,6 +302,7 @@ export class VoxelWorld {
         this.objSink.target = next;
         for (let p = 0; p < parts.length; p++) {
             const part = parts[p];
+            if (part.hidden) continue;
             const prio = Math.max(0, Math.min(255, part.priority | 0));
             rasterizeVolume(part.volume, part.pose, part.policy ?? policy, prio, this.objSink, stats);
         }
