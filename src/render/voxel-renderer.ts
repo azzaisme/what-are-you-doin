@@ -55,9 +55,13 @@ export class VoxelRenderer {
     misalignedVertices = 0;
     dynamicVisible = true;
 
-    constructor(app: AppBase, layer: Layer) {
+    /** Cell size of the lattice this renderer draws (per-item sizes: one renderer per lattice). */
+    readonly cellSize: number;
+
+    constructor(app: AppBase, layer: Layer, cellSize = GRID_SIZE) {
         this.app = app;
         this.layer = layer;
+        this.cellSize = cellSize;
         app.root.addChild(this.root);
         this.createMaterials();
     }
@@ -110,11 +114,12 @@ export class VoxelRenderer {
     }
 
     private createUnit(m: UnitMesh): Unit {
-        const entity = new Entity(`${m.mode}-${m.minI},${m.minJ},${m.minK}`);
+        const entity = new Entity(`${m.mode}-${Math.round(this.cellSize * 1000) / 10}cm-${m.minI},${m.minJ},${m.minK}`);
         // One mesh + instance per surface class, created once and assigned once: the render
         // component destroys previously assigned instances whenever its list is replaced.
-        const half = new Vec3((m.sx * GRID_SIZE) / 2, (m.sy * GRID_SIZE) / 2, (m.sz * GRID_SIZE) / 2);
-        const center = new Vec3(m.minI * GRID_SIZE + half.x, m.minJ * GRID_SIZE + half.y, m.minK * GRID_SIZE + half.z);
+        const cs = this.cellSize;
+        const half = new Vec3((m.sx * cs) / 2, (m.sy * cs) / 2, (m.sz * cs) / 2);
+        const center = new Vec3(m.minI * cs + half.x, m.minJ * cs + half.y, m.minK * cs + half.z);
         const meshes: Mesh[] = [];
         const instances: MeshInstance[] = [];
         const dynamic = m.mode === 'dynamic';
@@ -163,7 +168,7 @@ export class VoxelRenderer {
         // grid check on arrival: every coordinate must be a multiple of the cell size
         const p = b.positions;
         for (let v = 0; v < b.vertexCount * 3; v++) {
-            const g = p[v] / GRID_SIZE;
+            const g = p[v] / this.cellSize;
             if (Math.abs(g - Math.round(g)) > 1e-3) this.misalignedVertices++;
         }
         this.verifiedVertices += b.vertexCount;

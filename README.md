@@ -24,6 +24,10 @@ What the demo proves:
 - **Separate clocks.** Fixed 60 Hz simulation, display-rate camera and lighting, and a global voxel
   clock (12/20/30/60 Hz, default 20 Hz).
 
+**Per-item voxel sizes:** small things are drawn in 1 cm cubes (the bucket, the ragdoll's head and
+limbs), big things in coarse ones (the ute at 10 cm), and everything else on the 5 cm grid. All
+three lattices share the world origin ([ADR 0011](docs/adr/0011-per-item-cell-sizes.md)).
+
 Also: wind, falling leaves and voxel particles (dust, chips, splashes); a step-by-step tutorial
 (the first level on a first visit); a level designer (**Levels → Level designer**: place, move and
 tune pieces, trees, ground and props, then build, playtest and copy the level as JSON); local

@@ -1,5 +1,26 @@
 # Progress log
 
+## Per-item voxel sizes, and water in the bucket (2026-11-21, owner request)
+
+Owner: "I can't tell the bucket has anything in it. What if we adjust the resolution of the voxel
+grid per item, so big things have big blocks and small things have small blocks, all the way down
+to 1x1x1." ADR 0011 has the design.
+
+- **The bucket held no water.** It had a water level but no water part. It now has one, in a new
+  bright blue (`bucket-water`).
+- **Three lattices, one origin:** fine 1 cm (the bucket, the ragdoll's head and limbs), base 5 cm
+  (the player's setting: the world, beavers, timber and props) and coarse 10 cm (the ute). The tier
+  is picked from each asset's size. One voxel worker runs per lattice, and every lane's meshes for
+  a voxel frame are applied together. `?tiers=off` puts everything back on one grid.
+- **The bucket at 1 cm:** a 1.5 cm wall, a thin handle and a visible water surface. Before, it had
+  an 8 cm wall around a hole one or two cells wide.
+- **Cost (Timber Yard, SwiftShader):** median voxel frame 26 ms with tiers on against 37 ms off.
+  The lanes work in parallel. Every vertex is still on its lattice (`verifyGrid`: 0 misaligned).
+- **Tests:** 218 unit tests (new: tier rules, lattice sizes, a lane drawing only its own objects,
+  out-of-reach objects cleared) and the browser suite.
+- **Open:** objects on different lattices intersect instead of resolving by priority; the grid-line
+  overlay shows the base lattice only; the tier thresholds may want tuning once more assets exist.
+
 ## Wind, leaves, particles, the tutorial and the level designer (2026-11-20, owner request)
 
 Owner request: particle effects, falling leaves and wind; a level designer; a tutorial level; a
