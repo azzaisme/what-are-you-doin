@@ -276,8 +276,14 @@ test('physics sandbox: grab and carry the plank, launch the ragdoll, switch to s
     );
     expect((await lab(page, (l) => l.player())).holding).toBe(4);
     await lab(page, (l) => l.input({ throw: true }));
-    await page.waitForTimeout(500);
-    expect((await lab(page, (l) => l.player())).holding).toBe(-1);
+    // wait on sim progress, not wall time (slow CI runners simulate less per second)
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.player().holding === -1,
+        null,
+        {
+            timeout: 60_000
+        }
+    );
 
     await lab(page, (l) => l.action('ragdoll'));
     await page.waitForFunction(
@@ -363,19 +369,22 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
                 window as unknown as { __riverLab: { entities(): Record<string, { x: number; z: number }> } }
             ).__riverLab.entities()['avatar-1']
     );
-    for (let i = 0; i < 20; i++) {
+    // keep walking until player 2 has moved (slow CI runners simulate less per wall second)
+    let moved = 0;
+    for (let i = 0; i < 240 && moved <= 0.1; i++) {
         await lab(page, (l) =>
             (l as unknown as { input2(c: Record<string, unknown>): void }).input2({ moveZ: 1, yaw: 1.57 })
         );
         await page.waitForTimeout(250);
+        const after = await page.evaluate(
+            () =>
+                (
+                    window as unknown as { __riverLab: { entities(): Record<string, { x: number; z: number }> } }
+                ).__riverLab.entities()['avatar-1']
+        );
+        moved = Math.hypot(after.x - before.x, after.z - before.z);
     }
-    const after = await page.evaluate(
-        () =>
-            (
-                window as unknown as { __riverLab: { entities(): Record<string, { x: number; z: number }> } }
-            ).__riverLab.entities()['avatar-1']
-    );
-    expect(Math.hypot(after.x - before.x, after.z - before.z)).toBeGreaterThan(0.1);
+    expect(moved).toBeGreaterThan(0.1);
     // back to one player: one full view, bodies hidden
     await lab(page, (l) => (l as unknown as { setPlayers(n: number): void }).setPlayers(1));
     await page.waitForTimeout(2500);
@@ -445,12 +454,15 @@ test('online co-op: a second device joins the host, plays as player 2 and render
         );
     const before = await where();
     expect(before.visible).toBe(true);
-    for (let i = 0; i < 15; i++) {
+    // keep walking until player 2 has moved on the host (slow CI runners simulate less per second)
+    let moved = 0;
+    for (let i = 0; i < 300 && moved <= 0.3; i++) {
         await net(guest, '(l) => { l.look(3.14, -0.1); l.input({ moveZ: 1 }); }');
         await guest.waitForTimeout(300);
+        const after = await where();
+        moved = Math.hypot(after.x - before.x, after.z - before.z);
     }
-    const after = await where();
-    expect(Math.hypot(after.x - before.x, after.z - before.z)).toBeGreaterThan(0.3);
+    expect(moved).toBeGreaterThan(0.3);
     // the guest renders the host's world: both beaver bodies and every prop, all on the grid
     // (voxel frames lag the snapshots in software GL, so wait for the frame that has both beavers)
     await guest.waitForFunction(
