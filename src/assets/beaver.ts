@@ -191,7 +191,8 @@ const HEAD_PARTS = ['head', 'muzzle', 'earL', 'earR', 'hatDome', 'hatBrim'].map(
 });
 const HEAD_PART_SET = new Set(HEAD_PARTS);
 /** Raised arms also turn inward by up to this much (radians), so both hands come into view. */
-const ARM_INWARD = 0.15;
+export const BEAVER_ARM_INWARD = 0.15;
+const ARM_INWARD = BEAVER_ARM_INWARD;
 /**
  * First person only (the player's own camera): the beaver's short arms hang 38 cm below the eye and
  * could never reach into view, so for that one camera the shoulders move up and forward (spine
@@ -220,6 +221,9 @@ export const beaverAsset: VoxelAsset = {
     }
 };
 
+/** Shoulder joints above the spine joint, the torso's pivot (m). */
+const SHOULDER_ABOVE_SPINE = 0.22;
+
 function poseRig(root: Pose, anim: ArrayLike<number>): void {
     const phase = anim[BEAVER_WALK_PHASE] ?? 0;
     const amount = anim[BEAVER_WALK_AMOUNT] ?? 0;
@@ -233,8 +237,13 @@ function poseRig(root: Pose, anim: ArrayLike<number>): void {
     const headPitch = anim[BEAVER_HEAD_PITCH] ?? 0;
     // the torso leans back out of the lower view; the shoulders come forward and in. Reaching
     // brings the shoulders forward and a little up
+    const spinePitch = 0.05 * amount + 0.6 * Math.max(0, reach) - lean;
+    // leaning back with raised arms, the shoulders slide forward along the torso (the arms reach
+    // out), so the hands stay on what they hold
+    const raised = Math.min(1, Math.max(fp ? FP_READY_RAISE : 0, anim[BEAVER_ARM_RAISE] ?? 0));
+    const keep = SHOULDER_ABOVE_SPINE * Math.tan(Math.max(0, -spinePitch)) * raised;
     rig.setShift(J.spine, 0, 0, fp ? FP_SPINE_Z : 0);
-    const sz = (fp ? FP_SHOULDER.z - FP_SPINE_Z : 0) + reach;
+    const sz = (fp ? FP_SHOULDER.z - FP_SPINE_Z : 0) + reach + keep;
     const sy = (fp ? FP_SHOULDER.y : 0) + 0.3 * Math.max(0, reach);
     rig.setShift(J.shoulderL, fp ? -FP_SHOULDER.x : 0, sy, sz);
     rig.setShift(J.shoulderR, fp ? FP_SHOULDER.x : 0, sy, sz);
@@ -254,19 +263,21 @@ function poseRig(root: Pose, anim: ArrayLike<number>): void {
 
     rig.setRot(J.pelvis, 0.06 * amount * s, 0, 0.035 * amount * s);
     // positive spine pitch leans forward: walking, reaching; the lean channel leans back
-    const spinePitch = 0.05 * amount + 0.6 * Math.max(0, reach) - lean;
     rig.setRot(J.spine, 0, spinePitch, 0);
+    // raised arms keep aiming where the animation points them (at what you hold) as the torso
+    // leans; hanging arms move with it
+    const aim = raise + spinePitch * Math.min(1, raise);
     // the head follows the look, less the torso's lean (looking down pitches it forward)
     rig.setRot(J.head, headYaw, -0.05 * amount * s2 - 0.7 * headPitch - 0.6 * spinePitch, 0);
     rig.setRot(J.hipL, 0, 0.5 * amount * s, 0);
     rig.setRot(J.hipR, 0, -0.5 * amount * s, 0);
     // the right arm swings; the left arm holds the bucket out a little when carrying
     // (negative pitch swings an arm forward)
-    rig.setRot(J.shoulderR, inward, -0.4 * amount * s * hang - raise, -0.05 * hang);
+    rig.setRot(J.shoulderR, inward, -0.4 * amount * s * hang - aim, -0.05 * hang);
     rig.setRot(
         J.shoulderL,
         -inward,
-        ((1 - carry) * 0.4 * amount * s - carry * 0.12) * hang - raise,
+        ((1 - carry) * 0.4 * amount * s - carry * 0.12) * hang - aim,
         (0.05 + carry * 0.12) * hang
     );
     rig.setRot(J.tail, 0.22 * amount * s, -0.38 + 0.06 * amount * s2, 0);

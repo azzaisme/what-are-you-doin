@@ -286,7 +286,8 @@ export class LabSim {
         this.players.forEach((pl, i) => pw.createCharacter(pl.x, pl.y, pl.z, i));
         pw.setCharacterEnabled(this.fpActive, 0);
         for (let i = 1; i < MAX_PLAYERS; i++) pw.setCharacterEnabled(this.slotActive[i], i);
-        pw.comfortHold = BODY.comfortHold;
+        pw.holdReach = BODY.holdReach;
+        pw.shoulderDrop = BODY.eyeHeight - BODY.shoulderHeight;
         this.physics = pw;
     }
 

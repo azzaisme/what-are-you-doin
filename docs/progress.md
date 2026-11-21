@@ -1,5 +1,31 @@
 # Progress log
 
+## Holding things in your hands (2026-11-21, owner request)
+
+Owner: "It really needs to look like I am holding things with my arms".
+
+- **Problem:** held things floated at the grab distance, eased in to 1.7 m from the eye. The arms
+  are 0.84 m long, so they pointed at the object but stopped short of it.
+- **Arm's length:** held things are now carried at the body's `holdReach` (arm's length + 6 cm)
+  from the shoulders, for where you look (`handsHold` in `world.ts`).
+    - Looking straight ahead, that is about 0.9 m from the eye; looking down, about 1.05 m.
+    - Things grabbed from further away are drawn in at 3 m/s.
+    - The mouse wheel can only bring them nearer.
+    - Shared holds keep their distance: two carriers drawing a log in would pull it apart.
+- **Both hands on it:** the arms aim at the grip, and the shoulders reach in by whatever the arm
+  is short. The hands go either side of the grip: as wide as the thing (up to 0.35 m) for wide
+  things, close together for small ones.
+- **Leaning against a load keeps the hands on it:**
+    - raised arms counter the torso's pitch;
+    - the shoulders slide forward by what the lean takes back.
+    - (Before, leaning back lifted the hands 20 cm off the grip.)
+- **First person:** while you hold something, the arms drop their "ready" pose and aim at the
+  object, the same as others see them.
+- **Measured (`tests/unit/hands.test.ts`):** both hand tips are within 10 cm of the grip's height
+  and 8 cm of its depth, either side of it. Checked for the plank at three look angles, the cube
+  and the bucket, in your own view and as others see you.
+- **The beaver body** keeps the old behaviour (`holdReach: Infinity`).
+
 ## Balance: where you grip something is where it turns (2026-11-21, owner request)
 
 Owner: "Where I pick the logs up from should change their rotation point. Balance is a big part of

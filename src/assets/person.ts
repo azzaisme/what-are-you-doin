@@ -190,7 +190,8 @@ const HEAD_PART_SET = new Set(
     })
 );
 /** Raised arms turn inward by up to this much (rad), so both hands come into view. */
-const ARM_INWARD = 0.05;
+export const PERSON_ARM_INWARD = 0.05;
+const ARM_INWARD = PERSON_ARM_INWARD;
 /**
  * First person (the player's own camera): the shoulders come forward a little and the arms rest
  * in a ready pose, hands low in the view. The long arms reach what you hold without more help.
@@ -216,20 +217,31 @@ export const personAsset: VoxelAsset = {
     }
 };
 
+/** Shoulder joints above the spine joint, the torso's pivot (m). */
+const SHOULDER_ABOVE_SPINE = PERSON_SHOULDER_HEIGHT - HIP_Y - 0.04;
+
 function poseRig(root: Pose, anim: ArrayLike<number>): void {
     const phase = anim[BEAVER_WALK_PHASE] ?? 0;
     const amount = anim[BEAVER_WALK_AMOUNT] ?? 0;
     const carry = anim[BEAVER_CARRY] ?? 0;
     const headYaw = anim[BEAVER_HEAD_YAW] ?? 0;
     const fp = (anim[BEAVER_FIRST_PERSON] ?? 0) > 0.5;
-    const raise = Math.max(fp ? FP_READY_RAISE : 0, Math.min(2.7, anim[BEAVER_ARM_RAISE] ?? 0));
+    // empty-handed in first person, the arms are held up ready in view; holding something, they
+    // aim at it like everyone else sees them
+    const ready = fp && carry < 0.5;
+    const raise = Math.max(ready ? FP_READY_RAISE : 0, Math.min(2.7, anim[BEAVER_ARM_RAISE] ?? 0));
     const reach = anim[BEAVER_ARM_REACH] ?? 0;
     const spread = anim[BEAVER_ARM_SPREAD] ?? 0;
     const lean = anim[BEAVER_LEAN] ?? 0;
     const headPitch = anim[BEAVER_HEAD_PITCH] ?? 0;
 
+    const spinePitch = 0.06 * amount + 0.5 * Math.max(0, reach) - lean;
+    // leaning back with raised arms, the shoulders slide forward along the torso (the arms reach
+    // out), so the hands stay on what they hold
+    const raised = Math.min(1, raise);
+    const keep = SHOULDER_ABOVE_SPINE * Math.tan(Math.max(0, -spinePitch)) * raised;
     rig.setShift(J.spine, 0, 0, fp ? FP_SPINE_Z : 0);
-    const sz = (fp ? FP_SHOULDER.z - FP_SPINE_Z : 0) + reach;
+    const sz = (ready ? FP_SHOULDER.z : 0) - (fp ? FP_SPINE_Z : 0) + reach + keep;
     const sy = (fp ? FP_SHOULDER.y : 0) + 0.3 * Math.max(0, reach);
     rig.setShift(J.shoulderL, fp ? -FP_SHOULDER.x : 0, sy, sz);
     rig.setShift(J.shoulderR, fp ? FP_SHOULDER.x : 0, sy, sz);
@@ -249,18 +261,20 @@ function poseRig(root: Pose, anim: ArrayLike<number>): void {
     _root.q.w = root.q.w;
 
     rig.setRot(J.pelvis, 0.08 * amount * s, 0, 0.025 * amount * s);
-    const spinePitch = 0.06 * amount + 0.5 * Math.max(0, reach) - lean;
     // the shoulders counter-rotate against the hips
     rig.setRot(J.spine, -0.12 * amount * s, spinePitch, 0);
+    // raised arms keep aiming where the animation points them (at what you hold) as the torso
+    // leans; hanging arms move with it
+    const aim = raise + spinePitch * Math.min(1, raise);
     rig.setRot(J.head, headYaw + 0.1 * amount * s, -0.04 * amount * s2 - 0.7 * headPitch - 0.6 * spinePitch, 0);
     rig.setRot(J.hipL, 0, 0.45 * amount * s, 0);
     rig.setRot(J.hipR, 0, -0.45 * amount * s, 0);
     // long arms swing opposite the legs; the left one holds a bucket out a little when carrying
-    rig.setRot(J.shoulderR, inward, -0.38 * amount * s * hang - raise, -0.06 * hang);
+    rig.setRot(J.shoulderR, inward, -0.38 * amount * s * hang - aim, -0.06 * hang);
     rig.setRot(
         J.shoulderL,
         -inward,
-        ((1 - carry) * 0.38 * amount * s - carry * 0.12) * hang - raise,
+        ((1 - carry) * 0.38 * amount * s - carry * 0.12) * hang - aim,
         (0.06 + carry * 0.1) * hang
     );
     rig.evaluate(_root);

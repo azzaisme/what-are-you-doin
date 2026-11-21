@@ -214,12 +214,24 @@ const AXIS_X = { x: 1, y: 0, z: 0 };
 const AXIS_Y = { x: 0, y: 1, z: 0 };
 const AXIS_Z = { x: 0, y: 0, z: 1 };
 
+/**
+ * The distance along the view (from the eye, at `pitch`) to a point `reach` from the shoulders,
+ * which are `drop` below the eye: where the hands are with the arms out towards where you look.
+ */
+export function handsHold(reach: number, drop: number, pitch: number): number {
+    const s = Math.sin(pitch);
+    const c = Math.cos(pitch);
+    return -drop * s + Math.sqrt(Math.max(0, reach * reach - drop * drop * c * c));
+}
+
 export class PhysicsWorld {
     /**
-     * Things grabbed further away than this (m from the eye) are drawn in to it after the grab: the
-     * player body's comfortable carry. Infinity keeps the grab distance (the beavers).
+     * How far from the shoulders held things are carried (m): in the player's hands. Things grabbed
+     * from further away are drawn in to it. Infinity keeps the grab distance (the beavers).
      */
-    comfortHold = Infinity;
+    holdReach = Infinity;
+    /** How far the shoulders are below the eye (m). */
+    shoulderDrop = 0.2;
     readonly world: RAPIER.World;
     readonly bodies = new Map<number, PhysBody>();
     private readonly byCollider = new Map<number, PhysBody>();
@@ -702,10 +714,16 @@ export class PhysicsWorld {
         const pb = r?.held;
         if (!r || !pb) return;
         const d = viewDir(yaw, pitch, _dir);
-        // grabbed from further away: ease in to the comfortable carrying distance (2 m/s). Not while
-        // shared: two carriers at either end of a log would pull it apart
-        if (!r.holdSet && r.holdDist > this.comfortHold && (this.holdCount.get(pb.id) ?? 1) === 1)
-            r.holdDist = Math.max(this.comfortHold, r.holdDist - 2 * SIM_DT);
+        // carried in your hands: the hold distance follows arm's length from the shoulders for where
+        // you look (things grabbed from further away are drawn in at 3 m/s; the mouse wheel can only
+        // bring them nearer). Not while shared: two carriers at either end of a log would pull it
+        // apart
+        if (Number.isFinite(this.holdReach) && (this.holdCount.get(pb.id) ?? 1) === 1) {
+            const want = clampHold(handsHold(this.holdReach, this.shoulderDrop, pitch));
+            if (r.holdSet) r.holdDist = Math.min(r.holdDist, want);
+            else if (r.holdDist > want) r.holdDist = Math.max(want, r.holdDist - 3 * SIM_DT);
+            else r.holdDist = Math.min(want, r.holdDist + 1 * SIM_DT);
+        }
         _target.x = eye.x + d.x * r.holdDist;
         _target.y = eye.y + d.y * r.holdDist;
         _target.z = eye.z + d.z * r.holdDist;

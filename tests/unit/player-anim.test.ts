@@ -72,7 +72,8 @@ describe('player animation (grab, carry, throw)', () => {
     it('wide things spread the arms out, small ones bring them in', () => {
         const wide = run(new PlayerAnimator(), () => base({ held: heldAt(SHOULDER_HEIGHT, 5, 0.5) }), 120);
         const small = run(new PlayerAnimator(), () => base({ held: heldAt(SHOULDER_HEIGHT, 1, 0.08) }), 120);
-        expect(wide.spread).toBeGreaterThan(0.2);
+        // the hands go either side of the grip: wide apart for a wide thing, together for a small one
+        expect(wide.spread).toBeGreaterThan(small.spread + 0.1);
         expect(small.spread).toBeLessThan(0);
     });
 

@@ -10,8 +10,9 @@
 import type { Pose } from '../voxels/math.ts';
 
 import type { VoxelAsset } from './asset.ts';
-import { beaverAsset, beaverFirstPersonAsset, beaverLeftHand } from './beaver.ts';
+import { BEAVER_ARM_INWARD, beaverAsset, beaverFirstPersonAsset, beaverLeftHand } from './beaver.ts';
 import {
+    PERSON_ARM_INWARD,
     PERSON_ARM_LENGTH,
     PERSON_EYE_HEIGHT,
     PERSON_SHOULDER_HEIGHT,
@@ -35,8 +36,15 @@ export interface PlayerBody {
     armLength: number;
     /** Distance walked per walk cycle (m). */
     stride: number;
-    /** Held things are drawn in to this distance from the eye after a grab (m; Infinity: never). */
-    comfortHold: number;
+    /** Half the distance between the shoulders (m). */
+    shoulderHalfWidth: number;
+    /** How far raised arms turn in with no spread (rad). */
+    armInward: number;
+    /**
+     * How far from the shoulders held things are carried (m): where the hands are, with the arms
+     * out (Infinity: wherever they were grabbed, the beavers).
+     */
+    holdReach: number;
 }
 
 const BODIES: Record<BodyKind, PlayerBody> = {
@@ -48,7 +56,10 @@ const BODIES: Record<BodyKind, PlayerBody> = {
         shoulderHeight: PERSON_SHOULDER_HEIGHT,
         armLength: PERSON_ARM_LENGTH,
         stride: PERSON_STRIDE,
-        comfortHold: 1.7
+        shoulderHalfWidth: 0.2,
+        armInward: PERSON_ARM_INWARD,
+        // arm's length and a little reach into it
+        holdReach: PERSON_ARM_LENGTH + 0.06
     },
     beaver: {
         asset: beaverAsset,
@@ -58,7 +69,9 @@ const BODIES: Record<BodyKind, PlayerBody> = {
         shoulderHeight: 0.84,
         armLength: 0.34,
         stride: 0.95,
-        comfortHold: Infinity
+        shoulderHalfWidth: 0.3,
+        armInward: BEAVER_ARM_INWARD,
+        holdReach: Infinity
     }
 };
 

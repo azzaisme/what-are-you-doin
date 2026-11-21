@@ -24,6 +24,9 @@ import { BODY } from '../assets/player-body.ts';
 export const SHOULDER_HEIGHT = BODY.shoulderHeight;
 /** Arm length, shoulder to paw (m). */
 const ARM_LENGTH = BODY.armLength;
+const SHOULDER_HALF_WIDTH = BODY.shoulderHalfWidth;
+/** How far the body turns raised arms in with no spread (rad; see the assets' ARM_INWARD). */
+const ARM_INWARD_READY = BODY.armInward;
 
 export interface AnimEvents {
     grabbed: boolean;
@@ -217,9 +220,14 @@ export class PlayerAnimator {
             const up = h.y - (i.y + SHOULDER_HEIGHT);
             const dist = Math.hypot(fwd, up);
             raiseT = clamp(Math.atan2(Math.max(0.05, fwd), -up), 0.7, 2.5);
-            reachT = clamp((dist - ARM_LENGTH) * 0.25, 0, 0.12);
-            // wide things are held at their sides; small ones with both paws in front
-            spreadT = clamp((h.halfWidth - 0.18) * 0.9, -0.15, 0.3);
+            // the shoulders reach into it, so the hands get to the grip
+            reachT = clamp(dist - ARM_LENGTH, 0, 0.2);
+            // both hands on it, either side of the grip: wide things by their sides, small ones
+            // close together
+            const hand = clamp(h.halfWidth, 0.08, 0.35);
+            const across = Math.max(0.1, Math.hypot(fwd, up));
+            // turned in (or out) from straight ahead
+            spreadT = clamp(ARM_INWARD_READY - Math.atan2(SHOULDER_HALF_WIDTH - hand, across), -0.3, 0.3);
             // lean back against the load; strain shakes the arms a little
             leanT = 0.08 + 0.2 * Math.max(heavy, h.strain);
             raiseT += 0.022 * h.strain * Math.sin(this.time * Math.PI * 2 * 9);
