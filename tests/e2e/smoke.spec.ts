@@ -215,13 +215,17 @@ test('UI boxes never overlap: portrait phone, portrait tablet, desktop and lands
         await page.setViewportSize({ width: w, height: h });
         await page.waitForTimeout(400);
         await lab(page, (l) => (l as unknown as { showPanel(v: boolean): void }).showPanel(true));
-        await page.waitForTimeout(200);
-        const open = await assertLayout(`${w}x${h} panel open`, w, h);
-        expect(open['.debug-panel']).not.toBeNull();
-        expect(open['.hud']).not.toBeNull();
+        // the layout follows the HUD and dock sizes a frame after a resize (ResizeObserver); slow
+        // software-GL frames on CI can take longer than a fixed wait, so retry until it settles
+        await expect(async () => {
+            const open = await assertLayout(`${w}x${h} panel open`, w, h);
+            expect(open['.debug-panel']).not.toBeNull();
+            expect(open['.hud']).not.toBeNull();
+        }).toPass({ timeout: 20_000 });
         await lab(page, (l) => (l as unknown as { showPanel(v: boolean): void }).showPanel(false));
-        await page.waitForTimeout(200);
-        await assertLayout(`${w}x${h} panel closed`, w, h);
+        await expect(async () => {
+            await assertLayout(`${w}x${h} panel closed`, w, h);
+        }).toPass({ timeout: 20_000 });
     }
     // narrow screens get >= 40 px touch targets
     await page.setViewportSize({ width: 390, height: 844 });
