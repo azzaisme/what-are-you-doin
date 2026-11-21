@@ -49,20 +49,23 @@ npm run start        # serve the production build
 
 Query parameters (handy for comparisons and screenshots):
 
-| Parameter               | Effect                                                                                             |
-| ----------------------- | -------------------------------------------------------------------------------------------------- |
-| `?debug` or `#debug`    | show the debug panel in a production build (always shown in `npm run dev`)                         |
-| `#cell75`               | voxel size 7.5 cm (any 50–100, i.e. 5–10 cm); the slider saves the choice and reloads              |
-| `?quality=low`          | low preset: no MSAA, 1024 shadows, 2 cascades, 25% reflection, no refraction                       |
-| `?hz=12\|20\|30\|60`    | voxel reconstruction rate                                                                          |
-| `?t=4.5`                | start paused at an exact simulation time                                                           |
-| `?view=fp`              | start in first person                                                                              |
-| `?noui`                 | hide all UI                                                                                        |
-| `?level=lab`            | the River Lab test scene instead of level 1, the Timber Yard                                       |
-| `?view=orbit`           | start the Timber Yard in the orbit view instead of first person                                    |
-| `?net=local`            | online co-op between tabs of one browser (development; the published page uses the claude.ai room) |
-| `?net=p2p` / `?net=off` | online co-op peer to peer (the default outside claude.ai, e.g. itch.io) / no online play           |
-| `?props=scripted`       | River Lab only: Epic 1 scripted prop motion instead of physics props (also in the debug panel)     |
+| Parameter                    | Effect                                                                                             |
+| ---------------------------- | -------------------------------------------------------------------------------------------------- |
+| `?debug` or `#debug`         | show the debug panel in a production build (always shown in `npm run dev`)                         |
+| `#cell75`                    | voxel size 7.5 cm (any 50–100, i.e. 5–10 cm); the slider saves the choice and reloads              |
+| `?quality=low`               | low preset: no MSAA, 1024 shadows, 2 cascades, 25% reflection, no refraction                       |
+| `?hz=12\|20\|30\|60`         | voxel reconstruction rate                                                                          |
+| `?t=4.5`                     | start paused at an exact simulation time                                                           |
+| `?view=fp`                   | start in first person                                                                              |
+| `?noui`                      | hide all UI                                                                                        |
+| `?level=lab`                 | the River Lab test scene instead of level 1, the Timber Yard                                       |
+| `?view=orbit`                | start the Timber Yard in the orbit view instead of first person                                    |
+| `?view=chase` / `?view=side` | first person, seen from over the shoulder / from the side (animation checks)                       |
+| `?look=pixel`                | the pixel look (prototype): low-res pixels, outlines, posterized colour                            |
+| `?bob=off`                   | no first-person camera bob or kicks                                                                |
+| `?net=local`                 | online co-op between tabs of one browser (development; the published page uses the claude.ai room) |
+| `?net=p2p` / `?net=off`      | online co-op peer to peer (the default outside claude.ai, e.g. itch.io) / no online play           |
+| `?props=scripted`            | River Lab only: Epic 1 scripted prop motion instead of physics props (also in the debug panel)     |
 
 ## Controls
 
@@ -87,6 +90,8 @@ Query parameters (handy for comparisons and screenshots):
 | `P` / `N`                                  | pause / step exactly one voxel frame                                                       |
 | `Backspace`                                | reset the scene                                                                            |
 | `H`                                        | hide all UI (for screenshots)                                                              |
+| `C`                                        | first person: watch your beaver from over its shoulder                                     |
+| `L`                                        | pixel look on / off (prototype)                                                            |
 | `F3` or the corner chip                    | debug panel                                                                                |
 
 The debug panel (design doc §7.3) has: pause, step voxel frame, reset, voxel rate, sampling policy

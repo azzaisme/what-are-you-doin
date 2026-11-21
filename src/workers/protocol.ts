@@ -3,11 +3,12 @@
  * only; nothing engine-specific crosses this boundary (design doc §4.3, §5.5 Phase C).
  */
 
+import { ANIM_MAX } from '../sim/snapshots.ts';
 import type { MeshMode } from '../voxels/mesher.ts';
 import type { SamplingPolicy } from '../voxels/rasterizer.ts';
 
-/** Floats per tracked object in a frame request: visible, px py pz, qx qy qz qw, anim[6]. */
-export const STATE_STRIDE = 14;
+/** Floats per tracked object in a frame request: visible, px py pz, qx qy qz qw, anim[ANIM_MAX]. */
+export const STATE_STRIDE = 8 + ANIM_MAX;
 
 export interface ClassMesh {
     positions: Float32Array;

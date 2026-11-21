@@ -83,7 +83,11 @@ export const M = {
     Splash: 46,
     Dust: 47,
     WindSock: 48,
-    BucketWater: 49
+    BucketWater: 49,
+    // people (the lanky stand-in player bodies)
+    Skin: 50,
+    Workwear: 51,
+    Boot: 52
 } as const;
 
 const defs: MaterialDef[] = [];
@@ -147,6 +151,9 @@ def(M.Dust, 'dust', R, 0xb39f80, 0xa89577, 0xbeab8b, 0x9d8a6d);
 def(M.WindSock, 'wind-sock', R, 0xf26a1b, 0xe8e8cf, 0xf26a1b, 0xe8e8cf);
 // water carried in the bucket: a clear, bright blue so it reads against the galvanised wall
 def(M.BucketWater, 'bucket-water', S, 0x3a9ee0, 0x2f8fd2, 0x52b4ee, 0x2a82c2);
+def(M.Skin, 'skin', R, 0xd9a47e, 0xcf9a74, 0xe2ae88, 0xc4906b);
+def(M.Workwear, 'workwear', R, 0x34405a, 0x2f3a52, 0x3a4763, 0x2a344a);
+def(M.Boot, 'boot', R, 0x3b2a1e, 0x35251a, 0x413022, 0x2f2117);
 
 // details that must survive sub-cell placement
 for (const [m, p] of [

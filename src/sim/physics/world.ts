@@ -12,8 +12,8 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import type { Pose } from '../../voxels/math.ts';
 import { SIM_DT } from '../clock.ts';
 
-import { GRAB, clampHold, effectiveMassAlong, grabForce, throwImpulse, viewDir } from './grab.ts';
-import type { GrabForceResult, Vec3Like } from './grab.ts';
+import { GRAB, clampHold, effectiveMassAlong, grabForce, throwImpulse, viewDir, wristTorque } from './grab.ts';
+import type { GrabForceResult, Quat, Vec3Like, WristResult } from './grab.ts';
 
 let ready: Promise<void> | null = null;
 
@@ -159,11 +159,32 @@ const _force: GrabForceResult = { fx: 0, fy: 0, fz: 0, requested: 0, error: 0, s
 
 const EMPTY_STATE: CharacterState = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, grounded: false };
 
+/** What a player holds, for animation (see PhysicsWorld.heldInfo). */
+export interface HeldInfo {
+    x: number;
+    y: number;
+    z: number;
+    mass: number;
+    halfWidth: number;
+    strain: number;
+}
+
 /** One player's physical presence: capsule, controller and what they hold. */
 export class Rig {
     held: PhysBody | null = null;
     heldLocal = { x: 0, y: 0, z: 0 };
     holdDist = 1.5;
+    /** The hold distance was set with the wheel: it no longer eases in to the comfortable carry. */
+    holdSet = false;
+    /**
+     * Wrist: the held body's orientation relative to the player's facing when the grip took hold;
+     * the wrist turns it back towards that (see GRAB.maxTorque).
+     */
+    wristRel: Quat = { x: 0, y: 0, z: 0, w: 1 };
+    wristValid = false;
+    /** Twist the wrist wants over what it can give (1 or more: tipping), and the angle off (rad). */
+    wristLoad = 0;
+    wristAngle = 0;
     stretchTime = 0;
     prevTarget = { x: 0, y: 0, z: 0 };
     hasPrevTarget = false;
@@ -187,11 +208,30 @@ export class Rig {
     }
 }
 
+const _wristTarget: Quat = { x: 0, y: 0, z: 0, w: 1 };
+const _wrist: WristResult = { tx: 0, ty: 0, tz: 0, angle: 0, load: 0 };
 const AXIS_X = { x: 1, y: 0, z: 0 };
 const AXIS_Y = { x: 0, y: 1, z: 0 };
 const AXIS_Z = { x: 0, y: 0, z: 1 };
 
+/**
+ * The distance along the view (from the eye, at `pitch`) to a point `reach` from the shoulders,
+ * which are `drop` below the eye: where the hands are with the arms out towards where you look.
+ */
+export function handsHold(reach: number, drop: number, pitch: number): number {
+    const s = Math.sin(pitch);
+    const c = Math.cos(pitch);
+    return -drop * s + Math.sqrt(Math.max(0, reach * reach - drop * drop * c * c));
+}
+
 export class PhysicsWorld {
+    /**
+     * How far from the shoulders held things are carried (m): in the player's hands. Things grabbed
+     * from further away are drawn in to it. Infinity keeps the grab distance (the beavers).
+     */
+    holdReach = Infinity;
+    /** How far the shoulders are below the eye (m). */
+    shoulderDrop = 0.2;
     readonly world: RAPIER.World;
     readonly bodies = new Map<number, PhysBody>();
     private readonly byCollider = new Map<number, PhysBody>();
@@ -574,12 +614,16 @@ export class PhysicsWorld {
         } else inverseRotate(q, point.x - t.x, point.y - t.y, point.z - t.z, r.heldLocal);
         r.held = pb;
         r.holdDist = clampHold(holdDistance);
+        r.holdSet = false;
+        r.wristValid = false;
+        r.wristLoad = 0;
+        r.wristAngle = 0;
         r.stretchTime = 0;
         r.hasPrevTarget = false;
         const n = (this.holdCount.get(pb.id) ?? 0) + 1;
         this.holdCount.set(pb.id, n);
         if (n === 1) {
-            pb.body.setAngularDamping(GRAB.heldAngularDamping);
+            pb.body.setAngularDamping(pb.grabPoint ? GRAB.hangingAngularDamping : GRAB.heldAngularDamping);
             for (const c of pb.colliders) c.setCollisionGroups(groups(LAYER.held, ALL & ~LAYER.player));
         }
         pb.body.wakeUp();
@@ -589,6 +633,26 @@ export class PhysicsWorld {
     grabById(id: number, point: Vec3Like, holdDistance: number, p = 0): void {
         const pb = this.bodies.get(id);
         if (pb && pb.kind === 'dynamic' && pb.enabled) this.grabAt(pb, point, holdDistance, p);
+    }
+
+    /**
+     * Read-only, for animation: where a player's grip is on what they hold (world), the body's mass,
+     * a rough half width (from its wind area) and how hard the grab is pulling (0-1 of the cap).
+     * Returns false when the player holds nothing.
+     */
+    heldInfo(p: number, out: HeldInfo): boolean {
+        const r = this.rigs[p];
+        const pb = r?.held;
+        if (!r || !pb) return false;
+        const t = pb.body.translation();
+        rotate(pb.body.rotation(), r.heldLocal.x, r.heldLocal.y, r.heldLocal.z, _v);
+        out.x = t.x + _v.x;
+        out.y = t.y + _v.y;
+        out.z = t.z + _v.z;
+        out.mass = pb.body.mass();
+        out.halfWidth = Math.min(0.6, Math.sqrt(Math.max(0, pb.windArea)) * 0.5);
+        out.strain = Math.min(1, Math.max(r.grabForce / GRAB.maxForce, r.wristLoad));
+        return true;
     }
 
     /** Releases whatever a player holds. */
@@ -639,7 +703,9 @@ export class PhysicsWorld {
 
     adjustHold(delta: number, p = 0): void {
         const r = this.rigs[p];
-        if (r) r.holdDist = clampHold(r.holdDist + delta);
+        if (!r) return;
+        r.holdDist = clampHold(r.holdDist + delta);
+        r.holdSet = true;
     }
 
     /** Applies this tick's bounded grab force for a player. Call once per tick before step(). */
@@ -648,6 +714,16 @@ export class PhysicsWorld {
         const pb = r?.held;
         if (!r || !pb) return;
         const d = viewDir(yaw, pitch, _dir);
+        // carried in your hands: the hold distance follows arm's length from the shoulders for where
+        // you look (things grabbed from further away are drawn in at 3 m/s; the mouse wheel can only
+        // bring them nearer). Not while shared: two carriers at either end of a log would pull it
+        // apart
+        if (Number.isFinite(this.holdReach) && (this.holdCount.get(pb.id) ?? 1) === 1) {
+            const want = clampHold(handsHold(this.holdReach, this.shoulderDrop, pitch));
+            if (r.holdSet) r.holdDist = Math.min(r.holdDist, want);
+            else if (r.holdDist > want) r.holdDist = Math.max(want, r.holdDist - 3 * SIM_DT);
+            else r.holdDist = Math.min(want, r.holdDist + 1 * SIM_DT);
+        }
         _target.x = eye.x + d.x * r.holdDist;
         _target.y = eye.y + d.y * r.holdDist;
         _target.z = eye.z + d.z * r.holdDist;
@@ -697,6 +773,7 @@ export class PhysicsWorld {
         b.applyImpulseAtPoint({ x: f.fx * SIM_DT, y: f.fy * SIM_DT, z: f.fz * SIM_DT }, anchor, true);
         r.grabError = f.error;
         r.grabForce = Math.hypot(f.fx, f.fy, f.fz);
+        this.applyWrist(r, pb, yaw);
         const s = this.stats;
         if (p === 0) {
             s.grabError = f.error;
@@ -711,6 +788,55 @@ export class PhysicsWorld {
             s.grabBreaks++;
             this.release(p);
         }
+    }
+
+    /**
+     * The wrist: a capped torque holding the body at the angle it was picked up at, relative to the
+     * player's facing. Where you grip it decides how much twist its weight puts on the wrist, so
+     * held near its balance point it stays level, and held far off it, it tips about your hand.
+     * Not for bodies with a fixed grab point (the bucket hangs from its handle). Shared, each grip
+     * gives its share of one wrist's strength: two grips balance it between them and stop it
+     * rolling in their hands.
+     */
+    private applyWrist(r: Rig, pb: PhysBody, yaw: number): void {
+        r.wristLoad = 0;
+        r.wristAngle = 0;
+        if (pb.grabPoint) {
+            r.wristValid = false;
+            return;
+        }
+        // shared: each grip gives its share, so two wrists that disagree (the carriers turn
+        // differently) only ever fight within one wrist's strength
+        const share = 1 / Math.max(1, this.holdCount.get(pb.id) ?? 1);
+        const b = pb.body;
+        const q = b.rotation();
+        const sy = Math.sin(yaw / 2);
+        const cy = Math.cos(yaw / 2);
+        if (!r.wristValid) {
+            // rel = conj(yawQ) * q
+            r.wristRel.x = cy * q.x - sy * q.z;
+            r.wristRel.y = cy * q.y - sy * q.w;
+            r.wristRel.z = cy * q.z + sy * q.x;
+            r.wristRel.w = cy * q.w + sy * q.y;
+            r.wristValid = true;
+        }
+        // target = yawQ * rel
+        const rel = r.wristRel;
+        _wristTarget.x = cy * rel.x + sy * rel.z;
+        _wristTarget.y = cy * rel.y + sy * rel.w;
+        _wristTarget.z = cy * rel.z - sy * rel.x;
+        _wristTarget.w = cy * rel.w - sy * rel.y;
+        const t = wristTorque(
+            q,
+            _wristTarget,
+            b.angvel(),
+            b.effectiveWorldInvInertia(),
+            _wrist,
+            GRAB.maxTorque * share
+        );
+        b.applyTorqueImpulse({ x: t.tx * SIM_DT, y: t.ty * SIM_DT, z: t.tz * SIM_DT }, true);
+        r.wristLoad = t.load;
+        r.wristAngle = t.angle;
     }
 
     /**

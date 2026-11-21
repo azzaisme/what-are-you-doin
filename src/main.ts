@@ -9,6 +9,7 @@
 import { Color, Entity, Script, Vec2, Vec3 } from 'playcanvas';
 import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs';
 
+import { BEAVER_ARM_REACH, BEAVER_LEAN, BEAVER_WALK_AMOUNT, BEAVER_WALK_PHASE } from './assets/beaver.ts';
 import { CELL_TIERS, assetTier, tierCellCm } from './assets/cell-tier.ts';
 import type { CellTier } from './assets/cell-tier.ts';
 import { DebugPanel } from './debug/panel.ts';
@@ -93,7 +94,7 @@ function goToLevel(id: string, extra: Record<string, string> = {}): void {
         // storage blocked: the URL carries the choice
     }
     const q = new URLSearchParams({ level: id, ...extra });
-    for (const k of ['quality', 'net', 'debug']) {
+    for (const k of ['quality', 'net', 'debug', 'look']) {
         const v = params.get(k);
         if (v !== null) q.set(k, v);
     }
@@ -243,6 +244,10 @@ interface State {
     colliders: boolean;
     players: number;
     particles: boolean;
+    look: 'default' | 'pixel';
+    cameraFeel: boolean;
+    /** First person: watch your beaver from over its shoulder (C). */
+    chase: boolean;
 }
 
 const state: State = {
@@ -270,8 +275,13 @@ const state: State = {
     props: sim.propsMode,
     colliders: false,
     players: 1,
-    particles: true
+    particles: true,
+    look: params.get('look') === 'pixel' ? 'pixel' : 'default',
+    cameraFeel: params.get('bob') !== 'off',
+    chase: params.get('view') === 'chase' || params.get('view') === 'side'
 };
+const sideView = params.get('view') === 'side';
+scene.setPixelLook(state.look === 'pixel');
 
 const rateParam = Number(params.get('hz'));
 if ((VOXEL_RATES as readonly number[]).includes(rateParam)) state.hz = rateParam as VoxelRate;
@@ -336,6 +346,29 @@ let lastFrameStamp = performance.now();
 let renderTime = 0;
 const playerPose = pose();
 const playerAnim = new Float64Array(ANIM_MAX);
+const bodyPose = pose();
+const bodyAnim = new Float64Array(ANIM_MAX);
+/**
+ * First-person camera feel, from your own beaver's animation (so it matches what others see):
+ * a little head bob while walking, a kick forward and down on throws and hard landings, a lean back
+ * under heavy loads. Small: a few centimetres and degrees.
+ */
+function cameraFeel(slot: number, t: number, out: { dx: number; dy: number; dz: number; pitch: number; roll: number }) {
+    out.dx = out.dy = out.dz = out.pitch = out.roll = 0;
+    if (!state.cameraFeel || slot < 0 || !sim.ring.sample(slot, t, bodyPose, bodyAnim)) return;
+    const amount = bodyAnim[BEAVER_WALK_AMOUNT];
+    const phase = bodyAnim[BEAVER_WALK_PHASE];
+    const reach = bodyAnim[BEAVER_ARM_REACH];
+    const lean = bodyAnim[BEAVER_LEAN];
+    const fwd = 0.35 * reach + 0.12 * Math.min(0, lean) * -1;
+    const yaw = fpInput.yaw;
+    out.dx = -Math.sin(yaw) * fwd;
+    out.dz = -Math.cos(yaw) * fwd;
+    out.dy = 0.014 * amount * Math.cos(2 * phase) - 0.12 * Math.max(0, -lean) - 0.03 * Math.max(0, lean);
+    out.pitch = 0.18 * lean;
+    out.roll = 0.008 * amount * Math.sin(phase);
+}
+const feel = { dx: 0, dy: 0, dz: 0, pitch: 0, roll: 0 };
 let gridUniform = 0;
 
 class LabDirector extends Script {
@@ -393,12 +426,39 @@ class LabDirector extends Script {
         // ---- first-person camera: interpolated position, look applied at display rate
         if (state.mode === 'firstPerson') {
             const myEye = guestSession ? sim.eyes[Math.max(0, guestSession.slot)] : sim.playerEntity;
+            const mySlot = guestSession ? guestSession.slot : 0;
+            cameraFeel(mySlot >= 0 && mySlot < sim.avatars.length ? sim.avatars[mySlot].slot : -1, renderTime, feel);
             if (sim.ring.sample(myEye.slot, renderTime, playerPose, playerAnim)) {
-                camera.setPosition(playerPose.p.x, playerPose.p.y, playerPose.p.z);
+                camera.setPosition(playerPose.p.x + feel.dx, playerPose.p.y + feel.dy, playerPose.p.z + feel.dz);
             } else {
                 camera.setPosition(sim.player.x, sim.player.y + EYE_HEIGHT, sim.player.z);
             }
-            camera.setEulerAngles((fpInput.pitch * 180) / Math.PI, (fpInput.yaw * 180) / Math.PI, 0);
+            camera.setEulerAngles(
+                ((fpInput.pitch + feel.pitch) * 180) / Math.PI,
+                (fpInput.yaw * 180) / Math.PI,
+                (feel.roll * 180) / Math.PI
+            );
+            // over-the-shoulder view (C): back, up and to the right of the eye, same look
+            if (state.chase && localSlot2 < 0) {
+                const e = camera.getPosition();
+                const yaw = fpInput.yaw;
+                const cp = Math.cos(fpInput.pitch);
+                const back = 3.2;
+                camera.setPosition(
+                    e.x + Math.sin(yaw) * cp * back + Math.cos(yaw) * 0.7,
+                    e.y - Math.sin(fpInput.pitch) * back * 0.35 + 0.45,
+                    e.z + Math.cos(yaw) * cp * back - Math.sin(yaw) * 0.7
+                );
+                // ?view=side (screenshots of the animation): from the beaver's right, level
+                if (sideView) {
+                    camera.setPosition(
+                        e.x + Math.cos(yaw) * 2.1 * EYE_HEIGHT,
+                        e.y - 0.45 * EYE_HEIGHT,
+                        e.z - Math.sin(yaw) * 2.1 * EYE_HEIGHT
+                    );
+                    camera.setEulerAngles(-5, (yaw * 180) / Math.PI + 90, 0);
+                }
+            }
         }
         if (camera.camera!.fov !== state.fov) camera.camera!.fov = state.fov;
         // ---- player 2's view (split screen): interpolated eye, look at display rate
@@ -418,16 +478,28 @@ class LabDirector extends Script {
         // your own beaver, without its head, when yours is the only camera on this device
         const ownSlot = guestSession ? guestSession.slot : 0;
         pipeline.firstPersonSlot =
-            state.mode === 'firstPerson' && localSlot2 < 0 && ownSlot >= 0 && ownSlot < sim.avatars.length
+            state.mode === 'firstPerson' &&
+            !state.chase &&
+            localSlot2 < 0 &&
+            ownSlot >= 0 &&
+            ownSlot < sim.avatars.length
                 ? sim.avatars[ownSlot].slot
                 : -1;
+        pipeline.firstPersonBodySlot = sim.fpBody.slot;
         if (frame !== voxelClock.frame || state.forceVoxel) {
             voxelClock.frame = frame;
             state.forceVoxel = false;
             pipeline.request(frame, voxelClock.timeOf(frame));
         }
         // apply a finished voxel frame (all its meshes at once) before this frame renders
-        pipeline.poll();
+        if (pipeline.poll()) {
+            // how late voxel frames reach the screen: shown from now until the next one lands
+            const lead = Math.min(
+                0.25,
+                Math.max(0, renderTime - (pipeline.lastStats?.time ?? renderTime) + 0.5 / voxelClock.hz)
+            );
+            pipeline.firstPersonLead += (lead - pipeline.firstPersonLead) * 0.2;
+        }
         reference.update(renderTime);
         if (state.colliders) drawColliders();
         // gusts stir the water
@@ -697,6 +769,10 @@ const host: PanelHost = {
                 applyWater();
                 panel.sync();
                 break;
+            case 'look':
+                state.look = v === 'pixel' ? 'pixel' : 'default';
+                scene.setPixelLook(state.look === 'pixel');
+                break;
             case 'mode':
                 setMode(v as State['mode']);
                 break;
@@ -709,6 +785,12 @@ const host: PanelHost = {
                 break;
             case 'carry':
                 state.carry = Boolean(v);
+                break;
+            case 'cameraFeel':
+                state.cameraFeel = Boolean(v);
+                break;
+            case 'chase':
+                state.chase = Boolean(v);
                 break;
             case 'props':
                 state.props = v === 'scripted' ? 'scripted' : 'physics';
@@ -828,6 +910,15 @@ const panel = new DebugPanel(host, [
                     { value: 'high', label: 'High' },
                     { value: 'low', label: 'Low' }
                 ]
+            },
+            {
+                kind: 'select',
+                id: 'look',
+                label: 'Look (L)',
+                options: [
+                    { value: 'default', label: 'Default' },
+                    { value: 'pixel', label: 'Pixel (prototype)' }
+                ]
             }
         ]
     },
@@ -844,6 +935,8 @@ const panel = new DebugPanel(host, [
                 ]
             },
             { kind: 'toggle', id: 'carry', label: 'Carry plank (G, first person)' },
+            { kind: 'toggle', id: 'cameraFeel', label: 'Camera bob & kick' },
+            { kind: 'toggle', id: 'chase', label: 'Over the shoulder (C)' },
             { kind: 'range', id: 'fov', label: 'FOV', min: 40, max: 100, step: 1 },
             { kind: 'range', id: 'sensitivity', label: 'Mouse sensitivity', min: 0.5, max: 6, step: 0.1 }
         ]
@@ -1111,6 +1204,15 @@ window.addEventListener('keydown', (e) => {
             break;
         case 'KeyG':
             state.carry = !state.carry;
+            panel.sync();
+            break;
+        case 'KeyC':
+            state.chase = !state.chase;
+            panel.sync();
+            break;
+        case 'KeyL':
+            state.look = state.look === 'pixel' ? 'default' : 'pixel';
+            scene.setPixelLook(state.look === 'pixel');
             panel.sync();
             break;
         case 'F3':
@@ -1587,7 +1689,7 @@ window.__riverLab = {
     },
     /** Merges fields into the next player command (grab / throw / move edges for tests). */
     input: (c: Record<string, unknown>) => fpInput.inject(c),
-    player: () => ({ ...sim.player, holding: sim.physics.heldId }),
+    player: () => ({ ...sim.player, holding: sim.physics.heldId, eyeHeight: EYE_HEIGHT }),
     level: level.id,
     progress: () => ({ ...sim.progress, events: sim.events.map((e) => e.kind), stepText: sim.stepText }),
     /** Places a named prop at a pose (tests and the evidence capture), as a teleport. */
@@ -1654,7 +1756,11 @@ if (editing) {
     orbit.focusPoint = new Vec3(fx, fy, fz);
     const d = designer;
     app.on('update', () => d.draw());
-} else if (params.get('view') === 'fp' || (level.startFirstPerson && params.get('view') !== 'orbit')) {
+} else if (
+    params.get('view') === 'fp' ||
+    params.get('view') === 'chase' ||
+    (level.startFirstPerson && params.get('view') !== 'orbit')
+) {
     // no pointer lock without a user gesture (design doc §9): the first click on the canvas takes it
     setMode('firstPerson', false);
     toSpawn();

@@ -1,5 +1,148 @@
 # Progress log
 
+## Holding things in your hands (2026-11-21, owner request)
+
+Owner: "It really needs to look like I am holding things with my arms".
+
+- **Problem:** held things floated at the grab distance, eased in to 1.7 m from the eye. The arms
+  are 0.84 m long, so they pointed at the object but stopped short of it.
+- **Arm's length:** held things are now carried at the body's `holdReach` (arm's length + 6 cm)
+  from the shoulders, for where you look (`handsHold` in `world.ts`).
+    - Looking straight ahead, that is about 0.9 m from the eye; looking down, about 1.05 m.
+    - Things grabbed from further away are drawn in at 3 m/s.
+    - The mouse wheel can only bring them nearer.
+    - Shared holds keep their distance: two carriers drawing a log in would pull it apart.
+- **Both hands on it:** the arms aim at the grip, and the shoulders reach in by whatever the arm
+  is short. The hands go either side of the grip: as wide as the thing (up to 0.35 m) for wide
+  things, close together for small ones.
+- **Leaning against a load keeps the hands on it:**
+    - raised arms counter the torso's pitch;
+    - the shoulders slide forward by what the lean takes back.
+    - (Before, leaning back lifted the hands 20 cm off the grip.)
+- **First person:** while you hold something, the arms drop their "ready" pose and aim at the
+  object, the same as others see them.
+- **Measured (`tests/unit/hands.test.ts`):** both hand tips are within 10 cm of the grip's height
+  and 8 cm of its depth, either side of it. Checked for the plank at three look angles, the cube
+  and the bucket, in your own view and as others see you.
+- **The beaver body** keeps the old behaviour (`holdReach: Infinity`).
+
+## Balance: where you grip something is where it turns (2026-11-21, owner request)
+
+Owner: "Where I pick the logs up from should change their rotation point. Balance is a big part of
+this game".
+
+- **The grip was already the pivot:** the grab force acts at the point you grabbed. What was
+  missing was a wrist. Heavy angular damping (6) kept everything level wherever you held it.
+- **Now a wrist** (`wristTorque` in `src/sim/physics/grab.ts`, `applyWrist` in `world.ts`) holds
+  the object at the angle you picked it up at, relative to which way you face.
+    - It is a damped spring (2.2 Hz, critically damped), scaled by the body's inertia.
+    - It is capped at 70 N·m, so the weight's twist about your hand decides what happens.
+    - Angular damping on held things drops to 1.5. Things with a handle (the bucket) keep 6 and
+      have no wrist: they hang from the handle.
+- **Measured with the plank** (2.4 m), held up in front for two seconds:
+    - gripped at its middle, it stays as picked up (within 4°);
+    - 0.2 m off centre, it barely sags;
+    - 0.45 m off, it tips about 45°;
+    - by the end, it tips about 56° and hangs below the hand.
+- **Shared holds:** each grip gives half a wrist's strength. Two carriers balance a log between
+  them, and it doesn't roll in their hands.
+- **Animation:** the wrist's load feeds the carry strain, so an unbalanced hold makes the body
+  lean and tremble like a heavy one.
+- **Tests:** `tests/unit/balance.test.ts` covers the wrist maths (shortest way round, damping, the
+  cap, NaN safety) and the plank at four grips. It also checks the bucket has no wrist.
+    - Co-op log test: the log resting on the bottom log is now taken off before the two-player lift.
+      Before, whether the pair could lift the bottom log depended on how far the solo attempt had
+      rolled it out from under the top one.
+
+## Tall lanky people stand in for the beavers (2026-11-21, owner request, temporary)
+
+Owner: "replace (temporarily) the beavers with people. But like tall lanky simple people. Think
+Slenderman proportions".
+
+- **`src/assets/person.ts`:** a 2 m person.
+    - Small head, narrow torso, and very long thin arms and legs (fingertips just above the knee).
+    - Hard hat and hi-vis vest, like the beavers.
+    - Thin limbs use coverage25 sampling, so they stay solid on a 5–10 cm lattice.
+    - Three new palette colours: skin, workwear and boot.
+- **It uses the beaver's animation channels,** so grab, carry, throw, walk, the network and first
+  person all work unchanged. It replaces the players' bodies and the River Lab's walking NPC.
+- **One switch:** `PLAYER_BODY` in `src/assets/player-body.ts` picks the body, along with its eye
+  height (1.86 m vs 1.22 m), shoulders, arm length and stride. Set it to `'beaver'` to undo.
+- **Gameplay changes that come with the height:**
+    - the eye is 64 cm higher;
+    - things grabbed from further than 1.7 m ease in to 1.7 m (except while shared, or after a
+      mouse-wheel change);
+    - the collision capsule is unchanged (1.4 m).
+- **Long arms nearly reach what you hold:** the plank floats about 40 cm past the fingertips (the
+  beaver's gap was about a metre).
+- **Tests:** the first-person body tests now run for both bodies. Two physics tests now aim from
+  whatever eye height the body has. Measured with the person, the held bucket's tilt bound is 22°
+  (20.0° measured). The whole unit suite passes with either body.
+
+## Grab, carry and throw animation (2026-11-21, owner request)
+
+Owner: "add some animation in for the carrying and grabbing of things… look and feel like a AAA game
+that also just so happens to have this cool voxel pixel effect".
+
+- **A body animator in the sim** (`src/sim/player-anim.ts`): springs towards pose targets, plus timed
+  overlays on events. It runs at the fixed tick, so it is deterministic, and every player sees
+  everyone's animation through four new beaver channels: reach, spread, lean and head pitch
+  (`ANIM_MAX` is now 10).
+- **Holding:**
+    - the arms aim at the actual grip point, so a heavy log that sags pulls them down, and they
+      spread for wide things;
+    - the body leans back against the load, with a slight tremor under strain;
+    - what you carry bobs with your step.
+- **Grab:** a lunge towards the object, then a dip as its weight comes on (more for heavy things).
+- **Other events:**
+    - a missed grab swipes out and back;
+    - a throw flings the arms up and lunges forward (the throw itself stays instant);
+    - a drop lifts the paws slightly;
+    - a hard landing dips the body forward.
+- **The head follows where you look,** for other players to see.
+- **First-person camera:** a small walk bob, and kicks on throws, landings and heavy loads, taken
+  from your beaver's channels. _Camera bob & kick_ in the panel, or `?bob=off`, turns it off.
+- **Seeing yourself:**
+    - `C` watches your beaver from over its shoulder in first person;
+    - `?view=side` gives a side-on view for screenshots.
+- **Motions are exaggerated** (up to ~20 cm of lean or reach, 0.3–0.6 s) so they read on a 5–10 cm
+  lattice rebuilt 20 times a second. Anything faster or smaller doesn't show.
+- **Tests:** `tests/unit/player-anim.test.ts` (7 tests: aim, weight, spread, throw, miss, landing,
+  bounded under random events).
+- **Known limit:** things are held 1.3–1.5 m out (the grab distance), while the beaver's arms are
+  34 cm long. The arms point at what you hold rather than touching it. Holding things closer would
+  change how carrying plays, so that is the owner's call.
+
+## Pixel look prototype (2026-11-21, owner request)
+
+`?look=pixel`, `L`, or _Look_ in the debug panel's lighting section (`src/render/pixel-look.ts`):
+
+- a quarter-resolution render with a nearest-neighbour upscale;
+- silhouette outlines from depth, fading out between 25 and 60 m;
+- posterized colour;
+- lone sparkles and one-texel cracks filled in;
+- bloom, vignette and MSAA turned off.
+
+It is off by default.
+
+## First person: your limbs at 1 cm (2026-11-21, owner report)
+
+Owner, with a phone screenshot: looking down and walking backwards showed a few huge blocks; "can we
+shrink the voxel size for the player's arms?"
+
+- **Your own limbs are drawn on the 1 cm lattice.** That's your arms, legs and feet, as a
+  renderer-only entity (`fp-body`, `beaverFirstPersonAsset`, `cellTier: 'fine'`). It replaces your
+  beaver for your own camera. Other players still see your normal beaver.
+- **The torso is left out in first person.** At 5–10 cm it filled the lower view a hand's width from
+  the camera.
+- **No more trailing:** voxel frames reach the screen a frame or two after their time. Your limbs
+  are now sampled that much later (a measured, smoothed lead, up to 250 ms), so they keep up when
+  you walk. Before, the body ended up in front of you when walking backwards.
+- **Assets can choose their lattice** (`VoxelAsset.cellTier`). Your limbs use one sample per 1 cm
+  cell.
+- **Cost (SwiftShader container, slow CPU):** the voxel frame median goes from 24 ms to 39–45 ms in
+  first person. The 1 cm lane becomes the slowest of the parallel lanes. Unmeasured on phones.
+
 ## Online co-op diagnosis: relays fine, direct connections fail (2026-11-21, owner report)
 
 Owner: "It never showed up" (a hosted game, on the same network). ADR 0012 has the full write-up.

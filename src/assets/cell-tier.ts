@@ -60,6 +60,7 @@ export function assetBounds(asset: VoxelAsset): AABB {
 
 /** The lattice an asset is drawn on, from its size. */
 export function assetTier(asset: VoxelAsset): CellTier {
+    if (asset.cellTier) return asset.cellTier;
     if (asset.parts.length === 0) return 'base';
     const b = assetBounds(asset);
     const sides = [b.maxX - b.minX, b.maxY - b.minY, b.maxZ - b.minZ].sort((a, c) => a - c);

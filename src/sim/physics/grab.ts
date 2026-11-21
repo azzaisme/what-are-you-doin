@@ -32,8 +32,22 @@ export const GRAB = {
     breakTime: 0.75,
     /** ...or at once beyond this distance (snagged behind something). */
     snapDistance: 2.2,
-    /** Extra angular damping while held, so held props settle instead of spinning. */
-    heldAngularDamping: 6,
+    /**
+     * Extra angular damping while held, so held props settle instead of spinning. Low enough that a
+     * prop held off its balance point visibly tips and swings about the grip.
+     */
+    heldAngularDamping: 1.5,
+    /** The same for things that hang from a fixed grab point (the bucket): steady, no wrist. */
+    hangingAngularDamping: 6,
+    /**
+     * Wrist: one player's grip resists twisting up to this torque (N m), holding what they carry at
+     * the angle they picked it up at (turning with them). Held near its balance point a plank stays
+     * level; held 0.3 m off it (24 kg: 71 N m of twist) it starts to sag; held by the end it tips.
+     */
+    maxTorque: 70,
+    /** Wrist spring natural frequency (Hz) and damping ratio, inertia-normalized. */
+    wristFrequency: 2.2,
+    wristDamping: 1.0,
     /** Throw: desired speed along the view, capped by the impulse a beaver can give. */
     throwSpeed: 9,
     maxThrowImpulse: 45
@@ -166,5 +180,85 @@ export function viewDir(yaw: number, pitch: number, out: Vec3Like): Vec3Like {
     out.x = -Math.sin(yaw) * cp;
     out.y = Math.sin(pitch);
     out.z = -Math.cos(yaw) * cp;
+    return out;
+}
+
+export interface Quat {
+    x: number;
+    y: number;
+    z: number;
+    w: number;
+}
+
+export interface WristResult {
+    /** World torque to apply (N m), capped. */
+    tx: number;
+    ty: number;
+    tz: number;
+    /** Angle from the held orientation (rad). */
+    angle: number;
+    /** Wanted torque over the cap (1 or more: the wrist cannot hold it; it tips). */
+    load: number;
+}
+
+/**
+ * The wrist's torque for one tick: a damped spring turning the body from its orientation `q`
+ * towards `target`, as angular acceleration (inertia-normalized, so light and heavy things respond
+ * alike) times the body's world inertia, capped at `maxTorque`. Gravity is not compensated: a body
+ * held off its balance point sags until the spring (or the cap) balances the twist of its weight.
+ */
+export function wristTorque(
+    q: Quat,
+    target: Quat,
+    angVel: Vec3Like,
+    invI: Sym3,
+    out: WristResult,
+    maxTorque: number = GRAB.maxTorque
+): WristResult {
+    // error rotation e = target * conj(q), shortest way round, as a rotation vector
+    let ex = target.w * -q.x + target.x * q.w + target.y * -q.z - target.z * -q.y;
+    let ey = target.w * -q.y - target.x * -q.z + target.y * q.w + target.z * -q.x;
+    let ez = target.w * -q.z + target.x * -q.y - target.y * -q.x + target.z * q.w;
+    let ew = target.w * q.w - target.x * -q.x - target.y * -q.y - target.z * -q.z;
+    if (ew < 0) {
+        ex = -ex;
+        ey = -ey;
+        ez = -ez;
+        ew = -ew;
+    }
+    const sn = Math.hypot(ex, ey, ez);
+    const angle = 2 * Math.atan2(sn, ew);
+    const k = sn > 1e-9 ? angle / sn : 2;
+    const w0 = 2 * Math.PI * GRAB.wristFrequency;
+    const c = 2 * GRAB.wristDamping * w0;
+    // wanted angular acceleration
+    const ax = w0 * w0 * ex * k - c * angVel.x;
+    const ay = w0 * w0 * ey * k - c * angVel.y;
+    const az = w0 * w0 * ez * k - c * angVel.z;
+    // torque = I a, with I the inverse of the world inverse inertia
+    const { m11: a, m12: b, m13: d, m22: e, m23: f, m33: g } = invI;
+    const c11 = e * g - f * f;
+    const c12 = d * f - b * g;
+    const c13 = b * f - d * e;
+    const det = a * c11 + b * c12 + d * c13;
+    let tx = 0;
+    let ty = 0;
+    let tz = 0;
+    if (Number.isFinite(det) && Math.abs(det) > 1e-12) {
+        const c22 = a * g - d * d;
+        const c23 = b * d - a * f;
+        const c33 = a * e - b * b;
+        tx = (c11 * ax + c12 * ay + c13 * az) / det;
+        ty = (c12 * ax + c22 * ay + c23 * az) / det;
+        tz = (c13 * ax + c23 * ay + c33 * az) / det;
+    }
+    const mag = Math.hypot(tx, ty, tz);
+    const load = maxTorque > 0 ? mag / maxTorque : Infinity;
+    const scale = mag > maxTorque && mag > 0 ? maxTorque / mag : 1;
+    out.tx = Number.isFinite(tx) ? tx * scale : 0;
+    out.ty = Number.isFinite(ty) ? ty * scale : 0;
+    out.tz = Number.isFinite(tz) ? tz * scale : 0;
+    out.angle = angle;
+    out.load = Number.isFinite(load) ? load : 0;
     return out;
 }

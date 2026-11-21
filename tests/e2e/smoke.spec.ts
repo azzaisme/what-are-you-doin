@@ -22,7 +22,7 @@ type Lab = {
     entities(): Record<string, { visible: boolean; x: number; y: number; z: number }>;
     input(c: Record<string, unknown>): void;
     action(id: string): void;
-    player(): { x: number; y: number; z: number; holding: number; grounded: boolean };
+    player(): { x: number; y: number; z: number; holding: number; grounded: boolean; eyeHeight: number };
     look(yaw: number, pitch: number): void;
     level: string;
     progress(): { goalReached: boolean; falls: number; recoveries: number; events: string[] };
@@ -263,7 +263,7 @@ test('physics sandbox: grab and carry the plank, launch the ragdoll, switch to s
     await page.waitForTimeout(1500);
     const p = await lab(page, (l) => l.player());
     expect(p.grounded).toBe(true);
-    const pitch = -Math.atan2(p.y + 1.22 - plank.y, Math.hypot(plank.x - p.x, plank.z - p.z));
+    const pitch = -Math.atan2(p.y + p.eyeHeight - plank.y, Math.hypot(plank.x - p.x, plank.z - p.z));
     await page.evaluate(
         ([x, z, pitch]) => (window as unknown as { __riverLab: Lab }).__riverLab.setFirstPerson(x, z + 1.6, 0, pitch),
         [plank.x, plank.z, pitch]

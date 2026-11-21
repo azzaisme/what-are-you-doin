@@ -35,6 +35,8 @@ export interface VoxelAsset {
      * must not allocate per call.
      */
     evaluate(root: Pose, anim: ArrayLike<number>, out: Pose[]): void;
+    /** Optional: the voxel lattice it is drawn on, instead of the one its size picks (ADR 0011). */
+    readonly cellTier?: 'fine' | 'base' | 'coarse';
     /** Optional: true leaves that part out of this voxel frame (e.g. your own head in first person). */
     partHidden?(anim: ArrayLike<number>, part: number): boolean;
 }
