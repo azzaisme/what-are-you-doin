@@ -1,5 +1,94 @@
 # Progress log
 
+## Epic 8: the world fights back, sound, and a playtest kit (2026-11-22)
+
+The Timber Yard is now a complete slice: the creek floods when you finish the bridge, the wind
+goes for the plank you carry, everything makes a sound, and there is a script and an in-game log
+for running the playtest gate.
+
+### The hazards (#18, #71–#73)
+
+The world answers your progress on purpose. The hazard director runs inside the host's
+simulation, so it is deterministic (two runs of the same inputs give the same floods and gusts,
+tested) and guests see exactly what the host sees.
+
+- **The creek floods when the bridge is finished (#72):**
+    - **When:** 4 s after a beam (or plank) first lies across the gap and is let go.
+    - **The tell:** a siren, a rumble, and the new banded gauge post by the crossing going under.
+      The toast says what to do.
+    - **What happens:** the water rises from −0.45 m to 0.60 m, just over the capstones, over 18 s.
+      It stays up for 14 s and falls over 12 s. Floodwater floats timber and runs downstream at 1.3 m/s.
+    - **Nothing is lost for good:** whatever it carried off is left on the near bank downstream when
+      the water is down.
+    - **Counterplay, all tested:**
+        - carry the bucket across at a run before the peak (the bridge-building playthrough now does
+          this);
+        - stand on the beams, one player on each;
+        - hold the beams.
+          Left alone, both beams wash away.
+- **A gust goes for the plank you carry (#73):**
+    - **When:** after 1.5 s of carrying a plank within 4 m of the creek.
+    - **The tell:** the windsock swings round and stands out, a warning gust blows, and a toast warns.
+    - **What happens:** 2.2 s later, a 2 s gust pushes the plank towards the creek with 1,050 N, more
+      than one grip (650 N). It tears the plank out of your hands, and it lands in the creek
+      by the bank.
+    - **Counterplay, all tested:**
+        - hold it low (look down): it catches only about half the gust, measured 563 N, and you
+          keep it;
+        - carry it with a friend: two grips give 1,300 N;
+        - put it down: things lying still are left alone.
+- **Budget (#71):**
+    - one hazard at a time, and 15 s of quiet after each;
+    - nothing in the first 20 s of a run, and nothing after the goal;
+    - at most 2 floods (75 s apart), and none once the bucket is across;
+    - at most 3 gusts (40 s apart), and only while 3 or more planks are still out of the creek.
+- **Online:** the host sends the water level and the hazard phases with each snapshot. A guest's
+  river rises with the host's (browser test: the drawn water is within 5 cm of the simulation's).
+
+### Sound (#19, #79–#82)
+
+- **Every sound is made in code:** 33 of them, generated when the game starts. They are original,
+  so there is nothing to license or credit, and nothing to download.
+- **Starts on your first click, tap or key:** browsers and the itch.io embed only allow sound
+  after one. Before that, the game doesn't even create the audio system, so the console stays clean.
+- **What you hear:**
+    - **Impacts:** wooden knocks, the bucket's clank, heavy thuds, louder for harder hits.
+    - **Water:** splashes, small and big, including you falling in.
+    - **Your hands and feet:** grabs, throws and footsteps.
+    - **The ute:** its engine follows the speed, and the doors clunk as you get in and out.
+    - **Ambience:** the creek (louder in flood), wind that follows the gusts, and birds.
+    - **Hazard tells:** the siren and the flood's rumble, the warning gust and the gust.
+    - **Progress:** a ding for each step and a fanfare at the goal.
+- **Sound tab in Settings:** Volume, Effects and Ambience, saved like the other settings.
+  `?sound=off` mutes for one visit.
+- **For Epic 5 (bridges):** `sfx.creak(position, strain)` and `sfx.snap(position)` in
+  `src/audio/sfx.ts`. Creaks are louder and deeper as strain goes up, and calls before the sound has
+  started do nothing.
+- **Not done:** music and beaver chatter (#83). The settings have no music or voice slider until
+  there is something to play.
+
+### The playtest kit (#70)
+
+- **`docs/playtest.md`** is the script for the gate: the words to say, what not to say, what to
+  watch for, the questions to ask afterwards, a pass/fail table, and a template for recording the
+  results here.
+- **Settings → Game → Playtest log…** records the session on the device:
+    - every event (falls, recoveries, stages, the goal, each hazard and what it did, the ute);
+    - grabs, restarts, menu visits and who joins;
+    - every 5 s, where the players and the bucket are, what they hold and the water level.
+- **The summary at the top answers the gate's questions:** how long, finished or not, how many
+  falls, and floods and gusts met. Add notes as you watch, then copy or save it as a file. The
+  previous session's log is kept too.
+- **Not done:** the playtests themselves (solo, a team of two, an unfamiliar tester). They need
+  people, so #70 stays open.
+
+### Tests
+
+- Unit tests: 364 pass (was 326), at both voxel sizes. New: `hazards.test.ts`, `audio.test.ts` and
+  `playtest.test.ts`.
+- New browser test: a finished bridge in the Timber Yard brings the flood and its siren, the drawn
+  river rises with it, and the sound starts only after a key press, with no console errors.
+
 ## Epic 4: the ute drives (2026-11-22)
 
 You can now drive the ute in the Timber Yard and the Valley. A friend can ride along.

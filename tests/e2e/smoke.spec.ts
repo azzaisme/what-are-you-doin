@@ -30,6 +30,8 @@ type Lab = {
     interaction(): { holding: string | null; target: string | null; shared: boolean; driving: boolean; seat: number };
     teleport(x: number, z: number, yaw?: number): void;
     ute(): { x: number; y: number; z: number; yaw: number; speed: number; driver: number; drivable: boolean };
+    hazards(): { waterY: number; flood: number; gust: number; floods: number; planeY: number };
+    audio(): { started: boolean; context: string; played: number; recent: string[]; loops: Record<string, number> };
 };
 
 const IGNORED = [
@@ -438,6 +440,41 @@ test('level 1, the Timber Yard: starts in first person with the objective, and t
     );
     await expect(page.locator('#hud-objective')).toHaveClass(/done/);
     await expect(page.locator('.toast')).toContainText('delivered');
+    expect(problems).toEqual([]);
+});
+
+test('the Timber Yard fights back: the finished bridge brings the flood, with its siren; sound starts on a key', async ({
+    page
+}) => {
+    const problems = await boot(page, '?level=yard&t=0.01&quality=low#cell100');
+    // no sound (and no audio context) before the player does something: browser and itch.io rules
+    expect((await lab(page, (l) => l.audio())).context).toBe('locked');
+    await page.keyboard.press('Shift');
+    await page.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.audio().started, null, {
+        timeout: 10_000
+    });
+    // past the quiet start, lay both beams across the gap; the simulation runs on (seeking: software
+    // rendering here runs only a few ticks a second)
+    await lab(page, (l) => l.seek(21));
+    await lab(page, (l) => {
+        l.placeProp('beam-0', -1.105, 0.62, -2, Math.PI / 2);
+        l.placeProp('beam-1', -0.895, 0.62, -2, Math.PI / 2);
+    });
+    await lab(page, (l) => l.seek(26));
+    expect((await lab(page, (l) => l.hazards())).floods).toBe(1);
+    await expect(page.locator('.toast')).toContainText('siren');
+    // the river's surface rises on screen with the simulation's water
+    await lab(page, (l) => l.seek(37));
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().planeY > -0.2,
+        null,
+        { timeout: 30_000 }
+    );
+    const hz = await lab(page, (l) => l.hazards());
+    expect(Math.abs(hz.planeY - hz.waterY)).toBeLessThan(0.05);
+    const a = await lab(page, (l) => l.audio());
+    expect(a.recent).toContain('siren');
+    expect(a.context).toBe('running');
     expect(problems).toEqual([]);
 });
 

@@ -12,6 +12,7 @@ import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs';
 import { BEAVER_ARM_REACH, BEAVER_LEAN, BEAVER_WALK_AMOUNT, BEAVER_WALK_PHASE } from './assets/beaver.ts';
 import { CELL_TIERS, assetTier, tierCellCm } from './assets/cell-tier.ts';
 import type { CellTier } from './assets/cell-tier.ts';
+import { GameAudio, soundBodies } from './audio/game-audio.ts';
 import { DebugPanel } from './debug/panel.ts';
 import type { PanelHost } from './debug/panel.ts';
 import { DESIGN_KEY, Designer, loadDraft } from './editor/designer.ts';
@@ -28,6 +29,7 @@ import { GuestSession, HostSession, listGames } from './net/session.ts';
 import type { GameAd } from './net/session.ts';
 import { localTransport, roomTransport } from './net/transport.ts';
 import type { NetTransport } from './net/transport.ts';
+import { PLAYTEST_STORAGE_KEY, PlaytestLog } from './playtest/telemetry.ts';
 import { ReferenceRenderer } from './render/reference.ts';
 import { QUALITY, createLabScene } from './render/scene.ts';
 import type { Quality } from './render/scene.ts';
@@ -44,6 +46,7 @@ import { initPhysics } from './sim/physics/world.ts';
 import { ANIM_MAX } from './sim/snapshots.ts';
 import type { CameraControlsApi } from './types/engine-scripts.ts';
 import { OnlinePanel } from './ui/online-panel.ts';
+import { PlaytestPanel } from './ui/playtest-panel.ts';
 import { SettingsMenu } from './ui/settings-menu.ts';
 import type { SettingValue } from './ui/settings-menu.ts';
 import { DEFAULT_SETTINGS, SETTING_RANGES, loadSettings, saveSettings, urlOverrides } from './ui/settings-store.ts';
@@ -211,6 +214,74 @@ watch('bucket', 0, false);
 for (const d of sim.dummy) watch(d.name, 0.15, false);
 for (const e of sim.eyes) watched.push({ slot: e.slot, bottom: 0, timber: false, eyeHeight: EYE_HEIGHT });
 const fx = new ParticleFX(level, watched);
+// ---- sound (src/audio): built and started on the first click, tap or key (browser rules)
+const audio = new GameAudio(app, camera, {
+    level,
+    ring: sim.ring,
+    watched: soundBodies(sim.entities),
+    eyeSlots: sim.eyes.map((e) => e.slot),
+    eyeHeight: EYE_HEIGHT,
+    uteSlot: level.actors.ute.mode === 'none' ? -1 : sim.ute.slot,
+    slotOfId: (id) => sim.entities.find((e) => e.id === id)?.slot ?? -1
+});
+audio.armUnlock();
+// ---- the playtest log (Epic 8 gate): what happened this session, kept on this device
+const playtest = new PlaytestLog(
+    {
+        level: level.name,
+        voxels: `${Math.round(GRID_SIZE * 1000) / 10} cm`,
+        device: isTouchDevice() ? 'touch' : 'mouse & keyboard',
+        screen: `${window.innerWidth}x${window.innerHeight}`,
+        date: new Date().toISOString().slice(0, 16).replace('T', ' ')
+    },
+    performance.now()
+);
+const playtestHeld: number[] = [];
+const playtestPose = pose();
+const playtestAnim = new Float64Array(ANIM_MAX);
+function savePlaytest(): void {
+    try {
+        localStorage.setItem(PLAYTEST_STORAGE_KEY, playtest.text(performance.now()));
+    } catch {
+        // storage blocked or full: the log lasts for this visit
+    }
+}
+const previousPlaytest = (() => {
+    try {
+        return localStorage.getItem(PLAYTEST_STORAGE_KEY) ?? '';
+    } catch {
+        return '';
+    }
+})();
+setInterval(savePlaytest, 15_000);
+window.addEventListener('pagehide', savePlaytest);
+/** Per frame: grabs as they happen, who plays, and every few seconds where everyone is. */
+function playtestFrame(t: number): void {
+    const now = performance.now();
+    let playing = 0;
+    const players: { x: number; y: number; z: number; holding: string | null }[] = [];
+    sim.players.forEach((_, i) => {
+        const sp = soundPlayer(i);
+        if (!sp.active || !sim.ring.sample(sim.eyes[i].slot, t, playtestPose, playtestAnim)) return;
+        playing++;
+        const name = sp.held >= 0 ? (sim.entities.find((e) => e.id === sp.held)?.name ?? '?') : null;
+        if (sp.held !== (playtestHeld[i] ?? -1) && name) playtest.note(now, 'grab', `P${i + 1} took the ${name}`);
+        playtestHeld[i] = sp.held;
+        const p = playtestPose.p;
+        players.push({ x: p.x, y: p.y - EYE_HEIGHT, z: p.z, holding: name });
+    });
+    playtest.setPlayers(now, Math.max(1, playing));
+    const bucketSeen = sim.ring.sample(sim.bucket.slot, t, playtestPose, playtestAnim);
+    const r = level.rules;
+    const k = guestSession ? guestSession.step : sim.progress.step;
+    const stage = r?.stages?.[k]?.name ?? r?.steps?.[k]?.text ?? r?.objective ?? '';
+    playtest.sample(now, {
+        players,
+        bucket: bucketSeen ? { ...playtestPose.p } : null,
+        waterY: (guestSession ? guestSession.hazard : sim.hazards.net()).waterY,
+        stage: (guestSession ? guestSession.goal : sim.progress.goalReached) ? 'finished' : stage
+    });
+}
 pipeline.particles = (time) => {
     const cp = camera.getPosition();
     fx.update(time, sim.ring, { x: cp.x, z: cp.z });
@@ -569,6 +640,16 @@ class LabDirector extends Script {
             scene.waterEntity.setLocalPosition(level.water.cx, hz.waterY, level.water.cz);
             fx.waterY = hz.waterY;
         }
+        const cpos = camera.getPosition();
+        audio.update({
+            time: renderTime,
+            listener: { x: cpos.x, y: cpos.y, z: cpos.z },
+            hazard: hz,
+            windSpeed: windNow.speed,
+            players: sim.players.map((_, i) => soundPlayer(i)),
+            uteDriven: guestSession ? guestSession.hud.some((h) => h.seat === 0) : sim.driver >= 0
+        });
+        if (state.mode === 'firstPerson') playtestFrame(renderTime);
 
         // ---- debug overlay uniform
         const g = state.gridLines ? 1 : 0;
@@ -587,6 +668,20 @@ directorEntity.addComponent('script');
 directorEntity.script!.create(LabDirector);
 app.root.addChild(directorEntity);
 app.graphicsDevice.scope.resolve('uVoxelGridLines').setValue(0);
+
+/** What the sound needs of a player: playing, holding (entity id) and seat, host or guest alike. */
+function soundPlayer(i: number): { active: boolean; held: number; seat: number } {
+    if (guestSession) {
+        const h = guestSession.hud[i];
+        return { active: true, held: h?.held ?? -1, seat: h?.seat ?? -1 };
+    }
+    const active = sim.isSlotActive(i);
+    return {
+        active,
+        held: active && sim.physicsProps ? sim.physics.heldIdOf(i) : -1,
+        seat: sim.seatOf(i)
+    };
+}
 
 /** Player 1: keyboard + mouse, merged with player 1's pad when one has joined. */
 function playerOneCommand() {
@@ -739,6 +834,7 @@ function seek(t: number): void {
 
 function resetScene(): void {
     if (guestSession) return;
+    playtest.note(performance.now(), 'restart', 'level restarted');
     sim.reset();
     clock.reset(0);
     state.pausedTime = 0;
@@ -1183,6 +1279,8 @@ function pollEvents(): void {
             if (e.n <= guestEventsSeen) continue;
             guestEventsSeen = e.n;
             showToast(e.text, e.kind);
+            audio.onEvent(e.kind);
+            playtest.note(performance.now(), e.kind, e.text);
         }
         updateObjective();
         return;
@@ -1191,6 +1289,8 @@ function pollEvents(): void {
     while (seenEvents < sim.events.length) {
         const e = sim.events[seenEvents++];
         showToast(e.text, e.kind);
+        audio.onEvent(e.kind);
+        playtest.note(performance.now(), e.kind, e.text);
         updateObjective();
     }
 }
@@ -1563,6 +1663,7 @@ async function hostOnline(): Promise<void> {
         toSpawn();
     }
     hostSession = await HostSession.start(transport, sim, level.id);
+    playtest.note(performance.now(), 'online', `hosting game ${hostSession.code}`);
     hostSession.onGuestsChanged = (joined, left) => {
         for (const s of joined) showToast(`Player ${s + 1} joined`);
         for (const s of left) showToast(`Player ${s + 1} left`);
@@ -1582,6 +1683,7 @@ async function joinOnline(ad: GameAd): Promise<void> {
     setPlayers(1);
     if (state.paused) setPaused(false);
     guestSession = await GuestSession.join(transport, sim, ad);
+    playtest.note(performance.now(), 'online', `joined game ${ad.code}`);
     guestEventsSeen = 0;
     state.forceVoxel = true;
     if (state.mode !== 'firstPerson') setMode('firstPerson', false);
@@ -1744,6 +1846,11 @@ function applyInputSettings(): void {
 }
 
 function applyUiSettings(): void {
+    audio.setVolumes({
+        master: settings.volumeMaster,
+        effects: settings.volumeEffects,
+        ambience: settings.volumeAmbience
+    });
     document.documentElement.style.setProperty('--ui-scale', String(settings.uiScale));
     document.body.classList.toggle('no-hints', !settings.controlHints);
     layoutVars();
@@ -1832,6 +1939,9 @@ const menu = new SettingsMenu(
                     menu.close();
                     online.button.click();
                     break;
+                case 'playtest':
+                    playtestPanel.open();
+                    break;
                 case 'applyCell':
                     applyCellSize(cellPending);
                     break;
@@ -1866,6 +1976,7 @@ const menu = new SettingsMenu(
             return true;
         },
         opened() {
+            playtest.note(performance.now(), 'menu', 'settings opened');
             // the game below gets no input, and solo play pauses (an online game keeps running)
             fpInput.suspended = true;
             fpInput.clear();
@@ -1894,6 +2005,12 @@ const menu = new SettingsMenu(
                 { kind: 'button', id: 'restart', label: 'Restart level' },
                 { kind: 'button', id: 'levels', label: 'Levels…' },
                 { kind: 'button', id: 'online', label: 'Play online…' },
+                {
+                    kind: 'button',
+                    id: 'playtest',
+                    label: 'Playtest log…',
+                    hint: 'What happened this session, to note, copy or save'
+                },
                 { kind: 'toggle', key: 'uiHidden', label: 'Hide HUD', hint: 'H' },
                 { kind: 'toggle', key: 'debugPanel', label: 'Debug panel', hint: 'F3' }
             ]
@@ -1978,6 +2095,29 @@ const menu = new SettingsMenu(
             ]
         },
         {
+            id: 'sound',
+            label: 'Sound',
+            rows: [
+                { kind: 'range', key: 'volumeMaster', label: 'Volume', ...SETTING_RANGES.volumeMaster, format: pct },
+                {
+                    kind: 'range',
+                    key: 'volumeEffects',
+                    label: 'Effects',
+                    ...SETTING_RANGES.volumeEffects,
+                    format: pct,
+                    hint: 'Knocks, splashes, the ute, sirens and gusts'
+                },
+                {
+                    kind: 'range',
+                    key: 'volumeAmbience',
+                    label: 'Ambience',
+                    ...SETTING_RANGES.volumeAmbience,
+                    format: pct,
+                    hint: 'The creek, wind and birds'
+                }
+            ]
+        },
+        {
             id: 'interface',
             label: 'Interface',
             rows: [
@@ -1989,6 +2129,12 @@ const menu = new SettingsMenu(
     ]
 );
 menuReady = true;
+const playtestPanel = new PlaytestPanel({
+    text: () => playtest.text(performance.now()),
+    previous: () => previousPlaytest,
+    note: (t) => playtest.note(performance.now(), 'note', t),
+    closed: () => menu.sync()
+});
 
 // opening it: the Settings button, Esc, Start on a pad, or losing the mouse in first person
 const settingsBtn = document.createElement('button');
@@ -2125,6 +2271,18 @@ window.__riverLab = {
         return true;
     },
     interaction: () => sim.interaction(),
+    /** The hazards (Epic 8): water level, phases, and the rendered water plane's height. */
+    hazards: () => ({
+        ...(guestSession ? guestSession.hazard : sim.hazards.net()),
+        tick: sim.tick,
+        floods: sim.hazards.floodCount,
+        gusts: sim.hazards.gustCount,
+        planeY: scene.waterEntity.getPosition().y
+    }),
+    /** The playtest log as text. */
+    playtestLog: () => playtest.text(performance.now()),
+    /** The sound: locked until a gesture, then what has played. */
+    audio: () => audio.status(),
     /** The ute: where it is, which way it faces (yaw 0 = +z), its speed and who drives it (-1: nobody). */
     ute() {
         const p = sim.ute.pose;
