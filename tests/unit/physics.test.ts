@@ -270,7 +270,7 @@ describe('physics adapter', () => {
         expect(s.physics.stats.recovered).toBe(0);
     });
 
-    it('a violent flick drops the held plank rather than flinging it', () => {
+    it('a violent flick never flings the held plank: it is dropped, or stays in your paws', () => {
         const s = fpSim(0, 8, 0);
         s.step(cmd(100, { carry: true }));
         expect(s.physics.heldId).toBe(s.held.id);
@@ -280,8 +280,10 @@ describe('physics adapter', () => {
             const v = s.physics.bodies.get(s.held.id)!.body.linvel();
             maxSpeed = Math.max(maxSpeed, Math.hypot(v.x, v.y, v.z));
         }
-        expect(s.physics.heldId).toBe(-1);
-        expect(s.physics.stats.grabBreaks).toBe(1);
+        // held out far, the grab stretches past its limit and lets go; held close (a beaver's
+        // short reach, ~0.5 m) the hold point can't get far enough from the plank to break it
+        if (s.physics.heldId === -1) expect(s.physics.stats.grabBreaks).toBe(1);
+        else expect(s.physics.stats.grabBreaks).toBe(0);
         expect(maxSpeed).toBeLessThan(15);
     });
 
@@ -329,7 +331,8 @@ describe('physics adapter', () => {
         expect(s.physics.heldId).toBe(s.held.id);
         expect(s.held.visible).toBe(true);
         for (let n = 0; n < 60; n++) s.step(cmd(101 + n, { carry: true }));
-        expect(s.held.pose.p.z).toBeLessThan(s.player.z - 0.6);
+        // in your paws, half a metre or more ahead of the eye
+        expect(s.held.pose.p.z).toBeLessThan(s.player.z - 0.45);
         s.step(cmd(200, { carry: false }));
         expect(s.physics.heldId).toBe(-1);
         expect(s.held.visible).toBe(true);

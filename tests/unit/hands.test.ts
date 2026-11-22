@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { BEAVER_FIRST_PERSON } from '../../src/assets/beaver.ts';
-import { BODY, PLAYER_BODY } from '../../src/assets/player-body.ts';
+import { BODY } from '../../src/assets/player-body.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
@@ -32,7 +32,7 @@ function handTips(s: LabSim, firstPerson: boolean): Vec3Like[] {
     });
 }
 
-describe.runIf(PLAYER_BODY === 'person')('holding things in your hands', () => {
+describe('holding things in your hands', () => {
     it('carries at arm’s length for where you look', () => {
         const drop = BODY.eyeHeight - BODY.shoulderHeight;
         for (const pitch of [-0.8, -0.35, 0, 0.3]) {

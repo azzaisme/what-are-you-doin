@@ -456,8 +456,8 @@ test('the Timber Yard ute: get in, drive it with the keyboard, get out', async (
         ([x, z, yaw]) => {
             const l = (window as unknown as { __riverLab: Lab }).__riverLab;
             l.teleport(x, z, yaw);
-            // down at the door from a 1.86 m eye
-            l.look(yaw, -0.7);
+            // down at the door from a beaver's 1.22 m eye
+            l.look(yaw, -0.35);
         },
         [u0.x + sx * 2.2, u0.z + sz * 2.2, Math.atan2(sx, sz)]
     );

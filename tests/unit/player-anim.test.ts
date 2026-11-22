@@ -38,7 +38,9 @@ describe('player animation (grab, carry, throw)', () => {
         const level = run(new PlayerAnimator(), () => base({ held: heldAt(SHOULDER_HEIGHT) }), 120);
         const high = run(new PlayerAnimator(), () => base({ held: heldAt(SHOULDER_HEIGHT + 0.5) }), 120);
         expect(low.raise).toBeLessThan(level.raise);
-        expect(level.raise).toBeCloseTo(Math.PI / 2, 1);
+        // level with the shoulders: straight ahead, a touch down from the shoulders reaching up into it
+        expect(level.raise).toBeGreaterThan(1.45);
+        expect(level.raise).toBeLessThan(Math.PI / 2 + 0.01);
         expect(high.raise).toBeGreaterThan(level.raise);
         // empty paws hang
         expect(run(new PlayerAnimator(), () => base(), 60).raise).toBeCloseTo(0, 3);

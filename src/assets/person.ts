@@ -1,5 +1,6 @@
 /**
- * A tall, lanky, simple person: the stand-in player body (owner request, 2026-11-21: "replace
+ * A tall, lanky, simple person: the stand-in player body from 2026-11-21 to 2026-11-22, kept behind
+ * PLAYER_BODY in player-body.ts (owner request, 2026-11-21: "replace
  * (temporarily) the beavers with people… tall lanky simple people"). About 2 m tall: a small head,
  * a narrow torso, and very long thin arms and legs (fingertips just above the knee). Hard hat and
  * hi-vis vest, like the beavers.

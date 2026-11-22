@@ -77,7 +77,7 @@ export type { PlayerCommand, SimEntity };
 export { MAX_PLAYERS, MAX_STRESS };
 export type PropsMode = 'physics' | 'scripted';
 
-/** The player body's eye height (2026-11-21: the lanky stand-in people, 1.86 m; beavers 1.22 m). */
+/** The player body's eye height (beavers 1.22 m; the former stand-in people 1.86 m). */
 export const EYE_HEIGHT = BODY.eyeHeight;
 /** Stress bodies get a deterministic upward kick this often (ticks), so 25 bodies keep moving. */
 export const STRESS_KICK_TICKS = 150;
@@ -315,6 +315,7 @@ export class LabSim {
         for (let i = 1; i < MAX_PLAYERS; i++) pw.setCharacterEnabled(this.slotActive[i], i);
         pw.holdReach = BODY.holdReach;
         pw.shoulderDrop = BODY.eyeHeight - BODY.shoulderHeight;
+        pw.holdMin = BODY.holdMin;
         this.physics = pw;
     }
 

@@ -1,5 +1,56 @@
 # Progress log
 
+## The beavers are back (2026-11-22, Epic 9, #90)
+
+The tall people that stood in for the beavers are gone. Players, online avatars and the River
+Lab's walking co-worker are beaver engineers again.
+
+### What changed
+
+- **The switch:** `PLAYER_BODY` in `src/assets/player-body.ts` is `'beaver'` again. The person body
+  is still in the code and still passes every test, should you want it back.
+- **Things sit in the beaver's paws:** when the people came in they learned to carry things at
+  arm's length, with both hands on the grip. The beaver now does the same.
+    - Its arms are a little longer: 44 cm instead of 34. They still hang to the knee and read as a
+      beaver.
+    - A held thing is carried just past the paws, with the shoulders leaning in up to 20 cm.
+      From the eye that is 0.50 m looking straight ahead, 0.61 m looking a little down and 0.81 m
+      looking well down. A person held things about 0.9 m away.
+    - The arms now aim from where the leaning shoulders are, so the paws land on the grip.
+    - In first person, the "ready" pose (paws up in the corners) is only for empty paws. While
+      you hold something, your paws are where everyone else sees them: on it.
+- **Your first-person limbs** still have their own 1 cm lane that follows the camera every frame.
+  The longer arms go into it unchanged.
+
+### Measured (`tests/unit/hands.test.ts`, now run for the beaver)
+
+- Plank looking straight, a little down and well down, the crate and the bucket: both paw tips
+  are within 5 cm of the grip's height and 3 cm of its depth, one either side of it. That holds in
+  your own view and as others see you. The test's limits are 10 cm and 8 cm.
+
+### What playing feels like now
+
+- **The Timber Yard bridge:** a beaver carries a beam lower and closer. To lay one across, walk
+  right up to the bank's edge before you look down and let go. The playthrough test now stops
+  there and gets both beams onto both abutments, centred.
+- **Throwing the bucket over the creek** works again from the near abutment.
+- **Held planks:** grip a plank by its end and its far end rests on the ground, because a beaver
+  holds it lower. A violent flick no longer breaks a close hold, but it still can't fling the
+  plank (it stays under 15 m/s).
+- **The ute:** look less far down at the door to get in. The seats were already set for a sitting
+  beaver.
+
+### Tests
+
+- Unit tests: 326 pass with the beaver, and 326 with the person.
+- Updated for the beaver's height:
+    - the beam-laying stop point;
+    - a plank gripped by its end may rest on the ground;
+    - the close-hold flick;
+    - the G-plank distance;
+    - the ute door's look angle in the browser test.
+- Browser tests: first person, the Timber Yard, the ute, the Valley and split screen all pass.
+
 ## Epic 4: the ute drives (2026-11-22)
 
 You can now drive the ute in the Timber Yard and the Valley. A friend can ride along.

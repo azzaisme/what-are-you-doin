@@ -27,6 +27,8 @@ const ARM_LENGTH = BODY.armLength;
 const SHOULDER_HALF_WIDTH = BODY.shoulderHalfWidth;
 /** How far the body turns raised arms in with no spread (rad; see the assets' ARM_INWARD). */
 const ARM_INWARD_READY = BODY.armInward;
+/** Reaching shoulders also rise by this much of the reach (the bodies' `0.3 * reach`). */
+const REACH_RISE = 0.3;
 
 export interface AnimEvents {
     grabbed: boolean;
@@ -218,14 +220,20 @@ export class PlayerAnimator {
             const dz = h.z - i.z;
             const fwd = dx * fx + dz * fz;
             const up = h.y - (i.y + SHOULDER_HEIGHT);
-            const dist = Math.hypot(fwd, up);
-            raiseT = clamp(Math.atan2(Math.max(0.05, fwd), -up), 0.7, 2.5);
-            // the shoulders reach into it, so the hands get to the grip
-            reachT = clamp(dist - ARM_LENGTH, 0, 0.2);
+            // the shoulders reach into it (forward, and up by REACH_RISE of that), so the hands
+            // get to the grip; the arms aim from where the shoulders reach to
+            for (let k = 0; k < 4; k++) {
+                const d = Math.hypot(fwd - reachT, up - REACH_RISE * reachT);
+                reachT = clamp(reachT + d - ARM_LENGTH, 0, 0.2);
+            }
+            const af = fwd - reachT;
+            const au = up - REACH_RISE * reachT;
+            const dist = Math.hypot(af, au);
+            raiseT = clamp(Math.atan2(Math.max(0.05, af), -au), 0.7, 2.5);
             // both hands on it, either side of the grip: wide things by their sides, small ones
             // close together
             const hand = clamp(h.halfWidth, 0.08, 0.35);
-            const across = Math.max(0.1, Math.hypot(fwd, up));
+            const across = Math.max(0.1, dist);
             // turned in (or out) from straight ahead
             spreadT = clamp(ARM_INWARD_READY - Math.atan2(SHOULDER_HALF_WIDTH - hand, across), -0.3, 0.3);
             // lean back against the load; strain shakes the arms a little

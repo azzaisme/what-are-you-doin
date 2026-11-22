@@ -41,6 +41,11 @@ export const BEAVER_HEAD_PITCH = 9;
 export const BEAVER_ANIM_CHANNELS = 10;
 
 export const BEAVER_HEIGHT = 1.4;
+/**
+ * Shoulder to paw tip (m). A little long for a real beaver, so a carried plank or beam sits in its
+ * paws in front of the belly rather than floating beyond them.
+ */
+export const BEAVER_ARM_LENGTH = 0.44;
 
 const rig = new Rig([
     { name: 'pelvis', parent: -1, x: 0, y: 0.34, z: 0 },
@@ -106,9 +111,9 @@ const muzzleField = (x: number, y: number, z: number) => {
     return muzzleBase(x, y, z);
 };
 const arm = implicit(
-    aabb(-0.065, -0.18, -0.07, 0.065, 0.18, 0.07),
+    aabb(-0.065, -BEAVER_ARM_LENGTH / 2 - 0.01, -0.07, 0.065, BEAVER_ARM_LENGTH / 2 + 0.01, 0.07),
     () => true,
-    (x, y, z) => (y < -0.1 ? voxel(M.FurDark) : fur(x, y, z))
+    (x, y, z) => (y < -BEAVER_ARM_LENGTH / 2 + 0.1 ? voxel(M.FurDark) : fur(x, y, z))
 );
 const tail = box(0.15, 0.05, 0.26, (x, _y, z) =>
     voxel(M.Tail, (Math.floor(x / 0.07) + Math.floor(z / 0.07)) & 1 ? 1 : 2)
@@ -160,8 +165,8 @@ part(
     },
     attach(J.head, 0, 0.135, 0.01)
 );
-part({ name: 'armL', volume: arm, priority: 2, refColor: 0x8a5a33 }, attach(J.shoulderL, 0, -0.15, 0));
-part({ name: 'armR', volume: arm, priority: 2, refColor: 0x8a5a33 }, attach(J.shoulderR, 0, -0.15, 0));
+part({ name: 'armL', volume: arm, priority: 2, refColor: 0x8a5a33 }, attach(J.shoulderL, 0, -BEAVER_ARM_LENGTH / 2, 0));
+part({ name: 'armR', volume: arm, priority: 2, refColor: 0x8a5a33 }, attach(J.shoulderR, 0, -BEAVER_ARM_LENGTH / 2, 0));
 part(
     { name: 'legL', volume: box(0.08, 0.15, 0.09, fur), priority: 2, refColor: 0x8a5a33 },
     attach(J.hipL, 0, -0.16, 0)
@@ -205,7 +210,7 @@ const FP_SPINE_Z = -0.12;
 const FP_READY_RAISE = 1.55;
 
 const _root = pose();
-const _hand = pose(0, -0.34, 0.02);
+const _hand = pose(0, -BEAVER_ARM_LENGTH + 0.02, 0.02);
 
 export const beaverAsset: VoxelAsset = {
     schema: ASSET_SCHEMA_VERSION,
@@ -230,7 +235,10 @@ function poseRig(root: Pose, anim: ArrayLike<number>): void {
     const carry = anim[BEAVER_CARRY] ?? 0;
     const headYaw = anim[BEAVER_HEAD_YAW] ?? 0;
     const fp = (anim[BEAVER_FIRST_PERSON] ?? 0) > 0.5;
-    const raise = Math.max(fp ? FP_READY_RAISE : 0, Math.min(2.7, anim[BEAVER_ARM_RAISE] ?? 0));
+    // empty-handed in first person, the paws are held up ready in view; holding something, they
+    // aim at it from the real shoulders, like everyone else sees them
+    const ready = fp && carry < 0.5;
+    const raise = Math.max(ready ? FP_READY_RAISE : 0, Math.min(2.7, anim[BEAVER_ARM_RAISE] ?? 0));
     const reach = anim[BEAVER_ARM_REACH] ?? 0;
     const spread = anim[BEAVER_ARM_SPREAD] ?? 0;
     const lean = anim[BEAVER_LEAN] ?? 0;
@@ -240,13 +248,13 @@ function poseRig(root: Pose, anim: ArrayLike<number>): void {
     const spinePitch = 0.05 * amount + 0.6 * Math.max(0, reach) - lean;
     // leaning back with raised arms, the shoulders slide forward along the torso (the arms reach
     // out), so the hands stay on what they hold
-    const raised = Math.min(1, Math.max(fp ? FP_READY_RAISE : 0, anim[BEAVER_ARM_RAISE] ?? 0));
+    const raised = Math.min(1, raise);
     const keep = SHOULDER_ABOVE_SPINE * Math.tan(Math.max(0, -spinePitch)) * raised;
     rig.setShift(J.spine, 0, 0, fp ? FP_SPINE_Z : 0);
-    const sz = (fp ? FP_SHOULDER.z - FP_SPINE_Z : 0) + reach + keep;
-    const sy = (fp ? FP_SHOULDER.y : 0) + 0.3 * Math.max(0, reach);
-    rig.setShift(J.shoulderL, fp ? -FP_SHOULDER.x : 0, sy, sz);
-    rig.setShift(J.shoulderR, fp ? FP_SHOULDER.x : 0, sy, sz);
+    const sz = (ready ? FP_SHOULDER.z : 0) - (fp ? FP_SPINE_Z : 0) + reach + keep;
+    const sy = (ready ? FP_SHOULDER.y : 0) + 0.3 * Math.max(0, reach);
+    rig.setShift(J.shoulderL, ready ? -FP_SHOULDER.x : 0, sy, sz);
+    rig.setShift(J.shoulderR, ready ? FP_SHOULDER.x : 0, sy, sz);
     // raised arms stop swinging; hanging arms swing fully
     const hang = Math.max(0, 1 - raise / 0.6);
     const inward = ARM_INWARD * Math.min(1, raise) - spread;

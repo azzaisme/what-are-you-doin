@@ -84,7 +84,7 @@ export const M = {
     Dust: 47,
     WindSock: 48,
     BucketWater: 49,
-    // people (the lanky stand-in player bodies)
+    // people (the former lanky stand-in player bodies, PLAYER_BODY 'person')
     Skin: 50,
     Workwear: 51,
     Boot: 52,

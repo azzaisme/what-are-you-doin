@@ -66,6 +66,22 @@ function tilt(q: Quat): number {
     return (Math.atan2(Math.abs(ay), Math.hypot(ax, az)) * 180) / Math.PI;
 }
 
+/** The lowest corner of the 2.4 x 0.2 x 0.1 m plank (world y). */
+function plankLowest(q: Quat, p: { y: number }): number {
+    let low = Infinity;
+    for (const sx of [-1.2, 1.2])
+        for (const sy of [-0.1, 0.1])
+            for (const sz of [-0.05, 0.05]) {
+                // y row of the rotation matrix
+                const y =
+                    2 * (q.x * q.y + q.w * q.z) * sx +
+                    (1 - 2 * (q.x * q.x + q.z * q.z)) * sy +
+                    2 * (q.y * q.z - q.w * q.x) * sz;
+                low = Math.min(low, p.y + y);
+            }
+    return low;
+}
+
 /**
  * Picks the plank up `offset` m along its length from its middle and holds it up in front for two
  * seconds. Returns how far it tips, the grip's height over the middle's, and the wrist's load.
@@ -103,6 +119,8 @@ function holdPlankAt(offset: number) {
         tipped: tilt(pl.pose.q),
         lifted: pl.pose.p.y - c.y,
         gripAbove: info.y - pl.pose.p.y,
+        // the plank's lowest corner above the ground under the player (m)
+        lowest: plankLowest(pl.pose.q, pl.pose.p) - s.player.y,
         load: s.physics.rig(0)!.wristLoad,
         maxLoad
     };
@@ -122,7 +140,10 @@ describe('balance: where you pick something up decides how it hangs', () => {
         const end = holdPlankAt(1.0);
         expect(Math.abs(near.tipped - near.before)).toBeLessThan(6);
         expect(mid.tipped).toBeGreaterThan(near.tipped + 20);
-        expect(end.tipped).toBeGreaterThan(mid.tipped + 5);
+        // further out it tips more, unless its far end comes to rest on the ground first (a beaver
+        // holds things lower than a tall person)
+        if (end.lowest > 0.05) expect(end.tipped).toBeGreaterThan(mid.tipped + 5);
+        else expect(end.tipped).toBeGreaterThan(near.tipped + 15);
         // gripped by the end, it hangs below the hand, and the wrist is past what it can hold
         expect(end.gripAbove).toBeGreaterThan(0.3);
         expect(end.maxLoad).toBeGreaterThan(1);
