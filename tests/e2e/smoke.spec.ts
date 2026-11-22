@@ -27,6 +27,9 @@ type Lab = {
     level: string;
     progress(): { goalReached: boolean; falls: number; recoveries: number; events: string[] };
     placeProp(name: string, x: number, y: number, z: number, yaw?: number): boolean;
+    interaction(): { holding: string | null; target: string | null; shared: boolean; driving: boolean };
+    teleport(x: number, z: number, yaw?: number): void;
+    ute(): { x: number; y: number; z: number; yaw: number; speed: number; driver: number; drivable: boolean };
 };
 
 const IGNORED = [
@@ -435,6 +438,65 @@ test('level 1, the Timber Yard: starts in first person with the objective, and t
     );
     await expect(page.locator('#hud-objective')).toHaveClass(/done/);
     await expect(page.locator('.toast')).toContainText('delivered');
+    expect(problems).toEqual([]);
+});
+
+test('the Timber Yard ute: get in, drive it with the keyboard, get out', async ({ page }) => {
+    test.setTimeout(300_000);
+    // ?t= seeks and pauses (so boot can wait for the voxels); the pause action resumes it
+    const problems = await boot(page, '?level=yard&t=0.01&quality=low#cell100');
+    await lab(page, (l) => l.action('pause'));
+    const u0 = await lab(page, (l) => l.ute());
+    expect(u0.drivable).toBe(true);
+    expect(u0.driver).toBe(-1);
+    // stand by the driver's door (the ute's right, local -x) and look at it
+    const sx = -Math.cos(u0.yaw);
+    const sz = Math.sin(u0.yaw);
+    await page.evaluate(
+        ([x, z, yaw]) => {
+            const l = (window as unknown as { __riverLab: Lab }).__riverLab;
+            l.teleport(x, z, yaw);
+            // down at the door from a 1.86 m eye
+            l.look(yaw, -0.7);
+        },
+        [u0.x + sx * 2.2, u0.z + sz * 2.2, Math.atan2(sx, sz)]
+    );
+    // (no pointer lock in a headless browser, so read the prompt's source rather than the HUD)
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().target === 'ute',
+        null,
+        { timeout: 60_000 }
+    );
+    await lab(page, (l) => l.input({ grab: true }));
+    await page.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.ute().driver === 0, null, {
+        timeout: 30_000
+    });
+    expect(await lab(page, (l) => l.interaction().driving)).toBe(true);
+    // look ahead along the ute and drive forward
+    await page.evaluate(
+        (yaw) => (window as unknown as { __riverLab: Lab }).__riverLab.look(yaw + Math.PI, -0.1),
+        u0.yaw
+    );
+    await page.keyboard.down('KeyW');
+    await page.waitForFunction(
+        ([x, z]) => {
+            const u = (window as unknown as { __riverLab: Lab }).__riverLab.ute();
+            return Math.hypot(u.x - x, u.z - z) > 2;
+        },
+        [u0.x, u0.z],
+        { timeout: 120_000 }
+    );
+    await page.keyboard.up('KeyW');
+    await page.waitForTimeout(2000);
+    await page.screenshot({ path: 'test-results/ute-driving.png' });
+    // get out
+    await lab(page, (l) => l.input({ grab: true }));
+    await page.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.ute().driver === -1, null, {
+        timeout: 30_000
+    });
+    const p = await lab(page, (l) => l.player());
+    const u1 = await lab(page, (l) => l.ute());
+    expect(Math.hypot(p.x - u1.x, p.z - u1.z)).toBeGreaterThan(1);
     expect(problems).toEqual([]);
 });
 

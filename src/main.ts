@@ -2112,6 +2112,20 @@ window.__riverLab = {
         return true;
     },
     interaction: () => sim.interaction(),
+    /** The ute: where it is, which way it faces (yaw 0 = +z), its speed and who drives it (-1: nobody). */
+    ute() {
+        const p = sim.ute.pose;
+        const q = p.q;
+        return {
+            x: p.p.x,
+            y: p.p.y,
+            z: p.p.z,
+            yaw: Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.x * q.x)),
+            speed: sim.vehicle?.speed() ?? 0,
+            driver: sim.driver,
+            drivable: !!sim.vehicle
+        };
+    },
     /** Sets the first-person look angles (as mouse look would). */
     look(yaw: number, pitch: number) {
         fpInput.yaw = yaw;
