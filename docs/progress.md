@@ -64,7 +64,7 @@ CPU; the budget is 16.7 ms). The host's published state peaked at 1,875 bytes in
 | The Valley  | 1.28 ms (p95 1.67) | 1.83 ms (p95 2.59) | 2.67 ms (p95 3.40) | 1,040 bytes   |
 
 - Browser test: host and guest on `?netsim=150,100,0.1`. The round trip reads at least 250 ms.
-  Player 2 walks 2.5 m off, the guest reloads, the host holds player 2 (`dropped` is `[1]`), and the
+  Player 2 walks 1.5 m off, the guest reloads, the host holds player 2 (`dropped` is `[1]`), and the
   reloaded page gets player 2 back within 0.5 m of where it stood (a fresh join appears beside the
   host). The four online browser tests, split screen, the Timber
   Yard and the ute tests pass.

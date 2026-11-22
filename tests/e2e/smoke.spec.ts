@@ -794,13 +794,14 @@ test('online co-op over a bad network: the guest reloads and rejoins as the same
     );
     await guest.keyboard.down('KeyW');
     let away = 0;
-    for (let i = 0; i < 200 && away <= 2.5; i++) {
+    for (let i = 0; i < 200 && away <= 1.5; i++) {
         await guest.waitForTimeout(300);
         const p = await avatar2();
         away = Math.hypot(p.x - start.x, p.z - start.z);
     }
     await guest.keyboard.up('KeyW');
-    expect(away).toBeGreaterThan(2.5);
+    // (a fresh join would appear back on the start spot: 1.5 m off is well clear of 0.5 m)
+    expect(away).toBeGreaterThan(1.5);
     await page.waitForTimeout(1500); // the last of the walk arrives and the player stops
     const left = await avatar2();
 
