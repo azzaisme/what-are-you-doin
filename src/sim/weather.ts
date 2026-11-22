@@ -33,8 +33,9 @@ export interface WeatherZone {
     /** Seconds after the first player arrives before it gathers, plus up to `delayJitterS` (seeded). */
     delayS: number;
     delayJitterS: number;
-    /** At full strength: how far the river rises (m). */
+    /** At full strength: how far the river rises (m), and its current then (m/s, downstream). */
     riverRise?: number;
+    current?: { x: number; z: number };
     /** At full strength: the fog's end (m), the far edge of what you can see. */
     fogEnd?: number;
     /** At full strength: the crosswind's push on a carried piece (N), and its direction (rad, 0 = +X). */
@@ -111,6 +112,11 @@ export class WeatherScheduler {
         return this.zone >= 0 ? (this.spec.zones[this.zone].riverRise ?? 0) * this.strength : 0;
     }
 
+    /** The river's current at full strength (m/s), downstream. */
+    get current(): { x: number; z: number } {
+        return (this.zone >= 0 ? this.spec.zones[this.zone].current : undefined) ?? { x: 0, z: 0 };
+    }
+
     /** The crosswind now: push (N) and direction, or null. */
     get wind(): { force: number; dir: number } | null {
         if (this.zone < 0) return null;
@@ -160,9 +166,27 @@ export class WeatherScheduler {
     }
 }
 
-/** The fog's end (m) for a weather state: the level's own, closing in to the zone's at full strength. */
-export function weatherFogEnd(spec: WeatherSpec | undefined, zone: number, strength: number, levelEnd: number): number {
+/**
+ * The fog for a weather state, as one viewer sees it: the level's own (`base`), closing in to the
+ * zone's `fogEnd` at full strength. `strength` is the weather's times how far the viewer is inside
+ * its zone (0..1; see `weatherCovers`), so mist and fog hang over their own area only: the summit
+ * stays clear while the road below it is in fog. The start keeps its share of the end.
+ */
+export function weatherFog(
+    spec: WeatherSpec | undefined,
+    zone: number,
+    strength: number,
+    base: { start: number; end: number }
+): { start: number; end: number } {
     const z = spec && zone >= 0 ? spec.zones[zone] : undefined;
-    if (!z?.fogEnd) return levelEnd;
-    return levelEnd + (z.fogEnd - levelEnd) * Math.max(0, Math.min(1, strength));
+    const k = Math.max(0, Math.min(1, strength));
+    if (!z?.fogEnd || k === 0) return { start: base.start, end: base.end };
+    const end = base.end + (Math.min(base.end, z.fogEnd) - base.end) * k;
+    return { start: (base.start * end) / base.end, end };
+}
+
+/** Is a viewer at (x, z) under a zone's weather? */
+export function weatherCovers(spec: WeatherSpec | undefined, zone: number, x: number, z: number): boolean {
+    const w = spec && zone >= 0 ? spec.zones[zone] : undefined;
+    return !!w && w.contains(x, z);
 }

@@ -65,6 +65,7 @@ import { EYE_HEIGHT, LabSim, MAX_PLAYERS } from './sim/lab-sim.ts';
 import type { PropsMode } from './sim/lab-sim.ts';
 import { initPhysics } from './sim/physics/world.ts';
 import { ANIM_MAX } from './sim/snapshots.ts';
+import { weatherCovers, weatherFog } from './sim/weather.ts';
 import type { CameraControlsApi } from './types/engine-scripts.ts';
 import { OnlinePanel } from './ui/online-panel.ts';
 import { PlaytestPanel } from './ui/playtest-panel.ts';
@@ -216,12 +217,14 @@ if (level.stream)
         far: true
     });
 const pipeline = new VoxelClient(lanes, sim);
+/** The fog's start for the quality preset (the weather closes the fog in from here and from the level's end). */
+let baseFogStart = scene.app.scene.fog.start;
 /** Streamed levels: how far around the cameras the near world is built follows the quality preset. */
 function applyViewDistance(q: Quality): void {
     if (!level.stream) return;
     const v = viewDistance(level.stream, q.name);
     pipeline.nearRadius = v.radius;
-    scene.app.scene.fog.start = v.fogStart;
+    scene.app.scene.fog.start = baseFogStart = v.fogStart;
 }
 applyViewDistance(initialQuality);
 const build = await pipeline.init(1, level.id, level.data);
@@ -525,6 +528,8 @@ let frameTimeHead = 0;
 let lastFrameStamp = performance.now();
 let renderTime = 0;
 let prevGustPhase = 0;
+/** How far the camera is under the weather's area (eased, so its fog fades in and out at the edge). */
+let weatherUnder = 0;
 const playerPose = pose();
 const playerAnim = new Float64Array(ANIM_MAX);
 const bodyPose = pose();
@@ -713,6 +718,22 @@ class LabDirector extends Script {
                 );
         }
         prevGustPhase = hz.gust;
+        // the weather (Epic 9): fog over its own area, rain or snow round the camera
+        const wSpec = level.hazards?.weather;
+        if (wSpec && level.stream) {
+            const c = camera.getPosition();
+            const wz = hz.weatherZone ?? -1;
+            const under = weatherCovers(wSpec, wz, c.x, c.z) ? 1 : 0;
+            weatherUnder += (under - weatherUnder) * Math.min(1, dt * 0.6);
+            const k = (hz.weather ?? 0) * weatherUnder;
+            const f = weatherFog(wSpec, wz, k, { start: baseFogStart, end: level.stream.fog.end });
+            scene.app.scene.fog.start = f.start;
+            scene.app.scene.fog.end = f.end;
+            const zone = wz >= 0 ? wSpec.zones[wz] : undefined;
+            fx.weather.kind = zone?.kind ?? 0;
+            fx.weather.strength = k;
+            fx.weather.dir = zone?.wind?.dir ?? 0;
+        }
         const cpos = camera.getPosition();
         audio.update({
             time: renderTime,

@@ -28,6 +28,8 @@ import { GRAB } from './physics/grab.ts';
 import { applyFlood, pressStanding } from './physics/water.ts';
 import { GRAVITY } from './physics/world.ts';
 import type { PhysicsWorld } from './physics/world.ts';
+import { WEATHER, WeatherScheduler } from './weather.ts';
+import type { WeatherSpec } from './weather.ts';
 
 export interface FloodSpec {
     /** Water surface at the peak (m). */
@@ -37,8 +39,10 @@ export interface FloodSpec {
     /**
      * The crossing the flood answers (along Z): a resting, unheld piece whose ends reach past both
      * faces (z0 the near bank's, z1 the far's, z0 > z1) within `halfX` of `x` "finishes the bridge".
+     * `yaw` (default 0): the crossing's frame is the world turned by this about the origin (a
+     * crossing that runs across a level at an angle, the Valley's); x and z are in that frame.
      */
-    crossing: { x: number; halfX: number; z0: number; z1: number };
+    crossing: { x: number; halfX: number; z0: number; z1: number; yaw?: number };
     /** Where timber the flood carried off is left when the water goes down (in order). */
     washup: { x: number; y: number; z: number }[];
 }
@@ -52,6 +56,8 @@ export interface HazardSpec {
     seed: number;
     flood?: FloodSpec;
     gust?: GustSpec;
+    /** Weather along a long level (src/sim/weather.ts, Epic 9): one hazard at a time with the rest. */
+    weather?: WeatherSpec;
 }
 
 /** Timings (seconds) and budgets. */
@@ -100,6 +106,12 @@ export interface HazardNet {
     /** Gust direction (rad in XZ, 0 = +X) and its target player slot. */
     gustDir: number;
     gustSlot: number;
+    /**
+     * The weather (Epic 9): its zone in the level's weather spec (-1: none), and its strength 0..1.
+     * Absent from an older host's state (and from levels without weather): read as none.
+     */
+    weatherZone?: number;
+    weather?: number;
 }
 
 /** The parts of the simulation the director reads and acts on. */
@@ -157,15 +169,25 @@ export class HazardDirector {
     floodMoved = 0;
     private gustOver = 0;
 
+    /** Weather along the level (Epic 9), and the crosswind's hold on each carried piece. */
+    readonly weather: WeatherScheduler | null;
+    private readonly windOver = new Map<number, number>();
+    /** Telemetry: the largest push the snow's crosswind gave (N). */
+    lastWindForce = 0;
+
     /** `enabled` false: no hazards at all (tests of other mechanics in hazard levels). */
     constructor(level: LevelDef, enabled = true) {
         this.spec = enabled ? level.hazards : undefined;
+        this.weather = this.spec?.weather ? new WeatherScheduler(this.spec.weather) : null;
         this.seed = level.hazards?.seed ?? 1;
         this.baseY = level.water.y;
         this.waterY = this.baseY;
     }
 
     reset(): void {
+        this.weather?.reset();
+        this.windOver.clear();
+        this.lastWindForce = 0;
         this.waterY = this.baseY;
         this.rise = 0;
         this.floodPhase = this.gustPhase = PHASE.idle;
@@ -200,7 +222,11 @@ export class HazardDirector {
             flood: this.floodPhase,
             gust: this.gustPhase,
             gustDir: Math.atan2(this.gustDirZ, this.gustDirX),
-            gustSlot: this.gustSlot
+            gustSlot: this.gustSlot,
+            ...(this.weather && {
+                weatherZone: this.weather.busy ? this.weather.zone : -1,
+                weather: this.weather.busy ? this.weather.strength : 0
+            })
         };
     }
 
@@ -212,11 +238,18 @@ export class HazardDirector {
         if (spec.flood) this.stepFlood(h, spec.flood, tick);
         if (spec.gust) this.stepGust(h, spec.gust, tick, this.seed);
         if (this.busy) this.quietFrom = tick + S(HAZARD.safeS);
+        if (this.weather) this.stepWeather(h, this.weather, tick);
     }
 
     /** May a new hazard start now? */
     private canStart(h: HazardHost, tick: number): boolean {
-        return !h.progress.goalReached && tick >= S(HAZARD.graceS) && tick >= this.quietFrom && !this.busy;
+        return (
+            !h.progress.goalReached &&
+            tick >= S(HAZARD.graceS) &&
+            tick >= this.quietFrom &&
+            !this.busy &&
+            !this.weather?.busy
+        );
     }
 
     private say(h: HazardHost, text: string): void {
@@ -234,7 +267,7 @@ export class HazardDirector {
             const spanned = this.crossingSpanned(pw, f);
             this.spanTicks = spanned >= 2 ? this.spanTicks + 1 : 0;
             this.spanOneTicks = spanned >= 1 ? this.spanOneTicks + 1 : 0;
-            const bucketAcross = h.bucket.pose.p.z < f.crossing.z1;
+            const bucketAcross = crossingFrame(f.crossing, h.bucket.pose.p).z < f.crossing.z1;
             if (
                 (this.spanTicks >= S(F.holdToTrigger) || this.spanOneTicks >= S(F.oneBeamS)) &&
                 this.floodCount < F.max &&
@@ -324,7 +357,7 @@ export class HazardDirector {
             const s = pb.shape;
             if (pb.kind !== 'dynamic' || !pb.enabled || !pb.grabbable || !s || s.type !== 'box') continue;
             const b = pb.body;
-            const t = b.translation();
+            const t = crossingFrame(c, b.translation());
             if (Math.abs(t.x - c.x) > c.halfX || t.z > c.z0 || t.z < c.z1) continue;
             const v = b.linvel();
             if (Math.hypot(v.x, v.y, v.z) > 0.3 || pw.holders(pb.id) > 0) continue;
@@ -334,10 +367,15 @@ export class HazardDirector {
             const ax = long === s.hx ? 1 : 0;
             const ay = long === s.hy ? 1 : 0;
             const az = ax || ay ? 0 : 1;
-            const dz =
+            const wx =
+                (1 - 2 * (q.y * q.y + q.z * q.z)) * ax +
+                2 * (q.x * q.y - q.w * q.z) * ay +
+                2 * (q.x * q.z + q.w * q.y) * az;
+            const wz =
                 2 * (q.x * q.z - q.w * q.y) * ax +
                 2 * (q.y * q.z + q.w * q.x) * ay +
                 (1 - 2 * (q.x * q.x + q.y * q.y)) * az;
+            const dz = crossingFrame(c, { x: wx, z: wz }).z;
             const ez = Math.abs(dz) * long;
             if (t.z + ez > c.z0 && t.z - ez < c.z1) n++;
         }
@@ -451,6 +489,75 @@ export class HazardDirector {
         }
     }
 
+    // ------------------------------------------------------------------------------- weather
+
+    /**
+     * Weather along the level (Epic 9, src/sim/weather.ts): one hazard at a time with the rest.
+     * Rain lifts the river (the flood's water, gently: what lies in it drifts downstream); the snow's
+     * crosswind pushes carried planks like a weaker gust (lower them, or carry them together).
+     */
+    private stepWeather(h: HazardHost, w: WeatherScheduler, tick: number): void {
+        const players = h.players.filter((_, i) => h.isSlotActive(i));
+        const said = w.step({
+            tick,
+            hz: SIM_HZ,
+            players,
+            canStart: this.canStart(h, tick),
+            rand: (k) => rand(this.seed, k, 0)
+        });
+        if (said) this.say(h, said);
+        if (w.busy) this.quietFrom = tick + S(HAZARD.safeS);
+        const pw = h.physics;
+        // the river (never at the same time as a flood: one hazard at a time)
+        if (this.floodPhase === PHASE.idle && this.floodPending < 0) {
+            const rise = w.riverRise;
+            this.waterY = this.baseY + rise;
+            if (rise > 0) {
+                const cur = w.current;
+                applyFlood(
+                    pw,
+                    h.level.water,
+                    { y: this.waterY, vx: cur.x, vz: cur.z, strength: w.strength },
+                    h.level.terrainHeight,
+                    1 / SIM_HZ
+                );
+            }
+        }
+        // the snow's crosswind, on carried planks of players in the zone
+        const wind = w.wind;
+        if (!wind || w.kind !== WEATHER.snow) {
+            this.windOver.clear();
+            return;
+        }
+        const zone = w.spec.zones[w.zone];
+        const dx = Math.cos(wind.dir);
+        const dz = Math.sin(wind.dir);
+        const seen = new Set<number>();
+        for (let i = 0; i < h.players.length; i++) {
+            if (!h.isSlotActive(i)) continue;
+            const p = h.players[i];
+            if (!zone.contains(p.x, p.z)) continue;
+            const id = pw.heldIdOf(i);
+            const pb = id >= 0 ? pw.bodies.get(id) : undefined;
+            if (!pb || !isPlank(pb) || seen.has(id)) continue;
+            seen.add(id);
+            const b = pb.body;
+            const t = b.translation();
+            const f = wind.force * gustExposure(t.y - h.level.terrainHeight(t.x, t.z));
+            this.lastWindForce = Math.max(this.lastWindForce, f);
+            const holders = pw.holders(id);
+            const over = f > GRAB.maxForce * holders ? (this.windOver.get(id) ?? 0) + 1 : 0;
+            this.windOver.set(id, over);
+            if (over >= S(HAZARD.gust.tearS)) {
+                for (let k = 0; k < h.players.length; k++) if (pw.heldIdOf(k) === id) pw.release(k);
+                this.windOver.delete(id);
+                this.say(h, 'The snow squall tore it out of your hands!');
+            }
+            const dt = 1 / SIM_HZ;
+            b.applyImpulse({ x: dx * f * dt, y: 0, z: dz * f * dt }, true);
+        }
+    }
+
     /** Light pieces (planks) still out of the creek: the gust's severity budget. */
     private planksLeft(h: HazardHost): number {
         const lostY = h.level.rules?.lostY ?? this.baseY;
@@ -486,6 +593,18 @@ export function gustExposure(height: number): number {
     return Math.max(0.2, Math.min(1, (height - 0.45) / 0.95));
 }
 
+/**
+ * A world point (or direction) in a crossing's frame: the world turned by -yaw about the origin
+ * (yaw 0: the world itself, as in the Timber Yard).
+ */
+export function crossingFrame(c: { yaw?: number }, p: { x: number; z: number }): { x: number; z: number } {
+    const a = c.yaw ?? 0;
+    if (a === 0) return { x: p.x, z: p.z };
+    const cs = Math.cos(a);
+    const sn = Math.sin(a);
+    return { x: cs * p.x - sn * p.z, z: sn * p.x + cs * p.z };
+}
+
 /** Seeded 0..1 (deterministic: the same run gives the same gusts). */
 function rand(seed: number, n: number, tick: number): number {
     let x = (seed * 374761393 + n * 668265263 + tick * 2246822519) >>> 0;
@@ -503,11 +622,24 @@ export function readHazardNet(v: unknown, baseY: number): HazardNet {
         flood: Math.max(0, Math.min(3, Math.round(n(a[1], 0)))),
         gust: Math.max(0, Math.min(3, Math.round(n(a[2], 0)))),
         gustDir: n(a[3], 0),
-        gustSlot: Math.round(n(a[4], -1))
+        gustSlot: Math.round(n(a[4], -1)),
+        // (appended fields: an older host, or a level without weather, leaves them out)
+        ...(a.length > 5 && {
+            weatherZone: Math.max(-1, Math.min(63, Math.round(n(a[5], 0)) - 1)),
+            weather: Math.max(0, Math.min(1, n(a[6], 0)))
+        })
     };
 }
 
 /** The host's compact form of `net()`. */
 export function packHazardNet(h: HazardNet): number[] {
-    return [Math.round(h.waterY * 1000) / 1000, h.flood, h.gust, Math.round(h.gustDir * 100) / 100, h.gustSlot];
+    return [
+        Math.round(h.waterY * 1000) / 1000,
+        h.flood,
+        h.gust,
+        Math.round(h.gustDir * 100) / 100,
+        h.gustSlot,
+        // the weather's zone + 1 (0: none), and its strength (levels with weather)
+        ...(h.weatherZone === undefined ? [] : [h.weatherZone + 1, Math.round((h.weather ?? 0) * 1000) / 1000])
+    ];
 }

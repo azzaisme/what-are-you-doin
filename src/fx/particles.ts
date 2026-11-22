@@ -17,6 +17,7 @@ import { oakCrown } from '../levels/common.ts';
 import type { LevelDef } from '../levels/level.ts';
 import { ANIM_MAX } from '../sim/snapshots.ts';
 import type { SnapshotRing } from '../sim/snapshots.ts';
+import { WEATHER } from '../sim/weather.ts';
 import { GRID_SIZE } from '../voxels/grid.ts';
 import { pose } from '../voxels/math.ts';
 import { M, voxel } from '../voxels/palette.ts';
@@ -107,6 +108,11 @@ export class ParticleFX {
 
     /** The water surface now (it rises in a flood). */
     waterY: number;
+    /**
+     * The weather around the viewer (Epic 9, sim/weather.ts): rain or snow, how strong (0..1, only
+     * where the viewer is under it), and the snow's crosswind direction (rad in XZ).
+     */
+    weather = { kind: 0, strength: 0, dir: 0 };
 
     constructor(level: LevelDef, watched: WatchedEntity[]) {
         this.level = level;
@@ -131,6 +137,7 @@ export class ParticleFX {
         const dt = this.lastTime >= 0 ? time - this.lastTime : 0;
         this.lastTime = time;
         this.leaves(time);
+        this.precipitation(time);
         if (dt > 0 && dt < 0.5) this.detect(time, dt, ring);
         this.wood?.update(time, ring, (kind, x, y, z) =>
             this.spawn(time, x, y, z, kind, kind === 'needles' ? 40 : kind === 'sawdust' ? 6 : 8)
@@ -203,6 +210,43 @@ export class ParticleFX {
                 if (u(i, k, 10) < 0.5) this.push(x + GRID_SIZE, y, z, v);
                 else this.push(x, y, z + GRID_SIZE, v);
             }
+        }
+    }
+
+    // ------------------------------------------------------------------------------- weather
+
+    /**
+     * Rain and snow round the viewer: a fixed set of slots, each a drop or a flake on its own
+     * schedule falling through a box over the viewer (so the cost stays put; rain ends in a splash
+     * cell on the ground, snow drifts with the crosswind). None for mist and fog: the fog does those.
+     */
+    private precipitation(t: number): void {
+        const w = this.weather;
+        const v = this.viewer;
+        const rain = w.kind === WEATHER.rain;
+        if (!v || w.strength <= 0 || (!rain && w.kind !== WEATHER.snow)) return;
+        const n = Math.round(PRECIP_SLOTS * Math.min(1, w.strength));
+        const fall = rain ? 7 : 1.1;
+        const dx = Math.cos(w.dir);
+        const dz = Math.sin(w.dir);
+        for (let i = 0; i < n; i++) {
+            const period = (PRECIP_TOP / fall) * (1 + 0.3 * u(i, 0, 21));
+            const k = Math.floor((t + u(i, 0, 22) * period) / period);
+            const age = t + u(i, 0, 22) * period - k * period;
+            // where in the box (whole cells, so a flake does not shimmer between them)
+            const x0 = v.x + (u(i, k, 23) - 0.5) * PRECIP_BOX;
+            const z0 = v.z + (u(i, k, 24) - 0.5) * PRECIP_BOX;
+            const drift = rain ? 0 : 1.4 * age;
+            const x = x0 + dx * drift + (rain ? 0 : 0.15 * Math.sin(age * 2.3 + i));
+            const z = z0 + dz * drift + (rain ? 0 : 0.15 * Math.cos(age * 1.9 + i));
+            const g = Math.max(this.level.terrainHeight(cellCentre(x), cellCentre(z)), this.waterY);
+            const y = g + PRECIP_TOP - fall * age;
+            if (y <= restY(g)) {
+                // a raindrop's splash; snow lies a moment
+                this.push(x, restY(g), z, voxel(rain ? M.Splash : M.Snow, i & 3));
+                continue;
+            }
+            this.push(x, y, z, voxel(rain ? M.Splash : M.Snow, i & 3));
         }
     }
 
@@ -353,6 +397,11 @@ export class ParticleFX {
         }
     }
 }
+
+/** Rain and snow: slots at full strength, the box round the viewer (m) and the height they fall from. */
+const PRECIP_SLOTS = 90;
+const PRECIP_BOX = 14;
+const PRECIP_TOP = 6;
 
 /** Leaves in the gust's warning stream. */
 const GUST_LEAVES = 40;

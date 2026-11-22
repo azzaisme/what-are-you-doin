@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { W_PHASE, WEATHER, WeatherScheduler, weatherFogEnd } from '../../src/sim/weather.ts';
+import { W_PHASE, WEATHER, WeatherScheduler, weatherCovers, weatherFog } from '../../src/sim/weather.ts';
 import type { WeatherSpec, WeatherZone } from '../../src/sim/weather.ts';
 
 const HZ = 60;
@@ -73,9 +73,15 @@ describe('weather along the journey', () => {
         expect(max).toBeCloseTo(1, 3);
         expect(maxRise).toBeCloseTo(0.2, 3);
         expect(s.strength).toBe(0);
-        expect(weatherFogEnd(spec, 0, 1, 260)).toBe(40);
-        expect(weatherFogEnd(spec, 0, 0, 260)).toBe(260);
-        expect(weatherFogEnd(spec, -1, 1, 260)).toBe(260);
+        const base = { start: 30, end: 260 };
+        expect(weatherFog(spec, 0, 1, base)).toEqual({ start: (30 * 40) / 260, end: 40 });
+        expect(weatherFog(spec, 0, 0, base)).toEqual(base);
+        expect(weatherFog(spec, -1, 1, base)).toEqual(base);
+        // never pushes the fog out past the level's own
+        expect(weatherFog({ zones: [zone({ fogEnd: 400 })] }, 0, 1, base)).toEqual(base);
+        expect(weatherCovers(spec, 0, 20, 0)).toBe(true);
+        expect(weatherCovers(spec, 0, 0, 0)).toBe(false);
+        expect(weatherCovers(spec, -1, 20, 0)).toBe(false);
     });
 
     it('the same inputs give the same weather (deterministic), and reset starts over', () => {
