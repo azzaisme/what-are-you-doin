@@ -35,6 +35,7 @@ import {
     keysText,
     loadBindings,
     padLabel,
+    padText,
     saveBindings
 } from './input/bindings.ts';
 import type { Action, PadAction } from './input/bindings.ts';
@@ -1269,8 +1270,9 @@ function updateHud(): void {
         return;
     }
     if (state.players > 1 || pads.players[0]) {
-        help.innerHTML =
-            'Pads: left stick move · right stick look · A jump · RT grab / release · RB throw · B drop · Y pour · X ragdoll · D-pad up/down reach';
+        // from the pad bindings, like the keyboard line (a remapped button shows where it went)
+        const pb = (a: PadAction) => padText(bindings, a);
+        help.innerHTML = `Pads: left stick move · right stick look · ${pb('jump')} jump · ${pb('grab')} grab / release · ${pb('throw')} throw · ${pb('drop')} drop · ${pb('pour')} pour · ${pb('ragdoll')} ragdoll · ${pb('reachFar')}/${pb('reachNear')} reach`;
         crosshair.style.display = state.mode === 'firstPerson' && !state.uiHidden ? '' : 'none';
         return;
     }

@@ -10,7 +10,7 @@ The bucket now carries water the game keeps track of. Carry it steadily and it s
 - **Carry it gently.** Walking, stopping and turning are fine. A sprint that you stop dead slops some out. So does a drop, a hard hit or a big tilt.
 - **Set it down:** click (E, RT, Grab) to let go and the bucket is lowered to the ground first, so it keeps its water. Q (B, Drop) drops it from your hands and it splashes.
 - **Pour:** while holding the bucket, press R (Y on a pad, the Pour button on touch). (The River Lab's pad carry-plank toggle moved from Y to d-pad right.) The bucket tips forward, mouth towards where you look. Press again to stop. Letting go also stops it.
-- **Refill:** hold or stand the bucket under a water tank's tap. The Timber Yard's tank stands in the north-west corner of the yard; in the Valley there are tanks at the works and on the summit road. It fills at 4 L/s, and says so once when the bucket is full (or a second after you take it away).
+- **Refill:** hold or stand the bucket under a water tank's tap. The Timber Yard's tank stands in the south-west corner of the yard; in the Valley there are tanks at the works and on the summit road. It fills at 4 L/s, and says so once when the bucket is full (or a second after you take it away).
     - Each butt holds a fixed amount: the yard's 40 L, the Valley works tank 30 L, the mountain spring butt 20 L.
     - While the level's goal is still open, a butt always keeps at least a bucketful (topping itself up), so the run can't become unwinnable. After the goal it can run dry.
     - Losing the bucket or resetting the props refills every butt.
@@ -47,7 +47,7 @@ The bucket now carries water the game keeps track of. Carry it steadily and it s
     - The 1 cm water in the bucket follows the volume and tilts with the surface.
     - When water leaves, blue voxel droplets fall from the rim. When it fills, a stream falls from the tap.
     - The droplets are drawn from a fixed pool of particles and are decoration only. They never decide the volume.
-- **Water tanks:** a timber barrel with hoops up on a slim post, over everyone's heads, with a pipe down to an orange tap (`src/levels/water-butt.ts`). The post and the barrel are solid; the pipe and tap are not. The yard's tank stands in its north-west corner, away from the paths to the bridge, the logging stand and the sawmill.
+- **Water tanks:** a timber barrel with hoops up on a slim post, over everyone's heads, with a pipe down to an orange tap (`src/levels/water-butt.ts`). The post and the barrel are solid; the pipe and tap are not. The yard's tank stands in its south-west corner, away from the paths to the bridge, the logging stand and the sawmill.
 - **Pouring tips the bucket all the way:** the pour turns the bucket's mouth forward and down whichever way it faces, with the wrist sized for turning about the hand.
 - **Steadier bucket handling:** a hanging bucket's hand now moves at most 1.5 m/s relative to your eye.
 - **Remappable pour (with Epic 10's bindings):** pour is an action in Settings' controls, `pour` in `src/input/bindings.ts`, by default R and the pad's Y. The pad's plank toggle defaults to d-pad right, so Y is free for pour. Binding R to something else takes it off pour, and the prompts and the help line show whatever pour is bound to.
@@ -78,7 +78,7 @@ The bucket now carries water the game keeps track of. Carry it steadily and it s
 | Online: a guest picks up and pours the bucket                      | the host drains it; the guest's HUD and own snapshots show the host's litres                                                                                                           |
 | Droplets during a 3 s spill and a fill                             | within the particle pool's limit; all gone within a second after it stops                                                                                                              |
 
-- Unit tests: 540 runs pass (every test runs at both the 5 cm and the 10 cm voxel size). The played tests are in `tests/unit/water-play.test.ts`.
+- Unit tests: 566 runs pass (every test runs at both the 5 cm and the 10 cm voxel size). The played tests are in `tests/unit/water-play.test.ts`.
 - Browser tests pass: the Timber Yard objective and delivery, the Valley stages, online co-op in the Valley (the guest's HUD shows the host's litres), and UI boxes don't overlap.
 
 ### Changed on purpose

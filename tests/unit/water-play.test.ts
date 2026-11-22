@@ -44,7 +44,7 @@ function pickUp(s: LabSim): Player {
     return pl;
 }
 
-/** Walks to just east of the yard's tap (its post stands south of it) and faces the tap. */
+/** Walks to just east of the yard's tap (its post stands north of it) and faces the tap. */
 function toTap(pl: Player): void {
     pl.walkTo(YARD_TAP.x + 3, YARD_TAP.z + 0.3);
     pl.walkTo(YARD_TAP.x + 1.6, YARD_TAP.z + 0.1);

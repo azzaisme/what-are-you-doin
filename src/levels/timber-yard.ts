@@ -470,8 +470,8 @@ export const BUCKET_STUMP = { x: 5.6, z: 4.4, top: YARD_Y + 0.44 };
 /** The yard's water tank (Epic 7): its tap fills a bucket set under it (YARD_TAP). */
 export const yardButt = () => waterButt('water butt', YARD_TAP.x, YARD_TAP.z, YARD_Y, YARD_Y, Math.PI / 2, 40);
 /**
- * Where the yard's tap fills a bucket set on the ground under it: the north-west corner of the yard,
- * clear of the paths to the bridge, the logging stand and the sawmill (its post stands to the south).
+ * Where the yard's tap fills a bucket set on the ground under it: the south-west corner of the yard,
+ * clear of the paths to the bridge, the logging stand and the sawmill (its post stands to the north).
  */
 export const YARD_TAP = { x: -4.4, z: 10.4 };
 /** Far-bank goal area for the bucket. */
