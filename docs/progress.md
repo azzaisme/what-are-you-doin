@@ -23,7 +23,12 @@ reworking those into built bridges.
     - the track is level across, within 25 cm over 1.2 m;
     - the logging track starts and ends on the road, and the lookout track ends at the lookout;
     - no tree stands within 2 m of a track.
-- Unit tests: 342 pass.
+- Also new, for the route signs:
+    - each sign's arrow is checked against the road as it is painted, found from the ground's
+      surface material rather than the road formula. The works' sign is the exception: its
+      concrete road can't be told from the concrete yard by surface alone.
+    - a left arrow is read back from the voxels too.
+- Unit tests: 424 pass (merged with Epics 6, 9 part 1 and 10).
 
 ## Valley performance: what costs what, and Low builds less (2026-11-22, Epic 9, owner question)
 
