@@ -6,7 +6,7 @@ import { GuestSession, HostSession, listGames, readInput } from '../../src/net/s
 import { MemoryHub } from '../../src/net/transport.ts';
 import { ACTION_DROP_TEST, ACTION_NONE, ACTION_RAGDOLL, neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
-import { LabSim } from '../../src/sim/lab-sim.ts';
+import { LabSim, MAX_PLAYERS } from '../../src/sim/lab-sim.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
 import { SnapshotRing } from '../../src/sim/snapshots.ts';
 import { pose, quatFromYawPitchRoll } from '../../src/voxels/math.ts';
@@ -91,7 +91,7 @@ describe('online co-op sessions (in-memory transport)', () => {
 
         let clock = 0;
         const guestSim = new LabSim({ level: timberYardLevel });
-        const gs = await GuestSession.join(hub.transport('guest'), guestSim, games[0], () => clock);
+        const gs = await GuestSession.join(hub.transport('guest'), guestSim, games[0], { now: () => clock });
         expect(hs.remoteSlots()).toEqual(new Set([1]));
         expect(host.isSlotActive(1)).toBe(true);
         expect(gs.slot).toBe(1);
@@ -138,10 +138,15 @@ describe('online co-op sessions (in-memory transport)', () => {
         const hs = await HostSession.start(hub.transport('host'), host, 'yard', 'full');
         const ad = listGames(hub.channel('lobby', 'w'))[0];
         const guests = [];
-        for (let i = 0; i < 4; i++)
+        for (let i = 0; i < MAX_PLAYERS; i++)
             guests.push(await GuestSession.join(hub.transport(`g${i}`), new LabSim({ level: timberYardLevel }), ad));
-        expect(guests.map((g) => g.slot).sort()).toEqual([-1, 1, 2, 3]);
-        expect(host.playerCount).toBe(4);
+        expect(guests.map((g) => g.slot).sort()).toEqual([-1, 1, 2, 3, 4, 5, 6, 7]);
+        expect(host.playerCount).toBe(MAX_PLAYERS);
+        // the watcher takes the first player that frees up
+        const watcher = guests.find((g) => g.slot < 0)!;
+        guests.find((g) => g.slot === 3)!.leave();
+        expect(watcher.slot).toBe(3);
+        expect(host.playerCount).toBe(MAX_PLAYERS);
         hs.stop();
     });
 });

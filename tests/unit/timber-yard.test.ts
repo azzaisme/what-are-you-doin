@@ -39,15 +39,7 @@ describe('level 1: the timber yard', () => {
         expect(r.columns).toBeGreaterThan(300_000);
         expect(r.trees).toBeGreaterThan(30);
         const l = timberYardLevel.layout(1);
-        for (const name of [
-            'abutment-near',
-            'abutment-far',
-            'shed-roof',
-            'saw-bench',
-            'stump',
-            'flag',
-            'flower-centre'
-        ])
+        for (const name of ['abutment-near', 'abutment-far', 'shed-roof', 'saw-beam', 'stump', 'flag', 'flower-centre'])
             expect(l.pieces.some((p) => p.name === name)).toBe(true);
         // nothing grows on the road, in the creek or in the yard
         for (const t of l.trees) expect(Math.abs(t.z - creekCenterZ(t.x))).toBeGreaterThan(2);

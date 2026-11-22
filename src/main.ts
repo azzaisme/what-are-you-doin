@@ -12,19 +12,23 @@ import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs';
 import { BEAVER_ARM_REACH, BEAVER_LEAN, BEAVER_WALK_AMOUNT, BEAVER_WALK_PHASE } from './assets/beaver.ts';
 import { CELL_TIERS, assetTier, tierCellCm } from './assets/cell-tier.ts';
 import type { CellTier } from './assets/cell-tier.ts';
+import { SAW_MODE, TREE_CUT } from './assets/forestry.ts';
 import { DebugPanel } from './debug/panel.ts';
 import type { PanelHost } from './debug/panel.ts';
 import { DESIGN_KEY, Designer, loadDraft } from './editor/designer.ts';
 import { ParticleFX } from './fx/particles.ts';
 import type { WatchedEntity } from './fx/particles.ts';
 import { CALM, windAt } from './fx/wind.ts';
+import { WoodFX } from './fx/wood-fx.ts';
 import { FirstPersonInput } from './input/first-person.ts';
 import { PadManager } from './input/gamepad.ts';
 import { TouchControls, isTouchDevice } from './input/touch.ts';
 import { levelFromData } from './levels/data.ts';
 import { LEVEL_MENU, getLevel } from './levels/index.ts';
+import { degradedTransport, parseConditions } from './net/netsim.ts';
 import type { P2PTransport } from './net/p2p.ts';
-import { GuestSession, HostSession, listGames } from './net/session.ts';
+import { forgetGame, gameToRejoin, rejoinToken, rememberGame } from './net/rejoin.ts';
+import { GuestSession, HostSession, NET_PROTOCOL, listGames } from './net/session.ts';
 import type { GameAd } from './net/session.ts';
 import { localTransport, roomTransport } from './net/transport.ts';
 import type { NetTransport } from './net/transport.ts';
@@ -41,7 +45,7 @@ import { ACTION_DROP_TEST, ACTION_RAGDOLL, ACTION_RESET_PROPS, neutralCommand } 
 import type { PlayerCommand } from './sim/commands.ts';
 import { nailMarks } from './sim/joints/wire.ts';
 import type { NailMark } from './sim/joints/wire.ts';
-import { EYE_HEIGHT, LabSim } from './sim/lab-sim.ts';
+import { EYE_HEIGHT, LabSim, MAX_PLAYERS } from './sim/lab-sim.ts';
 import type { PropsMode } from './sim/lab-sim.ts';
 import { initPhysics } from './sim/physics/world.ts';
 import { ANIM_MAX } from './sim/snapshots.ts';
@@ -52,6 +56,7 @@ import { SettingsMenu } from './ui/settings-menu.ts';
 import type { SettingValue } from './ui/settings-menu.ts';
 import { DEFAULT_SETTINGS, SETTING_RANGES, loadSettings, saveSettings, urlOverrides } from './ui/settings-store.ts';
 import type { Settings } from './ui/settings-store.ts';
+import { woodLabel, woodPrompt } from './ui/wood-prompt.ts';
 import {
     CELL_SIZE_MAX_CM,
     CELL_SIZE_DEFAULT_CM,
@@ -210,12 +215,22 @@ for (const e of sim.entities) {
     else if (e.name.startsWith('crate-')) watch(e.name, 0.25, true);
 }
 for (const n of ['log', 'extra-log-0', 'extra-log-1']) watch(n, 0.2, true);
+for (const e of sim.entities)
+    if (e.name.startsWith('felled-log') || e.name.startsWith('short-log')) watch(e.name, 0.2, true);
 watch('cube', 0.25, true);
 watch('sphere', 0.3, false);
 watch('bucket', 0, false);
 for (const d of sim.dummy) watch(d.name, 0.15, false);
 for (const e of sim.eyes) watched.push({ slot: e.slot, bottom: 0, timber: false, eyeHeight: EYE_HEIGHT });
 const fx = new ParticleFX(level, watched);
+// logging: chips, needles and sawdust (src/fx/wood-fx.ts)
+if (level.forestry) {
+    const f = sim.forestry.ents;
+    fx.wood = new WoodFX(
+        { chips: f.chips.slot, needles: f.needles.slot, sawmill: f.sawmill.slot },
+        level.forestry.sawmill
+    );
+}
 pipeline.particles = (time) => {
     const cp = camera.getPosition();
     fx.update(time, sim.ring, { x: cp.x, z: cp.z });
@@ -465,12 +480,15 @@ class LabDirector extends Script {
         if (guestSession) {
             guestSession.sendInput(playerOneCommand());
             renderTime = guestSession.renderTime();
-            if (guestSession.hostGone) leaveOnline('The host left the game.');
+            if (guestSession.incompatible)
+                leaveOnline('That game runs another version: reload both pages to play together');
+            else if (guestSession.hostGone) leaveOnline('The host left the game.');
+            else noteReconnect(guestSession);
         } else if (!state.paused) {
             const steps = clock.advance(dt);
             for (let s = 0; s < steps; s++) {
                 const c = slotCommands();
-                sim.step(playerOneCommand(), c[1], [c[2], c[3]]);
+                sim.step(playerOneCommand(), c[1], c.slice(2));
                 hostSession?.afterStep((slot) => sim.interactionIds(slot));
                 physTimes[physHead] = sim.physicsMs;
                 physHead = (physHead + 1) % physTimes.length;
@@ -637,10 +655,10 @@ function playerTwoCommand() {
     return base;
 }
 
-/** Commands for slots 1..3 this tick: remote guests (when hosting) and the local second player. */
+/** Commands for slots 1.. this tick: remote guests (when hosting) and the local second player. */
 function slotCommands(): (PlayerCommand | undefined)[] {
-    const out: (PlayerCommand | undefined)[] = [undefined, undefined, undefined, undefined];
-    for (let slot = 1; slot < 4; slot++) {
+    const out: (PlayerCommand | undefined)[] = [];
+    for (let slot = 1; slot < MAX_PLAYERS; slot++) {
         if (slot === localSlot2) out[slot] = playerTwoCommand();
         else if (hostSession) out[slot] = hostSession.commandFor(slot);
     }
@@ -1130,7 +1148,7 @@ const propLabel = (name: string) =>
               ? 'beam'
               : name.startsWith('extra-log')
                 ? 'log (heavy)'
-                : name);
+                : (woodLabel(name) ?? name));
 
 // ---- objective line and toasts for level events (fell in, bucket recovered, goal reached)
 const toast = document.createElement('div');
@@ -1203,6 +1221,8 @@ function interactionText(i: number, pad: boolean): string {
             : 'Driving · W/S throttle · A/D steer · Space brake · Q recover · click or E to get out';
     if (it.seat >= 0) return pad ? 'Riding along · RT get out' : 'Riding along · click or E to get out';
     if (it.target === 'ute') return pad ? 'RT to drive the ute' : 'Click to drive the ute';
+    const wood = woodPrompt(it, pad ? 'pad' : 'mouse', treeCut, sawBeams());
+    if (wood) return wood;
     if (it.holding)
         return withHammer(
             pad
@@ -1218,6 +1238,22 @@ function interactionText(i: number, pad: boolean): string {
             pad ? 'pad' : 'mouse'
         );
     return withHammer('', it.nail, pad ? 'pad' : 'mouse');
+}
+
+/** A stand tree's cut so far, from the newest snapshot (the same for host and guests). */
+const cutPose = pose();
+const cutAnim = new Float64Array(ANIM_MAX);
+function treeCut(marker: string): number {
+    const e = sim.entities.find((x) => x.name === marker);
+    if (!e || !sim.ring.sample(e.slot, sim.ring.newestTick * SIM_DT, cutPose, cutAnim)) return 0;
+    return cutAnim[TREE_CUT];
+}
+
+/** Whether the sawmill is set to beams, from the newest snapshot. */
+function sawBeams(): boolean {
+    const e = sim.forestry.ents.sawmill;
+    if (!sim.ring.sample(e.slot, sim.ring.newestTick * SIM_DT, cutPose, cutAnim)) return false;
+    return cutAnim[SAW_MODE] > 0.5;
 }
 
 /** A guest's prompt comes from the host (guests run no physics). */
@@ -1306,13 +1342,15 @@ function updatePrompt(): void {
             touch.setHolding(!!it.holding);
             t = it.driving
                 ? 'Driving · stick to drive · jump to brake · drop to recover · grab to get out'
-                : it.seat >= 0
-                  ? 'Riding along · grab to get out'
-                  : it.holding
-                    ? withHammer(`Holding ${propLabel(it.holding)}${it.shared ? ' together' : ''}`, it.nail, 'touch')
-                    : it.target === 'ute'
-                      ? 'Grab to drive the ute'
-                      : withHammer(it.target ? `Grab ${propLabel(it.target)}` : '', it.nail, 'touch');
+                : woodPrompt(it, 'touch', treeCut, sawBeams())
+                  ? woodPrompt(it, 'touch', treeCut, sawBeams())!
+                  : it.seat >= 0
+                    ? 'Riding along · grab to get out'
+                    : it.holding
+                      ? withHammer(`Holding ${propLabel(it.holding)}${it.shared ? ' together' : ''}`, it.nail, 'touch')
+                      : it.target === 'ute'
+                        ? 'Grab to drive the ute'
+                        : withHammer(it.target ? `Grab ${propLabel(it.target)}` : '', it.nail, 'touch');
         } else if (!fpInput.locked && !pads.players[0]) t = 'Click to look around';
         else t = interactionText(0, !fpInput.locked);
     }
@@ -1535,6 +1573,7 @@ async function startTransport(): Promise<void> {
     const net = params.get('net');
     if (net === 'local') transport = localTransport();
     else if (net !== 'p2p' && net !== 'off') transport = await roomTransport();
+    if (transport && netConditions) transport = degradedTransport(transport, netConditions);
     if (transport) {
         transportKind = transport.kind === 'room' ? 'room' : 'local';
         watchLobby();
@@ -1567,7 +1606,7 @@ function connectP2P(): Promise<void> {
                       }
                     : undefined
             });
-            transport = p2p;
+            transport = netConditions ? degradedTransport(p2p, netConditions) : p2p;
             watchLobby();
             online.render();
         })
@@ -1583,7 +1622,7 @@ function watchLobby(): void {
     transport?.lobby.onChange(() => {
         online.render();
         // arrived with ?join=CODE (switched level to join a game): join as soon as it is listed
-        const code = params.get('join');
+        const code = params.get('join') ?? rejoinCode;
         if (code && !guestSession && !hostSession && !autoJoinTried) {
             const g = listGames(transport!.lobby).find((x) => x.code === code);
             if (g) {
@@ -1594,6 +1633,26 @@ function watchLobby(): void {
     });
 }
 let autoJoinTried = false;
+/** Testing on a bad network on purpose: `?netsim=latency,jitter,loss` (ms, ms, 0..1). */
+const netConditions = parseConditions(params.get('netsim'));
+/** A game this tab was playing as a guest before a reload: rejoined (as the same player) when listed. */
+const rejoinCode = gameToRejoin(level.id);
+let wasReconnecting = false;
+
+/** Tells a guest when the host goes quiet and when it is back. */
+function noteReconnect(g: GuestSession): void {
+    if (g.reconnecting !== wasReconnecting) {
+        wasReconnecting = g.reconnecting;
+        showToast(g.reconnecting ? 'Lost the host: reconnecting…' : 'Reconnected', g.reconnecting ? 'warn' : 'info');
+    }
+    // keep the rejoin record fresh, so a reload within the host's grace period comes back
+    const now = Date.now();
+    if (!g.reconnecting && g.received > 0 && now - lastRemembered > 5000) {
+        lastRemembered = now;
+        rememberGame(g.code, level.id, now);
+    }
+}
+let lastRemembered = 0;
 
 async function hostOnline(): Promise<void> {
     await connectP2P();
@@ -1604,9 +1663,11 @@ async function hostOnline(): Promise<void> {
         toSpawn();
     }
     hostSession = await HostSession.start(transport, sim, level.id);
-    hostSession.onGuestsChanged = (joined, left) => {
+    hostSession.onGuestsChanged = (joined, left, dropped, back) => {
         for (const s of joined) showToast(`Player ${s + 1} joined`);
         for (const s of left) showToast(`Player ${s + 1} left`);
+        for (const s of dropped) showToast(`Player ${s + 1} lost their connection: keeping their place for a minute`);
+        for (const s of back) showToast(`Player ${s + 1} is back`);
         online.render();
     };
     showToast(`Hosting game ${hostSession.code}`);
@@ -1615,6 +1676,10 @@ async function hostOnline(): Promise<void> {
 
 async function joinOnline(ad: GameAd): Promise<void> {
     if (!transport || hostSession || guestSession) return;
+    if (ad.v !== NET_PROTOCOL) {
+        showToast('That game runs another version: reload both pages to play together', 'warn');
+        return;
+    }
     if (ad.level !== level.id && LEVEL_MENU.some((l) => l.id === ad.level)) {
         // the voxel world is built per level: reload into the host's level and join from there
         goToLevel(ad.level, { join: ad.code });
@@ -1622,7 +1687,9 @@ async function joinOnline(ad: GameAd): Promise<void> {
     }
     setPlayers(1);
     if (state.paused) setPaused(false);
-    guestSession = await GuestSession.join(transport, sim, ad);
+    guestSession = await GuestSession.join(transport, sim, ad, { token: rejoinToken() });
+    rememberGame(ad.code, level.id);
+    wasReconnecting = false;
     guestEventsSeen = 0;
     state.forceVoxel = true;
     if (state.mode !== 'firstPerson') setMode('firstPerson', false);
@@ -1647,6 +1714,7 @@ function leaveOnline(message?: string): void {
     if (guestSession) {
         guestSession.leave();
         guestSession = null;
+        forgetGame();
         sim.reset();
         clock.reset(0);
         state.forceVoxel = true;
@@ -1666,13 +1734,24 @@ const online = new OnlinePanel(
         level: level.id,
         status: () =>
             hostSession
-                ? { mode: 'host', code: hostSession.code, players: sim.playerCount }
+                ? {
+                      mode: 'host',
+                      code: hostSession.code,
+                      players: sim.playerCount,
+                      max: MAX_PLAYERS,
+                      guests: [...hostSession.slots.values()]
+                          .sort((a, b) => a - b)
+                          .map((s) => ({ slot: s, lagMs: hostSession!.lagMs(s) })),
+                      dropped: hostSession.droppedSlots()
+                  }
                 : guestSession
                   ? {
                         mode: 'guest',
                         code: guestSession.code,
                         slot: guestSession.slot,
-                        waiting: guestSession.received === 0
+                        waiting: guestSession.received === 0,
+                        lagMs: guestSession.lagMs,
+                        reconnecting: guestSession.reconnecting
                     }
                   : { mode: 'off' },
         host: hostOnline,
@@ -2131,8 +2210,16 @@ window.__riverLab = {
             p2p: p2p ? p2p.status() : null,
             hosting: hostSession?.code ?? null,
             guests: hostSession?.guestCount ?? 0,
+            dropped: hostSession?.droppedSlots() ?? [],
+            lag: hostSession ? [...hostSession.slots.values()].map((s) => hostSession!.lagMs(s)) : [],
             guest: guestSession
-                ? { code: guestSession.code, slot: guestSession.slot, received: guestSession.received }
+                ? {
+                      code: guestSession.code,
+                      slot: guestSession.slot,
+                      received: guestSession.received,
+                      lagMs: guestSession.lagMs,
+                      reconnecting: guestSession.reconnecting
+                  }
                 : null
         })
     },
@@ -2172,6 +2259,13 @@ window.__riverLab = {
         nails: sim.joints.graph.nailCount,
         drawn: nailMarkers.drawn,
         preview: sim.nailPreview(0)
+    }),
+    /** Logging: each stand tree's phase and cut, and the sawmill's state and totals. */
+    wood: () => ({
+        trees: Array.from({ length: sim.forestry.treeCount }, (_, n) => sim.forestry.treeState(n)),
+        sawmill: sim.sawmill
+            ? { phase: sim.sawmill.phase, stopped: sim.sawmill.stopped, mode: sim.sawmill.mode, ...sim.sawmill.stats }
+            : null
     }),
     /** The ute: where it is, which way it faces (yaw 0 = +z), its speed and who drives it (-1: nobody). */
     ute() {

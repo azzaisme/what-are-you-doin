@@ -64,6 +64,7 @@ import {
     sanitizeCommand
 } from './commands.ts';
 import type { PlayerCommand } from './commands.ts';
+import { Forestry } from './forestry.ts';
 import { nailCode } from './joints/graph.ts';
 import { JointSystem } from './joints/joints.ts';
 import type { NailPreview } from './joints/joints.ts';
@@ -76,10 +77,20 @@ import { CHARACTER } from './physics/world.ts';
 import type { HeldInfo, PhysicsWorld } from './physics/world.ts';
 import { PlayerAnimator } from './player-anim.ts';
 import type { AnimEvents, AnimOutput } from './player-anim.ts';
+import { Sawmill } from './sawmill.ts';
 import { ANIM_MAX, SnapshotRing, writeEntity } from './snapshots.ts';
 
 export type { PlayerCommand, SimEntity };
 export { MAX_PLAYERS, MAX_STRESS };
+
+/**
+ * Where player slot i (1..) stands relative to player 1, in metres: rows of four to player 1's
+ * right (slots 1-4 on player 1's row, 5-7 a row behind), so eight players stay close together.
+ */
+export function slotOffset(i: number): { right: number; back: number } {
+    if (i <= 0) return { right: 0, back: 0 };
+    return { right: 1.2 * (((i - 1) % 4) + 1), back: 1.2 * Math.floor((i - 1) / 4) };
+}
 export type PropsMode = 'physics' | 'scripted';
 
 /** The player body's eye height (2026-11-21: the lanky stand-in people, 1.86 m; beavers 1.22 m). */
@@ -96,7 +107,7 @@ export interface LabSimOptions {
 /** Something the player should be told (objective reached, fell in the creek, ...). */
 export interface SimEvent {
     tick: number;
-    kind: 'goal' | 'fell' | 'recovered' | 'step' | 'ute';
+    kind: 'goal' | 'fell' | 'recovered' | 'step' | 'ute' | 'wood';
     text: string;
 }
 
@@ -195,6 +206,10 @@ export class LabSim {
     private goalTicks = 0;
     /** Not voxelized: carries the walker's pose through the snapshot ring for interpolation. */
     readonly playerEntity: SimEntity;
+    /** Logging (Epic 6): the stand's trees, felled logs, the axe (src/sim/forestry.ts). */
+    readonly forestry: Forestry;
+    /** The level's sawmill, if it has one (src/sim/sawmill.ts). */
+    readonly sawmill: Sawmill | null;
 
     constructor(opts: LabSimOptions = {}) {
         this.level = opts.level ?? riverLabLevel;
@@ -218,6 +233,10 @@ export class LabSim {
         this.playerEntity = c.player;
         this.player2Entity = c.player2;
         this.eyes = c.eyes;
+        const levelLogs = c.entities.filter((e) => e.name === 'log' || e.name.startsWith('extra-log'));
+        this.forestry = new Forestry(this.level, c.forestry, levelLogs);
+        const saw = this.level.forestry?.sawmill;
+        this.sawmill = saw ? new Sawmill(saw, c.forestry.sawmill, this.forestry) : null;
         const sp = this.level.spawn;
         this.player.x = sp.x;
         this.player.z = sp.z;
@@ -225,9 +244,10 @@ export class LabSim {
         this.player.yaw = sp.yaw;
         for (let i = 1; i < MAX_PLAYERS; i++) {
             const pi = this.players[i];
-            // a row to player 1's right
-            pi.x = sp.x + Math.cos(sp.yaw) * 1.2 * i;
-            pi.z = sp.z - Math.sin(sp.yaw) * 1.2 * i;
+            // rows to player 1's right
+            const o = slotOffset(i);
+            pi.x = sp.x + Math.cos(sp.yaw) * o.right + Math.sin(sp.yaw) * o.back;
+            pi.z = sp.z - Math.sin(sp.yaw) * o.right + Math.cos(sp.yaw) * o.back;
             pi.y = this.level.terrainHeight(pi.x, pi.z);
             pi.yaw = sp.yaw;
         }
@@ -282,6 +302,7 @@ export class LabSim {
             this.bucket,
             this.held,
             ...this.extras,
+            ...this.forestry.props,
             ...this.stress,
             ...this.dummy
         ];
@@ -308,6 +329,8 @@ export class LabSim {
             pw.setEnabled(this.held.id, false);
             for (const e of [this.plank, this.log, this.cube, this.sphere, this.bucket, ...this.extras])
                 if (!pw.bodies.has(e.id)) e.visible = false;
+            this.forestry.build(pw);
+            this.sawmill?.build(pw);
             for (let n = 0; n < this.stress.length; n++) {
                 const d = stressDef(this.level, this.stress[n].id, n);
                 pw.addDynamic(d.id, d.shape, d.spawn, d.opts);
@@ -386,7 +409,22 @@ export class LabSim {
         if (active) {
             const p1 = this.player;
             const pi = this.players[i];
-            this.placePlayer(p1.x + Math.cos(p1.yaw) * 1.2 * i, p1.z - Math.sin(p1.yaw) * 1.2 * i, p1.yaw, i);
+            // their spot in the rows, or the next one nobody is standing on (players who walked off
+            // leave theirs free; two characters placed into each other stick together)
+            let x = 0;
+            let z = 0;
+            for (let k = i; k < i + 4 * MAX_PLAYERS; k++) {
+                const o = slotOffset(k);
+                x = p1.x + Math.cos(p1.yaw) * o.right + Math.sin(p1.yaw) * o.back;
+                z = p1.z - Math.sin(p1.yaw) * o.right + Math.cos(p1.yaw) * o.back;
+                let clear = true;
+                for (let j = 0; j < MAX_PLAYERS && clear; j++) {
+                    if (j === i || !this.isSlotActive(j)) continue;
+                    clear = Math.hypot(this.players[j].x - x, this.players[j].z - z) > 0.9;
+                }
+                if (clear) break;
+            }
+            this.placePlayer(x, z, p1.yaw, i);
             pi.pitch = p1.pitch;
             pi.walkDist = 0;
             pw.setCharacterEnabled(true, i);
@@ -445,6 +483,8 @@ export class LabSim {
             else if (cmd.action === ACTION_RESET_PROPS) {
                 for (const e of this.propEntities) pw.respawn(e.id);
                 if (this.vehicle) pw.respawn(this.vehicle.id);
+                this.forestry.resetProps();
+                this.sawmill?.build(pw);
             }
             this.updateStress();
         }
@@ -466,6 +506,7 @@ export class LabSim {
         this.readPhysics();
         this.readVehicle();
         this.watchUte();
+        if (this.physicsProps) this.stepWood();
         this.applyRules();
         const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
         this.physicsMs = t1 - t0;
@@ -538,8 +579,16 @@ export class LabSim {
             if (pw.heldIdOf(i) >= 0) ev.thrown = true;
             pw.throwHeld(cmd.yaw, cmd.pitch, i);
         } else if (cmd.grab) {
-            if (pw.heldIdOf(i) >= 0) pw.release(i);
-            else if (!pw.tryGrab(eye, cmd.yaw, cmd.pitch, i) && !this.enterUte(i, eye, cmd)) ev.missed = true;
+            // holding the axe, a grab at a tree or a log is a blow; with empty hands, at a tree, a bite
+            const held = pw.heldIdOf(i);
+            if (held >= 0) {
+                if (this.forestry.strike(i, eye, p, cmd.yaw, cmd.pitch, held)) ev.missed = true;
+                else pw.release(i);
+            } else if (pw.tryGrab(eye, cmd.yaw, cmd.pitch, i)) {
+                // grabbed
+            } else if (this.sawmill?.pressLever(eye, cmd.yaw, cmd.pitch)) ev.grabbed = true;
+            else if (this.forestry.strike(i, eye, p, cmd.yaw, cmd.pitch, -1)) ev.missed = true;
+            else if (!this.enterUte(i, eye, cmd)) ev.missed = true;
         }
         pw.applyGrab(eye, cmd.yaw, cmd.pitch, i);
         const heldAfter = pw.heldIdOf(i);
@@ -572,8 +621,8 @@ export class LabSim {
                 const sp = p.safe.valid
                     ? p.safe
                     : st
-                      ? { x: st.start.x + i * 1.2, z: st.start.z }
-                      : { x: this.level.spawn.x + i * 1.2, z: this.level.spawn.z };
+                      ? { x: st.start.x + slotOffset(i).right, z: st.start.z + slotOffset(i).back }
+                      : { x: this.level.spawn.x + slotOffset(i).right, z: this.level.spawn.z + slotOffset(i).back };
                 this.placePlayer(sp.x, sp.z, p.yaw, i);
                 const who = this.playerCount > 1 ? `Player ${i + 1}: splash!` : 'Splash!';
                 this.events.push({
@@ -740,7 +789,23 @@ export class LabSim {
         this.jumped = false;
     }
 
-    /** Copies dynamic body poses into their entities (physics props mode). */
+    // ------------------------------------------------------------------------------- wood
+
+    /** Logging and the sawmill, after the physics step (src/sim/forestry.ts, sawmill.ts). */
+    private stepWood(): void {
+        const feet: { x: number; z: number }[] = [];
+        for (let i = 0; i < this.players.length; i++)
+            if (this.playerActive(i) && this.seatOf(i) < 0) feet.push(this.players[i]);
+        const props = this.propEntities;
+        this.forestry.step(this.tick, (x, z, r) => {
+            for (const f of feet) if (Math.hypot(f.x - x, f.z - z) < r) return true;
+            for (const e of props) if (e.visible && Math.hypot(e.pose.p.x - x, e.pose.p.z - z) < r) return true;
+            return false;
+        });
+        this.sawmill?.step(feet);
+        for (const text of this.forestry.drain()) this.events.push({ tick: this.tick, kind: 'wood', text });
+    }
+
     // ------------------------------------------------------------------------------- the ute
 
     /** The ute entity's pose and wheel animation from the vehicle; the driver rides in the seat. */
@@ -1354,6 +1419,10 @@ export class LabSim {
         const held = pw.heldIdOf(i);
         const eye = { x: p.x, y: p.y + EYE_HEIGHT, z: p.z };
         let target = held >= 0 ? -1 : pw.probe(eye, p.yaw, p.pitch, i);
+        // what a grab would cut (a stand tree with empty hands; a tree or a log with the axe)
+        if (target < 0) target = this.forestry.aim(eye, p.yaw, p.pitch, i, held);
+        // the sawmill's mode lever (with empty hands)
+        if (target < 0 && held < 0 && this.sawmill?.aimLever(eye, p.yaw, p.pitch)) target = this.sawmill.entity.id;
         if (
             held < 0 &&
             target < 0 &&

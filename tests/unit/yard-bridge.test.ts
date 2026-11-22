@@ -11,7 +11,7 @@ beforeAll(() => initPhysics());
 
 /** Beams go under the deck this far either side of the bridge's centre line (planks are 2.4 m). */
 const LINE = 0.55;
-const DECK_PITCH = 0.25;
+const DECK_PITCH = 0.27;
 let BEAM_STOP = 0.05;
 export const setBeamStop = (v: number) => (BEAM_STOP = v);
 
@@ -130,6 +130,15 @@ function buildAndCross() {
     // the last plank waits until the far ends are nailed (it covers them)
     const farNailZ = Math.min(BRIDGE.farFace - 0.06, beamFar + 0.16);
     let placed = 0;
+    /** A held plank turns with you: turn by its skew so it lies square across the beams. */
+    const straighten = (p: (typeof s.entities)[number]) => {
+        quatRotate(p.pose.q, 1, 0, 0, axis);
+        const skew = Math.atan2(-axis.z, axis.x);
+        const wrapped = Math.atan2(Math.sin(skew), Math.cos(skew));
+        // either end along +x will do
+        const turn = Math.abs(wrapped) > Math.PI / 2 ? wrapped - Math.sign(wrapped) * Math.PI : wrapped;
+        if (Math.abs(turn) > 0.01) ease(yaw - turn, 20, (v) => (yaw = v), yaw);
+    };
     const layPlank = (z: number) => {
         const p = stack[placed++];
         phase(`plank ${placed}`);
@@ -146,6 +155,7 @@ function buildAndCross() {
         }
         yaw = 0;
         ease(-0.3, 20, (v) => (pitch = v), pitch);
+        straighten(p);
         step({}, 30);
         // carry it over: out onto the ramp, then along to where it goes down
         const ahead = s.player.z - p.pose.p.z;
@@ -166,14 +176,16 @@ function buildAndCross() {
             // landed flat on the beams, where it should be? if not, pick it up again
             if (Math.abs(p.pose.p.z - z) < 0.06 && Math.abs(p.pose.p.y - restY) < 0.03) break;
             log.push(
-                `plank ${placed}: landed at z ${p.pose.p.z.toFixed(2)} y ${p.pose.p.y.toFixed(2)} (wanted ${z.toFixed(2)}, ${restY.toFixed(2)}): again`
+                `plank ${placed}: landed at z ${p.pose.p.z.toFixed(2)} y ${p.pose.p.y.toFixed(2)} (wanted ${z.toFixed(2)}, ${restY.toFixed(2)})`
             );
+            if (attempt === 2) break; // leave it where it lies
             look({ x: p.pose.p.x, y: p.pose.p.y + 0.05, z: p.pose.p.z });
             step({}, 4);
             step({ grab: true });
             if (s.physics.heldId !== p.id) break;
             yaw = 0;
             ease(-0.3, 20, (v) => (pitch = v), pitch);
+            straighten(p);
             step({}, 20);
         }
         for (const beam of beams) {

@@ -732,3 +732,22 @@ describe('joint stiffness (#47 audit)', () => {
         expect(one2.turn / one.turn).toBeLessThan(2.3);
     });
 });
+
+describe('what takes nails', () => {
+    it("timber does, by name: the yard's planks and beams, sawn planks and beams (Epic 6), logs, crates; the bucket doesn't", async () => {
+        const { propBody } = await import('../../src/sim/lab-physics.ts');
+        for (const name of [
+            'plank',
+            'extra-plank-4',
+            'extra-plank-11',
+            'extra-plank-20',
+            'beam-0',
+            'beam-14',
+            'log',
+            'extra-log-1',
+            'crate-2'
+        ])
+            expect(propBody(name)?.opts.nailable, name).toBe(true);
+        for (const name of ['bucket', 'sphere']) expect(propBody(name)?.opts.nailable, name).toBeFalsy();
+    });
+});

@@ -341,6 +341,38 @@ export class VoxelWorld {
         }
     };
 
+    /**
+     * Removes one static voxel (a felled tree leaves the static layer). The chunk and any
+     * neighbour sharing a face with the cell re-mesh. Returns false when the cell held none.
+     */
+    clearStatic(i: number, j: number, k: number): boolean {
+        const c = this.byCoord.get(packChunkCoord(i >> CHUNK_BITS, j >> CHUNK_BITS, k >> CHUNK_BITS));
+        if (!c || !c.stat) return false;
+        const li = localIndex(i & CHUNK_MASK, j & CHUNK_MASK, k & CHUNK_MASK);
+        if (c.stat[li] === 0) return false;
+        if (c.dyn && c.dyn[li] !== 0) {
+            c.overrideCount--;
+            this.dynStaticOverlapCells--;
+        }
+        c.stat[li] = 0;
+        if (c.statPrio) c.statPrio[li] = 0;
+        c.staticCount--;
+        c.staticDirty = true;
+        this.markDynDirtyAround(c, li, true);
+        return true;
+    }
+
+    /** Visits the cells a volume covers (as rasterizeStatic would write them), writing nothing. */
+    forEachCell(
+        volume: Volume,
+        worldPose: Pose,
+        policy: SamplingPolicy,
+        fn: (i: number, j: number, k: number, value: number) => void,
+        stats: RasterStats
+    ): void {
+        rasterizeVolume(volume, worldPose, policy, 0, { write: fn }, stats, this.clip);
+    }
+
     staticAt(i: number, j: number, k: number): number {
         const c = this.byCoord.get(packChunkCoord(i >> CHUNK_BITS, j >> CHUNK_BITS, k >> CHUNK_BITS));
         if (!c || !c.stat) return 0;
@@ -566,7 +598,7 @@ export class VoxelWorld {
     }
 
     /** Marks a chunk dyn-dirty, plus face/edge/corner neighbours when the cell lies on a border. */
-    private markDynDirtyAround(c: Chunk, li: number): void {
+    private markDynDirtyAround(c: Chunk, li: number, statToo = false): void {
         c.dynDirty = true;
         const lx = li & CHUNK_MASK;
         const lz = (li >> CHUNK_BITS) & CHUNK_MASK;
@@ -580,7 +612,10 @@ export class VoxelWorld {
                 for (let dx = bx < 0 ? -1 : 0; dx <= (bx > 0 ? 1 : 0); dx++) {
                     if (dx === 0 && dy === 0 && dz === 0) continue;
                     const n = this.byCoord.get(packChunkCoord(c.cx + dx, c.cy + dy, c.cz + dz));
-                    if (n) n.dynDirty = true;
+                    if (n) {
+                        n.dynDirty = true;
+                        if (statToo && n.stat) n.staticDirty = true;
+                    }
                 }
             }
         }
