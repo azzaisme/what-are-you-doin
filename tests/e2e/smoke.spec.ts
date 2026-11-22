@@ -970,7 +970,16 @@ test('online co-op: the host’s flood reaches the guest — its river rises, th
     const [hh, gh] = [await lab(page, (l) => l.hazards()), await lab(guest, (l) => l.hazards())];
     expect(gh.floods).toBe(0); // the guest runs no director of its own
     expect(Math.abs(gh.waterY - hh.waterY)).toBeLessThan(0.25);
-    expect(Math.abs(gh.planeY - gh.waterY)).toBeLessThan(0.01);
+    // the river plane moves on the guest's next rendered frame, which can come after a new state
+    // arrives (slow in software GL), so wait for it rather than read it between the two
+    await guest.waitForFunction(
+        () => {
+            const h = (window as unknown as { __riverLab: Lab }).__riverLab.hazards();
+            return Math.abs(h.planeY - h.waterY) < 0.01;
+        },
+        null,
+        { timeout: 60_000 }
+    );
     expect(problems).toEqual([]);
     expect(guestProblems).toEqual([]);
 });
