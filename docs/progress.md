@@ -1,5 +1,19 @@
 # Progress log
 
+## Beams are shouldered: level 1's bridge can be built (2026-11-22, owner request)
+
+Owner asked whether the Timber Yard is finishable. Played through with player inputs only, it
+was, but only by throwing the bucket over: no beam could be laid across. Held by its end, a 36 kg
+3.2 m beam needs 565 N m to stay level and the wrist gives 70, so it hung straight down; toppling it,
+carrying it by the middle or sliding it out all fell short of the far abutment.
+
+- **Fix:** beams are braced on the shoulder: their wrist strength is `GRAB.braceTorque` (700 N m,
+  per body via `BodyOptions.wristTorque`). Take a beam by its end, turn to the creek (it turns with
+  you), stop 0.35–0.6 m back from the bank, look down to lower it and let go: it lies across on both
+  abutments. Planks keep the hand wrist and still tip when held off balance.
+- **Tests:** two new input-only playthroughs of the yard: building the bridge with both beams and
+  carrying the bucket across to the flag, and the bucket-throw shortcut. 300 unit tests pass.
+
 ## The Valley: the rest of the levels as one big map (2026-11-22, owner request)
 
 Owner: "Let's do the rest of the levels (one big map). Make sure it works for multiplayer and

@@ -13,6 +13,7 @@ import type { LevelDef } from '../levels/level.ts';
 import { pose, quatFromYawPitchRoll, quatMul } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
 
+import { GRAB } from './physics/grab.ts';
 import { CHARACTER, PhysicsWorld } from './physics/world.ts';
 import type { BodyOptions, ShapeSpec } from './physics/world.ts';
 
@@ -45,7 +46,7 @@ export function propBody(name: string): { shape: ShapeSpec; opts: BodyOptions } 
     if (name.startsWith('beam'))
         return {
             shape: { type: 'box', hx: BEAM_HALF.x, hy: BEAM_HALF.y, hz: BEAM_HALF.z },
-            opts: { density: 380, friction: 0.75, restitution: 0.05, ccd: true }
+            opts: { density: 380, friction: 0.75, restitution: 0.05, ccd: true, wristTorque: GRAB.braceTorque }
         };
     if (name === 'log' || name.startsWith('extra-log'))
         return {

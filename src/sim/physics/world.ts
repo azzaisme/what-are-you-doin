@@ -77,6 +77,8 @@ export interface BodyOptions {
     grabbable?: boolean;
     /** Body-local point always used as the grab anchor (a bucket is held by its handle). */
     grabPoint?: { x: number; y: number; z: number };
+    /** Wrist strength for this body (N m), instead of GRAB.maxTorque (long timber is braced). */
+    wristTorque?: number;
 }
 
 export interface PhysBody {
@@ -93,6 +95,8 @@ export interface PhysBody {
     windArea: number;
     /** Body-local grab anchor override (see BodyOptions.grabPoint). */
     grabPoint?: { x: number; y: number; z: number };
+    /** See BodyOptions.wristTorque. */
+    wristTorque?: number;
 }
 
 /**
@@ -372,6 +376,7 @@ export class PhysicsWorld {
             kind: 'dynamic',
             grabbable: o.grabbable ?? true,
             grabPoint: o.grabPoint,
+            wristTorque: o.wristTorque,
             spawn: { p: { ...spawn.p }, q: { ...spawn.q } },
             baseAngularDamping: o.angularDamping ?? 0.3,
             enabled: true,
@@ -850,7 +855,7 @@ export class PhysicsWorld {
             b.angvel(),
             b.effectiveWorldInvInertia(),
             _wrist,
-            GRAB.maxTorque * share
+            (pb.wristTorque ?? GRAB.maxTorque) * share
         );
         b.applyTorqueImpulse({ x: t.tx * SIM_DT, y: t.ty * SIM_DT, z: t.tz * SIM_DT }, true);
         r.wristLoad = t.load;

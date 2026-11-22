@@ -173,9 +173,7 @@ describe('level 1: the timber yard', () => {
     });
 
     it('finishable with inputs only: carry the bucket to the near abutment and throw it over', () => {
-        // the whole level played through player commands (no teleporting props). Laying the beams
-        // across is not possible yet with one carrier's reach and wrist, so this is the route a
-        // player has today; it must keep working until the bridge route does
+        // the shortcut (freeform, design doc §2.1): played through player commands only, no bridge
         const s = yard();
         let n = 0;
         let pitch = 0;
@@ -207,4 +205,73 @@ describe('level 1: the timber yard', () => {
         expect(s.progress.goalReached).toBe(true);
         expect(s.player.z).toBeGreaterThan(BRIDGE.nearFace); // the player never crossed
     }, 60_000);
+
+    it('finishable with inputs only by building the bridge: shoulder both beams over, carry the bucket across', () => {
+        const s = yard();
+        let n = 0;
+        let yaw = 0;
+        let pitch = 0;
+        const step = (c: Partial<PlayerCommand> = {}, k = 1) => {
+            for (let i = 0; i < k; i++) s.step(cmd(n++, { yaw, pitch, ...c }));
+        };
+        const ease = (to: number, k: number, set: (v: number) => void, from: number) => {
+            for (let i = 1; i <= k; i++) {
+                set(from + ((to - from) * i) / k);
+                step();
+            }
+        };
+        const goTo = (x: number, zStop: number) => {
+            for (let i = 0; i < 900 && Math.abs(s.player.x - x) > 0.05; i++)
+                step({ moveX: s.player.x > x ? -0.4 : 0.4 });
+            for (let i = 0; i < 900 && s.player.z > zStop; i++) step({ moveZ: 0.5 });
+            step({}, 30);
+        };
+        step({}, 60);
+        s.fpActive = true;
+        for (const [name, x] of [
+            ['beam-0', BRIDGE_X - 0.12],
+            ['beam-1', BRIDGE_X + 0.12]
+        ] as const) {
+            const beam = byName(s, name);
+            // stand off the beam's +x end, facing it (-x), and take it by that end on your shoulder
+            yaw = Math.PI / 2;
+            s.placePlayer(beam.pose.p.x + 2.4, beam.pose.p.z, yaw);
+            step({}, 20);
+            pitch = -Math.atan2(s.player.y + EYE_HEIGHT - beam.pose.p.y, s.player.x - (beam.pose.p.x + 1.45));
+            step({}, 5);
+            step({ grab: true });
+            expect(s.physics.heldId).toBe(beam.id);
+            ease(-0.25, 40, (v) => (pitch = v), pitch);
+            step({}, 30);
+            // turn to the creek: the beam turns with you and points out over the gap
+            ease(0, 120, (v) => (yaw = v), yaw);
+            goTo(x, BRIDGE.nearEdge + 0.4);
+            ease(-0.7, 40, (v) => (pitch = v), pitch);
+            step({}, 30);
+            step({ grab: true });
+            step({}, 120);
+            expect(s.physics.heldId).toBe(-1);
+            // it rests on both abutments, level
+            const along = Math.abs(beam.pose.p.z - BRIDGE.zc);
+            expect(along).toBeLessThan(0.3);
+            expect(Math.abs(beam.pose.p.y - (YARD_Y + 0.12))).toBeLessThan(0.25);
+        }
+        expect(s.progress.falls).toBe(0);
+        // fetch the bucket and walk it over the new bridge to the flag
+        const bucket = byName(s, 'bucket');
+        yaw = 0;
+        s.placePlayer(BUCKET_STUMP.x, BUCKET_STUMP.z + 1, 0);
+        step({}, 20);
+        pitch = -Math.atan2(s.player.y + EYE_HEIGHT - bucket.pose.p.y, s.player.z - bucket.pose.p.z);
+        step({}, 3);
+        step({ grab: true });
+        expect(s.physics.heldId).toBe(bucket.id);
+        pitch = 0;
+        goTo(BRIDGE_X, (YARD_GOAL.minZ + YARD_GOAL.maxZ) / 2);
+        expect(s.progress.falls).toBe(0);
+        expect(s.player.z).toBeLessThan(BRIDGE.farEdge);
+        step({ grab: true });
+        step({}, 90);
+        expect(s.progress.goalReached).toBe(true);
+    }, 120_000);
 });
