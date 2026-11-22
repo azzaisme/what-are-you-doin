@@ -1,5 +1,58 @@
 # Progress log
 
+## Remappable controls (2026-11-22, Epic 10)
+
+You can now choose your own keys, mouse buttons and gamepad buttons. Settings has two new
+sections: **Keys** and **Pad**.
+
+### How to use it
+
+- Open Settings (Esc, the ⚙ button, or Start on a pad), go to **Keys** or **Pad**.
+- Each action has two slots. Press a slot, then the key, mouse button, wheel turn or pad button you
+  want there.
+    - **Esc** cancels (Start on a pad). **Backspace** or **Delete** empties the slot.
+    - A key does one thing: put W on Jump and it comes off Move forward. The menu says so ("W was
+      Move forward: that is now unbound there").
+- **Reset keys to defaults** and **Reset gamepad buttons to defaults** put everything back.
+- Saved per browser (only what you changed), so a later change to the defaults still reaches you.
+- The control hints and prompts follow your keys: the hint reads "F jump" with jump on F, and the
+  prompt reads "E to grab …" with grab on E.
+
+### What can be remapped
+
+- **Keys:** move (4 directions), run, jump, grab / release / use, throw, drop, ragdoll, carry
+  plank, and hold further / closer.
+- **Pad:** the same, except moving and looking, which stay on the sticks. Their speed and
+  inversion are settings.
+- **Not remappable**, so you can always get back to the menu: Esc, Start, F3 (debug panel) and Tab.
+- A key bound to an action wins over the game's own hotkeys (V, P, C, L, H): bind V to jump and V
+  jumps.
+- Keys are by position on the keyboard (`KeyboardEvent.code`), so the defaults sit in the same
+  place on AZERTY or Dvorak keyboards.
+
+### Tests (actual)
+
+- Unit (`tests/unit/bindings.test.ts`, both voxel sizes):
+    - every default key and button does exactly one thing;
+    - rebinding takes a key off its old action and names it;
+    - Esc, F3, Tab and Start can't be bound;
+    - saving stores only changes and loads back exactly;
+    - junk, unknown actions, prototype keys and duplicate keys in storage are cleaned up;
+    - a remapped pad button does the action and its old button no longer does.
+- Browser test, rebinding in Settings:
+    - Jump goes to F, and W goes onto Jump (taken off Move forward, and the menu says so);
+    - Esc cancels a capture, Backspace clears a slot;
+    - a pad press puts X on the pad's Jump (taken off the ragdoll).
+    - In the game, F jumps and Space no longer does. The hint reads "F jump".
+    - After a reload both are still there, and Reset puts the keys back.
+- The settings, UI-layout, first-person, Timber Yard, ute and split-screen browser tests pass.
+
+### Known limits
+
+- **Touch controls aren't remappable.** The on-screen buttons stay where they are.
+- **Analogue triggers count from part way down** (40 %). Bound to an action, they press it like a
+  button.
+
 ## Online: 8 players, reconnect, bad-network testing (2026-11-22, Epic 10)
 
 Online games now take up to **8 players** (was 4). A guest whose connection drops, or who reloads the

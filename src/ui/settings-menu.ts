@@ -9,6 +9,10 @@
  *
  * The highlighted row is always shown (not only after keyboard use), so a pad player can see where
  * they are. DOM only; the caller owns the values (get / set) and actions.
+ *
+ * Binding rows (remappable controls) have two slot buttons. Pressing one waits for the next key,
+ * mouse button or wheel turn (keyboard rows) or gamepad button (pad rows) and hands it to the host;
+ * Esc (or Start on a pad) cancels, Backspace / Delete clears the slot.
  */
 
 export type SettingValue = number | boolean | string;
@@ -26,7 +30,10 @@ export type SettingsRow =
       }
     | { kind: 'toggle'; key: string; label: string; hint?: string }
     | { kind: 'choice'; key: string; label: string; options: { value: string; label: string }[]; hint?: string }
-    | { kind: 'button'; id: string; label: string; hint?: string; primary?: boolean };
+    | { kind: 'button'; id: string; label: string; hint?: string; primary?: boolean }
+    | { kind: 'binding'; key: string; label: string; device: BindDevice; hint?: string };
+
+export type BindDevice = 'keys' | 'pad';
 
 export interface SettingsTab {
     id: string;
@@ -44,6 +51,13 @@ export interface SettingsMenuHost {
     enabled?(id: string): boolean;
     opened?(): void;
     closed?(): void;
+    /** What a binding slot shows (a key or button name, or '—' for none). */
+    binding?(device: BindDevice, action: string, slot: 0 | 1): string;
+    /**
+     * Binds a key code / pad button index to a slot, or clears it (null). Returns a note for the
+     * player (e.g. which action the key was taken from), or null.
+     */
+    rebind?(device: BindDevice, action: string, slot: 0 | 1, value: string | number | null): string | null;
 }
 
 /** Standard gamepad buttons used for menu navigation. */
@@ -83,6 +97,9 @@ export class SettingsMenu {
     private held: Dir | null = null;
     private heldTime = 0;
     private nextRepeat = 0;
+    /** A binding slot waiting for a key or button. */
+    private capturing: { device: BindDevice; action: string; slot: 0 | 1; button: HTMLButtonElement } | null = null;
+    private readonly status: HTMLDivElement;
 
     constructor(host: SettingsMenuHost, tabs: SettingsTab[]) {
         this.host = host;
@@ -99,6 +116,7 @@ export class SettingsMenu {
             </div>
             <div class="settings-tabs" role="tablist" aria-label="Settings sections"></div>
             <div class="settings-panel" role="tabpanel" id="${id}-panel"></div>
+            <div class="settings-status" role="status" aria-live="polite"></div>
             <div class="settings-foot" aria-hidden="true">
               <span class="foot-keys"><kbd>↑</kbd><kbd>↓</kbd> choose · <kbd>←</kbd><kbd>→</kbd> change · <kbd>Q</kbd><kbd>E</kbd> sections · <kbd>Esc</kbd> close</span>
               <span class="foot-pad"><b>A</b> select · <b>B</b> close · <b>LB</b>/<b>RB</b> sections</span>
@@ -108,6 +126,7 @@ export class SettingsMenu {
         this.el = el;
         this.dialog = el.querySelector('.settings')!;
         this.panel = el.querySelector('.settings-panel')!;
+        this.status = el.querySelector('.settings-status')!;
         const tablist = el.querySelector('.settings-tabs')!;
         tabs.forEach((t, i) => {
             const b = document.createElement('button');
@@ -125,6 +144,39 @@ export class SettingsMenu {
         el.addEventListener('pointerdown', (e) => {
             if (e.target === el) this.close();
         });
+        // a keyboard binding takes the next mouse button or wheel turn (before anything else sees it)
+        el.addEventListener(
+            'mousedown',
+            (e) => {
+                if (this.capturing?.device !== 'keys') return;
+                e.preventDefault();
+                e.stopPropagation();
+                this.finishCapture(`Mouse${e.button}`);
+            },
+            true
+        );
+        el.addEventListener(
+            'wheel',
+            (e) => {
+                if (this.capturing?.device !== 'keys' || !e.deltaY) return;
+                e.preventDefault();
+                this.finishCapture(e.deltaY < 0 ? 'WheelUp' : 'WheelDown');
+            },
+            { capture: true, passive: false }
+        );
+        el.addEventListener(
+            'click',
+            (e) => {
+                // the click that follows a captured mouse button presses nothing
+                if (this.swallowClick) {
+                    this.swallowClick = false;
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            },
+            true
+        );
+        el.addEventListener('contextmenu', (e) => e.preventDefault());
         // the game below never sees input meant for the menu
         for (const ev of ['pointerdown', 'mousedown', 'wheel', 'click', 'contextmenu', 'touchstart'] as const)
             el.addEventListener(ev, (e) => e.stopPropagation());
@@ -160,6 +212,8 @@ export class SettingsMenu {
 
     close(): void {
         if (!this.isOpen) return;
+        this.cancelCapture();
+        this.status.textContent = '';
         this.isOpen = false;
         this.el.hidden = true;
         document.body.classList.remove('settings-open');
@@ -185,6 +239,7 @@ export class SettingsMenu {
     }
 
     private showTab(k: number, focus: boolean): void {
+        this.cancelCapture();
         this.tab = k;
         this.tabButtons.forEach((b, i) => {
             b.setAttribute('aria-selected', String(i === k));
@@ -228,9 +283,54 @@ export class SettingsMenu {
         this.showTab((this.tab + d + n) % n, true);
     }
 
+    private swallowClick = false;
+
+    /** A binding slot was pressed: wait for the key or button to put there. */
+    private startCapture(device: BindDevice, action: string, slot: 0 | 1, button: HTMLButtonElement): void {
+        this.cancelCapture();
+        this.capturing = { device, action, slot, button };
+        button.classList.add('capturing');
+        button.textContent = device === 'keys' ? 'Press a key…' : 'Press a button…';
+        this.status.textContent =
+            device === 'keys'
+                ? 'Press a key, mouse button or wheel turn · Esc cancels · Backspace clears'
+                : 'Press a gamepad button · Start cancels · Backspace clears';
+        // a pad press that started this (A) is not read as the new button
+        this.padPrev = null;
+    }
+
+    private cancelCapture(): void {
+        const c = this.capturing;
+        if (!c) return;
+        this.capturing = null;
+        c.button.classList.remove('capturing');
+        this.status.textContent = '';
+        this.sync();
+    }
+
+    private finishCapture(value: string | number | null): void {
+        const c = this.capturing;
+        if (!c) return;
+        this.capturing = null;
+        c.button.classList.remove('capturing');
+        if (typeof value === 'string' && value.startsWith('Mouse')) this.swallowClick = true;
+        const note = this.host.rebind?.(c.device, c.action, c.slot, value) ?? null;
+        this.status.textContent = note ?? '';
+        this.sync();
+        c.button.focus({ preventScroll: true });
+    }
+
     private onKey(e: KeyboardEvent): void {
         // the game's own hotkeys stay out of the menu
         e.stopPropagation();
+        if (this.capturing) {
+            e.preventDefault();
+            if (e.repeat) return;
+            if (e.key === 'Escape') this.cancelCapture();
+            else if (e.code === 'Backspace' || e.code === 'Delete') this.finishCapture(null);
+            else if (this.capturing.device === 'keys') this.finishCapture(e.code);
+            return;
+        }
         const onTab = this.tabButtons.includes(e.target as HTMLButtonElement);
         switch (e.key) {
             case 'Escape':
@@ -299,6 +399,15 @@ export class SettingsMenu {
         }
         const prev = this.padPrev;
         const edge = (i: number) => b(i) && !prev[i];
+        if (this.capturing) {
+            // the next button press goes to the binding (Start cancels; B is a button like any other)
+            const pressed = pad.buttons.findIndex((x, i) => x.pressed && !prev[i]);
+            this.padPrev = pad.buttons.map((x) => x.pressed);
+            if (pressed === PAD.MENU) this.cancelCapture();
+            else if (pressed >= 0 && this.capturing.device === 'pad') this.finishCapture(pressed);
+            else if (pressed === PAD.B) this.cancelCapture(); // a pad can't press a key: B backs out
+            return;
+        }
         const ax = pad.axes[0] ?? 0;
         const ay = pad.axes[1] ?? 0;
         const dir: Dir | null =
@@ -473,6 +582,39 @@ export class SettingsMenu {
                     return true;
                 };
                 view = { row, el, focus: () => buttons[index()], nudge, sync };
+                break;
+            }
+            case 'binding': {
+                const slots = ([0, 1] as const).map((slot) => {
+                    const b = document.createElement('button');
+                    b.type = 'button';
+                    b.className = 'settings-bind';
+                    b.setAttribute(
+                        'aria-label',
+                        `${row.label}, ${slot === 0 ? 'first' : 'second'} ${row.device === 'keys' ? 'key' : 'button'}`
+                    );
+                    b.addEventListener('click', () => this.startCapture(row.device, row.key, slot, b));
+                    control.append(b);
+                    return b;
+                });
+                const sync = () => {
+                    slots.forEach((b, slot) => {
+                        if (this.capturing?.button === b) return;
+                        b.textContent = this.host.binding?.(row.device, row.key, slot as 0 | 1) ?? '—';
+                    });
+                };
+                // left / right moves between the two slots
+                const nudge = (d: -1 | 1) => {
+                    slots[d > 0 ? 1 : 0].focus();
+                    return true;
+                };
+                view = {
+                    row,
+                    el,
+                    focus: () => (slots[1] === document.activeElement ? slots[1] : slots[0]),
+                    nudge,
+                    sync
+                };
                 break;
             }
             case 'button': {
