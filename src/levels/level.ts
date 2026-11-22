@@ -150,6 +150,8 @@ export interface LevelDef {
     wind?: WindSpec;
     /** The hazard director's authored events (§2.9, src/sim/hazards.ts); none when absent. */
     hazards?: HazardSpec;
+    /** Fixed places that make a sound of their own (Epic 8, #80): heard from where they are. */
+    sounds?: { waterfalls?: { x: number; y: number; z: number }[] };
     /** A windsock on a pole (the wind's visible tell, §2.9). */
     windsock?: { x: number; z: number; height: number };
     spawn: { x: number; z: number; yaw: number; pitch: number };

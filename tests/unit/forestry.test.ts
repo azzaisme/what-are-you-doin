@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import { SAW_MODE, TREE_CUT, TREE_STATE } from '../../src/assets/forestry.ts';
 import { LOG_RADIUS } from '../../src/assets/props.ts';
+import { sfx } from '../../src/audio/sfx.ts';
 import { MAX_PARTICLES, ParticleFX } from '../../src/fx/particles.ts';
 import { WoodFX } from '../../src/fx/wood-fx.ts';
 import { PINE_TRUNK_HEIGHT } from '../../src/levels/common.ts';
@@ -698,7 +699,16 @@ describe('voxels: a felled tree leaves the static world, a regrown one comes bac
 });
 
 describe('wood effects', () => {
-    it('chips fly at every bite, needles burst when the crown breaks off, sawdust while it saws', () => {
+    it('chips fly at every bite, needles burst when the crown breaks off, sawdust while it saws (and their sounds)', () => {
+        const heard: string[] = [];
+        const held: number[] = [];
+        sfx.setSink({
+            play: (n) => heard.push(n),
+            hold: (_k, n, _at, o) => {
+                expect(n).toBe('saw');
+                held.push(o?.pitch ?? 1);
+            }
+        });
         const s = yard();
         const fx = new ParticleFX(timberYardLevel, []);
         const f = s.forestry.ents;
@@ -719,14 +729,29 @@ describe('wood effects', () => {
             run(look, 29, from);
         }
         expect(fx.spawned.chips).toBe(10);
+        expect(heard.filter((n) => n === 'chop')).toHaveLength(10);
         run({}, 200, from);
         expect(fx.spawned.needles).toBe(1);
+        expect(heard.filter((n) => n === 'thud')).toHaveLength(1);
+        expect(held).toHaveLength(0); // the saw only runs with a log in it
         // sawdust: a log in the guide
         s.placePlayer(SPOT.x, SPOT.z + 3, 0);
         s.physics.place(s.log.id, inGuide());
         run({}, SAW.settleTicks + 10 + 120, from);
         expect(fx.spawned.sawdust).toBeGreaterThan(5);
         expect(fx.count).toBeLessThanOrEqual(MAX_PARTICLES);
+        // the motor is held on every frame it cuts, rising a little through the cut
+        expect(held.length).toBeGreaterThan(60);
+        expect(held[held.length - 1]).toBeGreaterThan(held[0]);
+        // and let go once the planks are out (it fades by itself)
+        const n = held.length;
+        run({}, SAW.cutTicks + 120, from);
+        expect(s.sawmill!.running).toBe(false);
+        const after = held.length;
+        run({}, 60, from);
+        expect(held.length).toBe(after);
+        expect(after).toBeGreaterThanOrEqual(n);
+        sfx.setSink(null);
     });
 });
 

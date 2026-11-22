@@ -6,6 +6,8 @@ import { sfx } from '../../src/audio/sfx.ts';
 import type { SfxName } from '../../src/audio/sfx.ts';
 import { LOOPS, SOUND_NAMES, SYNTH_RATE, synthesize } from '../../src/audio/synth.ts';
 import type { SoundName, SynthSound } from '../../src/audio/synth.ts';
+import { timberYardLevel } from '../../src/levels/timber-yard.ts';
+import { valleyLevel } from '../../src/levels/valley.ts';
 
 /** Each sound synthesized once for all the tests here (about 0.2 s in all). */
 const cache = new Map<SoundName, SynthSound>();
@@ -136,6 +138,17 @@ describe('sound: every sound is synthesized (original, nothing to license)', () 
         expect(made.slice(1)).toEqual(['pump:pour', 'pump:slosh']);
         expect(destroyed.slice(1)).toEqual(['pump:pour']);
         expect(loops.size).toBe(1);
+    });
+
+    it('the Valley’s waterfall is heard from where it falls (its sound spot is the waterfall piece)', () => {
+        const spots = valleyLevel.sounds?.waterfalls ?? [];
+        expect(spots).toHaveLength(1);
+        const fall = valleyLevel.layout(1).pieces.find((p) => p.name === 'waterfall')!;
+        expect(fall).toBeDefined();
+        const at = spots[0];
+        expect(Math.hypot(at.x - fall.pose.p.x, at.y - fall.pose.p.y, at.z - fall.pose.p.z)).toBeLessThan(0.01);
+        // the yard has none
+        expect(timberYardLevel.sounds?.waterfalls ?? []).toHaveLength(0);
     });
 
     it('props sound like what they are made of', () => {
