@@ -474,10 +474,45 @@ describe('the ute crosses a beam bridge (Epic 4 gate)', () => {
         expect(seen.has(beams[0].id)).toBe(true);
         expect(seen.has(beams[1].id)).toBe(true);
         expect(maxLoad).toBeGreaterThan(0.3 * v.weight());
-        // placed this low the beams sit wedged against the far capstone, so here they stay across
-        // (dropped onto the capstones instead, the tyres walk one off its line: joints.test.ts)
+        // nailed down, the beams stay where they were laid
         const drift = beams.map((b, i) => Math.hypot(b.pose.p.x - start[i].x, b.pose.p.z - start[i].z));
-        console.log('loose beams after the crossing: moved', drift.map((d) => d.toFixed(2)).join(' m, '), 'm');
-        for (const b of beams) expect(Math.abs(b.pose.p.z - BRIDGE.zc)).toBeLessThan(0.4);
+        console.log('nailed beams after the crossing: moved', drift.map((d) => d.toFixed(3)).join(' m, '), 'm');
+        for (const d of drift) expect(d).toBeLessThan(0.05);
+        // and no hint about loose beams
+        expect(s.events.some((e) => /Loose beams/.test(e.text))).toBe(false);
+    }, 60_000);
+
+    it('onto the same beams left loose, the game says to nail them down', async () => {
+        const { LabSim } = await import('../../src/sim/lab-sim.ts');
+        const { timberYardLevel, BRIDGE, BRIDGE_X, YARD_Y } = await import('../../src/levels/timber-yard.ts');
+        const { neutralCommand } = await import('../../src/sim/commands.ts');
+        const { quatMul } = await import('../../src/voxels/math.ts');
+        const { UTE_TRACK_HALF } = await import('../../src/assets/ute.ts');
+        const s = new LabSim({ level: timberYardLevel });
+        const flatAlongZ = quatMul(quatFromYawPitchRoll(Math.PI / 2, 0, 0), quatFromYawPitchRoll(0, Math.PI / 2, 0));
+        ['beam-0', 'beam-1'].forEach((name, i) =>
+            s.physics.place(
+                s.entities.find((e) => e.name === name)!.id,
+                pose(BRIDGE_X + (i === 0 ? -1 : 1) * UTE_TRACK_HALF, YARD_Y + 0.3, BRIDGE.zc, flatAlongZ)
+            )
+        );
+        let n = 0;
+        for (; n < 60; n++) s.step(neutralCommand(n));
+        s.physics.place(
+            s.vehicle!.id,
+            pose(BRIDGE_X, YARD_Y + 0.25, BRIDGE.nearEdge + 3.2, quatFromYawPitchRoll(Math.PI, 0, 0))
+        );
+        for (; n < 120; n++) s.step(neutralCommand(n));
+        s.fpActive = true;
+        s.step(neutralCommand(n++));
+        expect(s.takeDriverSeat(0)).toBe(true);
+        const hint = () => s.events.find((e) => /Loose beams/.test(e.text));
+        // on the yard bank: nothing to say yet
+        for (let k = 0; k < 60; k++) s.step({ ...neutralCommand(n++, Math.PI) });
+        expect(hint()).toBeUndefined();
+        for (let k = 0; k < 60 * 6 && !hint(); k++)
+            s.step({ ...neutralCommand(n++, Math.PI), moveZ: 0.35, moveX: 4 * (BRIDGE_X - s.ute.pose.p.x) });
+        expect(hint()?.text).toBe('Loose beams shift under the ute: nail each beam down at both ends to drive across.');
+        expect(hint()?.kind).toBe('ute');
     }, 60_000);
 });

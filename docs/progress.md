@@ -66,8 +66,8 @@ build a real bridge, beams plus a nailed plank deck, and drive the ute over it.
 
 | Test                                                                                                                               | Result                                                                                                                                                                                                                                                                                                             |
 | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Gate, inputs only:** walk to each beam and stack, lay and nail beams and an 11-plank deck, drive the ute from where it is parked | 4 anchors, 22 deck joints, 28 nails; planks landed within 0.1 cm of the deck plane and 2.9 cm of their spots (pass: 2 cm, 5 cm); two floods during the build moved it at most 0.2 cm; the ute crossed the start line 1.4 cm off the bridge's line and reached the far bank, never lower than 0.26 m above the yard |
-| The same deck, nails pulled just before the ute sets off                                                                           | Planks shoved up to **183 cm**, the ute does not reach the far bank; nailed, they moved **0.2 cm** (pass: under 3 cm vs over 10 cm)                                                                                                                                                                                |
+| **Gate, inputs only:** walk to each beam and stack, lay and nail beams and an 11-plank deck, drive the ute from where it is parked | 4 anchors, 22 deck joints, 28 nails; planks landed within 0.1 cm of the deck plane and 2.9 cm of their spots (pass: 2 cm, 5 cm); two floods during the build moved it at most 0.2 cm; the ute crossed the start line 1.5 cm off the bridge's line and reached the far bank, never lower than 0.28 m above the yard |
+| The same deck, nails pulled just before the ute sets off                                                                           | Planks shoved up to **361 cm** (the same at the 5 cm and 10 cm voxel sizes: the simulation does not depend on them), the ute does not reach the far bank; nailed, they moved **0.1 cm** (pass: under 3 cm vs over 10 cm)                                                                                           |
 | Timber to timber (0.8 stiffness): 300 N at a plank's tip                                                                           | One nail turns 5.06 mrad (load / stiffness predicts 5.16), four nails 1.23 (1.29)                                                                                                                                                                                                                                  |
 | Beams nailed to both abutments (placed), ute driven across                                                                         | Reaches the far bank; beams moved **2 mm**                                                                                                                                                                                                                                                                         |
 | 400 N sideways for 1 s after a crossing                                                                                            | Loose beams move **102 mm**, nailed ones **0.2 mm**                                                                                                                                                                                                                                                                |
@@ -80,7 +80,7 @@ build a real bridge, beams plus a nailed plank deck, and drive the ute over it.
 
 - Browser test: in the Timber Yard, look at a beam, F nails it and the nail head draws; a second F
   at the same spot is refused.
-- Unit tests: 530 pass. Browser: the yard, ute, hammer, split screen and all online co-op tests
+- Unit tests: 668 pass (both voxel sizes). Browser: the yard, ute, hammer, split screen and all online co-op tests
   pass.
 
 ### Audit fixes (second review)
@@ -112,7 +112,13 @@ build a real bridge, beams plus a nailed plank deck, and drive the ute over it.
       under it). Three gusts came; no plank was lost.
 - **Epic 4's bare-beam test now nails the beams:** with the lips, a centred beam leaves a 0.3 m gap
   to the lip at each end, and wheels climbing out of it shove loose bare beams aside. Nailed at
-  both ends, two bare beams carry the ute. The yard's bridge is a nailed plank deck anyway.
+  both ends, two bare beams carry the ute. The yard's bridge is a nailed plank deck anyway. Driving
+  onto a beam nailed down nowhere now says so: "Loose beams shift under the ute: nail each beam
+  down at both ends to drive across." (conductor-approved design change)
+- **A sawn plank, from the log to the nail:** the yard's log goes into the saw, the saw cuts it, and
+  the player takes a plank off the rack, carries it to open ground and nails it down, by input.
+- **Joint stiffness held to 10%:** one nail turns 5.06 mrad (5.16 predicted) timber to timber, 4.18
+  (4.27) into stone; four nails turn about a quarter as much (4.1 times less).
 - **Beaver-sized players:** after Epic 9 the eye is 1.22 m up, not 1.86 m. The 35° square-on rule
   stays, so you stand closer to nail; the input tests now step up to each spot. Epic 6's gate test
   needed player 0 parked off player 1's path (they shove each other).
@@ -120,7 +126,8 @@ build a real bridge, beams plus a nailed plank deck, and drive the ute over it.
 ### Found on the way
 
 - **The Epic 4 bridge test's driver steered the wrong way:** its position correction had the
-  wrong sign. Fixed. Steering correctly, the ute drives over the two loose beams to the far bank.
+  wrong sign. Fixed. (With the lips added later in this epic, loose bare beams no longer carry the
+  ute across: that test now nails them down at both ends; see the audit fixes above.)
 - **Two bare 20 cm beams were a marginal road for 24 cm tyres:** a few centimetres decided whether
   the ute got over. That is why the yard bridge is now a plank deck with lips and ramps.
 
@@ -984,23 +991,23 @@ You can now drive the ute in the Timber Yard and the Valley. A friend can ride a
 
 ### Test results (actual, `tests/unit/ute.test.ts`, both voxel sizes)
 
-| Test                                                       | Result                                                                                        |
-| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Parked on a free platform                                  | All 4 wheels on it; reaction / weight = **1.000**; the platform stays pressed onto the ground |
-| Accelerating on a free platform on ice                     | The platform is pushed backwards (momentum is shared)                                         |
-| A loose deck over a gap                                    | Carries the ute and stays on its supports                                                     |
-| Two loose 20 cm beams over the Timber Yard creek           | Both take its weight out to mid-gap (over 0.3 × weight) and stay across                       |
-| Top speed and braking                                      | 8.5 m/s after 6 s; stops in 1.2 s                                                             |
-| A ~30 kg crate in the bed, after a 3 s run and a hard stop | Still in the bed: it slid forward to the cab end under braking                                |
-| Rolled onto its roof                                       | Back on its wheels in 1.05 s                                                                  |
-| Dropped nose-down in the creek, driver presses drop        | Back at its safe spot, upright, driver still seated                                           |
+| Test                                                       | Result                                                                                                                                      |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Parked on a free platform                                  | All 4 wheels on it; reaction / weight = **1.000**; the platform stays pressed onto the ground                                               |
+| Accelerating on a free platform on ice                     | The platform is pushed backwards (momentum is shared)                                                                                       |
+| A loose deck over a gap                                    | Carries the ute and stays on its supports                                                                                                   |
+| Two loose 20 cm beams over the Timber Yard creek           | Both take its weight out to mid-gap (over 0.3 × weight) and stay across (since Epic 5 the test nails them at both ends and the ute crosses) |
+| Top speed and braking                                      | 8.5 m/s after 6 s; stops in 1.2 s                                                                                                           |
+| A ~30 kg crate in the bed, after a 3 s run and a hard stop | Still in the bed: it slid forward to the cab end under braking                                                                              |
+| Rolled onto its roof                                       | Back on its wheels in 1.05 s                                                                                                                |
+| Dropped nose-down in the creek, driver presses drop        | Back at its safe spot, upright, driver still seated                                                                                         |
 
 - Browser test: get in, drive with the keyboard, get out, in the Timber Yard.
 - Unit tests: 326 pass.
 
 ### Known limits
 
-- **Crossing loose 20 cm beams all the way:** past mid-gap, the tyres' sideways push walks an unfastened beam out from under a wheel. Fastening comes in Epic 5.
+- **Crossing loose 20 cm beams all the way:** past mid-gap, the tyres' sideways push walks an unfastened beam out from under a wheel. Fastening comes in Epic 5. (Done there: nailed at both ends, two bare beams carry the ute across, and driving onto loose ones says to nail them.)
 - **The cab is a solid box:** the seat view is placed inside it. Passengers can't walk inside the cab.
 - **Not tried on a real phone or pad.** Driving with touch and pads is covered by the prompts and command mapping, not by a hands-on test.
 

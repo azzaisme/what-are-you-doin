@@ -68,7 +68,7 @@ import {
 import type { PlayerCommand } from './commands.ts';
 import { Forestry } from './forestry.ts';
 import { HazardDirector, PHASE } from './hazards.ts';
-import { nailCode } from './joints/graph.ts';
+import { GROUND, nailCode } from './joints/graph.ts';
 import { JointSystem } from './joints/joints.ts';
 import type { NailPreview } from './joints/joints.ts';
 import { MAX_PLAYERS, MAX_STRESS, createLabEntities } from './lab-entities.ts';
@@ -538,6 +538,7 @@ export class LabSim {
         pw.step();
         this.readPhysics();
         this.readVehicle();
+        this.looseBeamHint();
         this.stepWater();
         this.watchUte();
         if (this.physicsProps) this.stepWood();
@@ -1014,6 +1015,31 @@ export class LabSim {
         quatRotate({ x: -q.x, y: -q.y, z: -q.z, w: q.w }, eye.x - u.p.x, 0, eye.z - u.p.z, _v);
         const want = _v.x < 0 ? 0 : 1;
         return this.takeSeat(i, this.seats[want] < 0 ? want : 1 - want);
+    }
+
+    /** Tick the loose-beam hint was last given (it repeats at most every 30 s). */
+    private looseHintTick = -Infinity;
+
+    /**
+     * Driving onto a beam that is nailed down nowhere (Epic 5): one line saying a bare beam bridge
+     * wants nailing. Loose, the wheels shove a beam aside where it meets the bank's lip.
+     */
+    private looseBeamHint(): void {
+        const v = this.vehicle;
+        if (!v || this.driver < 0 || this.tick - this.looseHintTick < 30 * 60) return;
+        for (const id of v.groundIds) {
+            if (id < 0) continue;
+            const e = this.entities.find((x) => x.id === id);
+            if (!e || !/^beam-\d+$/.test(e.name)) continue;
+            if (this.joints.graph.of(id).some((c) => c.b === GROUND)) continue;
+            this.looseHintTick = this.tick;
+            this.events.push({
+                tick: this.tick,
+                kind: 'ute',
+                text: 'Loose beams shift under the ute: nail each beam down at both ends to drive across.'
+            });
+            return;
+        }
     }
 
     /** Puts a player in the driver's seat (if it is free); also for tests and scripted starts. */

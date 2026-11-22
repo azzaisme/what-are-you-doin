@@ -259,6 +259,8 @@ function buildAndCross(pullPlankNails = false) {
     for (let z = beamNear - 0.12; z >= beamFar + 0.12; z -= DECK_PITCH) deck.push(z);
     // the last plank waits until the far ends are nailed (it covers them)
     const farNailZ = Math.min(BRIDGE.farFace - 0.06, beamFar + 0.16);
+    /** Planks taken from the stacks, and placed (taken in hand: a missed grab does not count). */
+    let taken = 0;
     let placed = 0;
     /** A held plank turns with you: turn by its skew so it lies square across the beams. */
     const straighten = (p: (typeof s.entities)[number]) => {
@@ -270,8 +272,8 @@ function buildAndCross(pullPlankNails = false) {
         if (Math.abs(turn) > 0.01) ease(yaw - turn, 20, (v) => (yaw = v), yaw);
     };
     const layPlank = (z: number) => {
-        const p = stack[placed++];
-        phase(`plank ${placed}`);
+        const p = stack[taken++];
+        phase(`plank ${taken}`);
         // back up the ramp along the bridge's line, then along the stacks to stand beside it,
         // facing -z; look at its middle and take it
         yaw = 0;
@@ -283,10 +285,11 @@ function buildAndCross(pullPlankNails = false) {
         step({ grab: true });
         if (s.physics.heldId !== p.id) {
             log.push(
-                `plank ${placed}: grab missed (${p.name} at ${p.pose.p.x.toFixed(2)}, ${p.pose.p.y.toFixed(2)}, ${p.pose.p.z.toFixed(2)}; player ${s.player.x.toFixed(2)}, ${s.player.y.toFixed(2)}, ${s.player.z.toFixed(2)}; held ${s.physics.heldId})`
+                `plank ${taken}: grab missed (${p.name} at ${p.pose.p.x.toFixed(2)}, ${p.pose.p.y.toFixed(2)}, ${p.pose.p.z.toFixed(2)}; player ${s.player.x.toFixed(2)}, ${s.player.y.toFixed(2)}, ${s.player.z.toFixed(2)}; held ${s.physics.heldId})`
             );
             return;
         }
+        placed++;
         yaw = 0;
         ease(-0.3, 20, (v) => (pitch = v), pitch);
         straighten(p);
@@ -313,7 +316,7 @@ function buildAndCross(pullPlankNails = false) {
             // landed flat on the beams, where it should be? if not, pick it up again
             if (Math.abs(p.pose.p.z - z) <= PLANK_ALONG_TOL && Math.abs(p.pose.p.y - restY) <= PLANK_HEIGHT_TOL) break;
             log.push(
-                `plank ${placed}: landed at z ${p.pose.p.z.toFixed(2)} y ${p.pose.p.y.toFixed(2)} (wanted ${z.toFixed(2)}, ${restY.toFixed(2)})`
+                `plank ${taken}: landed at z ${p.pose.p.z.toFixed(2)} y ${p.pose.p.y.toFixed(2)} (wanted ${z.toFixed(2)}, ${restY.toFixed(2)})`
             );
             if (attempt === 2) break; // leave it where it lies (and fail)
             look({ x: p.pose.p.x, y: p.pose.p.y + 0.05, z: p.pose.p.z });
@@ -334,11 +337,11 @@ function buildAndCross(pullPlankNails = false) {
         let held = 0;
         for (const beam of beams) {
             const at = onBeam(beam, p.pose.p.z);
-            if (nail({ x: at.x, y: p.pose.p.y + 0.05, z: p.pose.p.z }, `plank ${placed} over ${beam.name}`)) held++;
+            if (nail({ x: at.x, y: p.pose.p.y + 0.05, z: p.pose.p.z }, `plank ${taken} over ${beam.name}`)) held++;
         }
         if (process.env.GATE_DEBUG)
             log.push(
-                `plank ${placed} done at ${(s.tick / 60).toFixed(0)} s: z ${p.pose.p.z.toFixed(2)} y ${p.pose.p.y.toFixed(2)} (wanted ${z.toFixed(2)}), ${held} nails`
+                `plank ${taken} done at ${(s.tick / 60).toFixed(0)} s: z ${p.pose.p.z.toFixed(2)} y ${p.pose.p.y.toFixed(2)} (wanted ${z.toFixed(2)}), ${held} nails`
             );
     };
     for (const z of deck.slice(0, -1)) layPlank(z);
@@ -489,9 +492,19 @@ describe('the yard crossing, built by a player and driven over (Epic 5 gate)', (
             expect(Math.abs(l.dy)).toBeLessThanOrEqual(PLANK_HEIGHT_TOL);
             expect(Math.abs(l.dz)).toBeLessThanOrEqual(PLANK_ALONG_TOL);
         }
-        // both beams anchored at both ends; every plank nailed to both beams
+        // both beams anchored at both ends: each end has its own anchor, into its own bank
+        const g = r.s.joints.graph;
         expect(anchors).toBe(4);
+        for (const beam of r.beams) {
+            const ends = g.of(beam.id).filter((c) => c.b === GROUND);
+            expect(ends.length).toBe(2);
+            expect(ends.filter((c) => c.anchorB.z > BRIDGE.nearFace - 0.1).length).toBe(1);
+            expect(ends.filter((c) => c.anchorB.z < BRIDGE.farFace + 0.1).length).toBe(1);
+        }
+        // every deck plank nailed to both beams
         expect(deckJoints).toBe(2 * r.deck.length);
+        for (const l of r.landed)
+            for (const beam of r.beams) expect(g.find(l.id, beam.id), `plank ${l.id} to ${beam.name}`).toBeDefined();
         // driven from where it was parked, turned round in the yard, onto the bridge's line
         expect(r.atStart).not.toBeNull();
         expect(Math.abs(r.atStart!.x)).toBeLessThan(0.1);

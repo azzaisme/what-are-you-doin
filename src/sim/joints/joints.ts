@@ -1,7 +1,9 @@
 /**
  * Fastening (Epic 5, #47 #48): the hammer's connection preview and the physics joints behind the
- * joint graph. A nail is a data connection (graph.ts) mirrored by one Rapier fixed joint per pair of
- * bodies; it is never a rigid body of its own.
+ * joint graph. A nail is a data connection (graph.ts) mirrored by one Rapier joint per pair of
+ * bodies (or per anchor site): a spherical joint holding the anchor points together, with angular
+ * springs (force-based motors) that pull the pieces back to their nailed orientation, stiffer with
+ * each nail. It is never a rigid body of its own.
  *
  * The preview runs the same test the hammer does, so what the prompt says is what a blow does:
  * - the view ray must hit a timber piece (A) within reach, squarely enough;

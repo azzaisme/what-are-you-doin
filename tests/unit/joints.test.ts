@@ -321,7 +321,7 @@ async function beamCrossing(nailed: boolean) {
     return { s, u, target, minY, maxLoad, weight: v.weight(), beamDrift, refusals, joints, YARD_Y, beams };
 }
 
-describe('a nailed beam bridge carries the ute across (Epic 5 gate)', () => {
+describe('placed setup: two beams put on the wheel lines and nailed by direct hammer calls carry the ute', () => {
     it('two beams nailed to both abutments: the ute drives from bank to bank', async () => {
         const r = await beamCrossing(true);
         expect(r.refusals).toEqual(['none', 'none', 'none', 'none']);
@@ -480,7 +480,7 @@ describe('nails on the wire and from player input (#48, #53)', () => {
     });
 });
 
-describe('building the yard bridge with inputs only (Epic 5 gate)', () => {
+describe('placed setup: the player, put beside each beam, shoulders it onto a wheel line and nails it with F', () => {
     it('shoulder both beams onto the wheel lines and nail them down with F: they hold', async () => {
         const { LabSim, EYE_HEIGHT } = await import('../../src/sim/lab-sim.ts');
         const { timberYardLevel, BRIDGE, BRIDGE_X } = await import('../../src/levels/timber-yard.ts');
@@ -824,9 +824,9 @@ describe('joint stiffness (#47 audit)', () => {
         console.log(
             `timber to timber, 300 N at the tip: one nail turns ${(one.turn * 1000).toFixed(2)} mrad (M/k ${((one.M / one.k) * 1000).toFixed(2)}), four ${(four.turn * 1000).toFixed(2)} mrad (M/k ${((four.M / four.k) * 1000).toFixed(2)})`
         );
-        expect(one.turn).toBeGreaterThan(0.7 * (one.M / one.k));
-        expect(one.turn).toBeLessThan(1.4 * (one.M / one.k));
-        expect(one.turn / four.turn).toBeGreaterThan(2.8);
+        expect(one.turn).toBeGreaterThan(0.9 * (one.M / one.k));
+        expect(one.turn).toBeLessThan(1.1 * (one.M / one.k));
+        expect(one.turn / four.turn).toBeGreaterThan(3.6);
     });
 
     it('a joint flexes in proportion to its load over its stiffness: one nail four times as much as four', () => {
@@ -838,9 +838,9 @@ describe('joint stiffness (#47 audit)', () => {
         console.log(
             `sideways 300 N at the tip: one nail turns ${(one.turn * 1000).toFixed(2)} mrad (M/k ${((one.M / one.k) * 1000).toFixed(2)}), four nails ${(four.turn * 1000).toFixed(2)} mrad (M/k ${((four.M / four.k) * 1000).toFixed(2)})`
         );
-        expect(one.turn).toBeGreaterThan(0.7 * (one.M / one.k));
-        expect(one.turn).toBeLessThan(1.4 * (one.M / one.k));
-        expect(one.turn / four.turn).toBeGreaterThan(2.8);
+        expect(one.turn).toBeGreaterThan(0.9 * (one.M / one.k));
+        expect(one.turn).toBeLessThan(1.1 * (one.M / one.k));
+        expect(one.turn / four.turn).toBeGreaterThan(3.6);
         // twice the load, about twice the turn
         const one2 = sideways(1, 600);
         expect(one2.turn / one.turn).toBeGreaterThan(1.7);
@@ -849,23 +849,83 @@ describe('joint stiffness (#47 audit)', () => {
 });
 
 describe('what takes nails', () => {
-    it('a plank from the sawmill (Epic 6) nails down onto the abutment like any other', async () => {
-        const { LabSim } = await import('../../src/sim/lab-sim.ts');
-        const { timberYardLevel, BRIDGE, BRIDGE_X, YARD_Y } = await import('../../src/levels/timber-yard.ts');
+    it('a plank the sawmill cut from a real log (Epic 6), carried off its rack and nailed down by player input', async () => {
+        const { LabSim, EYE_HEIGHT } = await import('../../src/sim/lab-sim.ts');
+        const { timberYardLevel, YARD_FORESTRY } = await import('../../src/levels/timber-yard.ts');
+        const { SAWMILL, sawmillToWorld } = await import('../../src/levels/forestry.ts');
+        const { SAW } = await import('../../src/sim/sawmill.ts');
+        const { ACTION_NAIL, neutralCommand } = await import('../../src/sim/commands.ts');
         const s = new LabSim({ level: timberYardLevel });
-        // lying flat across the near capstone, the way the sawmill hands planks out (long axis X)
-        const sawn = s.forestry.spawnPlank(
-            pose(BRIDGE_X, YARD_Y + 0.2, BRIDGE.nearFace + 0.3, quatFromYawPitchRoll(0, Math.PI / 2, 0))
-        )!;
-        expect(sawn).not.toBeNull();
-        expect(sawn.name).toMatch(/^extra-plank-(1[2-9]|2\d)$/);
+        const SPOT = YARD_FORESTRY.sawmill!;
         let n = 0;
-        for (; n < 60; n++) s.step({ ...(await import('../../src/sim/commands.ts')).neutralCommand(n) });
-        const pv = hammerAt(s.joints, { x: sawn.pose.p.x + 0.4, y: sawn.pose.p.y + 0.05, z: sawn.pose.p.z }, n);
-        expect(pv.a).toBe(sawn.id);
-        expect(pv.b).toBe(GROUND);
-        expect(pv.refusal).toBe('none');
-        expect(s.joints.graph.find(sawn.id, GROUND, pv.joint)).toBeDefined();
+        let yaw = 0;
+        let pitch = 0;
+        const step = (c: Partial<ReturnType<typeof neutralCommand>> = {}, k = 1) => {
+            for (let i = 0; i < k; i++) s.step({ ...neutralCommand(n++), yaw, pitch, ...c });
+        };
+        step({}, 60);
+        s.fpActive = true;
+        // the yard's log, fed into the saw's guide; the saw takes it and cuts it
+        const log = s.entities.find((e) => e.name === 'log')!;
+        const G = SAWMILL.guide;
+        const feed = sawmillToWorld(SPOT, (G.x0 + G.x1) / 2, SAWMILL.feedY + 0.05, 0);
+        s.physics.place(log.id, pose(feed.x, feed.y, feed.z, quatFromYawPitchRoll(SPOT.yaw, 0, 0)));
+        for (let k = 0; k < SAW.settleTicks + 60 && s.sawmill!.phase === 'ready'; k++) step();
+        expect(s.sawmill!.stats.takenIds).toEqual([log.id]);
+        step({}, SAW.cutTicks + 30);
+        expect(s.sawmill!.stats.planks).toBe(3);
+        // a plank it put on the rack
+        const rackX = SPOT.x + SAWMILL.outfeed.x;
+        const sawn = s.entities.filter(
+            (e) => /^extra-plank-(1[2-9]|2\d)$/.test(e.name) && e.visible && Math.abs(e.pose.p.x - rackX) < 1.5
+        );
+        expect(sawn.length).toBe(3);
+        const plank = sawn[0];
+        // ---- from here on, player input only: walk round to the rack's north side, facing south
+        const walkTo = (x: number, z: number) => {
+            for (let i = 0; i < 2000; i++) {
+                const dx = x - s.player.x;
+                const dz = z - s.player.z;
+                const d = Math.hypot(dx, dz);
+                if (d < 0.08) break;
+                yaw = Math.atan2(-dx, -dz);
+                step({ moveZ: Math.min(0.6, d * 1.5 + 0.1) });
+            }
+            step({}, 15);
+        };
+        const look = (at: { x: number; y: number; z: number }) => {
+            const dx = at.x - s.player.x;
+            const dz = at.z - s.player.z;
+            yaw = Math.atan2(-dx, -dz);
+            pitch = Math.atan2(at.y - (s.player.y + EYE_HEIGHT), Math.hypot(dx, dz));
+        };
+        const p0 = { ...plank.pose.p };
+        walkTo(p0.x, p0.z - 1.0);
+        look(p0);
+        step({}, 10);
+        step({ grab: true });
+        expect(s.physics.heldId).toBe(plank.id);
+        // lift it, carry it 2 m north onto open ground, set it down and let go
+        pitch = -0.2;
+        step({}, 30);
+        const from = { x: s.player.x, z: s.player.z };
+        for (let i = 0; i < 600 && s.player.z > from.z - 2; i++) step({ moveZ: -0.4 });
+        pitch = -0.9;
+        step({}, 40);
+        step({ grab: true });
+        step({}, 90);
+        expect(s.physics.heldId).toBe(-1);
+        // stand over it and swing the hammer at it (it goes down into the ground)
+        const lies = { ...plank.pose.p };
+        look({ x: lies.x, y: lies.y + 0.05, z: lies.z });
+        step({}, 5);
+        expect(s.interactionIds(0).nail).toBe(1);
+        step({ action: ACTION_NAIL });
+        step({}, 10);
+        const c = s.joints.graph.of(plank.id);
+        expect(c.length).toBe(1);
+        expect(c[0].b).toBe(GROUND);
+        expect(c[0].nails.length).toBe(1);
     });
 
     it("timber does, by name: the yard's planks and beams, sawn planks and beams (Epic 6), logs, crates; the bucket doesn't", async () => {
