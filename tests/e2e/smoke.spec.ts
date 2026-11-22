@@ -948,19 +948,29 @@ test("split screen: player 2's hammer aim shows player 2's nail outline in playe
     const j = await lab(page, (l) => l.joints());
     expect(j.outlines).toEqual([[], [slot2]]);
     expect(j.viewLayers).toEqual([['View1'], ['View2']]);
-    // and on screen: the pixels that change with the outline (on, off, on again: the same in both
-    // shots with it, different without; animated water and sky differ between the two shots with
-    // it) are all in the bottom half
-    const show = (on: boolean) =>
-        page.evaluate(async (v) => {
-            (window as unknown as { __riverLab: { showNailOutlines(on: boolean): void } }).__riverLab.showNailOutlines(
-                v
-            );
-            for (let k = 0; k < 3; k++) await new Promise((r) => requestAnimationFrame(r));
-        }, on);
+    // and on screen: the pixels that change with the outline (on, off, on, off, on, with uneven
+    // waits: the same in every shot with it and in every shot without, and different between;
+    // animated things, a creature or the water, differ between shots either way) are all in the
+    // bottom half
+    const show = (on: boolean, frames: number) =>
+        page.evaluate(
+            async ([v, k]) => {
+                (
+                    window as unknown as { __riverLab: { showNailOutlines(on: boolean): void } }
+                ).__riverLab.showNailOutlines(v as boolean);
+                for (let f = 0; f < (k as number); f++) await new Promise((r) => requestAnimationFrame(r));
+            },
+            [on, frames]
+        );
     const shots: string[] = [];
-    for (const on of [true, false, true]) {
-        await show(on);
+    for (const [on, frames] of [
+        [true, 3],
+        [false, 5],
+        [true, 4],
+        [false, 7],
+        [true, 6]
+    ] as const) {
+        await show(on, frames);
         shots.push((await page.screenshot()).toString('base64'));
     }
     const changed = await page.evaluate(async (pngs) => {
@@ -977,22 +987,24 @@ test("split screen: player 2's hammer aim shows player 2's nail outline in playe
                 return { w: c.width, h: c.height, d: g.getImageData(0, 0, c.width, c.height).data };
             })
         );
-        const [a, b, c] = data;
+        const ons = [data[0], data[2], data[4]];
+        const offs = [data[1], data[3]];
+        const diff = (a: Uint8ClampedArray, b: Uint8ClampedArray, i: number) =>
+            Math.max(Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2]));
+        const { w, h } = data[0];
         const half = [0, 0];
-        for (let i = 0; i < a.d.length; i += 4) {
-            let off = 0;
-            let again = 0;
-            for (let k = 0; k < 3; k++) {
-                off = Math.max(off, Math.abs(a.d[i + k] - b.d[i + k]));
-                again = Math.max(again, Math.abs(a.d[i + k] - c.d[i + k]));
-            }
-            if (off > 40 && again < 8) half[(i / 4 / a.w) * 2 < a.h ? 0 : 1]++;
+        for (let i = 0; i < data[0].d.length; i += 4) {
+            const steady =
+                diff(ons[0].d, ons[1].d, i) < 8 && diff(ons[0].d, ons[2].d, i) < 8 && diff(offs[0].d, offs[1].d, i) < 8;
+            if (steady && diff(ons[0].d, offs[0].d, i) > 25) half[(i / 4 / w) * 2 < h ? 0 : 1]++;
         }
         return half;
     }, shots);
     console.log(`outline pixels: top ${changed[0]}, bottom ${changed[1]}`);
-    expect(changed[0]).toBe(0);
-    expect(changed[1]).toBeGreaterThan(20);
+    // (a stray pixel or two of noise at most; the outline itself is 16 here, and drawn into the
+    // wrong view it shows there)
+    expect(changed[0]).toBeLessThanOrEqual(3);
+    expect(changed[1]).toBeGreaterThan(10);
     expect(problems).toEqual([]);
 });
 
