@@ -184,6 +184,18 @@ if (level.stream)
         far: true
     });
 const pipeline = new VoxelClient(lanes, sim);
+/**
+ * Streamed levels: how far around the cameras the near world is built follows the quality preset
+ * (Low: `lowRadius`), with the fog pulled in to match so the coarse far lattice stays in the haze.
+ */
+function applyViewDistance(q: Quality): void {
+    const st = level.stream;
+    if (!st) return;
+    const r = q.name === 'low' ? (st.lowRadius ?? st.radius) : st.radius;
+    pipeline.nearRadius = r;
+    scene.app.scene.fog.start = Math.min(st.fog.start, r - 6);
+}
+applyViewDistance(initialQuality);
 const build = await pipeline.init(1, level.id, level.data);
 setLoading('Uploading meshes…');
 await nextFrame();
@@ -821,6 +833,7 @@ const host: PanelHost = {
             case 'quality':
                 state.quality = v as Quality['name'];
                 scene.setQuality(QUALITY[state.quality]);
+                applyViewDistance(scene.quality);
                 state.refraction = scene.quality.refraction;
                 state.reflectionScale = scene.quality.reflectionScale;
                 applyWater();

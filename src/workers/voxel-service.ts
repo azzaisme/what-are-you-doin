@@ -170,12 +170,15 @@ export class VoxelService {
         particleCount = 0,
         focus?: Float32Array,
         nearTiles?: Int32Array,
-        nearTileSize = 0
+        nearTileSize = 0,
+        nearRadius?: number
     ): { units: UnitMesh[]; stats: FrameStats; tiles?: TileReport } {
         const t0 = performance.now();
         resetRasterStats(this.raster);
         let objects = 0;
         if (focus && focus.length >= 2) this.focus = focus;
+        // the quality preset's view distance: tiles beyond the new radius go on the next unload
+        if (this.stream && nearRadius !== undefined && nearRadius > 0) this.stream.radius = nearRadius;
         if (this.stream && this.focus) this.updateTiles(this.focus, this.tileBudgetMs, this.stream.radius);
         if (this.far && nearTiles) this.updateHoles(nearTiles, nearTileSize);
         // objects beyond the near world are not drawn (their ground is not built there either)
@@ -289,7 +292,8 @@ export class VoxelService {
         const key = (ti: number, tk: number) => (ti + 32768) * 65536 + (tk + 32768);
         // chunks emptied by earlier unloads (their empty meshes have gone out)
         this.world.releaseEmpty();
-        const keep = st.radius + size * 2;
+        // slack in proportion to the radius (36 m keeps ~48.6 m, 24 m keeps ~32.4 m)
+        const keep = st.radius * 1.35;
         for (const [k, t] of st.built) {
             if (dist(t.ti, t.tk) - half <= keep) continue;
             const r = { i0: t.ti * T, i1: t.ti * T + T - 1, k0: t.tk * T, k1: t.tk * T + T - 1 };

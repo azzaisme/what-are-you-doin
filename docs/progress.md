@@ -1,5 +1,64 @@
 # Progress log
 
+## Valley performance: what costs what, and Low builds less (2026-11-22, Epic 9, owner question)
+
+The owner asked: could the Valley load only the current area, with a cut between areas? The
+world already culls by chunk, but there is no occlusion culling. Measured first.
+
+### What the Valley draws
+
+Measured in the container's software renderer, with the Inspector's devtools hook. Draw calls
+and triangles are counted the same way on any GPU; frame times here are not representative.
+
+- **The near world** (the 5 cm tiles around you) is most of the cost. Once fully streamed in,
+  36 m around you is 120–130 tiles: 3.1 M triangles at the works and 5.4 M in the forest,
+  1,500–1,900 draw calls.
+- **The far lattice** (the whole map at 40 cm) is about 700 meshes and 0.72 M triangles wherever
+  you are.
+    - Hiding all of it saves 20–500 draw calls. The most is at the yard looking up the valley
+      (28%); the least is at the summit.
+- **An area cut on the far lattice** (draw only the current area and its neighbours) saves 10–25%
+  of draw calls.
+    - It would also hide the distant landmarks, the summit flower above all. Seeing your goal on
+      the far ridge from the start is in the design doc.
+
+So a cut between areas buys little, and it costs the view.
+
+### What changed
+
+The near world's radius is the lever, so it now follows the quality preset.
+
+- **High:** 36 m, as before.
+- **Low:** 24 m. The fog starts at 18 m to match, so the coarse far lattice stays in the haze.
+
+| Measured                      | 36 m (High)     | 24 m (Low)      |
+| ----------------------------- | --------------- | --------------- |
+| Tiles (forest / works)        | 131 / 119       | 64 / 57         |
+| Static cells (forest / works) | 14.2 M / 7.9 M  | 7.2 M / 2.8 M   |
+| Triangles (forest / works)    | 5.4 M / 3.1 M   | 2.7 M / 0.8 M   |
+| Draw calls (forest / works)   | 1,920 / 1,520   | 1,323 / 974     |
+| JS heap (forest / works)      | 525 MB / 343 MB | 317 MB / 173 MB |
+
+- **Switching preset takes effect at once.** The radius goes to the voxel worker with each frame.
+- **Tiles behind you** are kept up to 1.35 × the radius (was radius + 12.8 m). High is about the
+  same (48.6 m). On Low, tiles really are let go.
+- **The look** from the forest road on Low is nearly the same as on High: the fog hides the edge.
+
+### Not done, and why
+
+- **Occlusion culling:** the Valley's sides and the gorge walls hide a lot, but terrain-based
+  occlusion is real work for a smaller win than the radius.
+- **Phones still start on High:** every device does. Making Low the default on phones is an easy
+  next step if the owner wants it.
+
+### Tests
+
+- New Valley test:
+    - after switching to Low, no tile is left beyond 1.35 × 24 m;
+    - arriving on Low builds under 60% of High's tiles;
+    - the ground under you is always built.
+- Unit tests: 334 pass.
+
 ## Route signs and distant landmarks in the Valley (2026-11-22, Epic 9, #16)
 
 ### Route signs

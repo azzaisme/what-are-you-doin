@@ -1146,6 +1146,7 @@ export const valleyLevel: LevelDef = {
     stream: {
         buildTile: buildValleyTile,
         radius: 36,
+        lowRadius: 24,
         farCm: 40,
         fog: { start: 30, end: 260 }
     },
