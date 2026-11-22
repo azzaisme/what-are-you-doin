@@ -1,17 +1,26 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { TREE_CUT, TREE_STATE } from '../../src/assets/forestry.ts';
+import { MAX_PARTICLES, ParticleFX } from '../../src/fx/particles.ts';
+import { WoodFX } from '../../src/fx/wood-fx.ts';
 import { PINE_TRUNK_HEIGHT } from '../../src/levels/common.ts';
 import { SAWMILL, STAND_CROWN_RADIUS, sawmillToWorld } from '../../src/levels/forestry.ts';
 import { BRIDGE, BRIDGE_X, YARD_FORESTRY, YARD_Y, timberYardLevel } from '../../src/levels/timber-yard.ts';
+import { GORGE, ROUTE_YAW, roadT, routeToWorld, routeU, valleyHeight, valleyLevel } from '../../src/levels/valley.ts';
+import { SIM_DT } from '../../src/sim/clock.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
 import { WOOD } from '../../src/sim/forestry.ts';
+import { createLabEntities } from '../../src/sim/lab-entities.ts';
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
-import { SAW } from '../../src/sim/sawmill.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
+import { SAW } from '../../src/sim/sawmill.ts';
+import { GRID_SIZE, cellIndexX, cellIndexZ } from '../../src/voxels/grid.ts';
 import { pose, quatFromYawPitchRoll, quatMul, quatRotate } from '../../src/voxels/math.ts';
 import type { Pose } from '../../src/voxels/math.ts';
+import { M, voxelMaterial } from '../../src/voxels/palette.ts';
+import { STATE_STRIDE } from '../../src/workers/protocol.ts';
+import { VoxelService } from '../../src/workers/voxel-service.ts';
 
 beforeAll(() => initPhysics());
 
@@ -570,4 +579,172 @@ describe('resources come back', () => {
         expect(s.physics.bodies.get(log.id)!.enabled).toBe(false);
         expect(s.forestry.stats.returned).toBe(1);
     });
+});
+
+describe('voxels: a felled tree leaves the static world, a regrown one comes back', () => {
+    it('the voxel worker follows the stand markers in the snapshots', () => {
+        const svc = new VoxelService();
+        svc.build(1, 'yard');
+        const w = svc.world;
+        const drawable = createLabEntities().entities.filter((e) => e.asset.parts.length > 0);
+        const states = new Float64Array(drawable.length * STATE_STRIDE);
+        const tree = 2;
+        const t = YARD_FORESTRY.trees[tree];
+        const g = YARD_FORESTRY.ground(t.x, t.z);
+        const m = drawable.findIndex((e) => e.name === `tree-${tree}`);
+        const o = m * STATE_STRIDE;
+        states[o] = 1;
+        states[o + 1] = t.x;
+        states[o + 2] = g;
+        states[o + 3] = t.z;
+        states[o + 7] = 1;
+        const at = (y: number) =>
+            voxelMaterial(w.staticAt(cellIndexX(t.x), Math.floor(y / GRID_SIZE), cellIndexZ(t.z)));
+        // every cell above the stump within 1.2 m of the trunk (the neighbours' crowns reach 1.5 m
+        // into the 3 m between trees)
+        const crown = () => {
+            let n = 0;
+            let h = 0;
+            const r = Math.ceil(1.2 / GRID_SIZE);
+            const i0 = cellIndexX(t.x);
+            const k0 = cellIndexZ(t.z);
+            for (let j = Math.floor((g + 0.45) / GRID_SIZE); j < Math.ceil((g + 6) / GRID_SIZE); j++)
+                for (let k = k0 - r; k <= k0 + r; k++)
+                    for (let i = i0 - r; i <= i0 + r; i++) {
+                        if (Math.hypot(i - i0, k - k0) > r) continue;
+                        const v = w.staticAt(i, j, k);
+                        if (v === 0) continue;
+                        n++;
+                        h = (h * 31 + v * 7 + i * 3 + j * 5 + k) % 1_000_000_007;
+                    }
+            return { n, h };
+        };
+        const before = crown();
+        expect(at(g + 0.7)).toBe(M.Bark);
+        expect(before.n).toBeGreaterThan(200);
+        let f = 0;
+        svc.frame(f++, 0, 'coverage50', false, states);
+        expect(crown()).toEqual(before); // standing: nothing changes
+        states[o + 8 + TREE_STATE] = 1;
+        const r = svc.frame(f++, 0.1, 'coverage50', false, states);
+        expect(crown().n).toBe(0);
+        expect(at(g + 0.7)).toBe(0);
+        expect([M.LogBark, M.LogEnd]).toContain(at(g + 0.2));
+        expect(r.units.some((u) => u.mode === 'static')).toBe(true);
+        // the ground under it is untouched
+        expect(at(g - 0.03)).not.toBe(0);
+        states[o + 8 + TREE_STATE] = 0;
+        svc.frame(f++, 0.2, 'coverage50', false, states);
+        expect(crown()).toEqual(before);
+        expect(at(g + 0.7)).toBe(M.Bark);
+    }, 60_000);
+});
+
+describe('wood effects', () => {
+    it('chips fly at every bite, needles burst when the crown breaks off, sawdust while it saws', () => {
+        const s = yard();
+        const fx = new ParticleFX(timberYardLevel, []);
+        const f = s.forestry.ents;
+        fx.wood = new WoodFX({ chips: f.chips.slot, needles: f.needles.slot, sawmill: f.sawmill.slot }, SPOT);
+        const run = (c: Partial<PlayerCommand>, n: number, from: { k: number }) => {
+            for (let i = 0; i < n; i++) {
+                s.step(cmd(from.k++, c));
+                fx.update(s.tick * SIM_DT, s.ring);
+            }
+        };
+        const from = { k: 100 };
+        const t = YARD_FORESTRY.trees[1];
+        standBy(s, 1, Math.PI);
+        run({}, 10, from);
+        const look = lookAt(s, 0, t.x, YARD_Y + 0.6, t.z);
+        for (let b = 0; b < 10; b++) {
+            run({ ...look, grab: true }, 1, from);
+            run(look, 29, from);
+        }
+        expect(fx.spawned.chips).toBe(10);
+        run({}, 200, from);
+        expect(fx.spawned.needles).toBe(1);
+        // sawdust: a log in the guide
+        s.placePlayer(SPOT.x, SPOT.z + 3, 0);
+        s.physics.place(s.log.id, inGuide());
+        run({}, SAW.settleTicks + 10 + 120, from);
+        expect(fx.spawned.sawdust).toBeGreaterThan(5);
+        expect(fx.count).toBeLessThanOrEqual(MAX_PARTICLES);
+    });
+});
+
+describe('the Valley: the yard’s stand and sawmill, and sawn planks across the gorge', () => {
+    it('fells a stand tree, saws two logs, and four sawn planks carry a player over both gorge spans', () => {
+        const s = new LabSim({ level: valleyLevel });
+        let k = 0;
+        const step = (c: Partial<PlayerCommand> = {}, n = 1) => {
+            for (let i = 0; i < n; i++) s.step(cmd(k++, c));
+        };
+        step({}, 30);
+        s.fpActive = true;
+        const def = valleyLevel.forestry!;
+        expect(def.trees.length).toBe(6);
+        // chew stand tree 0 down
+        const t = def.trees[0];
+        s.placePlayer(t.x - 1, t.z, 0);
+        step({}, 20);
+        const look = lookAt(s, 0, t.x, def.ground(t.x, t.z) + 0.6, t.z);
+        for (let i = 0; i < 400 && s.forestry.treeState(0).phase === 'standing'; i++)
+            step({ ...look, grab: i % 30 === 0 });
+        expect(s.forestry.treeState(0).phase).toBe('down');
+        // saw the pile's two bottom logs, one after the other
+        const saw = def.sawmill!;
+        const G = SAWMILL.guide;
+        const g = sawmillToWorld(saw, (G.x0 + G.x1) / 2, SAWMILL.feedY + 0.05, 0);
+        s.placePlayer(saw.x + 3, saw.z + 3, 0);
+        for (const name of ['log', 'extra-log-0']) {
+            const e = byName(s, name);
+            s.physics.place(e.id, pose(g.x, g.y, g.z, quatFromYawPitchRoll(saw.yaw, 0, 0)));
+            for (let i = 0; i < 600 && s.sawmill!.stats.takenIds.at(-1) !== e.id; i++) step();
+            for (let i = 0; i < 600 && s.sawmill!.phase !== 'ready'; i++) step();
+        }
+        expect(s.sawmill!.stats.planks).toBe(6);
+        const planks = s.entities.filter((e) => e.name.startsWith('extra-plank-') && e.visible && e.id >= 380);
+        expect(planks.length).toBe(6);
+        // the gorge: two spans either side of the stone pier
+        const fall = valleyLevel.rules!.fallY;
+        const hAt = (u: number, tt: number) => {
+            const w = routeToWorld(u, tt);
+            return valleyHeight(w.x, w.z);
+        };
+        const rt = roadT(GORGE.u);
+        let a = NaN;
+        let b = NaN;
+        for (let u = GORGE.u - 6; u <= GORGE.u + 6; u += 0.02) {
+            const low = hAt(u, rt) < fall;
+            if (low && Number.isNaN(a)) a = u;
+            if (!low && !Number.isNaN(a) && Number.isNaN(b)) b = u;
+        }
+        const spans: [number, number][] = [
+            [a, GORGE.u - GORGE.pierHalfU],
+            [GORGE.u + GORGE.pierHalfU, b]
+        ];
+        for (const [x0, x1] of spans) expect(x1 - x0).toBeLessThan(2.3); // a 2.4 m plank bears on both
+        let n = 0;
+        for (const [x0, x1] of spans) {
+            const m = (x0 + x1) / 2;
+            const rim = Math.max(hAt(x0 - 0.3, rt), hAt(x1 + 0.3, rt));
+            for (const dt of [-0.105, 0.105]) {
+                const w = routeToWorld(m, rt + dt);
+                s.physics.place(planks[n++].id, {
+                    p: { x: w.x, y: rim + 0.15, z: w.z },
+                    q: quatFromYawPitchRoll(ROUTE_YAW + Math.PI / 2, Math.PI / 2, 0)
+                });
+            }
+        }
+        step({}, 120);
+        // walk along the road over both spans
+        const start = routeToWorld(a - 1.6, rt);
+        s.placePlayer(start.x, start.z, -Math.PI / 4);
+        step({ yaw: -Math.PI / 4 }, 20);
+        for (let i = 0; i < 600 && routeU(s.player.x, s.player.z) < b + 1; i++) step({ yaw: -Math.PI / 4, moveZ: 0.5 });
+        expect(s.progress.falls).toBe(0);
+        expect(routeU(s.player.x, s.player.z)).toBeGreaterThan(b + 0.5);
+        for (const p of planks.slice(0, 4)) expect(p.pose.p.y).toBeGreaterThan(fall);
+    }, 120_000);
 });

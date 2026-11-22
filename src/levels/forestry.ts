@@ -37,8 +37,13 @@ export const STUMP_HEIGHT = 0.3;
 export const LOG_LENGTH = 2.0;
 /** Stand trees are pines of this scale (their trunk radius is the log's). */
 export const STAND_SCALE = 1.3;
+/**
+ * The crown sits this much higher than a scenery pine's: a clear trunk to chew at (a tall player's
+ * eye stays below the needles) that is one whole log long.
+ */
+export const STAND_CROWN_LIFT = 1.0;
 /** The crown: the trunk carries on above the log up into the needle tiers. */
-export const CROWN_TRUNK_TOP = 4.2;
+export const CROWN_TRUNK_TOP = 5.2;
 
 export interface StandTree {
     x: number;
@@ -201,7 +206,7 @@ function treeVolumes(seed: number): TreeVolume[] {
     });
     for (let n = 0; n < PINE_TIERS.length; n++) {
         const t = PINE_TIERS[n];
-        out.push({ volume: needleCone(t.r * s, t.h * s, seed * 7 + n), y: t.y * s, priority: 2 });
+        out.push({ volume: needleCone(t.r * s, t.h * s, seed * 7 + n), y: t.y * s + STAND_CROWN_LIFT, priority: 2 });
     }
     return out;
 }

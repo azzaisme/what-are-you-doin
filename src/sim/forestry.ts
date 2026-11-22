@@ -525,6 +525,9 @@ export class Forestry {
         setPose(pb.spawn, at.p.x, at.p.y + 0.05, at.p.z, at.q);
         pw.setEnabled(e.id, true);
         pw.place(e.id, at);
+        // in this tick's snapshot already (the props were read before the sawmill ran)
+        setPose(e.pose, at.p.x, at.p.y, at.p.z, at.q);
+        e.visible = true;
         return e;
     }
 
@@ -566,7 +569,7 @@ export class Forestry {
             if (tilt > WOOD.crownBreakTilt || tick - f.fellTick > WOOD.crownMaxTicks) {
                 f.crown = false;
                 const c = log.pose.p;
-                this.needles(c.x + _v.x * 2.6, c.y + _v.y * 2.6, c.z + _v.z * 2.6);
+                this.needles(c.x + _v.x * 3.4, c.y + _v.y * 3.4, c.z + _v.z * 3.4);
             }
         }
         // stumps regrow
@@ -585,7 +588,7 @@ export class Forestry {
             st.dirX = st.dirZ = 0;
             this.addTreeColliders(n);
             this.stats.regrown++;
-            this.needles(t.x, this.ground(n) + 2.5, t.z);
+            this.needles(t.x, this.ground(n) + 3.4, t.z);
             this.say('A fresh pine has sprung up in the logging stand.');
         }
         // pooled pieces lost in the creek go back to their pools; the axe and level logs come home

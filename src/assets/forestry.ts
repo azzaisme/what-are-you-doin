@@ -13,7 +13,14 @@
  */
 
 import { PINE_TIERS } from '../levels/common.ts';
-import { CROWN_TRUNK_TOP, LOG_LENGTH, STAND_SCALE, STUMP_HEIGHT, needleCone } from '../levels/forestry.ts';
+import {
+    CROWN_TRUNK_TOP,
+    LOG_LENGTH,
+    STAND_CROWN_LIFT,
+    STAND_SCALE,
+    STUMP_HEIGHT,
+    needleCone
+} from '../levels/forestry.ts';
 import { aabb, composePose, pose, quatFromAxisAngle, quatMul } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
 import { M, voxel } from '../voxels/palette.ts';
@@ -113,7 +120,7 @@ export function crownAsset(): VoxelAsset {
             priority: 2,
             refColor: 0x2f5a35
         });
-        offsets.push(pose(t.y * s - LOG_CENTRE_HEIGHT, 0, 0, { ...yToX }));
+        offsets.push(pose(t.y * s + STAND_CROWN_LIFT - LOG_CENTRE_HEIGHT, 0, 0, { ...yToX }));
     });
     return {
         schema: ASSET_SCHEMA_VERSION,
