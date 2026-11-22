@@ -5,6 +5,14 @@
 
 import type { VoxelAsset } from '../assets/asset.ts';
 import { DUMMY_PARTS, dummyPartAsset } from '../assets/dummy.ts';
+import {
+    axeAsset,
+    counterAsset,
+    crownAsset,
+    sawmillAsset,
+    shortLogAsset,
+    standMarkerAsset
+} from '../assets/forestry.ts';
 import { BODY } from '../assets/player-body.ts';
 import {
     beamAsset,
@@ -16,6 +24,7 @@ import {
     windsockAsset
 } from '../assets/props.ts';
 import { uteAsset } from '../assets/ute.ts';
+import { SAWMILL } from '../levels/forestry.ts';
 import { pose } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
 import { M } from '../voxels/palette.ts';
@@ -31,6 +40,17 @@ export const EXTRA_PLANKS = 12;
 export const EXTRA_BEAMS = 12;
 export const EXTRA_LOGS = 2;
 export const EXTRA_CRATES = 6;
+/**
+ * Forestry pools (Epic 6): stand trees per level, logs felled at once (each with its crown while
+ * it falls), short logs bucked from them, and planks the sawmill makes. Sawn planks are ordinary
+ * planks (`extra-plank-12` on), so everything that works with planks works with them.
+ */
+export const STAND_TREES = 6;
+export const FELLED_LOGS = 6;
+export const SHORT_LOGS = 6;
+export const SAWN_PLANKS = 15;
+/** The first sawn plank's `extra-plank-N` number. */
+export const SAWN_PLANK0 = EXTRA_PLANKS;
 
 export interface SimEntity {
     /** Stable identity, also the voxel object id. */
@@ -62,6 +82,8 @@ export interface LabEntities {
     extras: SimEntity[];
     /** The level's windsock (hidden in levels without one). */
     windsock: SimEntity;
+    /** Logging and sawing (hidden in levels without a stand or a sawmill). */
+    forestry: ForestryEntities;
     /** Voxel beaver bodies for the players (shown in two-player mode). */
     avatars: SimEntity[];
     /** Your own limbs in first person (1 cm); drawn by the renderer only. */
@@ -72,6 +94,21 @@ export interface LabEntities {
     player2: SimEntity;
     /** Not voxelized: every player's eye pose, by slot (player, player2, player3, player4). */
     eyes: SimEntity[];
+}
+
+export interface ForestryEntities {
+    /** One per stand tree: draws its cut and carries its state. */
+    markers: SimEntity[];
+    /** A falling tree's crown, by felled-log slot. */
+    crowns: SimEntity[];
+    felled: SimEntity[];
+    short: SimEntity[];
+    sawn: SimEntity[];
+    axe: SimEntity;
+    sawmill: SimEntity;
+    /** Effect counters (no voxels): where chips flew and needles burst, and how many times. */
+    chips: SimEntity;
+    needles: SimEntity;
 }
 
 export function createLabEntities(): LabEntities {
@@ -120,6 +157,28 @@ export function createLabEntities(): LabEntities {
     for (let n = 0; n < EXTRA_LOGS; n++) extras.push(add(340 + n, `extra-log-${n}`, logAsset(), 1));
     for (let n = 0; n < EXTRA_CRATES; n++) extras.push(add(360 + n, `crate-${n}`, cubeAsset(0.5, M.Timber), 1));
     const windsock = add(950, 'windsock', windsockAsset(), 2);
+    const markers: SimEntity[] = [];
+    for (let n = 0; n < STAND_TREES; n++) markers.push(add(400 + n, `tree-${n}`, standMarkerAsset(), 4));
+    const crowns: SimEntity[] = [];
+    const felled: SimEntity[] = [];
+    for (let n = 0; n < FELLED_LOGS; n++) {
+        felled.push(add(420 + n, `felled-log-${n}`, logAsset(), 1));
+        crowns.push(add(410 + n, `crown-${n}`, crownAsset(), 1));
+    }
+    const short: SimEntity[] = [];
+    for (let n = 0; n < SHORT_LOGS; n++) short.push(add(430 + n, `short-log-${n}`, shortLogAsset(), 1));
+    const sawn: SimEntity[] = [];
+    for (let n = 0; n < SAWN_PLANKS; n++) {
+        const name = `extra-plank-${SAWN_PLANK0 + n}`;
+        sawn.push(add(380 + n, name, plankAsset(name), 1));
+    }
+    const axe = add(440, 'axe', axeAsset(), 2);
+    const sawmill = add(441, 'sawmill', sawmillAsset(SAWMILL.blade.y, SAWMILL.blade.r, SAWMILL.housing.top), 4);
+    const chips = add(442, 'chips-fx', counterAsset('chips-fx'), 0);
+    const needles = add(443, 'needles-fx', counterAsset('needles-fx'), 0);
+    const forestry: ForestryEntities = { markers, crowns, felled, short, sawn, axe, sawmill, chips, needles };
+    for (const e of [...markers, ...crowns, ...felled, ...short, ...sawn, axe, sawmill, chips, needles])
+        e.visible = false;
     const avatars: SimEntity[] = [];
     for (let n = 0; n < MAX_PLAYERS; n++) avatars.push(add(910 + n, `avatar-${n}`, BODY.asset, 3));
     const eyes: SimEntity[] = [];
@@ -142,6 +201,7 @@ export function createLabEntities(): LabEntities {
         dummy,
         extras,
         windsock,
+        forestry,
         avatars,
         fpBody,
         player: eyes[0],

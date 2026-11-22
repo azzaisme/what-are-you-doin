@@ -43,7 +43,7 @@ describe('level 1: the timber yard', () => {
             'abutment-near',
             'abutment-far',
             'shed-roof',
-            'saw-bench',
+            'saw-beam',
             'stump',
             'flag',
             'flower-centre'

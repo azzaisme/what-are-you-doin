@@ -7,6 +7,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 
 import { DUMMY_PARTS, dummyRestPose } from '../assets/dummy.ts';
+import { AXE, SHORT_LOG_HALF } from '../assets/forestry.ts';
 import { BEAM_HALF, BUCKET_HANDLE_TOP, BUCKET_HEIGHT, LOG_RADIUS } from '../assets/props.ts';
 import { OAK, PINE_TIERS, PINE_TRUNK_HEIGHT, ROCK_CENTRE_LIFT, oakCrown, pineTrunkRadius } from '../levels/common.ts';
 import type { LevelDef } from '../levels/level.ts';
@@ -48,7 +49,18 @@ export function propBody(name: string): { shape: ShapeSpec; opts: BodyOptions } 
             shape: { type: 'box', hx: BEAM_HALF.x, hy: BEAM_HALF.y, hz: BEAM_HALF.z },
             opts: { density: 380, friction: 0.75, restitution: 0.05, ccd: true, wristTorque: GRAB.braceTorque }
         };
-    if (name === 'log' || name.startsWith('extra-log'))
+    if (name.startsWith('short-log'))
+        return {
+            shape: { type: 'cylinder', axis: 'x', r: LOG_RADIUS, half: SHORT_LOG_HALF },
+            opts: { density: 450, friction: 0.8, restitution: 0.05, angularDamping: 0.4 }
+        };
+    if (name === 'axe')
+        // a 0.8 m handle with a steel head, ~2.5 kg
+        return {
+            shape: { type: 'box', hx: 0.05, hy: AXE.handleHalf, hz: 0.05 },
+            opts: { density: 310, friction: 0.7, restitution: 0.1, ccd: true }
+        };
+    if (name === 'log' || name.startsWith('extra-log') || name.startsWith('felled-log'))
         return {
             shape: { type: 'cylinder', axis: 'x', r: LOG_RADIUS, half: 1.0 },
             opts: { density: 450, friction: 0.8, restitution: 0.05, angularDamping: 0.4 }
