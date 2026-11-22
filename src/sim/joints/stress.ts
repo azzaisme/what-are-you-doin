@@ -174,8 +174,10 @@ export class StressMeter {
         if (this.graph.size === 0) return;
         for (const pb of this.jointed()) {
             const b = pb.body;
-            // asleep: Rapier does not integrate it, so there is nothing to measure (it keeps its last load)
-            if (b.isSleeping()) continue;
+            // kept awake while it is jointed: asleep, Rapier neither integrates it nor solves its
+            // contacts, so its load could not be measured (a beam that settled and slept kept the
+            // load of its last settling step: 7 % short of its weight)
+            if (b.isSleeping()) b.wakeUp();
             const v = b.linvel();
             const w = b.angvel();
             const I = b.effectiveAngularInertia();
@@ -193,7 +195,7 @@ export class StressMeter {
     }
 
     after(): void {
-        // connections gone since: forget them; asleep ones keep their last load
+        // connections gone since: forget them
         for (const id of [...this.loads.keys()]) if (!this.graph.get(id)) this.loads.delete(id);
         if (this.graph.size === 0 || this.states.size === 0) return;
         // groups of joined bodies (ground does not join groups)
