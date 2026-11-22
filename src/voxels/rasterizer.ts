@@ -97,7 +97,7 @@ export function rasterizeVolume(
     priority: number,
     sink: CellSink,
     stats: RasterStats,
-    clip: { i0: number; i1: number; k0: number; k1: number } | null = null
+    clip: { i0: number; i1: number; k0: number; k1: number; j0?: number; j1?: number } | null = null
 ): boolean {
     stats.parts++;
     if (!poseIsFinite(worldPose)) {
@@ -107,12 +107,16 @@ export function rasterizeVolume(
     poseToMat34(worldPose, _m);
     invertRigidMat34(_m, _inv);
     transformAabb(volume.bounds, _m, _wb);
+    // A box clip (j0 / j1 given: another lattice's object, sampled only where it meets this
+    // lattice's own objects) checks the candidate budget after clipping; a column clip (a streamed
+    // tile) before, as it always has.
+    const box = clip !== null && clip.j0 !== undefined && clip.j1 !== undefined;
     if (
         _wb.maxX - _wb.minX > MAX_PART_EXTENT ||
         _wb.maxY - _wb.minY > MAX_PART_EXTENT ||
         _wb.maxZ - _wb.minZ > MAX_PART_EXTENT ||
         !candidateCells(_wb.minX, _wb.minY, _wb.minZ, _wb.maxX, _wb.maxY, _wb.maxZ, _range) ||
-        rangeCellCount(_range) > MAX_PART_CANDIDATES
+        (!box && rangeCellCount(_range) > MAX_PART_CANDIDATES)
     ) {
         stats.rejected++;
         return false;
@@ -123,7 +127,15 @@ export function rasterizeVolume(
         _range.maxI = Math.min(_range.maxI, clip.i1);
         _range.minK = Math.max(_range.minK, clip.k0);
         _range.maxK = Math.min(_range.maxK, clip.k1);
-        if (_range.minI > _range.maxI || _range.minK > _range.maxK) return true;
+        if (box) {
+            _range.minJ = Math.max(_range.minJ, clip.j0!);
+            _range.maxJ = Math.min(_range.maxJ, clip.j1!);
+        }
+        if (_range.minI > _range.maxI || _range.minK > _range.maxK || _range.minJ > _range.maxJ) return true;
+        if (box && rangeCellCount(_range) > MAX_PART_CANDIDATES) {
+            stats.rejected++;
+            return false;
+        }
     }
 
     const inv = _inv;

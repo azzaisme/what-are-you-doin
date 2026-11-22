@@ -48,6 +48,10 @@ export interface FrameStats {
     dirtyCells: number;
     dynDynOverlaps: number;
     dynStaticOverlaps: number;
+    /** Objects on other lattices rasterized here because they outrank one of this lattice's (ADR 0011). */
+    latticeMasks: number;
+    /** Cells this frame where such an object took the cell from one of this lattice's objects. */
+    latticeHidden: number;
     staticRebuilt: number;
     dynamicRebuilt: number;
     rasterMs: number;
@@ -109,7 +113,7 @@ export type ToWorker =
           /** Streamed levels: the near world's radius (m) for this device's quality preset. */
           nearRadius?: number;
       }
-    | { type: 'query'; id: number; what: 'hash' | 'verify' };
+    | { type: 'query'; id: number; what: 'hash' | 'verify' | 'lattice' };
 
 export type FromWorker =
     | { type: 'ready'; build: BuildInfo; units: UnitMesh[] }

@@ -19,15 +19,23 @@ import type { SimEntity } from '../sim/lab-entities.ts';
 import { ANIM_MAX } from '../sim/snapshots.ts';
 import { DYNAMIC_REGION, STATIC_REGION, collectDirty, unpackRegion } from '../voxels/dirty.ts';
 import type { DirtyWork } from '../voxels/dirty.ts';
-import { CHUNK_COORD_LIMIT, CHUNK_SIZE, CHUNK_Y_LIMIT, GRID_SIZE, cellIndexX, cellIndexZ } from '../voxels/grid.ts';
-import { pose } from '../voxels/math.ts';
-import type { Pose } from '../voxels/math.ts';
+import {
+    CHUNK_COORD_LIMIT,
+    CHUNK_SIZE,
+    CHUNK_Y_LIMIT,
+    GRID_SIZE,
+    cellIndexX,
+    cellIndexY,
+    cellIndexZ
+} from '../voxels/grid.ts';
+import { aabb, mat34, pose, poseToMat34, transformAabb } from '../voxels/math.ts';
+import type { AABB, Pose } from '../voxels/math.ts';
 import { MeshOutput, meshRegionBlocked } from '../voxels/mesher.ts';
 import type { MeshMode } from '../voxels/mesher.ts';
 import { createRasterStats, resetRasterStats } from '../voxels/rasterizer.ts';
 import type { SamplingPolicy } from '../voxels/rasterizer.ts';
 import { VoxelWorld } from '../voxels/world.ts';
-import type { PartInstance } from '../voxels/world.ts';
+import type { CellBox, PartInstance } from '../voxels/world.ts';
 
 import { PARTICLE_OBJECT_ID, STATE_STRIDE } from './protocol.ts';
 import type { BuildInfo, ClassMesh, FrameStats, TileReport, UnitMesh } from './protocol.ts';
@@ -40,6 +48,10 @@ interface Tracked {
     id: number;
     /** False: tracked for the state layout only, drawn by another lattice's service. */
     drawn: boolean;
+    /** Drawn on another lattice and registered here as a mask (see VoxelWorld.rasterizeMask). */
+    mask: boolean;
+    /** Compositor order (priority desc, then id asc): lower rank wins. */
+    priority: number;
     evaluate: (root: Pose, anim: ArrayLike<number>, out: Pose[]) => void;
     hidden?: (anim: ArrayLike<number>, part: number) => boolean;
     root: Pose;
@@ -47,6 +59,33 @@ interface Tracked {
     poses: Pose[];
     parts: PartInstance[];
 }
+
+/** How far (m) an object's root may be from another's bounds and still reach into them. */
+const MASK_REACH = 6;
+
+/** Does `a` win a shared cell against `b` (priority desc, then id asc, as the compositor orders)? */
+function outranks(a: Tracked, b: Tracked): boolean {
+    return a.priority > b.priority || (a.priority === b.priority && a.id < b.id);
+}
+
+/** World bounds of an object's posed, shown parts. */
+function objectBounds(t: Tracked, out: AABB): AABB {
+    out.minX = out.minY = out.minZ = Infinity;
+    out.maxX = out.maxY = out.maxZ = -Infinity;
+    for (const p of t.parts) {
+        if (p.hidden) continue;
+        transformAabb(p.volume.bounds, poseToMat34(p.pose, _m), _b);
+        out.minX = Math.min(out.minX, _b.minX);
+        out.minY = Math.min(out.minY, _b.minY);
+        out.minZ = Math.min(out.minZ, _b.minZ);
+        out.maxX = Math.max(out.maxX, _b.maxX);
+        out.maxY = Math.max(out.maxY, _b.maxY);
+        out.maxZ = Math.max(out.maxZ, _b.maxZ);
+    }
+    return out;
+}
+const _m = mat34();
+const _b = aabb(0, 0, 0, 0, 0, 0);
 
 /** Order of tracked objects: every sim entity that has voxel parts, in sim order. */
 export function trackedEntityOrder(sim: { entities: SimEntity[] }): number[] {
@@ -100,11 +139,16 @@ export class VoxelService {
         for (const e of createLabEntities().entities) {
             if (e.asset.parts.length === 0) continue;
             const drawn = !objects || objects.has(e.id);
-            if (drawn) this.world.addObject(e.id, e.priority);
+            // another lattice's object takes its cells from this lattice's lower-priority objects
+            // (only a lattice that draws objects of its own needs to know)
+            const mask = !drawn && objects !== undefined && objects.size > 0;
+            if (drawn || mask) this.world.addObject(e.id, e.priority, mask);
             const poses = e.asset.parts.map(() => pose());
             this.tracked.push({
                 id: e.id,
                 drawn,
+                mask,
+                priority: e.priority,
                 evaluate: e.asset.evaluate.bind(e.asset),
                 hidden: e.asset.partHidden?.bind(e.asset),
                 root: pose(),
@@ -228,8 +272,12 @@ export class VoxelService {
             t.evaluate(t.root, t.anim, t.poses);
             if (t.hidden) for (let i = 0; i < t.parts.length; i++) t.parts[i].hidden = t.hidden(t.anim, i);
             this.world.rasterizeObject(t.id, t.parts, policy, this.raster);
+            objectBounds(t, this.boundsOf(t));
+            this.local.push(t);
             objects++;
         }
+        const latticeMasks = this.rasterizeMasks(states, reference, cull);
+        this.local.length = 0;
         // particles: single cells on the global grid, behind every object
         const pc =
             particles && !reference && this.withWorld ? Math.min(particleCount, Math.floor(particles.length / 4)) : 0;
@@ -269,6 +317,8 @@ export class VoxelService {
                 dirtyCells: comp.dirtyCells,
                 dynDynOverlaps: comp.dynDynOverlaps,
                 dynStaticOverlaps: comp.dynStaticOverlaps,
+                latticeMasks,
+                latticeHidden: comp.latticeHidden,
                 staticRebuilt,
                 dynamicRebuilt: units.length - staticRebuilt,
                 rasterMs: t1 - t0,
@@ -280,6 +330,106 @@ export class VoxelService {
                 chunks: this.world.chunkCount
             }
         };
+    }
+
+    /** This frame's drawn objects (for the masks), and per tracked object its world bounds. */
+    private readonly local: Tracked[] = [];
+    private readonly bounds = new Map<number, AABB>();
+    private readonly maskRaster = createRasterStats();
+    private readonly boxes: CellBox[] = [];
+
+    private boundsOf(t: Tracked): AABB {
+        let b = this.bounds.get(t.id);
+        if (!b) {
+            b = aabb(0, 0, 0, 0, 0, 0);
+            this.bounds.set(t.id, b);
+        }
+        return b;
+    }
+
+    /**
+     * Per-item cell sizes: every object drawn on another lattice that outranks one of this
+     * lattice's objects it touches is rasterized here, at this lattice's size, inside the boxes where
+     * their bounds meet (one cell of margin), so where it wins those cells are left empty here and
+     * only its own lattice draws them. A cell gives way where its centre lies inside the winner
+     * ('center' sampling: one sample a cell). Returns how many such objects were rasterized.
+     */
+    private rasterizeMasks(states: Float64Array, reference: boolean, cull: number): number {
+        let masks = 0;
+        for (let n = 0; n < this.tracked.length; n++) {
+            const t = this.tracked[n];
+            if (!t.mask) continue;
+            const o = n * STATE_STRIDE;
+            const visible =
+                !reference &&
+                this.local.length > 0 &&
+                states[o] > 0.5 &&
+                Math.abs(states[o + 1]) < LATTICE_REACH &&
+                Math.abs(states[o + 2]) < LATTICE_REACH_Y &&
+                Math.abs(states[o + 3]) < LATTICE_REACH &&
+                (cull === 0 || this.nearFocus(states[o + 1], states[o + 3], cull));
+            const boxes = this.boxes;
+            boxes.length = 0;
+            if (visible) {
+                // cheap first: is it near any object it outranks?
+                let near = false;
+                const px = states[o + 1];
+                const py = states[o + 2];
+                const pz = states[o + 3];
+                for (const l of this.local) {
+                    if (!outranks(t, l)) continue;
+                    const b = this.bounds.get(l.id)!;
+                    if (
+                        px > b.minX - MASK_REACH &&
+                        px < b.maxX + MASK_REACH &&
+                        py > b.minY - MASK_REACH &&
+                        py < b.maxY + MASK_REACH &&
+                        pz > b.minZ - MASK_REACH &&
+                        pz < b.maxZ + MASK_REACH
+                    ) {
+                        near = true;
+                        break;
+                    }
+                }
+                if (near) {
+                    t.root.p.x = px;
+                    t.root.p.y = py;
+                    t.root.p.z = pz;
+                    t.root.q.x = states[o + 4];
+                    t.root.q.y = states[o + 5];
+                    t.root.q.z = states[o + 6];
+                    t.root.q.w = states[o + 7];
+                    for (let c = 0; c < ANIM_MAX; c++) t.anim[c] = states[o + 8 + c];
+                    t.evaluate(t.root, t.anim, t.poses);
+                    if (t.hidden) for (let i = 0; i < t.parts.length; i++) t.parts[i].hidden = t.hidden(t.anim, i);
+                    const mb = objectBounds(t, this.boundsOf(t));
+                    for (const l of this.local) {
+                        if (!outranks(t, l)) continue;
+                        const b = this.bounds.get(l.id)!;
+                        const x0 = Math.max(mb.minX, b.minX);
+                        const y0 = Math.max(mb.minY, b.minY);
+                        const z0 = Math.max(mb.minZ, b.minZ);
+                        const x1 = Math.min(mb.maxX, b.maxX);
+                        const y1 = Math.min(mb.maxY, b.maxY);
+                        const z1 = Math.min(mb.maxZ, b.maxZ);
+                        if (x0 > x1 || y0 > y1 || z0 > z1) continue;
+                        boxes.push({
+                            i0: cellIndexX(x0) - 1,
+                            i1: cellIndexX(x1) + 1,
+                            j0: cellIndexY(y0) - 1,
+                            j1: cellIndexY(y1) + 1,
+                            k0: cellIndexZ(z0) - 1,
+                            k1: cellIndexZ(z1) + 1
+                        });
+                    }
+                }
+            }
+            if (boxes.length > 0) {
+                this.world.rasterizeMask(t.id, t.parts, 'center', this.maskRaster, boxes);
+                masks++;
+            } else if (this.world.objectCellCount(t.id) > 0) this.world.clearObject(t.id);
+        }
+        return masks;
     }
 
     private nearFocus(x: number, z: number, r: number): boolean {

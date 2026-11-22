@@ -53,7 +53,12 @@ function handle(msg: ToWorker): void {
             );
             post({ type: 'frame', units, stats, tiles }, transferables(units));
         } else if (msg.type === 'query') {
-            const result = msg.what === 'hash' ? service.world.dynamicHash() : service.verifyGrid();
+            const result =
+                msg.what === 'hash'
+                    ? service.world.dynamicHash()
+                    : msg.what === 'lattice'
+                      ? Object.fromEntries(service.world.latticeHiddenByObject())
+                      : service.verifyGrid();
             post({ type: 'query', id: msg.id, result });
         }
     } catch (err) {

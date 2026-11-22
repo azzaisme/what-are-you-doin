@@ -59,6 +59,8 @@ const SUMMED: (keyof FrameStats)[] = [
     'dirtyCells',
     'dynDynOverlaps',
     'dynStaticOverlaps',
+    'latticeMasks',
+    'latticeHidden',
     'staticRebuilt',
     'dynamicRebuilt',
     'dynamicCells',
@@ -269,9 +271,18 @@ export class VoxelClient {
         return out;
     }
 
-    /** `hash`: dynamic content of every lane combined; `verify`: grid checks summed over lanes. */
-    async query<T>(what: 'hash' | 'verify'): Promise<T> {
+    /**
+     * `hash`: dynamic content of every lane combined; `verify`: grid checks summed over lanes;
+     * `lattice`: per object id, the cells an object on another lattice takes from it (summed).
+     */
+    async query<T>(what: 'hash' | 'verify' | 'lattice'): Promise<T> {
         const results = await Promise.all(this.lanes.map((l) => this.queryLane(l, what)));
+        if (what === 'lattice') {
+            const out: Record<number, number> = {};
+            for (const r of results as Record<number, number>[])
+                for (const [id, n] of Object.entries(r)) out[Number(id)] = (out[Number(id)] ?? 0) + n;
+            return out as T;
+        }
         if (what === 'hash') return results.reduce((h: number, r) => (Math.imul(h, 31) + (r as number)) >>> 0, 17) as T;
         const v = { vertices: 0, misaligned: 0 };
         for (const r of results as { vertices: number; misaligned: number }[]) {
@@ -281,7 +292,7 @@ export class VoxelClient {
         return v as T;
     }
 
-    private queryLane(lane: Lane, what: 'hash' | 'verify'): Promise<unknown> {
+    private queryLane(lane: Lane, what: 'hash' | 'verify' | 'lattice'): Promise<unknown> {
         const id = ++this.queryId;
         return new Promise((resolve) => {
             this.queries.set(id, resolve);

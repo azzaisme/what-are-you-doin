@@ -1593,6 +1593,8 @@ const EMPTY_FRAME_STATS = {
     dirtyCells: 0,
     dynDynOverlaps: 0,
     dynStaticOverlaps: 0,
+    latticeMasks: 0,
+    latticeHidden: 0,
     staticRebuilt: 0,
     dynamicRebuilt: 0,
     rasterMs: 0,
@@ -1691,7 +1693,7 @@ function statsText(): string {
         `  candidates ${v.candidates} samples ${v.samples}`,
         `  occupied ${v.occupied} changed ${v.changedCells}`,
         `  dirty chunks: static ${v.staticRebuilt} dyn ${v.dynamicRebuilt}`,
-        `  overlap dyn/dyn ${v.dynDynOverlaps} dyn/static ${v.dynStaticOverlaps}`,
+        `  overlap dyn/dyn ${v.dynDynOverlaps} dyn/static ${v.dynStaticOverlaps} lattices ${v.latticeHidden}`,
         `  worker ms raster ${f(v.rasterMs)} resolve ${f(v.resolveMs)} mesh ${f(v.meshMs)}`,
         `  worker total ${f(v.totalMs)}   main-thread upload ${f(v.uploadMs)}`,
         `physics  ${s.physics.props}  tick ms avg ${f(s.physics.tickMsAvg)} p95 ${f(s.physics.tickMsP95)} max ${f(s.physics.tickMsMax)}`,
@@ -2409,6 +2411,11 @@ window.__riverLab = {
         };
     },
     dynamicHash: () => pipeline.query<number>('hash'),
+    /** Per object name: cells an object on another lattice takes from it (lattice priority, #107). */
+    latticeHidden: async () => {
+        const by = await pipeline.query<Record<number, number>>('lattice');
+        return Object.fromEntries(sim.entities.filter((e) => by[e.id]).map((e) => [e.name, by[e.id]]));
+    },
     /** True when no voxel frame is in flight or waiting to be applied. */
     voxelIdle: () => !pipeline.inFlight && !state.forceVoxel,
     entities: () =>

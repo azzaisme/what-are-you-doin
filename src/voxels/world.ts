@@ -15,6 +15,11 @@
  * Composite policy: a dynamic cell overrides a static cell (counted as telemetry). Overlaps between
  * dynamic objects are resolved by object priority, then lower id.
  *
+ * Masks (per-item cell sizes, ADR 0011): an object drawn on another lattice can be registered as a
+ * mask. It is rasterized on this lattice, only where it meets this lattice's own objects, and takes
+ * part in the same priority order; where a mask wins a cell, the cell is left empty here (the other
+ * lattice draws it). So a 1 cm bucket held in a 5 cm paw shows the bucket, not the paw through it.
+ *
  * Storage is sparse: chunks are allocated only when written. A level-sized dense array is never
  * allocated (§5.5).
  */
@@ -77,6 +82,8 @@ export interface PartInstance {
 interface DynamicEntry {
     id: number;
     priority: number;
+    /** Drawn on another lattice: wins cells by priority but leaves them empty here. */
+    mask: boolean;
     cells: Map<number, number>;
     prev: Map<number, number>;
     /** Occupied cells after the last rasterization. */
@@ -88,6 +95,8 @@ export interface CompositeStats {
     changedCells: number;
     dynDynOverlaps: number;
     dynStaticOverlaps: number;
+    /** Cells an object on another lattice now takes from one of this lattice's objects. */
+    latticeHidden: number;
 }
 
 /**
@@ -111,6 +120,15 @@ export interface ColumnRect {
     k0: number;
     k1: number;
 }
+
+/** A box of cells (inclusive): where a mask object is sampled. */
+export interface CellBox extends ColumnRect {
+    j0: number;
+    j1: number;
+}
+
+/** The value a mask holds in its own occupancy (never drawn: a winning mask leaves the cell empty). */
+const MASK_VALUE = 0xffff;
 
 const tileKey = (ti: number, tk: number) => (ti + 32768) * 65536 + (tk + 32768);
 
@@ -168,10 +186,13 @@ export class VoxelWorld {
         dirtyCells: 0,
         changedCells: 0,
         dynDynOverlaps: 0,
-        dynStaticOverlaps: 0
+        dynStaticOverlaps: 0,
+        latticeHidden: 0
     };
     /** Running totals of overlap cells currently present. */
     dynStaticOverlapCells = 0;
+    /** Cells (keys) where a mask currently hides one of this lattice's objects. */
+    private readonly latticeHiddenCells = new Set<number>();
 
     // ------------------------------------------------------------------------------- chunks
 
@@ -397,10 +418,10 @@ export class VoxelWorld {
 
     // ------------------------------------------------------------------------------- dynamic objects
 
-    addObject(id: number, priority = 0): void {
+    addObject(id: number, priority = 0, mask = false): void {
         if (this.objects.has(id)) throw new Error(`Dynamic object ${id} already registered`);
         if (!Number.isInteger(id) || id < 0) throw new Error(`Invalid object id ${id}`);
-        const e: DynamicEntry = { id, priority, cells: new Map(), prev: new Map(), count: 0 };
+        const e: DynamicEntry = { id, priority, mask, cells: new Map(), prev: new Map(), count: 0 };
         this.objects.set(id, e);
         this.order.push(e);
         this.order.sort((a, b) => b.priority - a.priority || a.id - b.id);
@@ -491,6 +512,61 @@ export class VoxelWorld {
         return changed;
     }
 
+    private readonly maskSink = {
+        world: this as VoxelWorld,
+        target: null as Map<number, number> | null,
+        write(i: number, j: number, k: number, _value: number, priority: number) {
+            // only where this lattice has chunks: a mask matters only over this lattice's own cells
+            const c = this.world.getChunk(i >> CHUNK_BITS, j >> CHUNK_BITS, k >> CHUNK_BITS);
+            if (!c) return;
+            const key = c.id * CHUNK_VOLUME + localIndex(i & CHUNK_MASK, j & CHUNK_MASK, k & CHUNK_MASK);
+            if (!this.target!.has(key)) this.target!.set(key, MASK_VALUE | (priority << 16));
+        }
+    } satisfies CellSink & { world: VoxelWorld; target: Map<number, number> | null };
+
+    /**
+     * Rasterizes a mask object (registered with `mask`) inside the given cell boxes only, and marks
+     * changed cells dirty. `policy` is the mask's own (the service samples cell centres: a cell gives
+     * way where its centre lies inside the winner). No boxes clears it. Returns the number of cells that changed.
+     */
+    rasterizeMask(
+        id: number,
+        parts: readonly PartInstance[],
+        policy: SamplingPolicy,
+        stats: RasterStats,
+        boxes: readonly CellBox[]
+    ): number {
+        const e = this.objects.get(id);
+        if (!e || !e.mask) throw new Error(`Unknown mask object ${id}`);
+        const prev = e.cells;
+        const next = e.prev;
+        next.clear();
+        this.maskSink.target = next;
+        for (const b of boxes)
+            for (let p = 0; p < parts.length; p++) {
+                const part = parts[p];
+                if (part.hidden) continue;
+                rasterizeVolume(part.volume, part.pose, policy, e.priority, this.maskSink, stats, b);
+            }
+        this.maskSink.target = null;
+        e.prev = prev;
+        e.cells = next;
+        e.count = next.size;
+        let changed = 0;
+        const dirty = this.dirtyCells;
+        for (const key of next.keys())
+            if (!prev.has(key)) {
+                dirty.add(key);
+                changed++;
+            }
+        for (const key of prev.keys())
+            if (!next.has(key)) {
+                dirty.add(key);
+                changed++;
+            }
+        return changed;
+    }
+
     /**
      * Writes an object made of single cells (particles: leaves, chips, splashes). `points` holds
      * x, y, z (metres) and a voxel value per point; each point fills the one cell containing it, on
@@ -564,13 +640,21 @@ export class VoxelWorld {
             const li = key & (CHUNK_VOLUME - 1);
             let winner = 0;
             let cover = 0;
+            let masked = false;
             for (let o = 0; o < n; o++) {
-                const v = order[o].cells.get(key);
-                if (v !== undefined) {
-                    if (cover === 0) winner = v & 0xffff;
-                    cover++;
+                const e = order[o];
+                const v = e.cells.get(key);
+                if (v === undefined) continue;
+                if (e.mask) {
+                    // another lattice's object: it takes the cell from everything after it
+                    if (cover === 0) masked = true;
+                    continue;
                 }
+                if (cover === 0) winner = masked ? 0 : v & 0xffff;
+                cover++;
             }
+            if (masked && cover > 0) this.latticeHiddenCells.add(key);
+            else this.latticeHiddenCells.delete(key);
             if (cover > 1) st.dynDynOverlaps++;
             if (!c.dyn) {
                 if (winner === 0) continue;
@@ -593,6 +677,7 @@ export class VoxelWorld {
             this.markDynDirtyAround(c, li);
         }
         st.dynStaticOverlaps = this.dynStaticOverlapCells;
+        st.latticeHidden = this.latticeHiddenCells.size;
         this.dirtyCells.clear();
         return st;
     }
@@ -619,6 +704,17 @@ export class VoxelWorld {
                 }
             }
         }
+    }
+
+    /** Per object id: the cells a mask (another lattice's object) currently takes from it. */
+    latticeHiddenByObject(): Map<number, number> {
+        const out = new Map<number, number>();
+        for (const key of this.latticeHiddenCells)
+            for (const e of this.order) {
+                if (e.mask || !e.cells.has(key)) continue;
+                out.set(e.id, (out.get(e.id) ?? 0) + 1);
+            }
+        return out;
     }
 
     /** Total static cells (for stats). */

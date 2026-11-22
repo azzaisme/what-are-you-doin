@@ -118,6 +118,35 @@ test('every uploaded vertex lies on the global 10 cm grid and render units never
     expect(r.misaligned).toBe(0);
 });
 
+test('objects on different lattices resolve by priority: the 1 cm bucket in the 5 cm paw (#107)', async ({ page }) => {
+    // the Epic 1 scripted River Lab: the beaver walks its loop with the bucket hanging from its paw
+    const problems = await boot(page, '?level=lab&props=scripted&t=4&noui');
+    type L = Lab & { latticeHidden(): Promise<Record<string, number>> };
+    for (const t of [2, 4, 6]) {
+        await page.evaluate((t) => (window as unknown as { __riverLab: Lab }).__riverLab.seek(t), t);
+        await idle(page);
+        const hidden = await page.evaluate(() => (window as unknown as { __riverLab: L }).__riverLab.latticeHidden());
+        // the bucket (priority 4) outranks the beaver (3): the paw's 5 cm cells inside the handle give
+        // way, and the bucket keeps every 1 cm cell
+        expect(hidden.beaver, `t=${t}`).toBeGreaterThan(0);
+        expect(hidden.bucket, `t=${t}`).toBeUndefined();
+    }
+    const s = await lab(page, (l) => l.stats());
+    expect(s.voxel.latticeMasks).toBeGreaterThan(0);
+    expect(s.voxel.rejected).toBe(0);
+    const g = await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid());
+    expect(g.misaligned).toBe(0);
+    expect(problems).toEqual([]);
+});
+
+test('one lattice for everything (?tiers=off) needs no lattice priority', async ({ page }) => {
+    const problems = await boot(page, '?level=lab&props=scripted&t=4&noui&tiers=off');
+    type L = Lab & { latticeHidden(): Promise<Record<string, number>> };
+    expect(await page.evaluate(() => (window as unknown as { __riverLab: L }).__riverLab.latticeHidden())).toEqual({});
+    expect((await lab(page, (l) => l.stats())).voxel.latticeMasks).toBe(0);
+    expect(problems).toEqual([]);
+});
+
 test('reconstruction is deterministic for a time and changes as objects move', async ({ page }) => {
     await boot(page);
     const at = async (t: number) => {

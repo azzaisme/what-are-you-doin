@@ -1,5 +1,59 @@
 # Progress log
 
+## Objects on different lattices resolve by priority (2026-11-22, Epic 10, #107)
+
+Objects drawn on different lattices (1 cm fine, the 5–10 cm base, the coarse 10–20 cm) used to draw
+through one another: the bucket's handle disappeared inside the beaver's 5 cm paw. Now they resolve
+by priority across lattices, as they always did within one (ADR 0011, amended).
+
+- **How:** each lattice's worker rasterizes, at its own cell size, every object of another lattice
+  that outranks one of its own objects nearby, only inside the boxes where their bounds meet (cell
+  centres only). Where it wins, the cell is left empty there, and the winner's own lattice draws it.
+- **Priority** is the objects' own: priority, then lower id. The bucket (4) wins over the beaver (3)
+  and planks (1); the beaver over the ute (2) and the ragdoll (2).
+- **The static world** is not part of this: it stays on the base lattice, where moving objects
+  already win over it.
+- **Debug panel:** "lattices N" after the overlap counts: cells another lattice's object takes now.
+  `__riverLab.latticeHidden()` gives them per object.
+
+### Measured
+
+| Lane, 60 frames, everything moving (Node, median of 3 runs) | Alone (ms/frame) | With the others |
+| ----------------------------------------------------------- | ---------------: | --------------: |
+| 1 cm bucket; the beaver and the held plank beside it        |            11.26 |           11.15 |
+| 5 cm beaver; the 1 cm bucket in its paw                     |             3.19 |            3.50 |
+| 5 cm beaver; the bucket and the 10 cm ute                   |             3.19 |            3.63 |
+| 1 cm first-person limbs; holding the bucket                 |            16.60 |           20.76 |
+| 1 cm ragdoll head; the beaver standing inside it (worst)    |            15.99 |           23.15 |
+
+The container was also running a browser, so single runs vary by about ±1.5 ms. Each lane is its own worker and
+a voxel frame lands when the slowest lane is done; the base lane, which also builds the world, took
+28 ms a frame on the owner's phone at Epic 1's gate.
+
+Pixels (verify-pixels, frozen frames, 480 × 270, SwiftShader; the harness gives 0 differing pixels
+between two runs of the old build):
+
+- **No cross-lattice overlap, unchanged:** River Lab at t = 4 from three views and the Timber Yard
+  from two: 0 of 129,600 pixels differ in each.
+- **The scripted River Lab, the bucket in the paw (t = 4):** 824 pixels differ. 566 are around the
+  paw and handle, the intended change; the other 258 each differ by one level out of 255 (the bloom,
+  which samples the whole screen, sees the changed paw).
+
+### Tests
+
+- Unit (`tests/unit/lattice-priority.test.ts`, at 5 and 10 cm): the winner empties exactly the
+  cells it shares with a lower-priority object and nothing else; a lower-priority object on another
+  lattice changes nothing (same hash); coarse and fine lattices give way to the base one by
+  priority; cells come back when the winner leaves, matching a fresh build; one lattice for
+  everything has no masks.
+- Browser: in the scripted River Lab the beaver's paw gives cells to the bucket at three times and
+  the bucket keeps all its own; with `?tiers=off` nothing is masked.
+
+### Found on the way, not changed
+
+- With `?props=scripted` the River Lab leaves the spare planks, beams, logs, crates and the ragdoll
+  piled at the origin, in the river, where they show above the water.
+
 ## Epic 7, part 1: the bucket holds real water (2026-11-22)
 
 The bucket now carries water the game keeps track of. Carry it steadily and it stays full. Jerk it, drop it or tip it and water slops out. In the Valley you win by pouring water on the flower, not by setting the bucket down beside it.
