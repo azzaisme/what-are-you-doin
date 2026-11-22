@@ -171,4 +171,40 @@ describe('level 1: the timber yard', () => {
         // eye): measured 20.0 deg for them, ~15 for beavers
         expect(maxTilt).toBeLessThan(22);
     });
+
+    it('finishable with inputs only: carry the bucket to the near abutment and throw it over', () => {
+        // the whole level played through player commands (no teleporting props). Laying the beams
+        // across is not possible yet with one carrier's reach and wrist, so this is the route a
+        // player has today; it must keep working until the bridge route does
+        const s = yard();
+        let n = 0;
+        let pitch = 0;
+        const step = (c: Partial<PlayerCommand> = {}, k = 1) => {
+            for (let i = 0; i < k; i++) s.step(cmd(n++, { pitch, ...c }));
+        };
+        step({}, 60);
+        s.fpActive = true;
+        const bucket = byName(s, 'bucket');
+        s.placePlayer(BUCKET_STUMP.x, BUCKET_STUMP.z + 1, 0);
+        step({}, 20);
+        pitch = -Math.atan2(s.player.y + EYE_HEIGHT - bucket.pose.p.y, s.player.z - bucket.pose.p.z);
+        step({}, 3);
+        step({ grab: true });
+        expect(s.physics.heldId).toBe(bucket.id);
+        pitch = 0;
+        for (let i = 0; i < 900 && Math.abs(s.player.x - BRIDGE_X) > 0.1; i++)
+            step({ moveX: s.player.x > BRIDGE_X ? -0.6 : 0.6 });
+        for (let i = 0; i < 900 && s.player.z > BRIDGE.nearFace + 0.25; i++) step({ moveZ: 0.6 });
+        expect(s.progress.falls).toBe(0);
+        step({}, 30);
+        for (let i = 0; i < 20; i++) {
+            pitch += (0.5 - pitch) / 6;
+            step();
+        }
+        step({}, 20);
+        step({ throw: true });
+        step({}, 240);
+        expect(s.progress.goalReached).toBe(true);
+        expect(s.player.z).toBeGreaterThan(BRIDGE.nearFace); // the player never crossed
+    }, 60_000);
 });
