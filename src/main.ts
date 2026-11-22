@@ -577,7 +577,7 @@ class LabDirector extends Script {
         if (panel.visible && (frameTimeHead & 7) === 0) panel.setStats(statsText());
         if ((frameTimeHead & 3) === 0) updatePrompt();
         pollEvents();
-        if ((frameTimeHead & 7) === 0) updateWater();
+        updateWater();
     }
 }
 const directorEntity = new Entity('LabDirector');
@@ -2229,6 +2229,7 @@ if (editing) {
     toSpawn();
 }
 updateObjective();
+updateWater();
 if (params.has('noui')) setUiHidden(true);
 updateHud();
 loading?.remove();
