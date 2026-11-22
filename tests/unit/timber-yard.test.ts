@@ -231,7 +231,11 @@ describe('level 1: the timber yard', () => {
         const goTo = (x: number, zStop: number) => {
             for (let i = 0; i < 900 && Math.abs(s.player.x - x) > 0.05; i++)
                 step({ moveX: s.player.x > x ? -0.4 : 0.4 });
-            for (let i = 0; i < 900 && s.player.z > zStop; i++) step({ moveZ: 0.5 });
+            // (room for a ~5 s crawl onto the bridge, with either body: the laid beams' near ends rest
+            // 10 cm past the near cap's edge, and that 10 cm ledge is narrower than the controller's
+            // 12 cm minimum step width, so the cap (10 cm up) and the beams (20 cm up) can't be
+            // stepped one after the other; laid 10 cm further out it takes under 1 s)
+            for (let i = 0; i < 1800 && s.player.z > zStop; i++) step({ moveZ: 0.5 });
             step({}, 30);
         };
         step({}, 60);

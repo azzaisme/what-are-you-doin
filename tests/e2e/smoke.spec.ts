@@ -465,8 +465,8 @@ test('the Timber Yard ute: get in, drive it with the keyboard, get out', async (
         ([x, z, yaw]) => {
             const l = (window as unknown as { __riverLab: Lab }).__riverLab;
             l.teleport(x, z, yaw);
-            // down at the door from a 1.86 m eye
-            l.look(yaw, -0.7);
+            // down at the door from a beaver's 1.22 m eye
+            l.look(yaw, -0.35);
         },
         [u0.x + sx * 2.2, u0.z + sz * 2.2, Math.atan2(sx, sz)]
     );
@@ -970,8 +970,14 @@ test('logging in the Timber Yard: chew a pine down, the voxel tree becomes a stu
     await lab(page, (l) => {
         // the lever is on the near (north) post: stand north of it, facing south (+z)
         l.teleport(4.8, 7.6, Math.PI);
-        l.look(Math.PI, -0.58);
+        l.look(Math.PI, -0.2);
     });
+    // look down until the view is on the lever (where depends on the body's eye height)
+    for (let p = -0.2; p > -1.0; p -= 0.04) {
+        await page.evaluate((pitch) => (window as unknown as { __riverLab: Lab }).__riverLab.look(Math.PI, pitch), p);
+        await page.waitForTimeout(250);
+        if ((await lab(page, (l) => l.interaction().target)) === 'sawmill') break;
+    }
     await page.waitForFunction(
         () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().target === 'sawmill',
         null,

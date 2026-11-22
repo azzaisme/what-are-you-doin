@@ -251,7 +251,9 @@ describe('the flower, played (#64)', () => {
         pl.step({}, 30);
         for (let i = 0; i < 400 && s.water.volume < WATER.capacity - 1e-6; i++) pl.step();
         expect(pl.grabBucket()).toBe(true);
-        // up the road to the ring of stones, then face the flower
+        // look up the road (carry it at a comfortable height), then up to the ring of stones
+        const ahead = routeToWorld(180, roadT(180));
+        pl.lookAt(ahead.x, s.player.y + EYE_HEIGHT, ahead.z, 30);
         for (let u = 178; u <= 196; u += 3)
             expect(pl.walkTo(routeToWorld(u, roadT(u)).x, routeToWorld(u, roadT(u)).z, 0.6)).toBe(true);
         const stand = routeToWorld(SUMMIT_U - 2.4, 0);
@@ -278,6 +280,7 @@ describe('the flower, played (#64)', () => {
         expect(pl.walkTo(butt.x - 0.9, butt.z - 0.9, 0.4)).toBe(true);
         pl.holdOver(butt.x, butt.z, butt.y + 0.55, 1200, () => s.water.volume >= WATER.capacity - 1e-9);
         expect(s.water.volume).toBeCloseTo(WATER.capacity, 6);
+        pl.lookAt(ahead.x, s.player.y + EYE_HEIGHT, ahead.z, 30);
         for (let u = 178; u <= 196; u += 3) pl.walkTo(routeToWorld(u, roadT(u)).x, routeToWorld(u, roadT(u)).z, 0.6);
         pl.walkTo(stand.x, stand.z, 0.3);
         pl.lookAt(f.x, s.player.y + EYE_HEIGHT - 0.3, f.z, 40);

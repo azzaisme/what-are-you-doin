@@ -253,11 +253,20 @@ export class PhysicsWorld {
     };
     /**
      * How far from the shoulders held things are carried (m): in the player's hands. Things grabbed
-     * from further away are drawn in to it. Infinity keeps the grab distance (the beavers).
+     * from further away are drawn in to it. Infinity keeps the grab distance.
      */
     holdReach = Infinity;
     /** How far the shoulders are below the eye (m). */
     shoulderDrop = 0.2;
+    /** With a finite holdReach: the nearest the eye things in your hands come (m). */
+    holdMin: number = GRAB.minHold;
+    /**
+     * The grab lets go when stretched beyond breakDistance (m) for breakTime (s; carried between two,
+     * GRAB.breakTime), or at once beyond snapDistance (m).
+     */
+    breakDistance: number = GRAB.breakDistance;
+    breakTime: number = GRAB.breakTime;
+    snapDistance: number = GRAB.snapDistance;
     readonly world: RAPIER.World;
     readonly bodies = new Map<number, PhysBody>();
     private readonly byCollider = new Map<number, PhysBody>();
@@ -858,7 +867,10 @@ export class PhysicsWorld {
         // bring them nearer). Not while shared: two carriers at either end of a log would pull it
         // apart
         if (Number.isFinite(this.holdReach) && (this.holdCount.get(pb.id) ?? 1) === 1) {
-            const want = clampHold(handsHold(this.holdReach, this.shoulderDrop, pitch));
+            const want = Math.max(
+                this.holdMin,
+                Math.min(GRAB.maxHold, handsHold(this.holdReach, this.shoulderDrop, pitch))
+            );
             if (r.holdSet) r.holdDist = Math.min(r.holdDist, want);
             else if (r.holdDist > want) r.holdDist = Math.max(want, r.holdDist - 3 * SIM_DT);
             else r.holdDist = Math.min(want, r.holdDist + 1 * SIM_DT);
@@ -954,8 +966,11 @@ export class PhysicsWorld {
         const lv = b.linvel();
         s.maxHeldSpeed = Math.max(s.maxHeldSpeed, Math.hypot(lv.x, lv.y, lv.z));
         // snagged or too heavy to follow: let go rather than build up energy
-        r.stretchTime = f.error > GRAB.breakDistance ? r.stretchTime + SIM_DT : 0;
-        if (r.stretchTime > GRAB.breakTime || f.error > GRAB.snapDistance) {
+        r.stretchTime = f.error > this.breakDistance ? r.stretchTime + SIM_DT : 0;
+        // alone, the body's own time (a beaver's paws give out sooner); carried between two, the
+        // other carrier steadies it
+        const breakTime = (this.holdCount.get(pb.id) ?? 1) > 1 ? GRAB.breakTime : this.breakTime;
+        if (r.stretchTime > breakTime || f.error > this.snapDistance) {
             s.grabBreaks++;
             this.release(p);
         }
