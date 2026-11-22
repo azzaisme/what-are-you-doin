@@ -201,6 +201,35 @@ describe('the Valley: one map, seven areas', () => {
         expect(s.world.chunkCount).toBeLessThan(chunksMid * 1.5);
     }, 300_000);
 
+    it('the Low preset builds a smaller near world, and shrinking it lets go of the outer tiles', () => {
+        const w = routeToWorld(110, 0);
+        const focus = new Float32Array([w.x, w.z]);
+        const size = STATIC_REGION.x * GRID_SIZE;
+        const s = new VoxelService();
+        s.build(1, 'valley');
+        const states = new Float64Array(s.trackedCount * 18);
+        const settle = (svc: VoxelService, radius: number) => {
+            for (let n = 0; n < 400; n++)
+                svc.frame(n, 0, 'coverage50', false, states, undefined, 0, focus, undefined, 0, radius);
+            return svc.builtTiles;
+        };
+        const far = (tiles: { ti: number; tk: number }[]) =>
+            Math.max(...tiles.map((t) => Math.hypot((t.ti + 0.5) * size - w.x, (t.tk + 0.5) * size - w.z)));
+        const { radius, lowRadius } = valleyLevel.stream!;
+        const high = settle(s, radius).length;
+        // switched to Low: the outer tiles go
+        const shrunk = settle(s, lowRadius!);
+        expect(far(shrunk)).toBeLessThan(lowRadius! * 1.35 + size);
+        // arriving somewhere on Low: about (24 / 36)^2 of the tiles
+        const fresh = new VoxelService();
+        fresh.build(1, 'valley');
+        const low = settle(fresh, lowRadius!);
+        expect(low.length).toBeLessThan(high * 0.6);
+        expect(far(low)).toBeLessThan(lowRadius! + size);
+        // the ground at the camera is built
+        expect(low.some((t) => Math.hypot((t.ti + 0.5) * size - w.x, (t.tk + 0.5) * size - w.z) < size)).toBe(true);
+    }, 300_000);
+
     it('stages: the bucket at each checkpoint in turn completes them, in order, then the journey', () => {
         const s = new LabSim({ level: valleyLevel });
         s.step(cmd(0));

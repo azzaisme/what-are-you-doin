@@ -106,6 +106,8 @@ export type ToWorker =
           /** The far lattice: the near tiles built (ti, tk pairs) and their size (m); it leaves them out. */
           nearTiles?: Int32Array;
           nearTileSize?: number;
+          /** Streamed levels: the near world's radius (m) for this device's quality preset. */
+          nearRadius?: number;
       }
     | { type: 'query'; id: number; what: 'hash' | 'verify' };
 

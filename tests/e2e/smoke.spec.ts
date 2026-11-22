@@ -1151,14 +1151,19 @@ test('online co-op: the host’s flood reaches the guest — its river rises, th
     await expect(guest.locator('.toast')).toContainText('siren');
     // and on into the rising water
     const later = (await lab(page, (l) => l.hazards())).tick / 60;
-    await page.evaluate((t) => {
+    const seekY = await page.evaluate((t) => {
         const l = (window as unknown as { __riverLab: Lab }).__riverLab;
         l.seek(t + 10);
         l.action('pause');
+        return l.hazards().waterY;
     }, later);
+    expect(seekY).toBeGreaterThan(baseY + 0.02);
+    // a seek steps the host's sim without sending a state (only its frames send them), so wait for
+    // the guest's river to reach where the seek left the host's (still rising or at the peak), not
+    // just for it to start rising on states from before the seek
     await guest.waitForFunction(
-        (b) => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().planeY > b + 0.02,
-        baseY,
+        (y) => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().planeY > y - 0.01,
+        seekY,
         { timeout: 300_000 }
     );
     const ga = await lab(guest, (l) => l.audio());
