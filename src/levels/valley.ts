@@ -755,12 +755,14 @@ function landmarkPieces(): StaticPiece[] {
                 priority: 3
             })
         );
-        P.push(piece('lookout-band', boxS(1.55, 0.2, 1.55), u, y + legH + 1.35, t, solid(M.HiVis, 0), { priority: 4 }));
+        P.push(
+            piece('lookout-band', boxS(1.55, 0.21, 1.55), u, y + legH + 1.35, t, solid(M.HiVis, 0), { priority: 4 })
+        );
         for (let n = 0; n < 3; n++)
             P.push(
                 piece(
                     'lookout-roof',
-                    boxS(1.8 - n * 0.55, 0.2, 1.8 - n * 0.55),
+                    boxS(1.8 - n * 0.55, 0.21, 1.8 - n * 0.55),
                     u,
                     y + legH + 2.2 + n * 0.4,
                     t,

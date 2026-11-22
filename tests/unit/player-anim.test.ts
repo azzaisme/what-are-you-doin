@@ -45,6 +45,21 @@ describe('player animation (grab, carry, throw)', () => {
         expect(level.raise).toBeCloseTo(Math.atan2(1.2 - level.reach, REACH_RISE * level.reach), 1);
         expect(level.raise).toBeLessThanOrEqual(Math.PI / 2);
         expect(high.raise).toBeGreaterThan(level.raise);
+        // a grip far below the shoulders (looking well down): the arms aim down at it, as low as
+        // 0.45 rad from hanging, never lower
+        const deep = run(
+            new PlayerAnimator(),
+            () => base({ held: { ...heldAt(SHOULDER_HEIGHT - 1.2), z: -0.35 } }),
+            120
+        );
+        expect(deep.raise).toBeCloseTo(0.45, 2);
+        const lowish = run(
+            new PlayerAnimator(),
+            () => base({ held: { ...heldAt(SHOULDER_HEIGHT - 0.5), z: -0.9 } }),
+            120
+        );
+        expect(lowish.raise).toBeGreaterThan(0.45);
+        expect(lowish.raise).toBeLessThan(low.raise);
         // empty paws hang
         expect(run(new PlayerAnimator(), () => base(), 60).raise).toBeCloseTo(0, 3);
     });

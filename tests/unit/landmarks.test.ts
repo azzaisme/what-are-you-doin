@@ -51,6 +51,15 @@ describe('Valley landmarks', () => {
                     );
                     w.finalizeStatic();
                     expect(w.staticCellCount(), `${name} at 40 cm`).toBeGreaterThan(2);
+                    // and at least one full 40 cm cell thick on its thinnest axis
+                    const sh = p.shape;
+                    const thin =
+                        sh.type === 'box'
+                            ? 2 * Math.min(sh.hx, sh.hy, sh.hz)
+                            : sh.type === 'cylinder'
+                              ? 2 * Math.min(sh.r, sh.half)
+                              : 2 * Math.min(sh.rx, sh.ry, sh.rz);
+                    expect(thin, `${name} thickness`).toBeGreaterThanOrEqual(0.42);
                 }
             }
         } finally {
