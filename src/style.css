@@ -1055,6 +1055,7 @@ body.settings-open .crosshair {
 .settings-switch,
 .settings-step,
 .settings-choices,
+.settings-bind,
 .settings-button .settings-control button {
     border: 0;
     border-radius: 0;
@@ -1072,6 +1073,7 @@ body.settings-open .crosshair {
 .settings-tabs button:hover,
 .settings-switch:hover,
 .settings-step:hover,
+.settings-bind:hover,
 .settings-button .settings-control button:hover:not(:disabled) {
     background: #33404c;
 }
@@ -1082,6 +1084,7 @@ body.settings-open .crosshair {
 .settings-switch:active,
 .settings-step:active,
 .settings-choices button:active,
+.settings-bind:active,
 .settings-button .settings-control button:active:not(:disabled) {
     transform: translateY(var(--vx));
     box-shadow: inset 0 var(--vx) 0 #0007;
@@ -1192,6 +1195,36 @@ body.settings-open .crosshair {
     box-shadow:
         inset 0 var(--vx) 0 #d4f7d1,
         inset 0 calc(var(--vx) * -1.5) 0 #5aa257;
+}
+
+.settings-bind {
+    min-width: 96px;
+    max-width: 132px;
+    padding: 0 10px 2px;
+    overflow: hidden;
+    font-weight: 700;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.settings-bind.capturing,
+.settings-bind.capturing:hover {
+    color: #10161c;
+    background: #f2c14e;
+}
+
+/* narrow screens: six sections fit (or scroll) without clipping their names */
+@media (max-width: 480px) {
+    .settings-bind {
+        min-width: 84px;
+    }
+}
+
+.settings-status {
+    min-height: 1.3em;
+    margin-top: 4px;
+    font-size: 0.85em;
+    color: #f2c14e;
 }
 
 .settings-choices {
@@ -1323,6 +1356,7 @@ body.settings-open .crosshair {
 .settings-tabs button:focus-visible,
 .settings-switch:focus-visible,
 .settings-choices button:focus-visible,
+.settings-bind:focus-visible,
 .settings-button .settings-control button:focus-visible {
     box-shadow: inset 0 0 0 var(--vx) #fff;
 }
@@ -1403,11 +1437,10 @@ body.has-pad .settings-foot .foot-pad {
         width: auto;
     }
 
-    /* all four tabs fit */
+    /* six sections: each keeps its whole name; the row scrolls (the current one is kept in view) */
     .settings-tabs button {
-        flex: 1 1 0;
-        min-width: 0;
-        padding: 0 4px 2px;
+        flex: 1 0 auto;
+        padding: 0 8px 2px;
         font-size: 11px;
         letter-spacing: 0.03em;
     }

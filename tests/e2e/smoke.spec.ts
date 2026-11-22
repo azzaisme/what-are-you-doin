@@ -188,6 +188,7 @@ test('default voxel size is 5 cm with the slider range 5-10 cm', async ({ page }
 });
 
 test('settings menu: mouse, keyboard and gamepad reach every setting, and it is saved', async ({ page }) => {
+    test.setTimeout(600_000); // two boots of the game page (with Epic 6's stand, ~4.5 min in software GL here)
     // a stand-in gamepad the page reads through navigator.getGamepads
     await page.addInitScript(() => {
         const buttons = Array.from({ length: 17 }, () => ({ pressed: false, touched: false, value: 0 }));
@@ -224,12 +225,14 @@ test('settings menu: mouse, keyboard and gamepad reach every setting, and it is 
     expect(await lab(page, (l) => (l as unknown as { paused(): boolean }).paused())).toBe(true);
     await page.locator('.settings-row button', { hasText: 'Resume' }).click();
     await expect(backdrop).toBeHidden();
-    // keyboard: Esc opens; E to Video; down to the field of view, right to widen it; Esc closes
+    // keyboard: Esc opens; E through the sections to Video; down to the field of view, right to
+    // widen it; Esc closes
     await page.keyboard.press('Escape');
     await expect(backdrop).toBeVisible();
     await expect(page.locator('.settings-row.current')).toContainText('Resume');
-    await page.keyboard.press('KeyE');
-    await page.keyboard.press('KeyE');
+    const tabNow = page.locator('.settings-tabs [aria-selected=true]');
+    for (let n = 0; n < 6 && (await tabNow.textContent()) !== 'Video'; n++) await page.keyboard.press('KeyE');
+    await expect(tabNow).toHaveText('Video');
     const fov = page.locator('.settings-row', { hasText: 'Field of view' });
     while (!(await fov.evaluate((e) => e.classList.contains('current')))) await page.keyboard.press('ArrowDown');
     await page.keyboard.press('ArrowRight');
@@ -274,7 +277,164 @@ test('settings menu: mouse, keyboard and gamepad reach every setting, and it is 
     expect(problems).toEqual([]);
 });
 
-test('UI boxes never overlap: portrait phone, portrait tablet, desktop and landscape phone', async ({ page }) => {
+test('remappable controls: rebind a key and a pad button in Settings; they work and are saved', async ({ page }) => {
+    test.setTimeout(600_000); // two boots of the game page
+    await page.addInitScript(() => {
+        const buttons = Array.from({ length: 17 }, () => ({ pressed: false, touched: false, value: 0 }));
+        const pad = { index: 0, id: 'test pad', connected: true, mapping: 'standard', axes: [0, 0, 0, 0], buttons };
+        (window as unknown as { __pad: typeof pad }).__pad = pad;
+        navigator.getGamepads = () => [pad as unknown as Gamepad];
+    });
+    const problems = await boot(page, '?level=yard&t=1&quality=low#cell100');
+    await lab(page, (l) => l.action('pause'));
+    const frames = () =>
+        page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+    const setButton = (i: number, v: boolean) =>
+        page.evaluate(
+            ([i, v]) => {
+                (window as unknown as { __pad: { buttons: { pressed: boolean; value: number }[] } }).__pad.buttons[
+                    i
+                ].pressed = v;
+            },
+            [i, v] as [number, boolean]
+        );
+    const press = async (b: number) => {
+        await setButton(b, true);
+        await frames();
+        await setButton(b, false);
+        await frames();
+    };
+    const eyeY = () =>
+        page.evaluate(
+            () =>
+                (
+                    window as unknown as { __riverLab: { entities(): Record<string, { y: number }> } }
+                ).__riverLab.entities().player.y
+        );
+    const backdrop = page.locator('.settings-backdrop');
+    await page.locator('.settings-chip').click();
+    await page.locator('.settings-tabs button', { hasText: 'Keys' }).click();
+    // Jump's first slot: press it, then F
+    const jump = page.locator('.settings-row', { hasText: 'Jump' });
+    await jump.locator('.settings-bind').first().click();
+    await expect(jump.locator('.settings-bind').first()).toHaveText('Press a key…');
+    await page.keyboard.press('KeyF');
+    await expect(jump.locator('.settings-bind').first()).toHaveText('F');
+    // W onto Jump's second slot: taken off Move forward, and the menu says so
+    await jump.locator('.settings-bind').nth(1).click();
+    await page.keyboard.press('KeyW');
+    await expect(jump.locator('.settings-bind').nth(1)).toHaveText('W');
+    await expect(page.locator('.settings-status')).toContainText('W was Move forward');
+    await expect(
+        page.locator('.settings-row', { hasText: 'Move forward' }).locator('.settings-bind').first()
+    ).toHaveText('—');
+    // Esc cancels a capture without closing the menu; Backspace clears a slot
+    await jump.locator('.settings-bind').nth(1).click();
+    await page.keyboard.press('Escape');
+    await expect(backdrop).toBeVisible();
+    await expect(jump.locator('.settings-bind').nth(1)).toHaveText('W');
+    await jump.locator('.settings-bind').nth(1).click();
+    await page.keyboard.press('Backspace');
+    await expect(jump.locator('.settings-bind').nth(1)).toHaveText('—');
+    // the pad's Jump: A on it (pad navigation), then X
+    await page.locator('.settings-tabs button', { hasText: 'Pad' }).click();
+    const padJump = page.locator('.settings-row', { hasText: 'Jump' });
+    await padJump.locator('.settings-bind').first().focus();
+    await press(0);
+    await expect(padJump.locator('.settings-bind').first()).toHaveText('Press a button…');
+    await press(2);
+    await expect(padJump.locator('.settings-bind').first()).toHaveText('X');
+    await expect(page.locator('.settings-status')).toContainText('X was Launch the ragdoll');
+    await page.keyboard.press('Escape');
+    await expect(backdrop).toBeHidden();
+
+    // in the game: F jumps, Space does not any more; the hint says F (keys go to the page, not the
+    // Settings button the menu handed focus back to)
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await expect(page.locator('#hud-help')).toContainText('F jump');
+    const ground = await eyeY();
+    await page.keyboard.press('Space');
+    for (let n = 0; n < 10; n++) await frames();
+    expect(Math.abs((await eyeY()) - ground)).toBeLessThan(0.05);
+    let top = ground;
+    await page.keyboard.down('KeyF');
+    for (let n = 0; n < 20 && top < ground + 0.2; n++) {
+        await frames();
+        top = Math.max(top, await eyeY());
+    }
+    await page.keyboard.up('KeyF');
+    expect(top).toBeGreaterThan(ground + 0.2);
+
+    // saved: a reload keeps them; reset puts the defaults back
+    await page.reload();
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab?: { ready?: boolean } }).__riverLab?.ready === true,
+        null,
+        { timeout: 150_000 }
+    );
+    // the reload seeks and pauses again (?t=): run live, as before it
+    if (await lab(page, (l) => (l as unknown as { paused(): boolean }).paused()))
+        await lab(page, (l) => l.action('pause'));
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('uncivil.bindings') ?? '{}'));
+    expect(saved.keys.jump).toEqual(['KeyF', '']);
+    expect(saved.keys.forward).toEqual(['', 'ArrowUp']);
+    expect(saved.pad.jump).toEqual([2, -1]);
+    await page.locator('.settings-chip').click();
+    await page.locator('.settings-tabs button', { hasText: 'Keys' }).click();
+    await expect(jump.locator('.settings-bind').first()).toHaveText('F');
+    const stored = () => page.evaluate(() => localStorage.getItem('uncivil.bindings'));
+    const mode = () =>
+        page.evaluate(() => (window as unknown as { __riverLab: { state: { mode: string } } }).__riverLab.state.mode);
+
+    // a bound key beats the game's hotkey: V on Jump jumps instead of switching to the orbit view,
+    // and the hint stops offering "V orbit"
+    await jump.locator('.settings-bind').nth(1).click();
+    await page.keyboard.press('KeyV');
+    await expect(jump.locator('.settings-bind').nth(1)).toHaveText('V');
+    await page.keyboard.press('Escape');
+    await expect(backdrop).toBeHidden();
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await expect(page.locator('#hud-help')).not.toContainText('orbit');
+    const ground2 = await eyeY();
+    let top2 = ground2;
+    await page.keyboard.down('KeyV');
+    for (let n = 0; n < 20 && top2 < ground2 + 0.2; n++) {
+        await frames();
+        top2 = Math.max(top2, await eyeY());
+    }
+    await page.keyboard.up('KeyV');
+    expect(top2).toBeGreaterThan(ground2 + 0.2);
+    expect(await mode()).toBe('firstPerson');
+
+    // Reset keys: the keys come back (V orbits again), the pad keeps its change
+    await page.locator('.settings-chip').click();
+    await page.locator('.settings-tabs button', { hasText: 'Keys' }).click();
+    await page.locator('.settings-row button', { hasText: 'Reset keys to defaults' }).click();
+    await expect(jump.locator('.settings-bind').first()).toHaveText('Space');
+    expect(JSON.parse((await stored())!)).toEqual({ pad: { jump: [2, -1], ragdoll: [-1, -1] } });
+    await expect(page.locator('#hud-help')).toContainText('V orbit');
+    // Reset gamepad buttons: the pad's too; nothing left stored
+    await page.locator('.settings-tabs button', { hasText: 'Pad' }).click();
+    await page.locator('.settings-row button', { hasText: 'Reset gamepad buttons to defaults' }).click();
+    await expect(padJump.locator('.settings-bind').first()).toHaveText('A');
+    expect(await stored()).toBeNull();
+    // Reset all settings resets the bindings as well
+    await page.locator('.settings-tabs button', { hasText: 'Keys' }).click();
+    await jump.locator('.settings-bind').first().click();
+    await page.keyboard.press('KeyF');
+    await expect(jump.locator('.settings-bind').first()).toHaveText('F');
+    expect(await stored()).not.toBeNull();
+    await page.locator('.settings-tabs button', { hasText: 'Interface' }).click();
+    await page.locator('.settings-row button', { hasText: 'Reset all settings' }).click();
+    expect(await stored()).toBeNull();
+    await page.locator('.settings-tabs button', { hasText: 'Keys' }).click();
+    await expect(jump.locator('.settings-bind').first()).toHaveText('Space');
+    expect(problems).toEqual([]);
+});
+
+test('UI boxes never overlap: small and large portrait phones, portrait tablet, desktop and landscape phone', async ({
+    page
+}) => {
     const problems = await boot(page, '?level=yard&t=4&debug&quality=low#cell100');
     type Rect = { l: number; t: number; r: number; b: number };
     const rects = () =>
@@ -309,6 +469,7 @@ test('UI boxes never overlap: portrait phone, portrait tablet, desktop and lands
         return r;
     };
     for (const [w, h] of [
+        [360, 740],
         [390, 844],
         [768, 1408],
         [1280, 720],
@@ -329,6 +490,41 @@ test('UI boxes never overlap: portrait phone, portrait tablet, desktop and lands
             await assertLayout(`${w}x${h} panel closed`, w, h);
         }).toPass({ timeout: 20_000 });
     }
+    // the settings menu at 360 px: the Keys section's rows stay inside the dialog, and the six section
+    // tabs scroll with the current one fully in view
+    await page.setViewportSize({ width: 360, height: 740 });
+    await page.locator('.settings-chip').click();
+    await page.locator('.settings-tabs button', { hasText: 'Keys' }).click();
+    await expect(async () => {
+        const fit = await page.evaluate(() => {
+            const d = document.querySelector('.settings')!.getBoundingClientRect();
+            const bar = document.querySelector('.settings-tabs')!.getBoundingClientRect();
+            const sel = document.querySelector('.settings-tabs [aria-selected=true]')!.getBoundingClientRect();
+            const out = [...document.querySelectorAll('.settings-panel *')].filter((e) => {
+                const b = e.getBoundingClientRect();
+                return b.width > 0 && (b.left < d.left - 0.5 || b.right > d.right + 0.5);
+            }).length;
+            return {
+                out,
+                selIn: sel.left >= bar.left - 0.5 && sel.right <= bar.right + 0.5,
+                page: document.documentElement.scrollWidth
+            };
+        });
+        expect(fit.out).toBe(0);
+        expect(fit.selIn).toBe(true);
+        expect(fit.page).toBeLessThanOrEqual(360);
+    }).toPass({ timeout: 20_000 });
+    for (const t of ['Interface', 'Game']) {
+        await page.locator('.settings-tabs button', { hasText: t }).click();
+        const inView = await page.evaluate(() => {
+            const bar = document.querySelector('.settings-tabs')!.getBoundingClientRect();
+            const sel = document.querySelector('.settings-tabs [aria-selected=true]')!.getBoundingClientRect();
+            return sel.left >= bar.left - 0.5 && sel.right <= bar.right + 0.5;
+        });
+        expect(inView, `${t} tab in view`).toBe(true);
+    }
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.settings-backdrop')).toBeHidden();
     // narrow screens get >= 40 px touch targets
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator('.debug-chip').click();
