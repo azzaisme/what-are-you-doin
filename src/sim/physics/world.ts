@@ -249,7 +249,10 @@ export class PhysicsWorld {
     shoulderDrop = 0.2;
     /** With a finite holdReach: the nearest the eye things in your hands come (m). */
     holdMin: number = GRAB.minHold;
-    /** The grab lets go when stretched beyond breakDistance (m) for breakTime (s), or at once beyond snapDistance (m). */
+    /**
+     * The grab lets go when stretched beyond breakDistance (m) for breakTime (s; carried between two,
+     * GRAB.breakTime), or at once beyond snapDistance (m).
+     */
     breakDistance: number = GRAB.breakDistance;
     breakTime: number = GRAB.breakTime;
     snapDistance: number = GRAB.snapDistance;
@@ -885,7 +888,10 @@ export class PhysicsWorld {
         s.maxHeldSpeed = Math.max(s.maxHeldSpeed, Math.hypot(lv.x, lv.y, lv.z));
         // snagged or too heavy to follow: let go rather than build up energy
         r.stretchTime = f.error > this.breakDistance ? r.stretchTime + SIM_DT : 0;
-        if (r.stretchTime > this.breakTime || f.error > this.snapDistance) {
+        // alone, the body's own time (a beaver's paws give out sooner); carried between two, the
+        // other carrier steadies it
+        const breakTime = (this.holdCount.get(pb.id) ?? 1) > 1 ? GRAB.breakTime : this.breakTime;
+        if (r.stretchTime > breakTime || f.error > this.snapDistance) {
             s.grabBreaks++;
             this.release(p);
         }
