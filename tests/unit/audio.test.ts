@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { soundBodies } from '../../src/audio/game-audio.ts';
 import { HOLD_FADE, HeldLoops } from '../../src/audio/held-loops.ts';
@@ -8,6 +8,9 @@ import { LOOPS, SOUND_NAMES, SYNTH_RATE, synthesize } from '../../src/audio/synt
 import type { SoundName, SynthSound } from '../../src/audio/synth.ts';
 import { timberYardLevel } from '../../src/levels/timber-yard.ts';
 import { valleyLevel } from '../../src/levels/valley.ts';
+
+// a test that installs an sfx sink never leaves it installed for later tests, even on a failure
+afterEach(() => sfx.setSink(null));
 
 /** Each sound synthesized once for all the tests here (about 0.2 s in all). */
 const cache = new Map<SoundName, SynthSound>();

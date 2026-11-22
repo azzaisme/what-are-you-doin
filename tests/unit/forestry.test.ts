@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { SAW_MODE, TREE_CUT, TREE_STATE } from '../../src/assets/forestry.ts';
 import { LOG_RADIUS } from '../../src/assets/props.ts';
@@ -699,6 +699,9 @@ describe('voxels: a felled tree leaves the static world, a regrown one comes bac
 });
 
 describe('wood effects', () => {
+    // the sound test installs a sink: never leave it installed for later tests, even on a failure
+    afterEach(() => sfx.setSink(null));
+
     it('chips fly at every bite, needles burst when the crown breaks off, sawdust while it saws (and their sounds)', () => {
         const heard: string[] = [];
         const held: number[] = [];
