@@ -180,7 +180,15 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
         fov: 52,
         nearClip: 0.05,
         farClip: 600,
-        layers: [worldLayer.id, LAYERID_DEPTH, skyboxLayer.id, waterLayer.id, immediateLayer.id, viewLayers[0].id, uiLayer.id]
+        layers: [
+            worldLayer.id,
+            LAYERID_DEPTH,
+            skyboxLayer.id,
+            waterLayer.id,
+            immediateLayer.id,
+            viewLayers[0].id,
+            uiLayer.id
+        ]
     });
     app.root.addChild(camera);
 
@@ -279,7 +287,15 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
         fov: 52,
         nearClip: 0.05,
         farClip: 600,
-        layers: [worldLayer.id, LAYERID_DEPTH, skyboxLayer.id, waterLayer.id, immediateLayer.id, viewLayers[1].id, uiLayer.id]
+        layers: [
+            worldLayer.id,
+            LAYERID_DEPTH,
+            skyboxLayer.id,
+            waterLayer.id,
+            immediateLayer.id,
+            viewLayers[1].id,
+            uiLayer.id
+        ]
     });
     camera2.enabled = false;
     app.root.addChild(camera2);

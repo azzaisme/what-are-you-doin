@@ -717,7 +717,8 @@ test("split screen: player 2's hammer aim shows player 2's nail outline in playe
         const d = g.getImageData(0, 0, c.width, c.height).data;
         const half = [0, 0];
         for (let i = 0; i < d.length; i += 4)
-            if (d[i + 1] > 200 && d[i + 1] - d[i] > 45 && d[i + 1] - d[i + 2] > 60) half[(i / 4 / c.width) * 2 < c.height ? 0 : 1]++;
+            if (d[i + 1] > 200 && d[i + 1] - d[i] > 45 && d[i + 1] - d[i + 2] > 60)
+                half[(i / 4 / c.width) * 2 < c.height ? 0 : 1]++;
         return half;
     }, shot);
     expect(green[0]).toBe(0);
