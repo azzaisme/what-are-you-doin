@@ -50,6 +50,7 @@ The bucket now carries water the game keeps track of. Carry it steadily and it s
 - **Water tanks:** a timber barrel with hoops up on a slim post, over everyone's heads, with a pipe down to an orange tap (`src/levels/water-butt.ts`). The post and the barrel are solid; the pipe and tap are not. The yard's tank stands in its north-west corner, away from the paths to the bridge, the logging stand and the sawmill.
 - **Pouring tips the bucket all the way:** the pour turns the bucket's mouth forward and down whichever way it faces, with the wrist sized for turning about the hand.
 - **Steadier bucket handling:** a hanging bucket's hand now moves at most 1.5 m/s relative to your eye.
+- **Remappable pour (with Epic 10's bindings):** pour is an action in Settings' controls, `pour` in `src/input/bindings.ts`, by default R and the pad's Y. The pad's plank toggle defaults to d-pad right, so Y is free for pour. Binding R to something else takes it off pour, and the prompts and the help line show whatever pour is bound to.
 - **Water sounds (with Epic 8's `sfx`):** water slopping or pouring over the rim makes a splash at the rim, at most about five a second, louder and deeper for a gush. Filling under a tap makes a soft, high trickle. Each device plays them from the bucket's litres in the snapshots, so guests hear them too. They reuse Epic 8's splash sounds; sounds made for water are left for Epic 8's part 2.
 - **Racing the flood:** with Epic 8's hazards on, finishing the Timber Yard's bridge sets off the flood. Both played yard deliveries (the yard's own, and the sixth bucket after five losses) still cross with the water ahead of the flood, and their tests now check that the siren went off.
     - So a flick of the view swings the bucket round instead of whipping it.
@@ -77,7 +78,7 @@ The bucket now carries water the game keeps track of. Carry it steadily and it s
 | Online: a guest picks up and pours the bucket                      | the host drains it; the guest's HUD and own snapshots show the host's litres                                                                                                           |
 | Droplets during a 3 s spill and a fill                             | within the particle pool's limit; all gone within a second after it stops                                                                                                              |
 
-- Unit tests: 520 runs pass (every test runs at both the 5 cm and the 10 cm voxel size). The played tests are in `tests/unit/water-play.test.ts`.
+- Unit tests: 540 runs pass (every test runs at both the 5 cm and the 10 cm voxel size). The played tests are in `tests/unit/water-play.test.ts`.
 - Browser tests pass: the Timber Yard objective and delivery, the Valley stages, online co-op in the Valley (the guest's HUD shows the host's litres), and UI boxes don't overlap.
 
 ### Changed on purpose
@@ -93,6 +94,73 @@ The bucket now carries water the game keeps track of. Carry it steadily and it s
 - **Hurrying spills.** Carried at a full walk down the yard's bank to the bridge, a full bucket lost about 2.5 L in a test; at half pace, none.
 - **Tuned by feel.** The water's damping is set well above real water's so a swinging carry doesn't build up waves. Owner playtesting should set how forgiving it is: the thresholds are in `WATER` in `src/sim/water.ts`.
 - **Not tried on a real phone.** The Pour touch button only appears while you hold the bucket.
+
+## Remappable controls (2026-11-22, Epic 10)
+
+You can now choose your own keys, mouse buttons and gamepad buttons. Settings has two new
+sections: **Keys** and **Pad**.
+
+### How to use it
+
+- Open Settings (Esc, the ⚙ button, or Start on a pad), go to **Keys** or **Pad**.
+- Each action has two slots. Press a slot, then the key, mouse button, wheel turn or pad button you
+  want there.
+    - **Esc** cancels (Start on a pad). **Backspace** or **Delete** empties the slot.
+    - A key does one thing: put W on Jump and it comes off Move forward. The menu says so ("W was
+      Move forward: that is now unbound there").
+- **Reset keys to defaults** and **Reset gamepad buttons to defaults** put each set back.
+  **Reset all settings** (Interface) resets them too.
+- Saved per browser (only what you changed), so a later change to the defaults still reaches you.
+- The control hints and prompts follow your keys: the hint reads "F jump" with jump on F, and the
+  prompt reads "E to grab …" with grab on E.
+
+### What can be remapped
+
+- **Keys:** move (4 directions), run, jump, grab / release / use, throw, drop, ragdoll, carry
+  plank, and hold further / closer.
+- **Pad:** the same, except moving and looking, which stay on the sticks. Their speed and
+  inversion are settings.
+- **Not remappable**, so you can always get back to the menu: Esc, Start, F3 (debug panel) and Tab.
+- A key bound to an action wins over the game's own hotkeys (V, P, C, L, H): bind V to jump and V
+  jumps. The hint then stops offering "V orbit".
+- Keys are by position on the keyboard (`KeyboardEvent.code`), so the defaults sit in the same
+  place on AZERTY or Dvorak keyboards.
+
+### Tests (actual)
+
+- Unit (`tests/unit/bindings.test.ts`, both voxel sizes):
+    - every default key and button does exactly one thing;
+    - rebinding takes a key off its old action and names it;
+    - Esc, F3, Tab and Start can't be bound;
+    - saving stores only changes and loads back exactly;
+    - junk, unknown actions, prototype keys and duplicate keys in storage are cleaned up;
+    - a remapped pad button does the action and its old button no longer does.
+- Browser test, rebinding in Settings:
+    - Jump goes to F, and W goes onto Jump (taken off Move forward, and the menu says so);
+    - Esc cancels a capture, Backspace clears a slot;
+    - a pad press puts X on the pad's Jump (taken off the ragdoll).
+    - In the game, F jumps and Space no longer does. The hint reads "F jump".
+    - After a reload both are still there, and Reset puts the keys back.
+- Unit (`tests/unit/prompts.test.ts`): prompts read as before with the defaults. They name a rebound
+  key or button the moment it changes ("R to grab the bucket", "RB to grab", "ZASD"). The axe
+  prompt says the rebound grab and drop ("F to chop the pine · X to put the axe down"). A hotkey's
+  hint disappears while its key is bound to an action.
+- Browser test, continued: V bound to Jump jumps and stays in first person, and the hint drops
+  "V orbit". Reset keys, Reset gamepad buttons and Reset all settings each clear what they cover.
+- UI layout test: now also at 360 × 740. With the Keys section open, nothing in it sticks out of
+  the dialog, and the current section tab is fully in view (also after switching to Interface and
+  back to Game).
+- The settings, UI-layout, first-person, Timber Yard, ute, split-screen and logging browser tests
+  pass.
+
+### Known limits
+
+- **On a phone the six Settings sections don't all fit:** the section row scrolls sideways and
+  keeps the current section in view.
+- **Touch controls aren't remappable.** The on-screen buttons stay where they are.
+- **A pad joins with A**, whatever A is bound to (the joining press is not also an action).
+- **Analogue triggers count from part way down** (40 %). Bound to an action, they press it like a
+  button.
 
 ## Epic 8: the world fights back, sound, and a playtest kit (2026-11-22)
 
@@ -504,7 +572,7 @@ The 2.8 cm is the straight line drawn between 20 Hz snapshots across a jump's ta
 the codec itself is good to 4 mm.
 
 Host cost per tick with everyone walking (`node scripts/bench-net-host.ts`, Node on this container's
-CPU; the budget is 16.7 ms). The host's published state peaked at 1,875 bytes in the Valley at 8.
+CPU; the budget is 16.7 ms). The host's published state peaked at 1,875–1,896 bytes in the Valley at 8 (two runs).
 
 | Level       | 1 player           | 4 players          | 8 players          | Snapshot at 8 |
 | ----------- | ------------------ | ------------------ | ------------------ | ------------- |
