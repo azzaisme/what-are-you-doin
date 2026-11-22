@@ -246,6 +246,8 @@ export class SettingsMenu {
             b.tabIndex = i === k ? 0 : -1;
         });
         this.panel.setAttribute('aria-labelledby', this.tabButtons[k].id);
+        // six sections can be wider than a phone: keep the current one in view
+        if (this.isOpen) this.tabButtons[k].scrollIntoView({ block: 'nearest', inline: 'nearest' });
         this.panel.replaceChildren();
         this.views = this.tabs[k].rows
             .filter((r) => this.host.shown?.(r.kind === 'button' ? r.id : r.key) ?? true)

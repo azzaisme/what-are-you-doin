@@ -49,6 +49,8 @@ sections: **Keys** and **Pad**.
 
 ### Known limits
 
+- **On a phone the six Settings sections don't all fit:** the section row scrolls sideways and
+  keeps the current section in view.
 - **Touch controls aren't remappable.** The on-screen buttons stay where they are.
 - **Analogue triggers count from part way down** (40 %). Bound to an action, they press it like a
   button.
