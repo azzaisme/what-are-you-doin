@@ -16,14 +16,19 @@
         - chock a downhill wheel: the cube against the front wheel, or a beam on its edge across the
           front tyres, holds it (asserted under 5 cm in 5 s with the handbrake off; measured 0 mm),
           against more than 3 m unchocked. A plank lying flat (0.1 m) is a step the wheel climbs: no
-          chock. The wheels are rays, so the game checks for a prop standing at least 0.13 m high
-          from under a tyre's centre to 0.4 m past its downhill face (out to the bumper).
+          chock. Chocks are a rule, not physics: the wheels are rays that would roll over a prop, so
+          the game checks for one standing at least 0.13 m high from under a tyre's centre to 0.4 m
+          past its downhill face (out to the bumper), and while it stands there the brake stays on.
+          Pull the chock out during the prank and the ute rolls (tested: more than 3 m in 4 s).
     - **Fixed on the way (an Epic 4 bug):** a parked ute with its handbrake on crept down a slope,
       2.5 cm a second on the far bank's road, because the wheel brake is a capped friction impulse
       that gravity wins back a little of every tick. Now a parked ute that is nearly still and
       standing on its wheels on fixed ground is held where it stands, gravity off while it holds,
-      until something moves it faster than 0.1 m/s. Tested: parked on that slope for 30 s it moves
-      under 2 cm (measured 0 mm). The ute's driving, braking, deck and platform tests pass unchanged;
+      until something moves it faster than 0.1 m/s. Any sideways push lets go of it for half a
+      second, so players can still shove a parked ute against its brake as before. Tested: parked
+      on that slope for 30 s it moves under 2 cm (measured 0 mm); two beavers pushing it on the flat
+      move it (measured 4.9 m in 3 s) and it holds again when they stop; a slow steady push of
+      3.5 m/s² still moves it (measured 5 cm in 2 s, where a lock that swallowed it gave 0). The ute's driving, braking, deck and platform tests pass unchanged;
       on a deck or beam that can move it rides along as before.
     - **Recovery:** if it ends up in the creek, the ute's usual recovery applies.
     - **Budget, tested:** one hazard at a time (no flood or gust during a prank, and no prank during

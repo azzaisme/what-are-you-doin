@@ -533,6 +533,48 @@ describe('hazard director: the handbrake prank (#75)', () => {
         expect(Math.hypot(p1.x - p0.x, p1.y - p0.y, p1.z - p0.z)).toBeLessThan(0.02);
     }, 60_000);
 
+    it('two beavers pushing a parked, braked ute on flat ground move it, and it holds again once they stop', () => {
+        const s = new LabSim({ level: timberYardLevel, hazards: false });
+        s.runTo(90);
+        s.fpActive = true;
+        s.setSlotActive(1, true);
+        const u = s.ute.pose;
+        // side by side behind its tailgate, facing it (forward is (-sin yaw, -cos yaw))
+        const spots = [-0.4, 0.4].map((lx) => composePose(u, pose(lx, 0, -1.84 - 1.2), pose()).p);
+        spots.forEach((p, i) => s.placePlayer(p.x, p.z, 0, i));
+        const yaws = spots.map((p) => Math.atan2(-(u.p.x - p.x), -(u.p.z - p.z)));
+        const both = (moveZ: number, k: number) => {
+            for (let i = 0; i < k; i++)
+                s.step(cmd(s.tick, { yaw: yaws[0], moveZ }), cmd(s.tick, { yaw: yaws[1], moveZ }));
+        };
+        both(0, 30);
+        expect(s.vehicle!.parkLocked).toBe(true);
+        const p0 = { ...s.ute.pose.p };
+        both(1, 180);
+        expect(Math.hypot(s.ute.pose.p.x - p0.x, s.ute.pose.p.z - p0.z)).toBeGreaterThan(1);
+        // they step back and stand: it holds again, locked
+        both(-1, 60);
+        both(0, 60);
+        const p1 = { ...s.ute.pose.p };
+        both(0, S(5));
+        expect(s.vehicle!.parkLocked).toBe(true);
+        expect(Math.hypot(s.ute.pose.p.x - p1.x, s.ute.pose.p.z - p1.z)).toBeLessThan(0.02);
+    }, 60_000);
+
+    it('a slow, steady push still moves a parked ute (the parking lock lets go; the brake resists)', () => {
+        const s = new LabSim({ level: timberYardLevel, hazards: false });
+        s.runTo(120);
+        expect(s.vehicle!.parkLocked).toBe(true);
+        const b = s.vehicle!.pb.body;
+        const p0 = { ...s.ute.pose.p };
+        // 3.5 m/s^2 (about 2.7 kN): a lock that swallowed every push under 0.1 m/s a tick held it still
+        for (let i = 0; i < 120; i++) {
+            b.applyImpulse({ x: (b.mass() * 3.5) / 60, y: 0, z: 0 }, true);
+            s.step(cmd(s.tick));
+        }
+        expect(Math.hypot(s.ute.pose.p.x - p0.x, s.ute.pose.p.z - p0.z)).toBeGreaterThan(0.02);
+    }, 60_000);
+
     it('counterplay: parked on the flat yard, nothing happens', () => {
         const s = yard();
         s.runTo(S(HAZARD.graceS + H.parkedS + 20));
@@ -590,6 +632,23 @@ describe('hazard director: the handbrake prank (#75)', () => {
         const r = chocked((s) => placeByUte(s, 'beam-0', 0, 0.12, TYRE + 0.1));
         expect(r.held).toBe(true);
         expect(Math.abs(r.moved)).toBeLessThan(0.05);
+    }, 60_000);
+
+    it('a chock pulled out during the prank: the ute rolls away', () => {
+        const s = yard();
+        parkOnRoad(s);
+        s.runTo(settle() - 60);
+        placeByUte(s, 'cube', 0.68, 0.28, 1.84 + 0.28);
+        runUntil(s, () => s.hazards.brakePhase === PHASE.active, S(30));
+        s.runTo(s.tick + S(1));
+        expect(s.hazards.chocked).toBe(true);
+        const z0 = s.ute.pose.p.z;
+        // someone takes the cube away
+        s.physics.place(byName(s, 'cube').id, pose(-8.4, YARD_Y + 0.26, 7.6));
+        s.runTo(s.tick + S(4));
+        expect(s.hazards.chocked).toBe(false);
+        expect(s.hazards.handbrakeOff).toBe(true);
+        expect(s.ute.pose.p.z - z0).toBeGreaterThan(3);
     }, 60_000);
 
     it('a plank lying flat is no chock: the wheels roll over it', () => {

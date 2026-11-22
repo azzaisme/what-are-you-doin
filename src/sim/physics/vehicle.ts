@@ -43,6 +43,9 @@ export const UTE = {
     /** Braked and slower than this (m/s, rad/s), the parking lock holds it (holdParked). */
     parkSpeed: 0.1,
     parkSpin: 0.2,
+    /** A sideways change this big (m/s) in a tick while locked is a push: the lock lets go this long (ticks). */
+    pushed: 0.002,
+    pushRelease: 30,
     /** Front wheel lock (rad) at a standstill and at top speed; how fast it turns (rad/s). */
     steerMax: 0.55,
     steerAtTop: 0.2,
@@ -103,6 +106,8 @@ export class UteVehicle {
     readonly groundIds: number[] = [-1, -1, -1, -1];
     /** The parking lock held it this tick (holdParked). */
     parkLocked = false;
+    /** Ticks the parking lock stays off after a push (holdParked). */
+    private pushedTicks = 0;
 
     constructor(pw: PhysicsWorld, id: number, spawn: Pose) {
         this.pw = pw;
@@ -174,10 +179,12 @@ export class UteVehicle {
     }
 
     /**
-     * Is a wheel chocked against rolling downhill? True when a prop (not held, not the ute) stands
-     * against the downhill face of any tyre and rises at least CHOCK.minY above the ground there: a
-     * cube, a beam or plank on edge, a log. The wheels are rays, so a chock is never felt as a
-     * contact; this is the tyre meeting it. A plank lying flat (0.1 m) is a step a wheel climbs.
+     * Is a wheel chocked against rolling downhill? A rule, not a contact: the wheels are rays, which
+     * would roll up over a prop, so a chock is never felt by the tyres. Instead this asks whether a
+     * prop (not held, not the ute) stands against the downhill side of any tyre and rises at least
+     * CHOCK.minY above the ground there: a cube, a beam or plank on edge, a log. While it does, the
+     * handbrake prank leaves the brake on and the parking lock (holdParked) holds the ute. A plank
+     * lying flat (0.1 m) does not count.
      */
     chocked(): boolean {
         const body = this.pb.body;
@@ -264,9 +271,20 @@ export class UteVehicle {
      * it is held where it stands, as locked wheels on gripping ground would: no motion, no spin, and
      * no gravity while it holds (the ground takes the weight; an impulse can't cancel gravity here,
      * as Rapier moves the body by it before gravity takes it back). Anything that moves it faster
-     * than UTE.parkSpeed (a knock, a push, the ground going) breaks the lock.
+     * than UTE.parkSpeed (a knock, the ground going) breaks the lock, and so does any sideways push
+     * (players shoving it), for half a second at a time, so the wheel brake alone resists pushes as
+     * it did before.
      */
     private holdParked(v0: { x: number; y: number; z: number }): void {
+        // locked, nothing but an outside push or hit can have moved it since the last tick (no
+        // gravity, its own motion zeroed): a sideways push lets go for a moment, so players can
+        // still shove a parked ute against its brake as before, and it holds again once still
+        if (this.parkLocked && Math.hypot(v0.x, v0.z) > UTE.pushed) this.pushedTicks = UTE.pushRelease;
+        if (this.pushedTicks > 0) {
+            this.pushedTicks--;
+            this.releasePark();
+            return;
+        }
         const body = this.pb.body;
         const w = body.angvel();
         const c = this.ctrl;

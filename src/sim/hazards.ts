@@ -507,7 +507,9 @@ export class HazardDirector {
     /**
      * Left parked on a slope, the ute's handbrake clicks off (after a ratchet warning) and it rolls.
      * Park on the flat, chock a downhill wheel (a cube, a beam on edge, a log: not a flat plank), or
-     * get in (a driver ends it). It catches again after a while.
+     * get in (a driver ends it). It catches again after a while. A chock is a rule (UteVehicle.
+     * chocked): while one stands there the brake stays on and the parking lock holds the ute; the
+     * ray wheels would otherwise roll over it.
      */
     private stepHandbrake(h: HazardHost, b: HandbrakeSpec, tick: number): void {
         const H = HAZARD.handbrake;
