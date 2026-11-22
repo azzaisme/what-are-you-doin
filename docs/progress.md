@@ -1,5 +1,116 @@
 # Progress log
 
+## Route signs and distant landmarks in the Valley (2026-11-22, Epic 9, #16)
+
+### Route signs
+
+Each area from the Forest Road on starts with a route sign beside the road.
+
+- **What it shows:** the area's number in big pixel digits and an arrow for the way on, on a band
+  of the area's colour.
+    - The arrow bears left or right where the road bends ahead.
+    - The sign faces players coming up the road.
+    - They replace the plain coloured signposts.
+- **Readable at both voxel sizes:** one glyph pixel is 10 cm. The board stands square to the world
+  grid, snapped to 10 cm lines, so every pixel is whole cells at 5 cm and at 10 cm.
+- **The code:** `src/levels/route-signs.ts`. Other levels can use it.
+
+### Distant landmarks
+
+Each area now has a silhouette you can head for.
+
+- **New:**
+    - **Forest Road:** a fire lookout on the ridge. It is a timber cabin with a hi-vis band, on 11 m
+      braced legs, and it stands over the pines. You can see it from the Timber Yard.
+    - **Mountain Approach:** an 18 m radio mast, banded orange and white, with a dish and a hut.
+- **Already there:** the gorge's waterfall, the works' chimney and crane, and the summit flower.
+- **Far away:** every part is at least 42 cm thick, so it still shows in the coarse 40 cm far lattice.
+- **Trees** are kept off both landmarks.
+
+### Tests
+
+- `tests/unit/route-signs.test.ts`:
+    - voxelizes a sign facing each of the four ways, at 5 and 10 cm, and reads the digit and arrow
+      back cell by cell;
+    - checks the board's height and that the posts reach the ground;
+    - for each of the Valley's five signs, checks it reads its area's number, its arrow points
+      where the road bends, and it faces down the route and towards the road.
+- `tests/unit/landmarks.test.ts`:
+    - voxelizes every part of the lookout and the mast at the far lattice's 40 cm, and each writes
+      cells;
+    - checks no tree stands within 4.5 m of either;
+    - checks the sight line from the bucket stump to the lookout cabin clears the ground and every
+      tree's crown.
+- Unit tests: 342 pass.
+- The Valley's streaming tests pass with the new pieces, including "a tile builds the same whether
+  its neighbours are built or not".
+
+## The beavers are back (2026-11-22, Epic 9, #90)
+
+The tall people that stood in for the beavers are gone. Players, online avatars and the River
+Lab's walking co-worker are beaver engineers again.
+
+### What changed
+
+- **The switch:** `PLAYER_BODY` in `src/assets/player-body.ts` is `'beaver'` again. The person body
+  is still in the code and still passes every test, should you want it back.
+- **Things sit in the beaver's paws, out in front, where a person carried them.** When the people
+  came in they learned to carry things at arm's length, with both hands on the grip. The beaver now
+  does the same.
+    - Its arms are longer: 50 cm instead of 34. They hang to its knees.
+    - To reach out, it leans in: its shoulders come forward up to 45 cm.
+    - A held thing is carried 0.76 m from the eye looking ahead, 0.90 m looking a little down and
+      1.08 m looking well down. A person held things 0.9–1.05 m away.
+    - The arms aim from where the leaning shoulders are, so the paws land on the grip.
+    - In first person, the "ready" pose (paws up in the corners) is only for empty paws. While you
+      hold something, your paws are where everyone else sees them: on it.
+- **A sustained yank tears things out of its paws.** The beaver's reach is shorter (0.95 m with
+  the lean, a person's is 1.04 m). The grab lets go when what you hold stays more than 1.25 m from
+  your paws for 0.4 s (0.75 s for a person), or at once beyond 2.2 m, as before.
+    - A violent flick stretches it past 1.25 m for about 0.5 s, so it drops the plank again (the
+      original test, unchanged).
+    - A sudden turn stretches it for under 0.1 s, and carrying while walking stays under 0.45 m:
+      both keep hold.
+- **Your first-person limbs** still have their own 1 cm lane that follows the camera every frame.
+
+### Measured (`tests/unit/hands.test.ts`, now run for the beaver)
+
+- Plank looking straight, a little down and well down, the crate and the bucket: both paw tips
+  are within 4 cm of the grip's height and 3 cm of its depth, one either side of it. That holds in
+  your own view and as others see you. The test's limits are 10 cm and 8 cm.
+
+### What playing feels like now
+
+- **The Timber Yard bridge** plays as before: stop 0.35–0.6 m back from the bank, look down, let
+  go. The playthrough test is unchanged, with one exception.
+    - Getting onto the laid beams can take about 5 s, with either body. Their near ends rest 10 cm
+      past the edge of the abutment's stone cap. That leaves a 10 cm ledge, narrower than the
+      character controller's 12 cm minimum step width, so the cap (10 cm up) and the beams (20 cm
+      up) can't be stepped one after the other, and you crawl up.
+    - Measured: laid 10 cm further out, the slow part drops from 5.4 s to 0.9 s. Epic 5's approach
+      ramps can remove it.
+    - The test's walk allows for it (1,800 ticks instead of 900).
+- **Throwing the bucket over the creek** works from the near abutment, as before.
+- **Planks gripped off centre** tip about your paws, more the further out you grip them, while they
+  hang free.
+    - A 2.4 m plank held by its end hangs 2.2 m below your paws, further than a 1.4 m beaver can
+      lift it. So its far end comes to rest on the ground (at 35°; held 0.45 m out it hangs free
+      at 41°).
+    - The test checks it rests on the ground and never sinks in. A person holds it clear, as before.
+- **The ute:** look less far down at the door to get in (your eye is 1.22 m up, not 1.86 m). The
+  seats were already set for a sitting beaver.
+
+### Tests
+
+- Unit tests pass with the beaver, and with the person.
+- The flick, the G-plank distance (0.6 m), the bucket throw and the beam-laying stand-off are
+  back to their original numbers.
+- Two animation checks now compute what the arms should do from the body's reach, instead of the
+  old fixed 0.26 m and "exactly level".
+- The balance test lifts the plank as each body carries it. Its end case allows resting on the
+  ground, and checks nothing sinks into it.
+- Browser tests: see the PR.
+
 ## Epic 6: logging and the sawmill (2026-11-22)
 
 East of the Timber Yard there is now a logging stand: six pines with an orange band round the
