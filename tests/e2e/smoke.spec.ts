@@ -27,6 +27,7 @@ type Lab = {
     look(yaw: number, pitch: number): void;
     level: string;
     progress(): { goalReached: boolean; falls: number; recoveries: number; events: string[] };
+    water(): { volume: number; poured: number };
     placeProp(name: string, x: number, y: number, z: number, yaw?: number): boolean;
     interaction(): { holding: string | null; target: string | null; shared: boolean; driving: boolean; seat: number };
     teleport(x: number, z: number, yaw?: number): void;
@@ -626,7 +627,9 @@ test('level 1, the Timber Yard: starts in first person with the objective, and t
     expect(await lab(page, (l) => l.level)).toBe('yard');
     const st = await lab(page, (l) => l.state as unknown as { mode: string });
     expect(st.mode).toBe('firstPerson');
-    await expect(page.locator('#hud-objective')).toContainText('bucket across the creek');
+    await expect(page.locator('#hud-objective')).toContainText('bucket of water across the creek');
+    // the bucket starts full, and the HUD says so (Epic 7)
+    await expect(page.locator('#hud-water')).toContainText('10.0 L');
     const s = await lab(page, (l) => l.stats());
     // beaver, ute, bucket, six planks, two beams, three logs, the crate, the windsock, and logging:
     // the axe, the sawmill and the six stand markers (their cut band hidden until a tree is bitten)
@@ -644,6 +647,7 @@ test('level 1, the Timber Yard: starts in first person with the objective, and t
     );
     await expect(page.locator('#hud-objective')).toHaveClass(/done/);
     await expect(page.locator('.toast')).toContainText('delivered');
+    await expect(page.locator('.toast')).toContainText('L of water');
     expect(problems).toEqual([]);
 });
 
@@ -1256,6 +1260,9 @@ test("online co-op in the Valley: the guest streams its own world and follows th
         { timeout: 120_000 }
     );
     await expect(guest.locator('#hud-objective')).toContainText('2/7 Shallow Creek', { timeout: 60_000 });
+    // both devices show the host's water (Epic 7: the volume travels in the host state)
+    const hostLitres = (await lab(page, (l) => l.water())).volume.toFixed(1);
+    await expect(guest.locator('#hud-water')).toContainText(`${hostLitres} L`, { timeout: 30_000 });
     expect(await call(guest, '(l) => l.nearTiles()')).toBeGreaterThan(10);
     const gs = await guest.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.stats());
     expect(gs.voxel.rejected).toBe(0);

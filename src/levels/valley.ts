@@ -52,7 +52,16 @@ import type { RockSpot, TerrainSpec, TreeSpot } from './common.ts';
 import { STAND_CROWN_RADIUS, drawStandTree } from './forestry.ts';
 import type { ForestryDef } from './forestry.ts';
 import { pieceVolume } from './level.ts';
-import type { LevelBuildResult, LevelDef, LevelLayout, LevelStage, PropPlacement, Rect, StaticPiece } from './level.ts';
+import type {
+    LevelBuildResult,
+    LevelDef,
+    LevelLayout,
+    LevelStage,
+    PropPlacement,
+    Rect,
+    StaticPiece,
+    WaterSource
+} from './level.ts';
 import { routeSign } from './route-signs.ts';
 import { nearestPath } from './side-paths.ts';
 import type { SidePath } from './side-paths.ts';
@@ -65,6 +74,7 @@ import {
     YARD_Y,
     creekCenterZ,
     creekHalfWidth,
+    yardButt,
     yardHeight,
     YARD_FORESTRY,
     yardLayout,
@@ -73,6 +83,7 @@ import {
     yardSideMaterial,
     yardSurfaceMaterial
 } from './timber-yard.ts';
+import { waterButt } from './water-butt.ts';
 
 // ------------------------------------------------------------------------------- the route frame
 
@@ -746,6 +757,8 @@ function valleyPieces(): StaticPiece[] {
     }
     P.push(...signpost(192, -2.6, 6));
     P.push(...landmarkPieces());
+    // ---- water tanks (Epic 7): where the spare buckets of the works and the summit road wait
+    for (const b of valleyButts()) P.push(...b.pieces);
     return P;
 }
 
@@ -1150,6 +1163,26 @@ const bucketAt = (u: number, t: number) => {
 
 const stump = yardToWorld(BUCKET_STUMP.x, BUCKET_STUMP.z);
 
+/**
+ * Water butts beyond the yard (Epic 7), each filling a bucket standing on a stage's spare-bucket
+ * spot, its barrel to the side of the road (+t).
+ */
+function valleyButts(): ReturnType<typeof waterButt>[] {
+    const butt = (name: string, u: number, t: number, litres: number) => {
+        const w = routeToWorld(u, t);
+        return waterButt(name, w.x, w.z, groundUT(u, t), groundUT(u, t + 0.62), -Math.PI / 4, litres);
+    };
+    return [butt('works water tank', 96, 1.8, 30), butt('mountain spring butt', 175, roadT(175) + 0.8, 20)];
+}
+
+function valleySources(): WaterSource[] {
+    const y = yardButt().source;
+    const w = yardToWorld(y.x, y.z);
+    return [{ ...y, x: w.x, z: w.z }, ...valleyButts().map((b) => b.source)];
+}
+
+const summit = routeToWorld(SUMMIT_U, 0);
+
 export const VALLEY_STAGES: LevelStage[] = [
     {
         name: 'Timber Yard',
@@ -1195,10 +1228,11 @@ export const VALLEY_STAGES: LevelStage[] = [
     },
     {
         name: 'Flower Summit',
-        objective: 'Set the bucket down by the flower',
+        objective: 'Water the flower: hold the bucket inside the ring of stones and pour (R)',
         goal: square(SUMMIT_U, 0, 2.0),
         start: restart(175, roadT(175)),
-        bucket: bucketAt(175, roadT(175) + 0.8)
+        bucket: bucketAt(175, roadT(175) + 0.8),
+        flower: { x: summit.x, z: summit.z, r: 2.2 }
     }
 ];
 
@@ -1262,12 +1296,13 @@ export const valleyLevel: LevelDef = {
     props: valleyProps(),
     forestry: VALLEY_FORESTRY,
     rules: {
-        objective: 'Deliver the bucket to the flower on the summit',
+        objective: 'Bring water to the flower on the summit',
         goal: VALLEY_STAGES[VALLEY_STAGES.length - 1].goal,
         fallY: -0.2,
         isSafe,
         lostY: CREEK_WATER_Y + 0.15,
-        stages: VALLEY_STAGES
+        stages: VALLEY_STAGES,
+        waterSources: valleySources()
     },
     scriptedProps: false
 };

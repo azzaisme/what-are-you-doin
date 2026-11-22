@@ -92,6 +92,10 @@ export function interactionPrompt(
         pad ? { press: padVerb('grab'), drop: padVerb('drop') } : { press: keyVerb('grab'), drop: keyVerb('drop') }
     );
     if (w) return w;
+    if (it.holding === 'bucket')
+        return pad
+            ? `Holding the bucket${both} · ${padVerb('pour')} pour · ${padVerb('grab')} release · ${padVerb('throw')} throw`
+            : `Holding the bucket${both} · ${keyVerb('pour')} to pour (again to stop) · ${lower(keyVerb('grab'))} to release · ${lower(keyVerb('throw'))} to throw`;
     if (it.holding)
         return pad
             ? `Holding ${propLabel(it.holding)}${both} · ${padVerb('grab')} release · ${padVerb('throw')} throw · ${padVerb('drop')} drop`

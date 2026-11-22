@@ -84,6 +84,31 @@ export interface LevelStage {
     start: { x: number; z: number; yaw: number };
     /** Where a lost bucket comes back in this stage. */
     bucket: { x: number; y: number; z: number };
+    /** Epic 7: this stage is done by pouring water here (the flower), not by setting the bucket down. */
+    flower?: FlowerTarget;
+}
+
+/**
+ * A clean water source (Epic 7): an upright bucket whose mouth is inside this upright cylinder is
+ * filled from it, while the source has water. Placed on purpose, never the creek.
+ */
+export interface WaterSource {
+    name: string;
+    x: number;
+    z: number;
+    r: number;
+    /** The cylinder's bottom and height. */
+    y: number;
+    h: number;
+    /** Litres it holds (it runs dry). */
+    litres: number;
+}
+
+/** Where water poured counts as watering the flower: within `r` of (x, z), across the ground. */
+export interface FlowerTarget {
+    x: number;
+    z: number;
+    r: number;
 }
 
 export interface LevelRules {
@@ -101,6 +126,10 @@ export interface LevelRules {
     steps?: TutorialStep[];
     /** Journey stages, done in order (progress.step counts them); the last one's goal is `goal`. */
     stages?: LevelStage[];
+    /** Epic 7: the bucket only counts as delivered to `goal` with at least this much water (litres). */
+    minLitres?: number;
+    /** Epic 7: where the bucket can be refilled. */
+    waterSources?: WaterSource[];
 }
 
 export interface LevelDef {
