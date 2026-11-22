@@ -8,7 +8,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { timberYardLevel } from '../../src/levels/timber-yard.ts';
 import { VirtualClock, degradedTransport, parseConditions } from '../../src/net/netsim.ts';
 import type { NetConditions } from '../../src/net/netsim.ts';
-import { GuestSession, HOST_GRACE_MS, HostSession, NET_PROTOCOL } from '../../src/net/session.ts';
+import { GuestSession, HOST_GRACE_MS, HostSession, NET_PROTOCOL, listGames } from '../../src/net/session.ts';
 import type { GameAd } from '../../src/net/session.ts';
 import { MemoryHub } from '../../src/net/transport.ts';
 import type { NetTransport } from '../../src/net/transport.ts';
@@ -400,6 +400,22 @@ describe('reconnect', { timeout: 30_000 }, () => {
         g2.until(() => gs2.received > 0);
         g2.hs.stop();
         expect(gs2.hostGone).toBe(true);
+    });
+});
+
+describe('version compatibility', () => {
+    it('lists a game of another version as not joinable, and the host seats no guest of another version', async () => {
+        const g = await new Game(null).start();
+        const other = g.hub.channel('lobby', 'old-host');
+        other.setState({ game: { code: 'oldd', level: 'yard', players: 1, max: 4, v: NET_PROTOCOL - 1 } });
+        const games = listGames(g.hub.channel('lobby', 'watcher'));
+        expect(games.find((x) => x.code === 'abcd')?.compatible).toBe(true);
+        expect(games.find((x) => x.code === 'oldd')?.compatible).toBe(false);
+        const old = await g.hub.transport('old-guest').join('ue-abcd');
+        old.setState({ role: 'guest', v: NET_PROTOCOL - 1, in: {} });
+        g.run(10);
+        expect(g.hs.slots.has('old-guest')).toBe(false);
+        expect(g.sim.playerCount).toBe(1);
     });
 });
 

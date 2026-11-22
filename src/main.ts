@@ -26,7 +26,7 @@ import { LEVEL_MENU, getLevel } from './levels/index.ts';
 import { degradedTransport, parseConditions } from './net/netsim.ts';
 import type { P2PTransport } from './net/p2p.ts';
 import { forgetGame, gameToRejoin, rejoinToken, rememberGame } from './net/rejoin.ts';
-import { GuestSession, HostSession, listGames } from './net/session.ts';
+import { GuestSession, HostSession, NET_PROTOCOL, listGames } from './net/session.ts';
 import type { GameAd } from './net/session.ts';
 import { localTransport, roomTransport } from './net/transport.ts';
 import type { NetTransport } from './net/transport.ts';
@@ -1591,6 +1591,10 @@ async function hostOnline(): Promise<void> {
 
 async function joinOnline(ad: GameAd): Promise<void> {
     if (!transport || hostSession || guestSession) return;
+    if (ad.v !== NET_PROTOCOL) {
+        showToast('That game runs another version: reload both pages to play together', 'warn');
+        return;
+    }
     if (ad.level !== level.id && LEVEL_MENU.some((l) => l.id === ad.level)) {
         // the voxel world is built per level: reload into the host's level and join from there
         goToLevel(ad.level, { join: ad.code });

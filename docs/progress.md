@@ -24,6 +24,9 @@ purpose.
   giving up. When the host stops hosting on purpose, guests leave straight away.
 - **Round trip:** the Online panel shows each guest's round trip on the host, and your own on a
   guest.
+- **Another version:** a game hosted by another version of the game (protocol 2 is this one) is
+  listed as "another version of the game: reload both pages to play together", and can't be joined.
+  The host never seats a guest of another version.
 
 ### Testing on a bad network
 
@@ -54,7 +57,7 @@ Host cost per tick with everyone walking (Node, this container's CPU; the budget
 - Browser test: host and guest on `?netsim=150,100,0.1`. The round trip reads at least 250 ms, the
   guest reloads and comes back as player 2. The four online browser tests, split screen, the Timber
   Yard and the ute tests pass.
-- Unit tests: 342 pass.
+- Unit tests: 350 pass.
 
 ### Known limits
 

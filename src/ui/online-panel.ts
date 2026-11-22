@@ -4,7 +4,7 @@
  */
 
 import type { P2PStatus } from '../net/p2p.ts';
-import type { GameAd } from '../net/session.ts';
+import type { GameAd, ListedGame } from '../net/session.ts';
 
 export interface OnlinePanelHost {
     available(): 'room' | 'local' | 'p2p' | 'none';
@@ -12,7 +12,7 @@ export interface OnlinePanelHost {
     opened?(): void;
     /** Peer to peer: relay and lobby status, or null while starting. */
     p2pStatus?(): P2PStatus | null;
-    games(): (GameAd & { full: boolean })[];
+    games(): ListedGame[];
     level: string;
     status(): OnlineStatus;
     host(): Promise<void>;
@@ -160,9 +160,12 @@ export class OnlinePanel {
         for (const g of games) {
             const same = g.level === this.host.level;
             // a full game can still be joined, to watch until a place frees up
-            const label = `${g.full ? 'Watch' : 'Join'} ${g.code} · ${g.players}/${g.max}${same ? '' : ' (other level)'}${g.full ? ' · full' : ''}`;
+            // another version of the game can't be joined: say so (the older page needs a reload)
+            const label = g.compatible
+                ? `${g.full ? 'Watch' : 'Join'} ${g.code} · ${g.players}/${g.max}${same ? '' : ' (other level)'}${g.full ? ' · full' : ''}`
+                : `${g.code} · another version of the game: reload both pages to play together`;
             const b = button(label, () => void this.host.join(g).then(() => this.render()), 'online-game');
-            b.disabled = !same;
+            b.disabled = !same || !g.compatible;
         }
         if (avail === 'local') note('Local test mode: tabs of this browser only.', 'online-warn');
         if (avail === 'p2p') {

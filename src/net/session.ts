@@ -28,7 +28,8 @@ import type { LabSim } from '../sim/lab-sim.ts';
 import { SnapshotDecoder, encodeSnapshot, fromBase64Chunks, snapshotTick, toBase64Chunks } from './codec.ts';
 import type { NetChannel, NetPeer, NetTransport } from './transport.ts';
 
-export const NET_PROTOCOL = 1;
+/** Bump whenever host and guest builds stop understanding each other (2: eight player slots). */
+export const NET_PROTOCOL = 2;
 /** The host publishes a snapshot every this many ticks (20 Hz). */
 export const SNAPSHOT_EVERY = 3;
 /** Guests render this many ticks behind the newest snapshot (150 ms) to ride out jitter. */
@@ -107,8 +108,11 @@ export function makeCode(): string {
     return s;
 }
 
-export function listGames(lobby: NetChannel): (GameAd & { full: boolean })[] {
-    const out: (GameAd & { full: boolean })[] = [];
+/** A game in the lobby, as listed: full, and whether this build can join it (same protocol). */
+export type ListedGame = GameAd & { full: boolean; compatible: boolean };
+
+export function listGames(lobby: NetChannel): ListedGame[] {
+    const out: ListedGame[] = [];
     for (const p of lobby.peers()) {
         if (p.isMe) continue;
         const g = p.state.game as Partial<GameAd> | undefined;
@@ -121,7 +125,7 @@ export function listGames(lobby: NetChannel): (GameAd & { full: boolean })[] {
             max: num(g.max),
             v: num(g.v)
         };
-        out.push({ ...ad, full: ad.players >= ad.max });
+        out.push({ ...ad, full: ad.players >= ad.max, compatible: ad.v === NET_PROTOCOL });
     }
     return out;
 }
