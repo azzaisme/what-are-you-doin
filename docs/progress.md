@@ -56,7 +56,7 @@ The 2.8 cm is the straight line drawn between 20 Hz snapshots across a jump's ta
 the codec itself is good to 4 mm.
 
 Host cost per tick with everyone walking (`node scripts/bench-net-host.ts`, Node on this container's
-CPU; the budget is 16.7 ms). The host's published state peaked at 1,875 bytes in the Valley at 8.
+CPU; the budget is 16.7 ms). The host's published state peaked at 1,875–1,896 bytes in the Valley at 8 (two runs).
 
 | Level       | 1 player           | 4 players          | 8 players          | Snapshot at 8 |
 | ----------- | ------------------ | ------------------ | ------------------ | ------------- |
