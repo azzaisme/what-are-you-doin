@@ -38,6 +38,8 @@ export const DEFAULT_RELAYS = [
 ];
 /** Coalesce state sends to ~30 Hz, like the room's presence. */
 const SEND_INTERVAL_MS = 33;
+/** Per-peer connection handshake allowance (the library's default is 10 s). */
+const HANDSHAKE_TIMEOUT_MS = 30_000;
 
 export interface P2POptions {
     /** Relay URLs (wss://… or ws://… for tests); the library's public list when omitted. */
@@ -64,7 +66,15 @@ class P2PChannel implements NetChannel {
 
     constructor(config: JoinRoomConfig, name: string, onError?: (e: string) => void) {
         this.room = joinRoom(config, name, {
+            // a busy page (a phone, or two 3D pages on one machine) can take longer than the
+            // library's 10 s to answer the per-peer handshake; it then drops that attempt and retries
+            handshakeTimeoutMs: HANDSHAKE_TIMEOUT_MS,
             onJoinError: (d) => {
+                // a timed-out handshake is retried by the library: worth a note, not a warning
+                if (/timed out/.test(d.error)) {
+                    console.info('online:', d.error, '(retrying)');
+                    return;
+                }
                 console.warn('online:', d.error);
                 onError?.(d.error);
             }
