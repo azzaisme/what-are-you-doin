@@ -21,7 +21,7 @@ import { ANIM_MAX } from '../sim/snapshots.ts';
 import { pose } from '../voxels/math.ts';
 import type { SamplingPolicy } from '../voxels/rasterizer.ts';
 import { STATE_STRIDE } from '../workers/protocol.ts';
-import type { BuildInfo, FrameStats, FromWorker, ToWorker, UnitMesh } from '../workers/protocol.ts';
+import type { BuildInfo, FrameStats, FromWorker, TileReport, ToWorker, UnitMesh } from '../workers/protocol.ts';
 
 import type { VoxelRenderer } from './voxel-renderer.ts';
 
@@ -34,10 +34,15 @@ export interface LaneSpec {
     objects?: number[];
     /** Static world and particles (exactly one lane). */
     world: boolean;
+    /**
+     * The far lattice of a streamed level: the whole static world, coarse, except where the near
+     * world is built (each voxel frame tells it which near tiles are).
+     */
+    far?: boolean;
 }
 
 interface Lane extends LaneSpec {
-    inbox: { units: UnitMesh[]; stats: FrameStats } | null;
+    inbox: { units: UnitMesh[]; stats: FrameStats; tiles?: TileReport } | null;
     staticUnits: UnitMesh[] | null;
     build: BuildInfo | null;
 }
@@ -86,6 +91,20 @@ export class VoxelClient {
     uploadMs = 0;
     /** Particle cells for a voxel time (leaves, dust, splashes); optional. */
     particles: ((time: number) => { buffer: Float32Array; count: number }) | null = null;
+    /** Streamed levels: this device's camera positions (x, z pairs), sent with each voxel frame. */
+    focus: (() => Float32Array) | null = null;
+    /** Streamed levels: near tiles built (ti, tk keys) and their size (m). */
+    readonly nearTiles = new Set<number>();
+    nearTileSize = 0;
+    /** The same as ti, tk pairs, for the far lattice. */
+    private nearTileList: Int32Array | null = null;
+
+    private *nearTileArray(): Iterable<number> {
+        for (const k of this.nearTiles) {
+            yield Math.floor(k / 65536) - 32768;
+            yield (k % 65536) - 32768;
+        }
+    }
 
     readonly lanes: Lane[];
     private readonly sim: LabSim;
@@ -101,7 +120,8 @@ export class VoxelClient {
     private readonly anim = new Float64Array(ANIM_MAX);
 
     constructor(lanes: LaneSpec[], sim: LabSim) {
-        if (lanes.filter((l) => l.world).length !== 1) throw new Error('exactly one voxel lane holds the world');
+        if (lanes.filter((l) => l.world && !l.far).length !== 1)
+            throw new Error('exactly one voxel lane holds the world');
         this.lanes = lanes.map((l) => ({ ...l, inbox: null, staticUnits: null, build: null }));
         this.laneStats = lanes.map(() => null);
         this.sim = sim;
@@ -121,7 +141,23 @@ export class VoxelClient {
     }
 
     private get worldLane(): Lane {
-        return this.lanes.find((l) => l.world)!;
+        return this.lanes.find((l) => l.world && !l.far)!;
+    }
+
+    /** Lanes that take part in voxel frames (all of them). */
+    private get frameLanes(): Lane[] {
+        return this.lanes;
+    }
+
+    /** Is the near world built over the whole rectangle (m)? */
+    nearCovers(minX: number, maxX: number, minZ: number, maxZ: number): boolean {
+        const s = this.nearTileSize;
+        if (s <= 0) return false;
+        const e = 1e-6;
+        for (let tk = Math.floor((minZ + e) / s); tk <= Math.floor((maxZ - e) / s); tk++)
+            for (let ti = Math.floor((minX + e) / s); ti <= Math.floor((maxX - e) / s); ti++)
+                if (!this.nearTiles.has((ti + 32768) * 65536 + (tk + 32768))) return false;
+        return true;
     }
 
     /** Builds the static world (and each lane's objects); resolves once every lane is ready. */
@@ -131,7 +167,16 @@ export class VoxelClient {
             this.readyReject = reject;
             this.readyCount = 0;
             for (const l of this.lanes)
-                this.send(l, { type: 'init', cellCm: l.cellCm, seed, level, data, objects: l.objects, world: l.world });
+                this.send(l, {
+                    type: 'init',
+                    cellCm: l.cellCm,
+                    seed,
+                    level,
+                    data,
+                    objects: l.objects,
+                    world: l.world,
+                    far: l.far
+                });
         });
     }
 
@@ -157,14 +202,24 @@ export class VoxelClient {
 
     /** Applies a finished voxel frame once every lane has it. Returns true when meshes changed. */
     poll(): boolean {
-        if (!this.busy || this.lanes.some((l) => !l.inbox)) return false;
+        if (!this.busy || this.frameLanes.some((l) => !l.inbox)) return false;
         let uploadMs = 0;
+        let tilesChanged = false;
         this.lanes.forEach((l, i) => {
-            const r = l.inbox!;
+            const r = l.inbox;
+            if (!r) return;
             l.inbox = null;
             uploadMs += l.renderer.apply(r.units).uploadMs;
             this.laneStats[i] = r.stats;
+            if (r.tiles) {
+                this.nearTiles.clear();
+                this.nearTileSize = r.tiles.size;
+                const t = r.tiles.tiles;
+                for (let n = 0; n + 1 < t.length; n += 2) this.nearTiles.add((t[n] + 32768) * 65536 + (t[n + 1] + 32768));
+                tilesChanged = true;
+            }
         });
+        if (tilesChanged) this.nearTileList = Int32Array.from(this.nearTileArray());
         this.uploadMs = uploadMs;
         this.lastStats = this.combine();
         this.appliedFrame = this.lastStats.frame;
@@ -255,9 +310,11 @@ export class VoxelClient {
         }
         this.busy = true;
         const fx = this.particles?.(time);
-        for (const l of this.lanes) {
-            const st = l === this.lanes[this.lanes.length - 1] ? states : states.slice();
-            const particles = l.world && fx && fx.count > 0 ? fx.buffer.slice(0, fx.count * 4) : undefined;
+        const lanes = this.frameLanes;
+        const focus = this.focus?.();
+        for (const l of lanes) {
+            const st = l === lanes[lanes.length - 1] ? states : states.slice();
+            const particles = l.world && !l.far && fx && fx.count > 0 ? fx.buffer.slice(0, fx.count * 4) : undefined;
             const transfer: ArrayBuffer[] = [st.buffer as ArrayBuffer];
             if (particles) transfer.push(particles.buffer as ArrayBuffer);
             this.send(
@@ -270,7 +327,10 @@ export class VoxelClient {
                     reference: this.reference,
                     states: st,
                     particles,
-                    particleCount: particles ? fx!.count : 0
+                    particleCount: particles ? fx!.count : 0,
+                    focus: l.world && !l.far && focus ? focus.slice() : undefined,
+                    nearTiles: l.far && this.nearTileList ? this.nearTileList.slice() : undefined,
+                    nearTileSize: l.far ? this.nearTileSize : undefined
                 },
                 transfer
             );
@@ -286,11 +346,11 @@ export class VoxelClient {
             case 'ready':
                 lane.build = msg.build;
                 lane.staticUnits = msg.units;
-                if (lane.world) this.build = msg.build;
+                if (lane.world && !lane.far) this.build = msg.build;
                 if (++this.readyCount === this.lanes.length) this.readyResolve?.(this.build!);
                 break;
             case 'frame':
-                lane.inbox = { units: msg.units, stats: msg.stats };
+                lane.inbox = { units: msg.units, stats: msg.stats, tiles: msg.tiles };
                 break;
             case 'query': {
                 const q = this.queries.get(msg.id);

@@ -25,11 +25,11 @@ import { rasterizePieces } from './level.ts';
 import type { LevelBuildResult, LevelDef, LevelLayout, PropPlacement, StaticPiece } from './level.ts';
 
 export const YARD_BOUNDS = { minX: -28, maxX: 28, minZ: -42, maxZ: 14 };
-const CUT_BASE_Y = -2;
+export const CUT_BASE_Y = -2;
 
 /** Creek water surface; the bed lies about 0.6 m below, the banks 0.85 m above. */
 export const CREEK_WATER_Y = -0.45;
-const CREEK_BED_Y = -1.05;
+export const CREEK_BED_Y = -1.05;
 /** Yard pad height (a grid plane at both 5 and 10 cm cells). */
 export const YARD_Y = 0.4;
 const FAR_BANK_Y = 0.5;
@@ -49,7 +49,7 @@ const YARD = { minX: -15.5, maxX: 9, minZ: 1.6, maxZ: 12.5 };
 /** Summit of the ridge where the flower stands. */
 export const SUMMIT = { x: 3, z: -35 };
 
-function yardWeight(x: number, z: number): number {
+export function yardWeight(x: number, z: number): number {
     const m = 1.6;
     const wx = smoothstep(YARD.minX - m, YARD.minX, x) * (1 - smoothstep(YARD.maxX, YARD.maxX + m, x));
     const wz = smoothstep(YARD.minZ - 0.4, YARD.minZ + 0.6, z) * (1 - smoothstep(YARD.maxZ, YARD.maxZ + m, z));
@@ -113,7 +113,7 @@ export function yardSurfaceY(x: number, z: number): number {
     return (yardTopCell(x, z) + 1) * GRID_SIZE;
 }
 
-function surfaceMaterial(x: number, z: number, top: number): number {
+export function yardSurfaceMaterial(x: number, z: number, top: number): number {
     const y = (top + 1) * GRID_SIZE;
     const ad = Math.abs(z - creekCenterZ(x));
     const hw = creekHalfWidth(x);
@@ -139,7 +139,7 @@ function surfaceMaterial(x: number, z: number, top: number): number {
     return voxel(M.Grass, shade);
 }
 
-function sideMaterial(depthBelowTop: number, j: number, z: number): number {
+export function yardSideMaterial(depthBelowTop: number, j: number, z: number): number {
     const strata = hash3(Math.floor((j * GRID_SIZE) / 0.1), 0, 0, 5) & 3;
     if (z < -23) return depthBelowTop * GRID_SIZE <= 0.3 ? voxel(M.HillGrass, 1) : voxel(M.HillRock, strata & 1);
     if (depthBelowTop * GRID_SIZE <= 0.2) return voxel(M.Dirt, strata);
@@ -195,7 +195,7 @@ export const BRIDGE = (() => {
     };
 })();
 
-function yardPieces(): StaticPiece[] {
+export function yardPieces(): StaticPiece[] {
     const P: StaticPiece[] = [];
     const B = BRIDGE;
     // ---- the old crossing: two stone abutments, a snapped stringer, boards in the water
@@ -549,8 +549,8 @@ export function buildTimberYard(world: VoxelWorld, seed = 1): LevelBuildResult {
         maxZ: B.maxZ,
         cutBaseY: CUT_BASE_Y,
         topCell: yardTopCell,
-        surface: surfaceMaterial,
-        side: sideMaterial
+        surface: yardSurfaceMaterial,
+        side: yardSideMaterial
     });
     const layout = yardLayout(seed);
     let trees = 0;
@@ -600,7 +600,7 @@ const at = (x: number, y: number, z: number, yaw = 0, pitch = 0, roll = 0): Pose
 const FLAT = Math.PI / 2; // planks and beams lie on their wide face
 
 /** Where the yard's dynamic props start. */
-function yardProps(): PropPlacement[] {
+export function yardProps(): PropPlacement[] {
     const P: PropPlacement[] = [];
     // plank stack by the shed: six planks, long axis X, flat
     const plankNames = ['plank', 'extra-plank-0', 'extra-plank-1', 'extra-plank-2', 'extra-plank-3', 'extra-plank-4'];

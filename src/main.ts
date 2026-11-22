@@ -155,6 +155,20 @@ for (const tier of CELL_TIERS) {
         world: tier === 'base'
     });
 }
+// streamed levels (the Valley): a coarse far lattice holds the whole world, the base lane builds
+// only the tiles near this device's cameras
+if (level.stream)
+    lanes.push({
+        worker: new Worker(new URL('./workers/voxel-worker.ts', import.meta.url), {
+            type: 'module',
+            name: 'voxels-far'
+        }),
+        renderer: new VoxelRenderer(app, scene.worldLayer, level.stream.farCm / 100, true),
+        cellCm: level.stream.farCm,
+        objects: [],
+        world: true,
+        far: true
+    });
 const pipeline = new VoxelClient(lanes, sim);
 const build = await pipeline.init(1, level.id, level.data);
 setLoading('Uploading meshes…');
@@ -171,17 +185,11 @@ const watch = (name: string, bottom: number, timber: boolean) => {
     const e = sim.entities.find((x) => x.name === name);
     if (e) watched.push({ slot: e.slot, bottom, timber });
 };
-for (const n of [
-    'plank',
-    'held-plank',
-    'extra-plank-0',
-    'extra-plank-1',
-    'extra-plank-2',
-    'extra-plank-3',
-    'extra-plank-4'
-])
-    watch(n, 0.05, true);
-for (const n of ['beam-0', 'beam-1']) watch(n, 0.075, true);
+for (const e of sim.entities) {
+    if (e.name === 'plank' || e.name === 'held-plank' || e.name.startsWith('extra-plank')) watch(e.name, 0.05, true);
+    else if (e.name.startsWith('beam-')) watch(e.name, 0.075, true);
+    else if (e.name.startsWith('crate-')) watch(e.name, 0.25, true);
+}
 for (const n of ['log', 'extra-log-0', 'extra-log-1']) watch(n, 0.2, true);
 watch('cube', 0.25, true);
 watch('sphere', 0.3, false);
@@ -194,6 +202,22 @@ pipeline.particles = (time) => {
     fx.update(time, sim.ring, { x: cp.x, z: cp.z });
     return { buffer: fx.buffer, count: fx.count };
 };
+// streamed levels: the near world follows this device's cameras (both views in split screen)
+if (level.stream) {
+    const focus = new Float32Array(4);
+    pipeline.focus = () => {
+        const a = camera.getPosition();
+        focus[0] = a.x;
+        focus[1] = a.z;
+        if (state.players > 1) {
+            const b = scene.camera2.getPosition();
+            focus[2] = b.x;
+            focus[3] = b.z;
+            return focus;
+        }
+        return focus.subarray(0, 2);
+    };
+}
 const windNow = { x: 0, z: 0, speed: 0, gustiness: 0 };
 // gamepads (local co-op): the first pad to press A drives player 1, the next one joins as player 2
 const pads = new PadManager();
@@ -1112,6 +1136,17 @@ function updateObjective(): void {
         el.classList.toggle('done', done);
         return;
     }
+    const stages = r?.stages;
+    if (stages) {
+        // journeys: the stage being played, out of all of them
+        const k = guestSession ? guestSession.step : sim.progress.step;
+        const done = k >= stages.length;
+        el.textContent = done
+            ? '✓ The bucket reached the flower — the valley is yours'
+            : `${k + 1}/${stages.length} ${stages[k].name} · ${stages[k].objective}`;
+        el.classList.toggle('done', done);
+        return;
+    }
     const done = guestSession ? guestSession.goal : sim.progress.goalReached;
     el.textContent = r ? `${done ? '✓' : '○'} ${r.objective}` : '';
     el.classList.toggle('done', done);
@@ -2000,6 +2035,10 @@ window.__riverLab = {
     /** Merges fields into the next player command (grab / throw / move edges for tests). */
     input: (c: Record<string, unknown>) => fpInput.inject(c),
     player: () => ({ ...sim.player, holding: sim.physics.heldId, eyeHeight: EYE_HEIGHT }),
+    /** Puts player 1 somewhere (tests and screenshots of big levels). */
+    teleport: (x: number, z: number, yaw?: number) => sim.placePlayer(x, z, yaw ?? sim.player.yaw, 0),
+    /** Streamed levels: near tiles built so far. */
+    nearTiles: () => pipeline.nearTiles.size,
     level: level.id,
     progress: () => ({ ...sim.progress, events: sim.events.map((e) => e.kind), stepText: sim.stepText }),
     /** Places a named prop at a pose (tests and the evidence capture), as a teleport. */

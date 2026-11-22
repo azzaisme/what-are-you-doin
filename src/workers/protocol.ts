@@ -60,6 +60,14 @@ export interface FrameStats {
     particles: number;
 }
 
+/** Streamed levels: the near tiles built so far (sent when the set changes). */
+export interface TileReport {
+    /** Tile edge (m); tile (ti, tk) spans [ti * size, (ti + 1) * size) on x and the same on z. */
+    size: number;
+    /** ti, tk pairs. */
+    tiles: Int32Array;
+}
+
 export interface BuildInfo {
     cellCm: number;
     columns: number;
@@ -81,6 +89,8 @@ export type ToWorker =
           objects?: number[];
           /** Build the static world and draw particles (the base lattice only). Default true. */
           world?: boolean;
+          /** The far lattice of a streamed level: the whole static world, coarse, no objects. */
+          far?: boolean;
       }
     | {
           type: 'frame';
@@ -91,12 +101,17 @@ export type ToWorker =
           states: Float64Array;
           particles?: Float32Array;
           particleCount?: number;
+          /** Streamed levels: this device's camera positions (x, z pairs); the near world follows them. */
+          focus?: Float32Array;
+          /** The far lattice: the near tiles built (ti, tk pairs) and their size (m); it leaves them out. */
+          nearTiles?: Int32Array;
+          nearTileSize?: number;
       }
     | { type: 'query'; id: number; what: 'hash' | 'verify' };
 
 export type FromWorker =
     | { type: 'ready'; build: BuildInfo; units: UnitMesh[] }
-    | { type: 'frame'; units: UnitMesh[]; stats: FrameStats }
+    | { type: 'frame'; units: UnitMesh[]; stats: FrameStats; tiles?: TileReport }
     | { type: 'query'; id: number; result: unknown }
     | { type: 'error'; message: string };
 

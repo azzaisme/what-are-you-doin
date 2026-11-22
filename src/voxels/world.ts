@@ -26,6 +26,7 @@ import {
     CHUNK_VOLUME,
     GRID_SIZE,
     chunkCoordInRange,
+    chunkYInRange,
     localIndex,
     packChunkCoord
 } from './grid.ts';
@@ -103,19 +104,60 @@ export interface Bedrock {
     bottom: Int32Array;
 }
 
+/** A rectangle of cell columns (inclusive). */
+export interface ColumnRect {
+    i0: number;
+    i1: number;
+    k0: number;
+    k1: number;
+}
+
+const tileKey = (ti: number, tk: number) => (ti + 32768) * 65536 + (tk + 32768);
+
 export class VoxelWorld {
     private readonly byCoord = new Map<number, Chunk>();
+    /** Bedrock of a level built in one go. */
     bedrock: Bedrock | null = null;
+    /**
+     * Streamed levels: bedrock per tile of `tileCells` x `tileCells` columns (tile (ti, tk) covers
+     * columns ti * tileCells .. (ti + 1) * tileCells - 1), added and dropped with the tile.
+     */
+    readonly bedrockTiles = new Map<number, Bedrock>();
+    tileCells = 0;
+    /** When set, static writes outside these columns are ignored (building one tile). */
+    clip: ColumnRect | null = null;
+    /** Ids of released chunks, reused before new ones are made. */
+    private readonly freeIds: number[] = [];
+
+    /** The bedrock holding column (i, k), if any. */
+    bedrockAt(i: number, k: number): Bedrock | null {
+        const b = this.bedrock;
+        if (b) {
+            const x = i - b.minI;
+            const z = k - b.minK;
+            if (x >= 0 && z >= 0 && x < b.width && z < b.depth) return b;
+        }
+        if (this.tileCells === 0 || this.bedrockTiles.size === 0) return null;
+        const t = this.tileCells;
+        return this.bedrockTiles.get(tileKey(Math.floor(i / t), Math.floor(k / t))) ?? null;
+    }
 
     /** True when a cell lies inside the implicit bedrock. */
     isBedrock(i: number, j: number, k: number): boolean {
-        const b = this.bedrock;
+        const b = this.bedrockAt(i, k);
         if (!b) return false;
         const x = i - b.minI;
         const z = k - b.minK;
         if (x < 0 || z < 0 || x >= b.width || z >= b.depth) return false;
         return j < b.bottom[x + z * b.width];
     }
+
+    /** Registers the bedrock of one streamed tile. */
+    setTileBedrock(ti: number, tk: number, b: Bedrock | null): void {
+        if (b) this.bedrockTiles.set(tileKey(ti, tk), b);
+        else this.bedrockTiles.delete(tileKey(ti, tk));
+    }
+
     readonly chunks: Chunk[] = [];
     private readonly objects = new Map<number, DynamicEntry>();
     private order: DynamicEntry[] = [];
@@ -141,12 +183,18 @@ export class VoxelWorld {
         const key = packChunkCoord(cx, cy, cz);
         let c = this.byCoord.get(key);
         if (!c) {
-            if (!chunkCoordInRange(cx) || !chunkCoordInRange(cy) || !chunkCoordInRange(cz)) {
+            if (!chunkCoordInRange(cx) || !chunkYInRange(cy) || !chunkCoordInRange(cz)) {
                 throw new RangeError(`Chunk coordinate out of range: ${cx}, ${cy}, ${cz}`);
             }
-            if (this.chunks.length >= MAX_CHUNKS) throw new RangeError('Chunk budget exceeded');
-            c = new Chunk(this.chunks.length, cx, cy, cz);
-            this.chunks.push(c);
+            const free = this.freeIds.pop();
+            if (free !== undefined) {
+                c = new Chunk(free, cx, cy, cz);
+                this.chunks[free] = c;
+            } else {
+                if (this.chunks.length >= MAX_CHUNKS) throw new RangeError('Chunk budget exceeded');
+                c = new Chunk(this.chunks.length, cx, cy, cz);
+                this.chunks.push(c);
+            }
             this.byCoord.set(key, c);
         }
         return c;
@@ -158,8 +206,88 @@ export class VoxelWorld {
         return c.id * CHUNK_VOLUME + localIndex(i & CHUNK_MASK, j & CHUNK_MASK, k & CHUNK_MASK);
     }
 
+    /** Live chunks (released ones are not counted). */
     get chunkCount(): number {
-        return this.chunks.length;
+        return this.chunks.length - this.freeIds.length;
+    }
+
+    /**
+     * Drops the static layer of a rectangle of columns (a streamed tile leaving view). The chunks
+     * are marked static-dirty, so their regions re-mesh (empty when nothing is left). Chunks left
+     * with nothing in them are released later by `releaseEmpty` (after the empty meshes went out).
+     */
+    clearStaticColumns(r: ColumnRect): void {
+        const ci0 = r.i0 >> CHUNK_BITS;
+        const ci1 = r.i1 >> CHUNK_BITS;
+        const ck0 = r.k0 >> CHUNK_BITS;
+        const ck1 = r.k1 >> CHUNK_BITS;
+        for (const c of this.chunks) {
+            if (c.cx < ci0 - 1 || c.cx > ci1 + 1 || c.cz < ck0 - 1 || c.cz > ck1 + 1) continue;
+            // neighbours keep their meshes: their faces towards the cleared columns (on the edge of
+            // the near world, over the far lattice) are not worth re-meshing a whole region for
+            if (!c.stat || c.cx < ci0 || c.cx > ci1 || c.cz < ck0 || c.cz > ck1) continue;
+            // the part of this chunk inside the rectangle (all of it when the rectangle is aligned)
+            const x0 = Math.max(0, r.i0 - c.cx * CHUNK_SIZE);
+            const x1 = Math.min(CHUNK_SIZE - 1, r.i1 - c.cx * CHUNK_SIZE);
+            const z0 = Math.max(0, r.k0 - c.cz * CHUNK_SIZE);
+            const z1 = Math.min(CHUNK_SIZE - 1, r.k1 - c.cz * CHUNK_SIZE);
+            const whole = x0 === 0 && z0 === 0 && x1 === CHUNK_SIZE - 1 && z1 === CHUNK_SIZE - 1;
+            if (whole) {
+                c.stat = null;
+                c.statPrio = null;
+                c.staticCount = 0;
+            } else {
+                for (let ly = 0; ly < CHUNK_SIZE; ly++)
+                    for (let lz = z0; lz <= z1; lz++)
+                        for (let lx = x0; lx <= x1; lx++) {
+                            const li = localIndex(lx, ly, lz);
+                            if (c.stat[li] === 0) continue;
+                            if (c.dyn && c.dyn[li] !== 0) {
+                                c.overrideCount--;
+                                this.dynStaticOverlapCells--;
+                            }
+                            c.stat[li] = 0;
+                            c.staticCount--;
+                        }
+                if (c.staticCount === 0) {
+                    c.stat = null;
+                    c.statPrio = null;
+                }
+            }
+            if (whole && c.overrideCount) {
+                this.dynStaticOverlapCells -= c.overrideCount;
+                c.overrideCount = 0;
+            }
+            c.staticDirty = true;
+            c.dynDirty = true;
+        }
+    }
+
+    /** Marks the static chunks around a column rectangle for re-meshing (a tile arrived next door). */
+    touchAround(r: ColumnRect): void {
+        const ci0 = (r.i0 >> CHUNK_BITS) - 1;
+        const ci1 = (r.i1 >> CHUNK_BITS) + 1;
+        const ck0 = (r.k0 >> CHUNK_BITS) - 1;
+        const ck1 = (r.k1 >> CHUNK_BITS) + 1;
+        for (const c of this.chunks) {
+            if (!c.stat || c.cx < ci0 || c.cx > ci1 || c.cz < ck0 || c.cz > ck1) continue;
+            const inside = c.cx > ci0 && c.cx < ci1 && c.cz > ck0 && c.cz < ck1;
+            if (!inside) c.staticDirty = true;
+        }
+    }
+
+    /** Releases chunks that hold nothing and have no pending re-mesh; their ids are reused. */
+    releaseEmpty(): number {
+        let n = 0;
+        for (const c of this.chunks) {
+            if (c.stat || c.dynCount > 0 || c.staticDirty || c.dynDirty) continue;
+            if (this.byCoord.get(packChunkCoord(c.cx, c.cy, c.cz)) !== c) continue;
+            this.byCoord.delete(packChunkCoord(c.cx, c.cy, c.cz));
+            c.dyn = null;
+            this.freeIds.push(c.id);
+            n++;
+        }
+        return n;
     }
 
     // ------------------------------------------------------------------------------- static layer
@@ -170,6 +298,8 @@ export class VoxelWorld {
      */
     setStatic(i: number, j: number, k: number, value: number, priority = 0): void {
         if (value <= 0) return;
+        const clip = this.clip;
+        if (clip && (i < clip.i0 || i > clip.i1 || k < clip.k0 || k > clip.k1)) return;
         const c = this.getOrCreateChunk(i >> CHUNK_BITS, j >> CHUNK_BITS, k >> CHUNK_BITS);
         if (!c.stat) c.stat = new Uint16Array(CHUNK_VOLUME);
         if (!c.statPrio) c.statPrio = new Uint8Array(CHUNK_VOLUME);
@@ -200,7 +330,7 @@ export class VoxelWorld {
         stats: RasterStats
     ): void {
         this.staticSink.priority = priority;
-        rasterizeVolume(volume, worldPose, policy, priority, this.staticSink, stats);
+        rasterizeVolume(volume, worldPose, policy, priority, this.staticSink, stats, this.clip);
     }
 
     private readonly staticSink = {

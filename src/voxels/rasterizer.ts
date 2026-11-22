@@ -96,7 +96,8 @@ export function rasterizeVolume(
     policy: SamplingPolicy,
     priority: number,
     sink: CellSink,
-    stats: RasterStats
+    stats: RasterStats,
+    clip: { i0: number; i1: number; k0: number; k1: number } | null = null
 ): boolean {
     stats.parts++;
     if (!poseIsFinite(worldPose)) {
@@ -115,6 +116,14 @@ export function rasterizeVolume(
     ) {
         stats.rejected++;
         return false;
+    }
+    // only the columns being built (a streamed tile): the rest of the volume is skipped, not sampled
+    if (clip) {
+        _range.minI = Math.max(_range.minI, clip.i0);
+        _range.maxI = Math.min(_range.maxI, clip.i1);
+        _range.minK = Math.max(_range.minK, clip.k0);
+        _range.maxK = Math.min(_range.maxK, clip.k1);
+        if (_range.minI > _range.maxI || _range.minK > _range.maxK) return true;
     }
 
     const inv = _inv;

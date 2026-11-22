@@ -26,9 +26,11 @@ export const MAX_STRESS = 25;
 /** Players per world: local split screen and networked guests share these slots. */
 export const MAX_PLAYERS = 4;
 export const DUMMY_ID0 = 200;
-export const EXTRA_PLANKS = 5;
-export const EXTRA_BEAMS = 2;
+/** Extra prop pools, sized for the Valley (its seven areas each have their own timber or crates). */
+export const EXTRA_PLANKS = 12;
+export const EXTRA_BEAMS = 12;
 export const EXTRA_LOGS = 2;
+export const EXTRA_CRATES = 6;
 
 export interface SimEntity {
     /** Stable identity, also the voxel object id. */
@@ -116,6 +118,7 @@ export function createLabEntities(): LabEntities {
         extras.push(add(300 + n, `extra-plank-${n}`, plankAsset(`extra-plank-${n}`), 1));
     for (let n = 0; n < EXTRA_BEAMS; n++) extras.push(add(320 + n, `beam-${n}`, beamAsset(`beam-${n}`), 1));
     for (let n = 0; n < EXTRA_LOGS; n++) extras.push(add(340 + n, `extra-log-${n}`, logAsset(), 1));
+    for (let n = 0; n < EXTRA_CRATES; n++) extras.push(add(360 + n, `crate-${n}`, cubeAsset(0.5, M.Timber), 1));
     const windsock = add(950, 'windsock', windsockAsset(), 2);
     const avatars: SimEntity[] = [];
     for (let n = 0; n < MAX_PLAYERS; n++) avatars.push(add(910 + n, `avatar-${n}`, BODY.asset, 3));

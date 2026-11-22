@@ -31,9 +31,9 @@ export function clampCellSizeCm(cm: number): number {
     return Math.min(CELL_SIZE_MAX_CM, Math.max(CELL_SIZE_MIN_CM, Math.round(cm * 2) / 2));
 }
 
-/** Any lattice a voxel worker may run (per-item sizes: fine 1 cm up to coarse 20 cm). */
+/** Any lattice a voxel worker may run (per-item sizes: fine 1 cm up to coarse 20 cm; far 80 cm). */
 export const LATTICE_MIN_CM = 1;
-export const LATTICE_MAX_CM = 20;
+export const LATTICE_MAX_CM = 80;
 export function clampLatticeCm(cm: number): number {
     if (!Number.isFinite(cm)) return CELL_SIZE_DEFAULT_CM;
     return Math.min(LATTICE_MAX_CM, Math.max(LATTICE_MIN_CM, Math.round(cm * 2) / 2));
@@ -224,20 +224,29 @@ export function localIndex(lx: number, ly: number, lz: number): number {
 }
 
 /**
- * Chunk coordinates are packed into a small integer: 10 bits per axis (±512 chunks = ±819 m).
+ * Chunk coordinates are packed into a small integer: 11 bits for x and z (±1024 chunks: ±1,638 m
+ * at 10 cm, ±164 m on the 1 cm lattice) and 8 for y (±128 chunks: ±20 m at 1 cm, ±102 m at 5 cm).
  * Values stay below 2^30 so V8 keeps them as small integers (no heap numbers in hot maps).
  */
-export const CHUNK_COORD_BITS = 10;
+export const CHUNK_COORD_BITS = 11;
+export const CHUNK_Y_BITS = 8;
 export const CHUNK_COORD_OFFSET = 1 << (CHUNK_COORD_BITS - 1);
+export const CHUNK_Y_OFFSET = 1 << (CHUNK_Y_BITS - 1);
 export const CHUNK_COORD_LIMIT = CHUNK_COORD_OFFSET;
+export const CHUNK_Y_LIMIT = CHUNK_Y_OFFSET;
 
+/** Horizontal chunk coordinate (x or z) in range. */
 export function chunkCoordInRange(c: number): boolean {
     return c >= -CHUNK_COORD_LIMIT && c < CHUNK_COORD_LIMIT;
 }
 
+export function chunkYInRange(c: number): boolean {
+    return c >= -CHUNK_Y_LIMIT && c < CHUNK_Y_LIMIT;
+}
+
 export function packChunkCoord(cx: number, cy: number, cz: number): number {
     return (
-        (((cy + CHUNK_COORD_OFFSET) << (2 * CHUNK_COORD_BITS)) |
+        (((cy + CHUNK_Y_OFFSET) << (2 * CHUNK_COORD_BITS)) |
             ((cz + CHUNK_COORD_OFFSET) << CHUNK_COORD_BITS) |
             (cx + CHUNK_COORD_OFFSET)) >>>
         0
@@ -248,5 +257,5 @@ export function unpackChunkCoord(key: number, out: { x: number; y: number; z: nu
     const m = (1 << CHUNK_COORD_BITS) - 1;
     out.x = (key & m) - CHUNK_COORD_OFFSET;
     out.z = ((key >>> CHUNK_COORD_BITS) & m) - CHUNK_COORD_OFFSET;
-    out.y = ((key >>> (2 * CHUNK_COORD_BITS)) & m) - CHUNK_COORD_OFFSET;
+    out.y = ((key >>> (2 * CHUNK_COORD_BITS)) & ((1 << CHUNK_Y_BITS) - 1)) - CHUNK_Y_OFFSET;
 }

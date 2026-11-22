@@ -69,8 +69,8 @@ describe('grid coordinate contract (§5.1)', () => {
         for (const [x, y, z] of [
             [0, 0, 0],
             [-1, -1, -1],
-            [511, -512, 3],
-            [-512, 511, -200]
+            [1023, -128, 3],
+            [-1024, 127, -1000]
         ]) {
             const key = packChunkCoord(x, y, z);
             expect(key).toBeLessThan(2 ** 30);

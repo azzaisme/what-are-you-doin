@@ -144,7 +144,11 @@ export function meshRegion(
     const emit = _emit;
     const solid = _solid;
     const isStatic = mode === 'static';
-    const bedrock = world.bedrock;
+    // bedrock (implicit solid under the terrain shell): one level-wide rectangle, or one per
+    // streamed tile, looked up once per run of columns in the same tile
+    const tileCells = world.tileCells;
+    const tiled = world.bedrockTiles.size > 0 && tileCells > 0;
+    const anyBedrock = world.bedrock !== null || tiled;
 
     // ---- fill padded occupancy, one chunk lookup per run of cells in the same chunk.
     // Per-slice emit counts let the face pass skip slices with nothing to emit.
@@ -168,6 +172,8 @@ export function meshRegion(
             let curCx = 0x7fffffff;
             let stat: Uint16Array | null = null;
             let dyn: Uint16Array | null = null;
+            let curTile = 0x7fffffff;
+            let bedrock = world.bedrock;
             for (let x = 0; x < PX; x++, base++) {
                 const i = minI - 1 + x;
                 const cx = i >> CHUNK_BITS;
@@ -188,6 +194,15 @@ export function meshRegion(
                 } else {
                     e = d;
                     sol = s !== 0 || d !== 0 ? 1 : 0;
+                }
+                if (sol === 0 && anyBedrock) {
+                    if (tiled) {
+                        const t = Math.floor(i / tileCells);
+                        if (t !== curTile) {
+                            curTile = t;
+                            bedrock = world.bedrockAt(i, k);
+                        }
+                    }
                 }
                 if (sol === 0 && bedrock !== null) {
                     const bx = i - bedrock.minI;
