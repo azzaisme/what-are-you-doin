@@ -95,6 +95,8 @@ export class VoxelClient {
     particles: ((time: number) => { buffer: Float32Array; count: number }) | null = null;
     /** Streamed levels: this device's camera positions (x, z pairs), sent with each voxel frame. */
     focus: (() => Float32Array) | null = null;
+    /** Streamed levels: the near world's radius (m), from the quality preset (null: the level's). */
+    nearRadius: number | null = null;
     /** Streamed levels: near tiles built (ti, tk keys) and their size (m). */
     readonly nearTiles = new Set<number>();
     nearTileSize = 0;
@@ -353,7 +355,8 @@ export class VoxelClient {
                     particleCount: particles ? fx!.count : 0,
                     focus: l.world && !l.far && focus ? focus.slice() : undefined,
                     nearTiles: l.far && this.nearTileList ? this.nearTileList.slice() : undefined,
-                    nearTileSize: l.far ? this.nearTileSize : undefined
+                    nearTileSize: l.far ? this.nearTileSize : undefined,
+                    nearRadius: l.world && !l.far && this.nearRadius !== null ? this.nearRadius : undefined
                 },
                 transfer
             );

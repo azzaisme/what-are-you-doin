@@ -21,11 +21,28 @@ import { ParticleFX } from './fx/particles.ts';
 import type { WatchedEntity } from './fx/particles.ts';
 import { CALM, windAt } from './fx/wind.ts';
 import { WoodFX } from './fx/wood-fx.ts';
+import {
+    ACTIONS,
+    ACTION_LABELS,
+    PAD_ACTIONS,
+    actionForKey,
+    bindKey,
+    bindPad,
+    bindableKey,
+    defaultBindings,
+    keyLabel,
+    keysText,
+    loadBindings,
+    padLabel,
+    saveBindings
+} from './input/bindings.ts';
+import type { Action, PadAction } from './input/bindings.ts';
 import { FirstPersonInput } from './input/first-person.ts';
 import { PadManager } from './input/gamepad.ts';
 import { TouchControls, isTouchDevice } from './input/touch.ts';
 import { levelFromData } from './levels/data.ts';
 import { LEVEL_MENU, getLevel } from './levels/index.ts';
+import { viewDistance } from './levels/view-distance.ts';
 import { degradedTransport, parseConditions } from './net/netsim.ts';
 import type { P2PTransport } from './net/p2p.ts';
 import { forgetGame, gameToRejoin, rejoinToken, rememberGame } from './net/rejoin.ts';
@@ -55,6 +72,7 @@ import type { CameraControlsApi } from './types/engine-scripts.ts';
 import { withHammer } from './ui/hammer-hud.ts';
 import { OnlinePanel } from './ui/online-panel.ts';
 import { PlaytestPanel } from './ui/playtest-panel.ts';
+import { controlNames, interactionPrompt } from './ui/prompts.ts';
 import { SettingsMenu } from './ui/settings-menu.ts';
 import type { SettingValue } from './ui/settings-menu.ts';
 import { DEFAULT_SETTINGS, SETTING_RANGES, loadSettings, saveSettings, urlOverrides } from './ui/settings-store.ts';
@@ -202,6 +220,14 @@ if (level.stream)
         far: true
     });
 const pipeline = new VoxelClient(lanes, sim);
+/** Streamed levels: how far around the cameras the near world is built follows the quality preset. */
+function applyViewDistance(q: Quality): void {
+    if (!level.stream) return;
+    const v = viewDistance(level.stream, q.name);
+    pipeline.nearRadius = v.radius;
+    scene.app.scene.fog.start = v.fogStart;
+}
+applyViewDistance(initialQuality);
 const build = await pipeline.init(1, level.id, level.data);
 setLoading('Uploading meshes…');
 await nextFrame();
@@ -211,6 +237,13 @@ const staticUploadMs = performance.now() - tUpload;
 const reference = new ReferenceRenderer(app, sim, scene.worldLayer, scene.immediateLayer);
 const nailMarkers = new NailMarkers(app, scene.worldLayer, scene.viewLayers);
 const fpInput = new FirstPersonInput(canvas);
+// remappable controls (#98): one table shared by the keyboard, the pads and the settings menu
+const bindings = loadBindings(settingsStorage);
+fpInput.bindings = bindings;
+fpInput.onPlank = () => {
+    state.carry = !state.carry;
+    panel.sync();
+};
 
 // ---- particles (voxel cells): falling leaves, landing dust and chips, splashes
 const watched: WatchedEntity[] = [];
@@ -333,6 +366,7 @@ if (level.stream) {
 const windNow = { x: 0, z: 0, speed: 0, gustiness: 0 };
 // gamepads (local co-op): the first pad to press A drives player 1, the next one joins as player 2
 const pads = new PadManager();
+pads.bindings = bindings;
 // touch controls (phones): shown in first person on touch devices, or after the first touch
 const touch = new TouchControls();
 let touchSeen = isTouchDevice();
@@ -968,6 +1002,7 @@ const host: PanelHost = {
             case 'quality':
                 state.quality = v as Quality['name'];
                 scene.setQuality(QUALITY[state.quality]);
+                applyViewDistance(scene.quality);
                 state.refraction = scene.quality.refraction;
                 state.reflectionScale = scene.quality.reflectionScale;
                 applyWater();
@@ -1220,14 +1255,14 @@ function updateHud(): void {
     // long help for keyboard screens, short help for narrow / touch screens (chosen in CSS)
     const long =
         state.mode === 'orbit'
-            ? 'Drag to orbit · right-drag to pan · wheel to zoom · <kbd>V</kbd> first person · <kbd>H</kbd> hide UI'
+            ? `Drag to orbit · right-drag to pan · wheel to zoom${hotkey('KeyV', 'first person')}${hotkey('KeyH', 'hide UI')}`
             : sim.physicsProps
-              ? 'Click to look · <kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>LMB</kbd>/<kbd>E</kbd> grab / release · <kbd>RMB</kbd> throw · wheel reach · <kbd>Q</kbd> drop · <kbd>F</kbd> nail · <kbd>G</kbd> plank · <kbd>T</kbd> ragdoll · <kbd>Esc</kbd> release mouse · <kbd>V</kbd> orbit'
-              : 'Click to look · <kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>G</kbd> carry plank · <kbd>Esc</kbd> release mouse · <kbd>V</kbd> orbit';
+              ? `Click to look · ${kbd(moveKeys())} move · ${kbd(keysText(bindings, 'sprint'))} run · ${kbd(keysText(bindings, 'jump'))} jump · ${kbd(keysText(bindings, 'grab'))} grab / release · ${kbd(keysText(bindings, 'throw'))} throw · ${kbd(keyVerb('reachFar'))} reach · ${kbd(keysText(bindings, 'drop'))} drop · ${kbd(keysText(bindings, 'nail'))} nail · ${kbd(keysText(bindings, 'plank'))} plank · ${kbd(keysText(bindings, 'ragdoll'))} ragdoll · <kbd>Esc</kbd> release mouse${hotkey('KeyV', 'orbit')}`
+              : `Click to look · ${kbd(moveKeys())} move · ${kbd(keysText(bindings, 'sprint'))} run · ${kbd(keysText(bindings, 'jump'))} jump · ${kbd(keysText(bindings, 'plank'))} carry plank · <kbd>Esc</kbd> release mouse${hotkey('KeyV', 'orbit')}`;
     const short =
         state.mode === 'orbit'
             ? 'Drag to orbit · two fingers to pan and zoom'
-            : 'Click to look · WASD move · click grab · V orbit';
+            : `Click to look · ${moveKeys()} move · ${lower(keyVerb('grab'))} grab${hotkey('KeyV', 'orbit', false)}`;
     if (touchSeen && state.mode === 'firstPerson') {
         help.innerHTML =
             'Left thumb: move (push to the edge to run) · right thumb: look · buttons: jump, grab, throw, drop';
@@ -1342,32 +1377,18 @@ function pollEvents(): void {
 let promptText = '';
 
 /** Context prompt (design doc §2.3): what a click (or a trigger) would do right now. */
+// ---- control names in hints and prompts, from the player's bindings (src/ui/prompts.ts)
+const names = controlNames(bindings);
+const { keyVerb, lower, moveKeys, kbd, hotkey } = names;
+
 function interactionText(i: number, pad: boolean): string {
     const it = guestInteraction() ?? sim.interaction(i);
-    const both = it.shared ? ' together' : '';
-    if (it.driving)
-        return pad
-            ? 'Driving · left stick drive and steer · A brake · B recover · RT get out'
-            : 'Driving · W/S throttle · A/D steer · Space brake · Q recover · click or E to get out';
-    if (it.seat >= 0) return pad ? 'Riding along · RT get out' : 'Riding along · click or E to get out';
-    if (it.target === 'ute') return pad ? 'RT to drive the ute' : 'Click to drive the ute';
-    const wood = woodPrompt(it, pad ? 'pad' : 'mouse', treeCut, sawBeams());
-    if (wood) return wood;
-    if (it.holding)
-        return withHammer(
-            pad
-                ? `Holding ${propLabel(it.holding)}${both} · RT release · RB throw · B drop`
-                : `Holding ${propLabel(it.holding)}${both} · click to release · right-click to throw · wheel to adjust reach`,
-            it.nail,
-            pad ? 'pad' : 'mouse'
-        );
-    if (it.target)
-        return withHammer(
-            pad ? `RT to grab ${propLabel(it.target)}` : `Click to grab ${propLabel(it.target)}`,
-            it.nail,
-            pad ? 'pad' : 'mouse'
-        );
-    return withHammer('', it.nail, pad ? 'pad' : 'mouse');
+    const base = interactionPrompt(it, pad, names, propLabel, (n) =>
+        woodPrompt(it, pad ? 'pad' : 'mouse', treeCut, sawBeams(), n)
+    );
+    // the hammer's hint, on foot (src/ui/hammer-hud.ts)
+    if (it.driving || it.seat >= 0 || it.target === 'ute') return base;
+    return withHammer(base, it.nail, pad ? names.padVerb('nail') : keyVerb('nail'));
 }
 
 /** A stand tree's cut so far, from the newest snapshot (the same for host and guests). */
@@ -1477,10 +1498,10 @@ function updatePrompt(): void {
                   : it.seat >= 0
                     ? 'Riding along · grab to get out'
                     : it.holding
-                      ? withHammer(`Holding ${propLabel(it.holding)}${it.shared ? ' together' : ''}`, it.nail, 'touch')
+                      ? withHammer(`Holding ${propLabel(it.holding)}${it.shared ? ' together' : ''}`, it.nail, 'Nail')
                       : it.target === 'ute'
                         ? 'Grab to drive the ute'
-                        : withHammer(it.target ? `Grab ${propLabel(it.target)}` : '', it.nail, 'touch');
+                        : withHammer(it.target ? `Grab ${propLabel(it.target)}` : '', it.nail, 'Nail');
         } else if (!fpInput.locked && !pads.players[0]) t = 'Click to look around';
         else t = interactionText(0, !fpInput.locked);
     }
@@ -1490,7 +1511,9 @@ function updatePrompt(): void {
         document.getElementById('hud-prompt')!.textContent = t;
         crosshair.classList.toggle(
             'crosshair-active',
-            t.startsWith('Click to grab') || t.startsWith('Holding') || t.startsWith('Click to drive')
+            t.startsWith(`${keyVerb('grab')} to grab`) ||
+                t.startsWith('Holding') ||
+                t.startsWith(`${keyVerb('grab')} to drive`)
         );
     }
 }
@@ -1506,6 +1529,8 @@ window.addEventListener('keydown', (e) => {
         e.preventDefault();
         return;
     }
+    // a key bound to a game action does that, not a hotkey (bind V to jump and V jumps)
+    if (actionForKey(bindings, e.code)) return;
     switch (e.code) {
         case 'KeyP':
             setPaused(!state.paused);
@@ -1522,10 +1547,6 @@ window.addEventListener('keydown', (e) => {
             break;
         case 'KeyV':
             setMode(state.mode === 'orbit' ? 'firstPerson' : 'orbit');
-            panel.sync();
-            break;
-        case 'KeyG':
-            state.carry = !state.carry;
             panel.sync();
             break;
         case 'KeyC':
@@ -2098,7 +2119,22 @@ const menu = new SettingsMenu(
                 case 'resetCell':
                     applyCellSize(CELL_SIZE_DEFAULT_CM);
                     break;
-                case 'resetAll':
+                case 'resetKeys':
+                case 'resetPad': {
+                    const d = defaultBindings();
+                    if (id === 'resetKeys') Object.assign(bindings.keys, d.keys);
+                    else Object.assign(bindings.pad, d.pad);
+                    saveBindings(settingsStorage, bindings);
+                    updateHud();
+                    menu.sync();
+                    break;
+                }
+                case 'resetAll': {
+                    // everything: the settings and the remapped keys and buttons
+                    const d = defaultBindings();
+                    Object.assign(bindings.keys, d.keys);
+                    Object.assign(bindings.pad, d.pad);
+                    saveBindings(settingsStorage, bindings);
                     for (const k of Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]) {
                         const v = DEFAULT_SETTINGS[k];
                         const pid = PANEL_ID[k];
@@ -2107,10 +2143,35 @@ const menu = new SettingsMenu(
                     }
                     applyInputSettings();
                     applyUiSettings();
+                    updateHud();
                     panel.sync();
                     menu.sync();
                     break;
+                }
             }
+        },
+        binding(device, action, slot) {
+            return device === 'keys'
+                ? keyLabel(bindings.keys[action as Action][slot])
+                : padLabel(bindings.pad[action as PadAction][slot]);
+        },
+        rebind(device, action, slot, value) {
+            let note: string | null = null;
+            if (device === 'keys') {
+                const code = typeof value === 'string' ? value : '';
+                if (code && !bindableKey(code))
+                    return `${keyLabel(code)} can't be bound (it opens the menu or the browser's own)`;
+                const took = bindKey(bindings, action as Action, slot, code);
+                if (took) note = `${keyLabel(code)} was ${ACTION_LABELS[took]}: that is now unbound there`;
+            } else {
+                const button = typeof value === 'number' ? value : -1;
+                if (button === 9) return "Start opens the menu and can't be bound";
+                const took = bindPad(bindings, action as PadAction, slot, button);
+                if (took) note = `${padLabel(button)} was ${ACTION_LABELS[took]}: that is now unbound there`;
+            }
+            saveBindings(settingsStorage, bindings);
+            updateHud();
+            return note;
         },
         enabled(id) {
             if (id === 'applyCell') return cellPending !== cellCm;
@@ -2193,6 +2254,33 @@ const menu = new SettingsMenu(
                     format: times
                 },
                 { kind: 'toggle', key: 'overShoulder', label: 'Over-the-shoulder camera', hint: 'C' }
+            ]
+        },
+        {
+            id: 'keys',
+            label: 'Keys',
+            rows: [
+                ...ACTIONS.map((a) => ({
+                    kind: 'binding' as const,
+                    key: a,
+                    label: ACTION_LABELS[a],
+                    device: 'keys' as const
+                })),
+                { kind: 'button', id: 'resetKeys', label: 'Reset keys to defaults' }
+            ]
+        },
+        {
+            id: 'pad',
+            label: 'Pad',
+            rows: [
+                ...PAD_ACTIONS.map((a) => ({
+                    kind: 'binding' as const,
+                    key: a,
+                    label: ACTION_LABELS[a],
+                    device: 'pad' as const,
+                    hint: a === 'sprint' ? 'The sticks move and look; Start opens this menu' : undefined
+                })),
+                { kind: 'button', id: 'resetPad', label: 'Reset gamepad buttons to defaults' }
             ]
         },
         {
