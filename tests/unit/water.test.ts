@@ -382,9 +382,14 @@ describe('droplets (#65)', () => {
         const ring = new SnapshotRing(sim.entities.length, 64);
         const fx = new ParticleFX(timberYardLevel, []);
         fx.bucketSlot = sim.bucket.slot;
-        // the sounds they make (Epic 8's sfx): a splash now and then while it spills, a trickle filling
-        const heard: string[] = [];
-        sfx.setSink({ play: (name, _at, o) => heard.push(`${name}@${(o?.pitch ?? 1).toFixed(1)}`) });
+        // the sounds they make (Epic 8's sfx, counted by a sink as in tests/unit/audio.test.ts): the
+        // pour loop held every frame water leaves or arrives, a slosh as a spill starts, then now and then
+        const plays: string[] = [];
+        const holds: string[] = [];
+        sfx.setSink({
+            play: (name) => plays.push(name),
+            hold: (key, name, _at, o) => holds.push(`${key}:${name}@${(o?.pitch ?? 1).toFixed(1)}`)
+        });
         const anim = new Float64Array(ANIM_MAX);
         const at = pose(0, 1, 8, quatFromYawPitchRoll(0, 1.2, 0));
         const drops = () => {
@@ -409,11 +414,15 @@ describe('droplets (#65)', () => {
         }
         expect(fx.spawned.pour).toBeGreaterThan(20);
         expect(most).toBeGreaterThan(0);
-        // it runs dry after 1.7 s of that: a splash about every 0.2 s (8 or so), not one per frame (33)
-        const spillSounds = heard.filter((h) => h.startsWith('splash')).length;
-        expect(spillSounds).toBeGreaterThanOrEqual(6);
-        expect(spillSounds).toBeLessThanOrEqual(10);
-        heard.length = 0;
+        // it runs dry after 1.7 s of that (32 frames that lose water, after the first sample): the pour
+        // loop is held every one of them, and it sloshes as the spill starts and every 0.6 s, not every frame
+        expect(holds.filter((h) => h === 'bucket-water:pour@1.0').length).toBe(32);
+        const sloshes = plays.filter((n) => n === 'slosh').length;
+        expect(sloshes).toBeGreaterThanOrEqual(2);
+        expect(sloshes).toBeLessThanOrEqual(4);
+        expect(plays.filter((n) => n !== 'slosh')).toEqual([]);
+        plays.length = 0;
+        holds.length = 0;
         // the pool holds at most 32 bursts of 8: a long spill never grows past that
         expect(most).toBeLessThanOrEqual(32 * 8);
         // stopped: within a second every droplet is gone
@@ -425,7 +434,11 @@ describe('droplets (#65)', () => {
             frame(tick);
         }
         expect(fx.spawned.fill).toBeGreaterThan(0);
-        expect(heard).toContain('splash-small@1.8');
+        // filling: the same loop, higher, every frame it fills; no slosh
+        expect(holds.length).toBe(10);
+        expect(holds.every((h) => h.startsWith('bucket-water:pour@1.'))).toBe(true);
+        expect(holds.some((h) => h === 'bucket-water:pour@1.0')).toBe(false);
+        expect(plays).toEqual([]);
         sfx.setSink(null);
         for (const end = tick + 60; tick < end; tick += 3) frame(tick);
         expect(drops()).toBe(0);

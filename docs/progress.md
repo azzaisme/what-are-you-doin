@@ -51,7 +51,7 @@ The bucket now carries water the game keeps track of. Carry it steadily and it s
 - **Pouring tips the bucket all the way:** the pour turns the bucket's mouth forward and down whichever way it faces, with the wrist sized for turning about the hand.
 - **Steadier bucket handling:** a hanging bucket's hand now moves at most 1.5 m/s relative to your eye.
 - **Remappable pour (with Epic 10's bindings):** pour is an action in Settings' controls, `pour` in `src/input/bindings.ts`, by default R and the pad's Y. The pad's plank toggle defaults to d-pad right, so Y is free for pour. Binding R to something else takes it off pour, and the prompts and the help line show whatever pour is bound to.
-- **Water sounds (with Epic 8's `sfx`):** water slopping or pouring over the rim makes a splash at the rim, at most about five a second, louder and deeper for a gush. Filling under a tap makes a soft, high trickle. Each device plays them from the bucket's litres in the snapshots, so guests hear them too. They reuse Epic 8's splash sounds; sounds made for water are left for Epic 8's part 2.
+- **Water sounds (with Epic 8's `sfx`):** while water leaves the bucket, the `pour` loop plays at the rim (`sfx.hold`), with a `slosh` as a spill starts (then at most every 0.6 s) and a big splash for a gush. Filling under a tap plays the same loop, rising in pitch as the bucket fills. Each device plays them from the bucket's litres in the snapshots, so guests hear them too.
 - **Racing the flood:** with Epic 8's hazards on, finishing the Timber Yard's bridge sets off the flood. Both played yard deliveries (the yard's own, and the sixth bucket after five losses) still cross with the water ahead of the flood, and their tests now check that the siren went off.
     - So a flick of the view swings the bucket round instead of whipping it.
     - Before this, looking up quickly after picking it up flung out 7 of the 10 litres.
@@ -78,7 +78,7 @@ The bucket now carries water the game keeps track of. Carry it steadily and it s
 | Online: a guest picks up and pours the bucket                      | the host drains it; the guest's HUD and own snapshots show the host's litres                                                                                                           |
 | Droplets during a 3 s spill and a fill                             | within the particle pool's limit; all gone within a second after it stops                                                                                                              |
 
-- Unit tests: 566 runs pass (every test runs at both the 5 cm and the 10 cm voxel size). The played tests are in `tests/unit/water-play.test.ts`.
+- Unit tests: 606 runs pass (every test runs at both the 5 cm and the 10 cm voxel size). The played tests are in `tests/unit/water-play.test.ts`.
 - Browser tests pass: the Timber Yard objective and delivery, the Valley stages, online co-op in the Valley (the guest's HUD shows the host's litres), and UI boxes don't overlap.
 
 ### Changed on purpose

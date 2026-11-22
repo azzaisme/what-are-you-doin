@@ -115,8 +115,10 @@ export class ParticleFX {
     /** The bucket's entity slot (-1: none) and its litres at the last sample. */
     bucketSlot = -1;
     private bucketLitres = -1;
-    /** When the bucket's water last made a sound (s, sample time): a trickle every so often, not every frame. */
+    /** When the bucket's water last sloshed (s, sample time): once as a spill starts, then now and then. */
     private waterSoundAt = -1;
+    /** The bucket lost water at the last sample (a spill under way: no new slosh yet). */
+    private spilling = false;
 
     /** The water surface now (it rises in a flood). */
     waterY: number;
@@ -285,26 +287,24 @@ export class ParticleFX {
             const h = Math.hypot(lip.x, lip.z) || 1;
             const n = Math.min(8, 2 + Math.round(-d * 20));
             this.spawn(t, this.p.p.x + lip.x, this.p.p.y + lip.y, this.p.p.z + lip.z, 'pour', n, lip.x / h, lip.z / h);
-            // a slosh or a pour: a splash at the rim, louder for more water, deeper for a gush
-            if (t - this.waterSoundAt > 0.18 || t < this.waterSoundAt) {
+            // water leaving: a pour loop at the rim while it runs (Epic 8's `sfx.hold`), a slosh as a
+            // spill starts, and a splash for a gush (a drop, a hard knock)
+            const at = { x: this.p.p.x + lip.x, y: this.p.p.y + lip.y, z: this.p.p.z + lip.z };
+            sfx.hold('bucket-water', 'pour', at, { gain: Math.min(1, 0.3 - d * 4), pitch: 1 });
+            if (!this.spilling || t - this.waterSoundAt > 0.6 || t < this.waterSoundAt) {
                 this.waterSoundAt = t;
-                const at = { x: this.p.p.x + lip.x, y: this.p.p.y + lip.y, z: this.p.p.z + lip.z };
-                const big = -d > 0.5;
-                sfx.play(big ? 'splash-big' : 'splash-small', at, {
-                    gain: Math.min(0.8, 0.15 - d * 0.6),
-                    pitch: big ? 1 : 1.5
-                });
+                sfx.play('slosh', at, { gain: Math.min(1, 0.3 - d * 3) });
             }
+            if (-d > 0.5) sfx.play('splash-big', at, { gain: Math.min(1, -d) });
+            this.spilling = true;
         } else if (d > 0.004) {
             const m = quatRotate(q, 0, 0.3, 0, _lip);
             this.spawn(t, this.p.p.x + m.x, this.p.p.y + m.y + 0.25, this.p.p.z + m.z, 'fill', 5);
-            // filling under the tap: a soft, high trickle
-            if (t - this.waterSoundAt > 0.25 || t < this.waterSoundAt) {
-                this.waterSoundAt = t;
-                const at = { x: this.p.p.x + m.x, y: this.p.p.y + m.y, z: this.p.p.z + m.z };
-                sfx.play('splash-small', at, { gain: 0.12, pitch: 1.8 });
-            }
-        }
+            // filling under the tap: the pour loop, higher (a filling vessel rises in pitch)
+            const at = { x: this.p.p.x + m.x, y: this.p.p.y + m.y, z: this.p.p.z + m.z };
+            sfx.hold('bucket-water', 'pour', at, { gain: 0.5, pitch: 1.1 + 0.03 * litres });
+            this.spilling = false;
+        } else this.spilling = false;
     }
 
     /**
