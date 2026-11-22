@@ -22,7 +22,9 @@
     - Two beavers fell two trees and carry each whole log into the guide; each comes out as one
       beam (`beam-12`, `beam-13`) and no planks.
     - One beaver shoulders the two sawn beams across the creek as the bridge's stringers. The yard's
-      own beams are never touched.
+      own beams are never touched. (A beaver carries a beam lower than the old person did: low
+      enough to catch the creek's warning sign by the bridge, so the route goes north just west
+      of it.)
     - The other decks them with three planks from the yard's stack, and a player walks over to the
       far bank without falling in.
 - **Determinism of sawing and regrowth:**
@@ -43,6 +45,7 @@
     - In a wider sweep (48 fellings), one log had looked propped (0.24), but it was lying on the
       chewer, who stood in its path. No log was left resting on its stump, so no "kick off the
       stump" was needed.
+
 ## Route signs and distant landmarks in the Valley (2026-11-22, Epic 9, #16)
 
 ### Route signs

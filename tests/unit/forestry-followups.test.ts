@@ -165,6 +165,15 @@ class Play {
 }
 
 /**
+ * The look that lowers what player i holds by `drop` m at its hold distance, whatever the body's eye
+ * height (a beaver's eye is 1.22 m up, a person's was 1.86 m).
+ */
+function lowerBy(g: Play, i: number, drop: number): number {
+    const d = g.s.physics.rig(i)!.holdDist;
+    return Math.asin(Math.max(-1, Math.min(1, Math.sin(g.pitch[i]) - drop / d)));
+}
+
+/**
  * Two players (0 and 1) carry a lying log into the sawmill's guide together, by input only: round
  * to its north side, take it either side of its middle, lift, forward to the guide's line, sideways
  * into the guide, square it up, lower, let go, step back. Returns the lowest height it was carried
@@ -214,6 +223,22 @@ function carryIntoGuide(
     g.pitch[0] = up(0);
     g.pitch[1] = up(1);
     g.step({}, {}, 60);
+    // the beaver at the end that has swung south steps back until the log lies east-west: a felled
+    // log can lie well askew, and carried askew its two carriers end up far apart along the way
+    const swing = () => {
+        const q = log.pose.q;
+        const ax = 1 - 2 * (q.y * q.y + q.z * q.z);
+        const az = 2 * (q.x * q.z - q.w * q.y);
+        // the east-pointing end's angle from east (positive: swung south)
+        return ax < 0 ? Math.atan2(-az, -ax) : Math.atan2(az, ax);
+    };
+    const squared = () => Math.max(-0.2, Math.min(0.2, swing() * 1.5));
+    for (let k = 0; k < 480 && Math.abs(swing()) > 0.05; k++) {
+        const c = Math.max(-0.08, Math.min(0.08, swing()));
+        // player 0 holds the west end, player 1 the east end; forward is south
+        g.step({ moveZ: c }, { moveZ: -c });
+    }
+    g.step({}, {}, 30);
     // forward (south) to the guide's line, let it settle, then sideways (west: their right)
     // into the guide from its open east end
     let minY = Infinity;
@@ -234,15 +259,7 @@ function carryIntoGuide(
     expect(minY).toBeGreaterThan(y0 + 0.3);
     expect(Math.abs(lp.x - GUIDE.x)).toBeLessThan(0.5);
     expect(Math.abs(lp.z - GUIDE.z)).toBeLessThan(0.3);
-    // square it up along the guide: the beaver at the end that has swung south steps back
-    const swing = () => {
-        const q = log.pose.q;
-        const ax = 1 - 2 * (q.y * q.y + q.z * q.z);
-        const az = 2 * (q.x * q.z - q.w * q.y);
-        // the east-pointing end's angle from east (positive: swung south)
-        return ax < 0 ? Math.atan2(-az, -ax) : Math.atan2(az, ax);
-    };
-    const squared = () => Math.max(-0.2, Math.min(0.2, swing() * 1.5));
+    // square it up along the guide
     for (let k = 0; k < 180 && Math.abs(swing()) > 0.03; k++) {
         const c = squared();
         // player 0 holds the west end, player 1 the east end; forward is south
@@ -252,9 +269,11 @@ function carryIntoGuide(
     // out of the blade guard
     const p0 = g.pitch[0];
     const p1 = g.pitch[1];
+    const t0 = lowerBy(g, 0, 0.2);
+    const t1 = lowerBy(g, 1, 0.2);
     for (let k = 1; k <= 60; k++) {
-        g.pitch[0] = p0 + ((-0.75 - p0) * k) / 60;
-        g.pitch[1] = p1 + ((-0.75 - p1) * k) / 60;
+        g.pitch[0] = p0 + ((t0 - p0) * k) / 60;
+        g.pitch[1] = p1 + ((t1 - p1) * k) / 60;
         g.step({ moveZ: keep() }, { moveZ: keep() });
     }
     for (let k = 0; k < 120 && Math.abs(lp.z - GUIDE.z) > 0.06; k++) g.step({ moveZ: keep() }, { moveZ: keep() });
@@ -268,7 +287,8 @@ function carryIntoGuide(
 /**
  * Player 0 shoulders a lying beam (along x) across the creek by one end (`end` +1: its east end,
  * standing east of it; -1: its west end) and lays it at `x` on the bridge line, by input only.
- * With `north` it first carries it north to that z on its own line, then steps across to `x`.
+ * With `route` it first carries it across to `route.x`, north along that line to `route.z`, and
+ * only then steps across to `x`.
  */
 function shoulderBeam(
     g: Play,
@@ -278,7 +298,7 @@ function shoulderBeam(
     },
     x: number,
     end: 1 | -1,
-    north?: number
+    route?: { x: number; z: number }
 ): void {
     const s = g.s;
     const b = beam.pose.p;
@@ -305,10 +325,12 @@ function shoulderBeam(
     const p0 = s.players[0];
     // (steering by the beam itself: it is held a little to one side)
     const bx = () => beam.pose.p.x;
-    if (north !== undefined) {
-        const x0 = bx();
-        for (let k = 0; k < 1200 && p0.z > north; k++)
-            g.one(0, { moveZ: 0.5, moveX: Math.max(-0.2, Math.min(0.2, (x0 - bx()) * 2)) });
+    if (route) {
+        // first across to its own line, then north along it
+        for (let k = 0; k < 900 && Math.abs(bx() - route.x) > 0.04; k++)
+            g.one(0, { moveX: bx() > route.x ? -0.3 : 0.3 });
+        for (let k = 0; k < 1200 && p0.z > route.z; k++)
+            g.one(0, { moveZ: 0.5, moveX: Math.max(-0.2, Math.min(0.2, (route.x - bx()) * 2)) });
         g.one(0, {}, 30);
     }
     // (the yard bridge test's moves: across to the line, then straight to the bank)
@@ -444,11 +466,14 @@ describe('beams by player input', () => {
         const yardBeams = ['beam-0', 'beam-1'].map((n) => ({ ...g.entity(n).pose.p }));
 
         // ---- player 0 shoulders the two sawn beams across the creek, each by its west end (the
-        // mill is east of the rack), north on its own line clear of the yard's beams, then across
+        // mill is east of the rack), north on a line clear of the yard's beams, then across
         // (the second may lie partly on the first, on the rack's upper layer: the top one first)
         const [top, under] = [...beams].sort((a, b) => b.pose.p.y - a.pose.p.y);
-        shoulderBeam(g, top, BRIDGE_X - 0.12, -1, BRIDGE.nearEdge + 2.0);
-        shoulderBeam(g, under, BRIDGE_X + 0.12, -1, BRIDGE.nearEdge + 2.0);
+        // (north between the yard's beams, whose east end is at x -0.6, and the creek's warning
+        // sign east of the bridge end, whose board a beaver's beam would hit: x 0.28 to 0.92)
+        const route = { x: -0.15, z: BRIDGE.nearEdge + 0.5 };
+        shoulderBeam(g, top, BRIDGE_X - 0.12, -1, route);
+        shoulderBeam(g, under, BRIDGE_X + 0.12, -1, route);
         expect(s.progress.falls).toBe(0);
         // both under the deck (a plank is 2.4 m long), side by side
         for (const b of beams) expect(Math.abs(b.pose.p.x - BRIDGE_X)).toBeLessThan(0.6);
@@ -458,9 +483,11 @@ describe('beams by player input', () => {
         // west end of the yard's beams
         const stack = ['extra-plank-4', 'extra-plank-3', 'extra-plank-2'].map((n) => g.entity(n));
         const deckZ = [BRIDGE.farFace + 0.6, BRIDGE.zc, BRIDGE.nearFace - 0.6];
-        stack.forEach((plank, n) =>
-            layPlank(g, plank, deckZ[n], plank.pose.p.z - 1.6, { x: plank.pose.p.x, z: BRIDGE.nearEdge + 2.0 })
-        );
+        stack.forEach((plank, n) => {
+            // (back from the bridge round the yard's beams' east end, south of them)
+            g.walkTo(1, 0, 4.7);
+            layPlank(g, plank, deckZ[n], plank.pose.p.z - 1.6, { x: plank.pose.p.x, z: BRIDGE.nearEdge + 2.0 });
+        });
         const decked = stack.filter((p) => p.pose.p.z < BRIDGE.nearFace && p.pose.p.z > BRIDGE.farFace);
         expect(decked.length).toBe(3);
 
