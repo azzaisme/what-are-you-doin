@@ -22,6 +22,7 @@ beforeAll(() => initPhysics());
 
 const cmd = (n: number, c: Partial<PlayerCommand> = {}): PlayerCommand => ({ ...neutralCommand(n), ...c });
 const yard = () => new LabSim({ level: timberYardLevel });
+const S_TICKS = (sec: number) => Math.round(sec * 60);
 const byName = (s: LabSim, n: string) => s.entities.find((e) => e.name === n)!;
 
 /** Lays both beams flat across the gap, side by side, long axis along Z. */
@@ -211,7 +212,7 @@ describe('level 1: the timber yard', () => {
         expect(s.player.z).toBeGreaterThan(BRIDGE.nearFace); // the player never crossed
     }, 60_000);
 
-    it('finishable with inputs only by building the bridge: shoulder both beams over, run the bucket across before the flood peaks', () => {
+    it('finishable with inputs only by building the bridge: shoulder both beams over, walk back for the bucket and carry it across at a normal pace', () => {
         const s = yard();
         let n = 0;
         let yaw = 0;
@@ -225,15 +226,22 @@ describe('level 1: the timber yard', () => {
                 step();
             }
         };
-        const goTo = (x: number, zStop: number, run = false) => {
-            const fast = run ? 1 : 0.4;
+        const goTo = (x: number, zStop: number, pace = 0.4) => {
             for (let i = 0; i < 900 && Math.abs(s.player.x - x) > 0.05; i++)
-                step({
-                    moveX: (s.player.x > x ? -1 : 1) * Math.min(fast, Math.abs(s.player.x - x) * 2 + 0.1),
-                    sprint: run
-                });
-            for (let i = 0; i < 900 && s.player.z > zStop; i++) step({ moveZ: run ? 1 : 0.5, sprint: run });
+                step({ moveX: (s.player.x > x ? -1 : 1) * Math.min(pace, Math.abs(s.player.x - x) * 2 + 0.1) });
+            for (let i = 0; i < 900 && s.player.z > zStop; i++) step({ moveZ: Math.max(0.5, pace) });
             step({}, 30);
+        };
+        /** Walks (full stick, no sprint) facing the way it goes, to within 0.3 m of (x, z). */
+        const walkTo = (x: number, z: number) => {
+            for (let i = 0; i < 1800; i++) {
+                const dx = x - s.player.x;
+                const dz = z - s.player.z;
+                if (Math.hypot(dx, dz) < 0.3) break;
+                // forward is (-sin yaw, -cos yaw)
+                yaw = Math.atan2(-dx, -dz);
+                step({ moveZ: 1 });
+            }
         };
         step({}, 60);
         s.fpActive = true;
@@ -266,23 +274,29 @@ describe('level 1: the timber yard', () => {
             expect(Math.abs(beam.pose.p.y - (YARD_Y + 0.12))).toBeLessThan(0.25);
         }
         expect(s.progress.falls).toBe(0);
-        // fetch the bucket and walk it over the new bridge to the flag
+        // walk back to the stump for the bucket (no teleport, no sprint) and carry it over the new
+        // bridge to the flag: the flood the finished bridge set off (Epic 8) leaves time for that
         const bucket = byName(s, 'bucket');
+        const bridgeDone = s.tick;
+        pitch = 0;
+        walkTo(BUCKET_STUMP.x, BUCKET_STUMP.z + 1);
         yaw = 0;
-        s.placePlayer(BUCKET_STUMP.x, BUCKET_STUMP.z + 1, 0);
-        step({}, 20);
+        step({}, 10);
         pitch = -Math.atan2(s.player.y + EYE_HEIGHT - bucket.pose.p.y, s.player.z - bucket.pose.p.z);
         step({}, 3);
         step({ grab: true });
         expect(s.physics.heldId).toBe(bucket.id);
-        // the finished bridge set off the flood (Epic 8): the siren has gone, so run
-        expect(s.events.some((e) => e.kind === 'hazard' && e.text.includes('siren'))).toBe(true);
         pitch = 0;
-        goTo(BRIDGE_X, (YARD_GOAL.minZ + YARD_GOAL.maxZ) / 2, true);
+        goTo(BRIDGE_X, (YARD_GOAL.minZ + YARD_GOAL.maxZ) / 2, 1);
+        // the finished bridge set off the flood, and a walk was quick enough: the water is still
+        // well below the capstones (0.5 m) the beams rest on
+        expect(s.events.some((e) => e.kind === 'hazard' && e.text.includes('siren'))).toBe(true);
+        expect(s.hazards.waterY).toBeLessThan(0.3);
+        expect(s.tick - bridgeDone).toBeLessThan(S_TICKS(20));
         expect(s.progress.falls).toBe(0);
         expect(s.player.z).toBeLessThan(BRIDGE.farEdge);
         step({ grab: true });
-        step({}, 240);
+        step({}, 90);
         expect(s.progress.goalReached).toBe(true);
     }, 120_000);
 });

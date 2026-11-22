@@ -64,9 +64,12 @@ interface Burst {
     x: number;
     y: number;
     z: number;
-    kind: 'dust' | 'chips' | 'splash';
+    kind: 'dust' | 'chips' | 'splash' | 'gust';
     n: number;
     seed: number;
+    /** A gust's direction (unit, XZ). */
+    dx?: number;
+    dz?: number;
 }
 
 /** What the effects watch: entity slots with a rough "size" (for landing detection) and material. */
@@ -95,7 +98,7 @@ export class ParticleFX {
     private readonly p = pose();
     private readonly anim = new Float64Array(ANIM_MAX);
     /** Effects spawned (cumulative, for tests and the debug panel). */
-    readonly spawned = { dust: 0, chips: 0, splash: 0 };
+    readonly spawned = { dust: 0, chips: 0, splash: 0, gust: 0 };
 
     /** The water surface now (it rises in a flood). */
     waterY: number;
@@ -233,9 +236,26 @@ export class ParticleFX {
         }
     }
 
-    private spawn(t0: number, x: number, y: number, z: number, kind: Burst['kind'], n: number): void {
+    /**
+     * The aimed gust's warning (Epic 8): a stream of leaves blowing past (x, z), along (dx, dz), from
+     * upwind of it. Every device starts it from the host's hazard state, so all see it.
+     */
+    gust(t0: number, x: number, y: number, z: number, dx: number, dz: number): void {
+        this.spawn(t0, x, y, z, 'gust', GUST_LEAVES, dx, dz);
+    }
+
+    private spawn(
+        t0: number,
+        x: number,
+        y: number,
+        z: number,
+        kind: Burst['kind'],
+        n: number,
+        dx?: number,
+        dz?: number
+    ): void {
         this.spawned[kind]++;
-        this.bursts.push({ t0, x, y, z, kind, n, seed: ++this.burstSeq });
+        this.bursts.push({ t0, x, y, z, kind, n, seed: ++this.burstSeq, dx, dz });
         if (this.bursts.length > 24) this.bursts.shift();
     }
 
@@ -243,9 +263,13 @@ export class ParticleFX {
         const live: Burst[] = [];
         for (const b of this.bursts) {
             const age = t - b.t0;
-            const life = b.kind === 'splash' ? 0.7 : b.kind === 'chips' ? 0.8 : 1.1;
+            const life = b.kind === 'splash' ? 0.7 : b.kind === 'chips' ? 0.8 : b.kind === 'gust' ? 2.6 : 1.1;
             if (age < 0 || age > life) continue;
             live.push(b);
+            if (b.kind === 'gust') {
+                this.drawGust(b, age);
+                continue;
+            }
             for (let i = 0; i < b.n; i++) {
                 const a = u(b.seed, i, 1) * Math.PI * 2;
                 const sp = b.kind === 'dust' ? 0.5 + 0.6 * u(b.seed, i, 2) : 1.0 + 1.6 * u(b.seed, i, 2);
@@ -264,4 +288,26 @@ export class ParticleFX {
         }
         this.bursts = live;
     }
+
+    /** Leaves streaming with the gust: from 4 m upwind, through and past the target, fluttering. */
+    private drawGust(b: Burst, age: number): void {
+        const dx = b.dx ?? 1;
+        const dz = b.dz ?? 0;
+        for (let i = 0; i < b.n; i++) {
+            const start = u(b.seed, i, 4) * 0.8; // they come in over the first 0.8 s
+            const a = age - start;
+            if (a < 0) continue;
+            const speed = 4.5 + 3 * u(b.seed, i, 5);
+            const along = -4 + speed * a;
+            const side = (u(b.seed, i, 6) - 0.5) * 3 + 0.25 * Math.sin(a * 9 + i);
+            const x = b.x + dx * along - dz * side;
+            const z = b.z + dz * along + dx * side;
+            const y = b.y - 1.2 + 2.4 * u(b.seed, i, 7) + 0.3 * Math.sin(a * 6 + i * 1.7);
+            const mat = LEAF_MATS[Math.floor(u(b.seed, i, 8) * LEAF_MATS.length)];
+            this.push(x, y, z, voxel(mat, i & 3));
+        }
+    }
 }
+
+/** Leaves in the gust's warning stream. */
+const GUST_LEAVES = 40;

@@ -646,7 +646,11 @@ export const FLOOD_PEAK_Y = 0.6;
 function floodWashup(): { x: number; y: number; z: number }[] {
     return [8, 10.5, 13, 15.5].map((x) => {
         const z = creekCenterZ(x) + creekHalfWidth(x) + 1.4;
-        return { x, y: yardHeight(x, z) + 0.2, z };
+        // dropped onto the highest ground under a 3.2 m beam's whole length (the bank is uneven)
+        let top = -Infinity;
+        for (let dx = -1.7; dx <= 1.7; dx += 0.1)
+            for (const dz of [-0.15, 0, 0.15]) top = Math.max(top, yardHeight(x + dx, z + dz));
+        return { x, y: top + 0.2, z };
     });
 }
 

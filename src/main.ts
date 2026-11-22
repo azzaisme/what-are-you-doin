@@ -134,7 +134,13 @@ try {
 setLoading(`Rasterizing the ${level.name} into the ${cellCm} cm grid…`);
 await nextFrame();
 await initPhysics();
-const sim = new LabSim({ level, props: params.get('props') === 'scripted' ? 'scripted' : 'physics' });
+// the game's hazard seed (Epic 8): a new one each visit, or ?seed= to replay one; hosts send theirs
+const hazardSeed = params.has('seed') ? Number(params.get('seed')) >>> 0 : (Math.random() * 2 ** 32) >>> 0;
+const sim = new LabSim({
+    level,
+    props: params.get('props') === 'scripted' ? 'scripted' : 'physics',
+    hazardSeed
+});
 // the voxel world lives in workers: static build, rasterization and meshing all happen there.
 // Per-item cell sizes: one worker per lattice (fine 1 cm, base, coarse), each drawing the objects
 // of its tier (src/assets/cell-tier.ts); ?tiers=off draws everything on the base grid.
@@ -230,6 +236,7 @@ const playtest = new PlaytestLog(
     {
         level: level.name,
         voxels: `${Math.round(GRID_SIZE * 1000) / 10} cm`,
+        seed: String(hazardSeed),
         device: isTouchDevice() ? 'touch' : 'mouse & keyboard',
         screen: `${window.innerWidth}x${window.innerHeight}`,
         date: new Date().toISOString().slice(0, 16).replace('T', ' ')
@@ -468,6 +475,7 @@ let frameTimeCount = 0;
 let frameTimeHead = 0;
 let lastFrameStamp = performance.now();
 let renderTime = 0;
+let prevGustPhase = 0;
 const playerPose = pose();
 const playerAnim = new Float64Array(ANIM_MAX);
 const bodyPose = pose();
@@ -640,6 +648,19 @@ class LabDirector extends Script {
             scene.waterEntity.setLocalPosition(level.water.cx, hz.waterY, level.water.cz);
             fx.waterY = hz.waterY;
         }
+        // the aimed gust's warning: leaves stream past the player it is aimed at
+        if (hz.gust === 1 && prevGustPhase === 0 && hz.gustSlot >= 0 && hz.gustSlot < sim.eyes.length) {
+            if (sim.ring.sample(sim.eyes[hz.gustSlot].slot, renderTime, playerPose, playerAnim))
+                fx.gust(
+                    renderTime,
+                    playerPose.p.x,
+                    playerPose.p.y - 0.5,
+                    playerPose.p.z,
+                    Math.cos(hz.gustDir),
+                    Math.sin(hz.gustDir)
+                );
+        }
+        prevGustPhase = hz.gust;
         const cpos = camera.getPosition();
         audio.update({
             time: renderTime,

@@ -87,6 +87,8 @@ export interface LabSimOptions {
     props?: PropsMode;
     /** The level to simulate (default: the River Lab test scene). */
     level?: LevelDef;
+    /** The game's hazard seed (the host picks one per game); default: the level's. */
+    hazardSeed?: number;
 }
 
 /** Something the player should be told (objective reached, fell in the creek, ...). */
@@ -195,6 +197,7 @@ export class LabSim {
     constructor(opts: LabSimOptions = {}) {
         this.level = opts.level ?? riverLabLevel;
         this.hazards = new HazardDirector(this.level);
+        if (opts.hazardSeed !== undefined) this.hazards.seed = opts.hazardSeed >>> 0;
         this.propsMode = this.level.scriptedProps ? (opts.props ?? 'physics') : 'physics';
         const c = createLabEntities();
         this.entities = c.entities;
