@@ -452,6 +452,10 @@ body.ui-hidden .inspector-hint {
     font-weight: 600;
 }
 
+.toast-warn {
+    background: #5a3d12e6;
+}
+
 body.ui-hidden .toast {
     display: none;
 }

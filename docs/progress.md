@@ -124,6 +124,85 @@ a player beside a tree directly, to test one thing at a time:
 - **No sawmill or chopping sounds yet** (they come with the shared sound effects).
 - **Not tried on a real phone or pad.**
 
+## Online: 8 players, reconnect, bad-network testing (2026-11-22, Epic 10)
+
+Online games now take up to **8 players** (was 4). A guest whose connection drops, or who reloads the
+page, gets their own player back. And there is now a way to test online play on a bad network on
+purpose.
+
+### What changed for players
+
+- **8 players:** the host plus seven guests. Players appear in two rows of four beside the host, and
+  never on top of someone already standing there (two players placed into each other used to stick
+  together).
+- **A full game:** you can still pick it from the list ("Watch abcd · 8/8 · full"). You watch the
+  game and get the first place that frees up.
+- **Dropping out:** if a guest's connection drops or they reload, the host keeps their player where
+  it stood for **60 seconds**. Their player lets go of anything they were carrying (so a partner on
+  the other end of a beam is not stuck) and gets out of the ute. The host sees "Player 3 lost their
+  connection: keeping their place for a minute", then "Player 3 is back".
+- **Coming back:** the same browser tab rejoins by itself after a reload and gets the same player.
+  Nobody else can take a held place, and nobody can take the place of a player who is still
+  connected.
+- **The host going quiet:** guests see "Lost the host: reconnecting…" and wait up to 20 s before
+  giving up. When the host stops hosting on purpose, guests leave straight away.
+- **Round trip:** the Online panel shows each guest's round trip on the host, and your own on a
+  guest.
+- **Another version:** a game hosted by another version of the game (protocol 2 is this one) is
+  listed as "another version of the game: reload both pages to play together", and can't be joined.
+  The host never seats a guest of another version. The host also sends its world's entity layout
+  (a short hash of the entity list): a guest whose build lists other entities applies none of the
+  host's snapshots and leaves with the same message, so two builds can't garble each other's world.
+
+### Testing on a bad network
+
+- `?netsim=latency,jitter,loss` delays and drops everything this page sends. For example,
+  `?net=local&netsim=150,100,0.1` gives 150–250 ms one way, with 10 % of updates lost.
+- The same shim runs in unit tests on a virtual clock (`src/net/netsim.ts`).
+
+### Test results (actual)
+
+Unit tests, 100–300 ms one way with 10 % loss (`tests/unit/net-robust.test.ts`, both voxel sizes):
+
+| Test                                                                       | Result                                                                                                       |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Join and walk; three one-frame jump presses                                | Exactly 3 jumps on the host                                                                                  |
+| Host and guest lift the 113 kg log together                                | Both hold it, it rises over 0.4 m; the guest's one release press lets go                                     |
+| Garbage input (NaN, 1e300, strings, reset requests)                        | Every position stays finite, no reset or drop test runs, lag reads "unknown"                                 |
+| A guest drops, reloads, comes back                                         | Same player, within 0.3 m of where it stood; a newcomer meanwhile got a different place                      |
+| A guest drops while carrying the bucket                                    | The bucket is let go at once; the place frees after the grace period                                         |
+| 8 players walking, turning and jumping                                     | All 8 move; what each guest draws (every player, the bucket) matches the host to 2.8 cm, worst of 567 checks |
+| A host that goes quiet, then comes back                                    | "Reconnecting", then reconnected and receiving again; gone for good, the guest gives up after 20 s           |
+| A guest of a build with other entities                                     | Applies no snapshot and says it's another version                                                            |
+| Largest host state: the Valley, 8 players, every entity drawn, long events | 2,841 bytes (the room allows 4,096)                                                                          |
+
+The 2.8 cm is the straight line drawn between 20 Hz snapshots across a jump's take-off or landing;
+the codec itself is good to 4 mm.
+
+Host cost per tick with everyone walking (`node scripts/bench-net-host.ts`, Node on this container's
+CPU; the budget is 16.7 ms). The host's published state peaked at 1,875 bytes in the Valley at 8.
+
+| Level       | 1 player           | 4 players          | 8 players          | Snapshot at 8 |
+| ----------- | ------------------ | ------------------ | ------------------ | ------------- |
+| Timber Yard | 0.47 ms (p95 0.86) | 1.16 ms (p95 1.51) | 1.69 ms (p95 2.56) | 695 bytes     |
+| The Valley  | 1.28 ms (p95 1.67) | 1.83 ms (p95 2.59) | 2.67 ms (p95 3.40) | 1,040 bytes   |
+
+- Browser test: host and guest on `?netsim=150,100,0.1`. The round trip reads at least 250 ms.
+  Player 2 walks 1.5 m off, the guest reloads, the host holds player 2 (`dropped` is `[1]`), and the
+  reloaded page gets player 2 back within 0.5 m of where it stood (a fresh join appears beside the
+  host). The four online browser tests, split screen, the Timber
+  Yard and the ute tests pass.
+- Unit tests: 354 pass.
+
+### Known limits
+
+- **Not tried with 8 real devices.** Eight beaver bodies on a phone guest are not measured, and the
+  peer-to-peer mesh (each guest connects to every other player in the room) is not measured at 8.
+- **The rejoin token is visible to the room.** Someone in the same private game could copy it and
+  take a dropped player's place. That's low stakes for a co-op game with private codes.
+- **A host reload ends the game**, because the world lives on the host. Guests see "The host left
+  the game" after 20 s.
+
 ## Epic 4: the ute drives (2026-11-22)
 
 You can now drive the ute in the Timber Yard and the Valley. A friend can ride along.

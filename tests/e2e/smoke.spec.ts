@@ -729,6 +729,103 @@ for (const transport of ['local', 'p2p'] as const)
         expect(guestProblems).toEqual([]);
     });
 
+// a bad network on purpose (?netsim: 150-250 ms one way, 10 % of updates lost), and a guest who
+// reloads mid-game: the host keeps their player, and the same tab gets it back
+test('online co-op over a bad network: the guest reloads and rejoins as the same player', async ({ page, context }) => {
+    test.setTimeout(600_000);
+    const query = '?level=yard&t=0.01&quality=low&net=local&netsim=150,100,0.1#cell100';
+    const problems = await boot(page, query);
+    const guest = await context.newPage();
+    const guestProblems: string[] = [];
+    guest.on('pageerror', (e) => guestProblems.push(e.message));
+    const ready = (p: Page) =>
+        p.waitForFunction(() => (window as unknown as { __riverLab?: Lab }).__riverLab?.ready === true, null, {
+            timeout: 150_000
+        });
+    await guest.goto(`/${query}`);
+    await ready(guest);
+    type Status = {
+        hosting: string | null;
+        guests: number;
+        dropped: number[];
+        lag: (number | null)[];
+        guest: { slot: number; received: number; lagMs: number | null } | null;
+    };
+    type Net = {
+        net: {
+            host(): Promise<void>;
+            games(): { code: string }[];
+            join(c: string): Promise<void>;
+            status(): Status;
+        };
+    };
+    const status = (p: Page) => p.evaluate(() => (window as unknown as { __riverLab: Net }).__riverLab.net.status());
+    const until = (p: Page, src: string, timeout = 120_000) =>
+        p.waitForFunction(
+            (s) =>
+                new Function('st', `return ${s}`)((window as unknown as { __riverLab: Net }).__riverLab.net.status()),
+            src,
+            { timeout, polling: 250 }
+        );
+
+    await page.evaluate(() => (window as unknown as { __riverLab: Net }).__riverLab.net.host());
+    const code = (await status(page)).hosting!;
+    await guest.waitForFunction(
+        (c) => (window as unknown as { __riverLab: Net }).__riverLab.net.games().some((g) => g.code === c),
+        code,
+        { timeout: 120_000 }
+    );
+    await guest.evaluate((c) => (window as unknown as { __riverLab: Net }).__riverLab.net.join(c), code);
+    await until(guest, '(st.guest?.received ?? 0) > 5');
+    expect((await status(guest)).guest!.slot).toBe(1);
+    // both sides measure the round trip: at least the two one-way delays
+    await until(page, 'st.lag[0] !== null && st.lag[0] !== undefined');
+    expect((await status(page)).lag[0]).toBeGreaterThanOrEqual(250);
+    await until(guest, 'st.guest?.lagMs !== null');
+
+    // player 2 walks well away from where a newcomer would appear (beside the host)
+    const avatar2 = () =>
+        page.evaluate(
+            () =>
+                (
+                    window as unknown as {
+                        __riverLab: { entities(): Record<string, { x: number; z: number }> };
+                    }
+                ).__riverLab.entities()['avatar-1']
+        );
+    const start = await avatar2();
+    await guest.evaluate(() =>
+        (window as unknown as { __riverLab: { look(y: number, p: number): void } }).__riverLab.look(3.14, -0.1)
+    );
+    await guest.keyboard.down('KeyW');
+    let away = 0;
+    for (let i = 0; i < 200 && away <= 1.5; i++) {
+        await guest.waitForTimeout(300);
+        const p = await avatar2();
+        away = Math.hypot(p.x - start.x, p.z - start.z);
+    }
+    await guest.keyboard.up('KeyW');
+    // (a fresh join would appear back on the start spot: 1.5 m off is well clear of 0.5 m)
+    expect(away).toBeGreaterThan(1.5);
+    await page.waitForTimeout(1500); // the last of the walk arrives and the player stops
+    const left = await avatar2();
+
+    // the guest reloads: the host holds player 2 where they stood...
+    await guest.reload();
+    await until(page, 'st.dropped.length === 1', 30_000);
+    expect((await status(page)).dropped).toEqual([1]);
+    expect((await status(page)).guests).toBe(0);
+    // ...and the reloaded page gets that player back, still there (a fresh join would appear beside the host)
+    await ready(guest);
+    await until(guest, '(st.guest?.received ?? 0) > 5');
+    expect((await status(guest)).guest!.slot).toBe(1);
+    await until(page, 'st.guests === 1 && st.dropped.length === 0', 30_000);
+    const back = await avatar2();
+    expect(Math.hypot(back.x - left.x, back.z - left.z)).toBeLessThan(0.5);
+    expect(problems).toEqual([]);
+    expect(guestProblems).toEqual([]);
+});
+
 test("online co-op in the Valley: the guest streams its own world and follows the host's stages", async ({
     page,
     context
