@@ -398,7 +398,6 @@ export class HostSession {
             if (h.nailAt) row.push(cm(h.nailAt.x), cm(h.nailAt.y), cm(h.nailAt.z));
             huds.push(row);
         }
-        // the nails, only when they change (presence keeps the last value)
         // the nails ride in the same update, only when they changed (presence keeps the last value)
         const graph = sim.joints.graph;
         const extra: Record<string, unknown> = {};

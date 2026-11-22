@@ -496,17 +496,24 @@ describe('eight players', { timeout: 30_000 }, () => {
         expect(new Set(guests.map((x) => x.slot)).size).toBe(MAX_PLAYERS - 1);
         expect(g.sim.playerCount).toBe(MAX_PLAYERS);
         // steady play on open, flat ground (the yard between the shed and the sawmill, clear of the
-        // stump, the beams and the creek bank): everyone in a block, walking the same way at a stroll,
-        // about 4 m in all. Jumps across a lost update have their own test below.
-        const yaw = 0;
+        // stump, the beams and the creek bank): everyone in a block, walking at full speed and turning
+        // all the while, so the block goes round a 1.5 m circle and stays on the flat. Jumps across a
+        // lost update have their own test below.
+        const radius = 1.5;
+        const spin = CHARACTER.walk / radius; // rad/s
+        // the block starts radius east of the circle's centre (0.5, 9), heading -z, turning left
         for (let s = 0; s < MAX_PLAYERS; s++)
-            g.sim.placePlayer(-0.3 + 1.3 * (s % 3), 11.6 - 1.2 * Math.floor(s / 3), yaw, s);
+            g.sim.placePlayer(0.5 + radius - 1.3 + 1.3 * (s % 3), 9 - 1.3 + 1.3 * Math.floor(s / 3), 0, s);
         g.run(30);
         const start = g.sim.players.map((p) => ({ x: p.x, z: p.z }));
-        const stroll = 0.3;
-        for (const x of guests) g.inputs.set(x, cmd(0, { moveZ: stroll, yaw }));
-        g.hostCmd = cmd(0, { moveZ: stroll, yaw });
-        g.run(270);
+        let walked = 0;
+        const walk = () => {
+            const yaw = (spin * walked++) / 60;
+            for (const x of guests) g.inputs.set(x, cmd(0, { moveZ: 1, yaw }));
+            g.hostCmd = cmd(0, { moveZ: 1, yaw });
+        };
+        // about half a circle, over 2 m from where each started (late inputs included)
+        g.run(120, walk);
         for (let s = 0; s < MAX_PLAYERS; s++)
             expect(Math.hypot(g.sim.players[s].x - start[s].x, g.sim.players[s].z - start[s].z)).toBeGreaterThan(2);
         // what the host publishes: the room capability allows 4 KiB per participant
@@ -532,9 +539,7 @@ describe('eight players', { timeout: 30_000 }, () => {
         const out = pose();
         const anim = new Float64Array(64);
         g.run(240, (k) => {
-            // turn now and then, so the poses don't just run in straight lines
-            const yaw2 = yaw + Math.sin(k / 40);
-            for (const x of guests) g.inputs.set(x, cmd(0, { moveZ: stroll, yaw: yaw2 }));
+            walk();
             record();
             if (k < 60 || k % 20 !== 0) return;
             for (const x of guests) {

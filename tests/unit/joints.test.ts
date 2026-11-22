@@ -633,22 +633,74 @@ describe('hammer refusals and limits (#48 audit)', () => {
         expect(r.js.graph.size).toBe(0);
     });
 
-    it('the level: tree trunks are not anchors, stone abutments are', async () => {
+    it('the level: every tree trunk, crown and stump (scenery and the logging stand) is not an anchor; stone is', async () => {
+        const { LabSim } = await import('../../src/sim/lab-sim.ts');
+        const { timberYardLevel, BRIDGE, BRIDGE_X, YARD_Y } = await import('../../src/levels/timber-yard.ts');
+        const s = new LabSim({ level: timberYardLevel });
+        const pw = s.physics;
+        run(pw, 1);
+        /** Every static collider touching a small ball at a point. */
+        const staticsAt = (x: number, y: number, z: number, r = 0.12) => {
+            const out: number[] = [];
+            pw.world.intersectionsWithShape({ x, y, z }, ident, new RAPIER.Ball(r), (c) => {
+                if (!pw.bodyOfCollider(c.handle) && !c.parent()) out.push(c.handle);
+                return true;
+            });
+            return out;
+        };
+        const layout = timberYardLevel.layout(1);
+        const g = timberYardLevel.terrainHeight;
+        let trunks = 0;
+        for (const t of layout.trees) {
+            const hit = staticsAt(t.x, g(t.x, t.z) + 0.8, t.z);
+            for (const h of hit) expect(pw.isAnchor(h), `tree at ${t.x},${t.z}`).toBe(false);
+            trunks += hit.length;
+        }
+        // the logging stand's trees (Epic 6): standing trunks, then a felled one's stump
+        const stand = timberYardLevel.forestry!.trees;
+        let standing = 0;
+        for (const t of stand) {
+            const hit = staticsAt(t.x, g(t.x, t.z) + 0.6, t.z, 0.2);
+            for (const h of hit) expect(pw.isAnchor(h), `stand tree at ${t.x},${t.z}`).toBe(false);
+            standing += hit.length;
+        }
+        (s.forestry as unknown as { fell(n: number): void }).fell(0);
+        run(pw, 1);
+        const stump = staticsAt(stand[0].x, g(stand[0].x, stand[0].z) + 0.08, stand[0].z, 0.2).filter(
+            (h) => h !== (pw as unknown as { terrainHandle: number }).terrainHandle
+        );
+        for (const h of stump) expect(pw.isAnchor(h), 'stump').toBe(false);
+        console.log(`non-anchors: ${trunks} scenery tree colliders, ${standing} stand trunks, ${stump.length} stump`);
+        expect(trunks).toBeGreaterThan(5);
+        expect(standing).toBe(stand.length);
+        expect(stump.length).toBe(1);
+        // stone: the abutment capstone and the deck lip take nails
+        for (const z of [BRIDGE.nearFace + 0.3, BRIDGE.nearEdge])
+            for (const h of staticsAt(BRIDGE_X, YARD_Y + 0.1, z, 0.05))
+                expect(pw.isAnchor(h), `stone at z ${z}`).toBe(true);
+    });
+
+    it('refuses to nail a plank to a logging-stand tree', async () => {
         const { LabSim } = await import('../../src/sim/lab-sim.ts');
         const { timberYardLevel } = await import('../../src/levels/timber-yard.ts');
         const s = new LabSim({ level: timberYardLevel });
-        const pw = s.physics;
-        let trees = 0;
-        let anchors = 0;
-        pw.world.forEachCollider((c) => {
-            if (pw.bodyOfCollider(c.handle) || c.parent()) return;
-            if (c.shape.type === RAPIER.ShapeType.Cone) expect(pw.isAnchor(c.handle)).toBe(false);
-            if (!pw.isAnchor(c.handle)) trees++;
-            else anchors++;
-        });
-        // trunks, crowns and cones of the yard's trees, plus the four invisible walls
-        expect(trees).toBeGreaterThan(4);
-        expect(anchors).toBeGreaterThan(1);
+        const t = timberYardLevel.forestry!.trees[0];
+        const y = timberYardLevel.terrainHeight(t.x, t.z) + 1.0;
+        // a plank held upright against the trunk's +z side (found with a ray: the stand trees lean), its
+        // thin face towards the tree
+        run(s.physics, 1);
+        const hit = s.physics.world.castRay(new RAPIER.Ray({ x: t.x, y, z: t.z + 2 }, { x: 0, y: 0, z: -1 }), 2, true);
+        expect(hit).not.toBeNull();
+        const surface = t.z + 2 - hit!.timeOfImpact;
+        const plank = s.entities.find((e) => e.name === 'plank')!;
+        s.physics.place(plank.id, pose(t.x, y, surface + 0.051, quatFromYawPitchRoll(0, 0, Math.PI / 2)));
+        s.physics.bodies.get(plank.id)!.body.setGravityScale(0, true);
+        run(s.physics, 1);
+        const eye = { x: t.x, y, z: t.z + 1.2 };
+        const pv = s.joints.preview(eye, 0, 0, 0);
+        expect(pv.a).toBe(plank.id);
+        expect(pv.b).toBe(GROUND);
+        expect(pv.refusal).toBe('cannot-fasten');
     });
 
     it('a full joint (four nails) refuses a fifth through the hammer; the world stops at 64 nails', () => {
@@ -714,6 +766,63 @@ describe('joint stiffness (#47 audit)', () => {
         return { turn: Math.abs(yaw), M: load * arm, k: js.angularStiffness(c), nails: c.nails.length };
     }
 
+    /**
+     * Timber to timber: a 3.2 m beam nailed across a plank lying on the ground; once nailed the
+     * plank is fixed in place, and the beam is pushed sideways at its tip. Only the nailed joint
+     * (stiffness NAIL.stiffness = 0.8) resists the turn.
+     */
+    function timberSideways(nails: number, load: number) {
+        const pw = world();
+        const base = pw.addDynamic(
+            2,
+            { type: 'box', hx: 1.2, hy: 0.05, hz: 0.1 },
+            pose(-1.2, 0.05, 0, quatFromYawPitchRoll(Math.PI / 2, 0, 0)),
+            TIMBER
+        );
+        const pb = pw.addDynamic(1, { type: 'box', hx: 1.6, hy: 0.075, hz: 0.1 }, pose(0, 0.176, 0), TIMBER);
+        base.body.setGravityScale(0, true);
+        pb.body.setGravityScale(0, true);
+        run(pw, 1);
+        const js = new JointSystem(pw);
+        // nails in a grid inside the 20 x 20 cm crossing
+        const spots = [
+            [-1.25, -0.05],
+            [-1.15, 0.05],
+            [-1.15, -0.05],
+            [-1.25, 0.05]
+        ];
+        for (let k = 0; k < nails; k++) hammerAt(js, { x: spots[k][0], y: 0.25, z: spots[k][1] });
+        base.body.setBodyType(RAPIER.RigidBodyType.Fixed, true);
+        pb.body.setGravityScale(1, true);
+        const c = [...js.graph.connections()][0];
+        let yaw = 0;
+        for (let i = 0; i < 240; i++) {
+            const t = pb.body.translation();
+            pb.body.applyImpulseAtPoint({ x: 0, y: 0, z: load / 60 }, { x: t.x + 1.5, y: t.y, z: t.z }, true);
+            pw.step();
+            const q = pb.body.rotation();
+            yaw = Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.x * q.x));
+        }
+        const arm = pb.body.translation().x + 1.5 - pw.bodies.get(1)!.body.translation().x - (c.anchorA.x ?? 0);
+        return { turn: Math.abs(yaw), M: load * arm, k: js.angularStiffness(c), c };
+    }
+
+    it('timber to timber: a nailed joint between two pieces flexes by its 0.8 stiffness, one nail four times four', () => {
+        const one = timberSideways(1, 300);
+        const four = timberSideways(4, 300);
+        expect(one.c.type).toBe('nail');
+        expect(one.c.b).toBe(2);
+        expect(one.c.stiffness).toBe(NAIL.stiffness);
+        expect(four.c.nails.length).toBe(4);
+        expect(one.k).toBe(NAIL.stiffness * NAIL.angularStiffness);
+        console.log(
+            `timber to timber, 300 N at the tip: one nail turns ${(one.turn * 1000).toFixed(2)} mrad (M/k ${((one.M / one.k) * 1000).toFixed(2)}), four ${(four.turn * 1000).toFixed(2)} mrad (M/k ${((four.M / four.k) * 1000).toFixed(2)})`
+        );
+        expect(one.turn).toBeGreaterThan(0.7 * (one.M / one.k));
+        expect(one.turn).toBeLessThan(1.4 * (one.M / one.k));
+        expect(one.turn / four.turn).toBeGreaterThan(2.8);
+    });
+
     it('a joint flexes in proportion to its load over its stiffness: one nail four times as much as four', () => {
         const one = sideways(1, 300);
         const four = sideways(4, 300);
@@ -734,6 +843,25 @@ describe('joint stiffness (#47 audit)', () => {
 });
 
 describe('what takes nails', () => {
+    it('a plank from the sawmill (Epic 6) nails down onto the abutment like any other', async () => {
+        const { LabSim } = await import('../../src/sim/lab-sim.ts');
+        const { timberYardLevel, BRIDGE, BRIDGE_X, YARD_Y } = await import('../../src/levels/timber-yard.ts');
+        const s = new LabSim({ level: timberYardLevel });
+        // lying flat across the near capstone, the way the sawmill hands planks out (long axis X)
+        const sawn = s.forestry.spawnPlank(
+            pose(BRIDGE_X, YARD_Y + 0.2, BRIDGE.nearFace + 0.3, quatFromYawPitchRoll(0, Math.PI / 2, 0))
+        )!;
+        expect(sawn).not.toBeNull();
+        expect(sawn.name).toMatch(/^extra-plank-(1[2-9]|2\d)$/);
+        let n = 0;
+        for (; n < 60; n++) s.step({ ...(await import('../../src/sim/commands.ts')).neutralCommand(n) });
+        const pv = hammerAt(s.joints, { x: sawn.pose.p.x + 0.4, y: sawn.pose.p.y + 0.05, z: sawn.pose.p.z }, n);
+        expect(pv.a).toBe(sawn.id);
+        expect(pv.b).toBe(GROUND);
+        expect(pv.refusal).toBe('none');
+        expect(s.joints.graph.find(sawn.id, GROUND, pv.joint)).toBeDefined();
+    });
+
     it("timber does, by name: the yard's planks and beams, sawn planks and beams (Epic 6), logs, crates; the bucket doesn't", async () => {
         const { propBody } = await import('../../src/sim/lab-physics.ts');
         for (const name of [
