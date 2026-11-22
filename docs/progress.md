@@ -32,7 +32,9 @@ Owner: "Can I have a proper settings menu please. Accessible to both keyboard, m
   change the same settings.
 - **Voxel styling** (owner: "more like the voxel/grid theme … build up the corners"):
     - a 16×16-voxel frame (stepped corners, a bevel lit top-left and shaded bottom-right);
-    - yellow L-blocks with bolts on each corner, one voxel proud of the frame;
+    - yellow L-blocks with bolts on each corner, one voxel proud of the frame, extruded in 3D: the
+      face, three voxels of depth (a shaded right side and a dark underside, lit from the top left
+      on every corner) and a shadow cast on the frame;
     - a faint voxel grid behind the rows, and dotted voxel rules;
     - buttons, tabs, switches, choices and sliders are blocks with stepped corners that press
       down. Focus shows as a voxel ring inside them.

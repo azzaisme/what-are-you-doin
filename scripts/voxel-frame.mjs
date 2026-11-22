@@ -59,29 +59,54 @@ if (process.argv[2] !== 'corners')
         `url("data:image/svg+xml,${encodeURIComponent(svg).replace(/%20/g, ' ').replace(/%3D/g, '=').replace(/%3A/g, ':').replace(/%2F/g, '/').replace(/%27/g, "'").replace(/%3C/g, '<').replace(/%3E/g, '>')}")`
     );
 
-// Corner caps (--menu-corners): L-shaped yellow blocks, 11 voxels long and 5 thick, with a stepped
-// outer corner and a bolt, one per corner; they sit one voxel proud of the frame.
+// Corner caps (--menu-corners): L-shaped yellow blocks, 11 voxels long and 5 thick, extruded towards
+// the viewer: the yellow face on top, D voxels of depth going down-right (a mid side face on the
+// right, the darkest face underneath) and a shadow cast on the frame. The light is from the top left
+// on all four corners; only the L is mirrored.
 const M = 11;
 const T = 5;
+const D = 3; // extrusion depth (voxels)
+const S = M + D + 1; // image size: the face, its depth and its shadow
 const inCap = (x, y) => x >= 0 && y >= 0 && x < M && y < M && (x < T || y < T) && !(y < 2 && x < 2 - y);
 const capCells = (flipX, flipY) => {
+    const face = (x, y) => inCap(flipX ? M - 1 - x : x, flipY ? M - 1 - y : y);
+    // where the face was pushed from, for a cell in its depth (null: not in the block)
+    const origin = (x, y, depth) => {
+        for (let k = 1; k <= depth; k++) if (face(x - k, y - k)) return [x - k, y - k];
+        return null;
+    };
+    const solid = (x, y) => face(x, y) || origin(x, y, D) !== null;
     const cells = new Map();
-    const at = (x, y) => inCap(flipX ? M - 1 - x : x, flipY ? M - 1 - y : y);
-    for (let y = 0; y < M; y++)
-        for (let x = 0; x < M; x++) {
-            if (!at(x, y)) continue;
-            const edge = !at(x - 1, y) || !at(x + 1, y) || !at(x, y - 1) || !at(x, y + 1);
-            let c;
-            if (edge) c = C.outline;
-            else if (!at(x, y - 1 - 1) || !at(x - 1 - 1, y)) c = C.cornerLit;
-            else if (!at(x, y + 2) || !at(x + 2, y)) c = C.cornerShade;
-            else c = C.corner;
-            cells.set(`${x},${y}`, c);
+    for (let y = 0; y < S; y++)
+        for (let x = 0; x < S; x++) {
+            let c = null;
+            if (face(x, y)) {
+                const edge = !solid(x - 1, y) || !solid(x, y - 1) || !solid(x + 1, y) || !solid(x, y + 1);
+                if (edge) c = C.outline;
+                else if (!face(x - 1, y - 1) || !face(x, y - 2) || !face(x - 2, y)) c = C.cornerLit;
+                else c = C.corner;
+            } else {
+                const o = origin(x, y, D);
+                if (o) {
+                    const edge = !solid(x + 1, y) || !solid(x, y + 1) || !solid(x + 1, y + 1);
+                    // under the face: the underside (darkest); beside it: the right side
+                    let above = false;
+                    let left = false;
+                    for (let j = 1; j <= D; j++) {
+                        above ||= face(x, y - j);
+                        left ||= face(x - j, y);
+                    }
+                    if (edge) c = C.outline;
+                    else c = left && !above ? C.cornerShade : '#7a5414';
+                } else if (origin(x, y, D + 1)) c = 'rgba(0,0,0,0.45)'; // the cast shadow
+            }
+            if (c) cells.set(`${x},${y}`, c);
         }
     // the bolt, in the corner block
     const bx = flipX ? M - 3 : 2;
     const by = flipY ? M - 3 : 2;
     cells.set(`${bx},${by}`, '#6e4c12');
+    cells.set(`${bx + 1},${by + 1}`, '#ffe9a8');
     return cells;
 };
 const svgOf = (cells, n) => {
@@ -108,5 +133,5 @@ if (process.argv[2] === 'corners') {
         [false, true, 'bottom left'],
         [true, true, 'bottom right']
     ];
-    console.log(caps.map(([fx, fy, pos]) => `${enc(svgOf(capCells(fx, fy), M))} ${pos} no-repeat`).join(', '));
+    console.log(caps.map(([fx, fy, pos]) => `${enc(svgOf(capCells(fx, fy), S))} ${pos} no-repeat`).join(', '));
 }
