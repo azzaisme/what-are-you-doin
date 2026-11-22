@@ -64,6 +64,7 @@ import {
     sanitizeCommand
 } from './commands.ts';
 import type { PlayerCommand } from './commands.ts';
+import type { JointEvent } from './joints/breaking.ts';
 import { nailCode } from './joints/graph.ts';
 import { JointSystem } from './joints/joints.ts';
 import type { NailPreview } from './joints/joints.ts';
@@ -96,7 +97,7 @@ export interface LabSimOptions {
 /** Something the player should be told (objective reached, fell in the creek, ...). */
 export interface SimEvent {
     tick: number;
-    kind: 'goal' | 'fell' | 'recovered' | 'step' | 'ute';
+    kind: 'goal' | 'fell' | 'recovered' | 'step' | 'ute' | 'creak' | 'break';
     text: string;
 }
 
@@ -463,12 +464,38 @@ export class LabSim {
         // nobody driving: the handbrake is on
         this.vehicle?.drive(this.driver >= 0 ? this.driveInput : PARKED);
         pw.step();
+        this.jointEvents(this.joints.update(this.tick));
         this.readPhysics();
         this.readVehicle();
         this.watchUte();
         this.applyRules();
         const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
         this.physicsMs = t1 - t0;
+    }
+
+    private lastCreakTick = -1e9;
+    /** Joint warnings and breaks as player events (creaks at most every 2 s). */
+    private jointEvents(evs: JointEvent[]): void {
+        for (const e of evs) {
+            const anchor = e.conn.type === 'anchor';
+            if (e.kind === 'break') {
+                this.events.push({
+                    tick: this.tick,
+                    kind: 'break',
+                    text: anchor ? 'Crack! A nailed piece tore loose from the stone' : 'Crack! A nailed joint gave way'
+                });
+            } else if (this.tick - this.lastCreakTick >= 2 / SIM_DT) {
+                this.lastCreakTick = this.tick;
+                this.events.push({
+                    tick: this.tick,
+                    kind: 'creak',
+                    text:
+                        e.kind === 'groan'
+                            ? '⚠ The bridge groans: a joint is close to breaking'
+                            : '⚠ Creak: a joint is straining'
+                });
+            }
+        }
     }
 
     private playerActive(i: number): boolean {

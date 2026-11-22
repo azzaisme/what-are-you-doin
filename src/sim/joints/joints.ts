@@ -23,8 +23,11 @@ import type { Quat, Vec3Like } from '../physics/grab.ts';
 import { LAYER, groups } from '../physics/world.ts';
 import type { PhysBody, PhysicsWorld } from '../physics/world.ts';
 
+import { JointHealth } from './breaking.ts';
+import type { JointEvent } from './breaking.ts';
 import { GROUND, JointGraph, NAIL } from './graph.ts';
 import type { Connection, NailRefusal } from './graph.ts';
+import { StressMeter } from './stress.ts';
 
 const ALL = 0xffff;
 
@@ -81,6 +84,10 @@ function quatConjMul(a: Quat, b: Quat): Quat {
  */
 export class JointSystem {
     readonly graph = new JointGraph();
+    /** Each connection's load over the last step. */
+    readonly stress: StressMeter;
+    /** Each connection's utilization, warnings and fatigue. */
+    readonly health = new JointHealth();
     private readonly pw: PhysicsWorld;
     private readonly rapier = new Map<number, RAPIER.ImpulseJoint>();
     private ground: RAPIER.RigidBody | null = null;
@@ -89,6 +96,8 @@ export class JointSystem {
         this.pw = pw;
         // a body put somewhere else (respawned, recovered, reset) or switched off comes loose
         pw.onRelocate = (id) => this.detach(id);
+        this.stress = new StressMeter(pw, this.graph);
+        pw.stepHooks.push(this.stress);
     }
 
     private groundBody(): RAPIER.RigidBody {
@@ -257,6 +266,20 @@ export class JointSystem {
         // the pieces were touching when nailed: their contact would only fight the joint
         if (B) j.setContactsEnabled(false);
         this.rapier.set(c.id, j);
+    }
+
+    /**
+     * After each physics step: rates every connection's load, and breaks those past their limit
+     * (their joints are removed here, between steps, waking the pieces). Returns warnings and breaks.
+     */
+    update(tick: number): JointEvent[] {
+        if (this.graph.size === 0) {
+            this.health.states.clear();
+            return [];
+        }
+        const events = this.health.update(this.graph.connections(), this.stress.loads, tick);
+        for (const e of events) if (e.kind === 'break') this.remove(e.conn.id);
+        return events;
     }
 
     /** Removes one connection and its joint, waking both pieces (call between physics steps). */

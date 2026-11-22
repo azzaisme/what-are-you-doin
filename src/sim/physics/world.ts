@@ -256,6 +256,8 @@ export class PhysicsWorld {
      * joint system unfastens it, so no joint yanks it back.
      */
     onRelocate: ((id: number) => void) | null = null;
+    /** Called just before and just after each Rapier step (the joint load meter). */
+    readonly stepHooks: { before(): void; after(): void }[] = [];
     readonly world: RAPIER.World;
     readonly bodies = new Map<number, PhysBody>();
     private readonly byCollider = new Map<number, PhysBody>();
@@ -985,7 +987,9 @@ export class PhysicsWorld {
 
     step(): void {
         const t0 = now();
+        for (const h of this.stepHooks) h.before();
         this.world.step();
+        for (const h of this.stepHooks) h.after();
         const t1 = now();
         // bound velocities and recover lost bodies
         let active = 0;
