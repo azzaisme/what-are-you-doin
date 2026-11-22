@@ -174,8 +174,8 @@ function yardBlend(u: number, t: number): number {
 
 /**
  * Side paths off the road (side-paths.ts): the old logging track loops off the forest road and back
- * before the culvert (somewhere to go when the road is closed), and a track climbs from past the
- * culvert to the fire lookout.
+ * before the culvert (somewhere to go when the road is closed; wide enough for the ute), and a track
+ * climbs from past the culvert to the foot of the fire lookout, stopping short of its legs.
  */
 export const SIDE_PATHS: SidePath[] = [
     {
@@ -196,7 +196,7 @@ export const SIDE_PATHS: SidePath[] = [
             [48, roadT(48) + 2.2],
             [51, 9],
             [54, 15],
-            [57.2, 21.6]
+            [56, 19.2]
         ],
         halfWidth: 1.4
     }
