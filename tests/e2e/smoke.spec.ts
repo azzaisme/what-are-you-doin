@@ -553,6 +553,8 @@ for (const transport of ['local', 'p2p'] as const)
         page,
         context
     }) => {
+        // two full game pages in software GL: on a busy CI runner this has taken 1–5 minutes
+        test.setTimeout(600_000);
         const relay = transport === 'p2p' ? await startRelay() : null;
         const query =
             transport === 'p2p'
