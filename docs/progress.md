@@ -8,7 +8,7 @@ The bucket now carries water the game keeps track of. Carry it steadily and it s
 
 - **The HUD** shows the bucket's water under the objective, for example `Bucket ▮▮▮▮▮▮▮▮▮▯ 9.4 L`. On the flower stage it also shows what the flower has had.
 - **Carry it gently.** Walking, stopping and turning are fine. A sprint that you stop dead slops some out. So does a drop, a hard hit or a big tilt.
-- **Pour:** while holding the bucket, press R (LB on a pad, the Pour button on touch). The bucket tips forward, mouth towards where you look. Press again to stop. Letting go also stops it.
+- **Pour:** while holding the bucket, press R (Y on a pad, the Pour button on touch). (The River Lab's pad carry-plank toggle moved from Y to d-pad right.) The bucket tips forward, mouth towards where you look. Press again to stop. Letting go also stops it.
 - **Refill:** stand the bucket under a water butt's tap. On the Timber Yard stump, the tap is right above it. It fills at 4 L/s.
     - Each butt holds a fixed amount: the yard's 40 L, the Valley works tank 30 L, the mountain spring butt 20 L.
     - The creek is not a refill point.

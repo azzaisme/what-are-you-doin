@@ -80,13 +80,14 @@ Query parameters (handy for comparisons and screenshots):
 | Right click                                | throw what you hold                                                                        |
 | Mouse wheel                                | hold closer / further                                                                      |
 | `Q`                                        | drop                                                                                       |
+| `R`                                        | pour the bucket you hold (again: stop)                                                     |
 | `G`                                        | put a plank in your hands (scripted mode: the Epic 1 comfort-test plank)                   |
 | `T`                                        | launch the ragdoll dummy                                                                   |
 | **Play online** (bottom left)              | host a game, or join one, up to 4 players (claude.ai: same artifact link; itch.io: anyone) |
-| **Touch** (phones)                         | left thumb move (edge: run) · right thumb look · Jump / Grab / Throw / Drop buttons        |
+| **Touch** (phones)                         | left thumb move (edge: run) · right thumb look · Jump / Grab / Throw / Drop / Pour buttons |
 | **Gamepad**                                | press **A** to join (first pad: player 1, second pad: player 2 → split screen)             |
 | left / right stick                         | move / look                                                                                |
-| A · LT or L3 · RT · RB · B · X · Y · D-pad | jump · sprint · grab / release · throw · drop · ragdoll · plank · reach                    |
+| A · LT or L3 · RT · RB · B · X · Y · D-pad | jump · sprint · grab / release · throw · drop · ragdoll · pour · reach (right: plank)      |
 | **Levels** (bottom left)                   | tutorial, Timber Yard, River Lab, the level designer and your own level                    |
 | `P` / `N`                                  | pause / step exactly one voxel frame                                                       |
 | `Backspace`                                | reset the scene                                                                            |

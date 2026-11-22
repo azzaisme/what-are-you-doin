@@ -9,9 +9,9 @@
  * Standard mapping used:
  *   left stick  move            right stick  look            L3 or LT (held)  sprint
  *   A           jump            RT           grab / release   RB               throw
- *   B           drop            Y            plank (player 1) X                ragdoll
- *   LB          pour the bucket you hold (again: stop)
- *   D-pad up/down  hold further / closer
+ *   B           drop            Y            pour the bucket you hold (again: stop)
+ *   X           ragdoll
+ *   D-pad up/down  hold further / closer   D-pad right  plank (player 1, River Lab)
  *   Start (menu)   settings (any pad, joined or not)
  */
 
@@ -32,7 +32,8 @@ export const PAD = {
     L3: 10,
     R3: 11,
     UP: 12,
-    DOWN: 13
+    DOWN: 13,
+    RIGHT: 15
 } as const;
 
 const DEADZONE = 0.18;
@@ -89,10 +90,10 @@ export class PadPlayer {
         if (edge(PAD.RB)) this.q.throw = true;
         if (edge(PAD.B)) this.q.action = ACTION_DROP;
         if (edge(PAD.X)) this.q.action = ACTION_RAGDOLL;
-        if (edge(PAD.LB)) this.q.action = ACTION_POUR;
+        if (edge(PAD.Y)) this.q.action = ACTION_POUR;
         if (edge(PAD.UP)) this.q.reach += 0.25;
         if (edge(PAD.DOWN)) this.q.reach -= 0.25;
-        if (allowCarry && edge(PAD.Y)) this.carry = !this.carry;
+        if (allowCarry && edge(PAD.RIGHT)) this.carry = !this.carry;
         this.prev = pad.buttons.map((x) => x.pressed);
     }
 

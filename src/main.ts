@@ -1094,7 +1094,7 @@ function updateHud(): void {
     }
     if (state.players > 1 || pads.players[0]) {
         help.innerHTML =
-            'Pads: left stick move · right stick look · A jump · RT grab / release · RB throw · B drop · LB pour · X ragdoll · D-pad reach';
+            'Pads: left stick move · right stick look · A jump · RT grab / release · RB throw · B drop · Y pour · X ragdoll · D-pad up/down reach';
         crosshair.style.display = state.mode === 'firstPerson' && !state.uiHidden ? '' : 'none';
         return;
     }
@@ -1226,7 +1226,7 @@ function interactionText(i: number, pad: boolean): string {
     if (it.target === 'ute') return pad ? 'RT to drive the ute' : 'Click to drive the ute';
     if (it.holding === 'bucket')
         return pad
-            ? `Holding the bucket${both} · LB pour · RT release · RB throw`
+            ? `Holding the bucket${both} · Y pour · RT release · RB throw`
             : `Holding the bucket${both} · R to pour (again to stop) · click to release · right-click to throw`;
     if (it.holding)
         return pad
