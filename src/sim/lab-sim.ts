@@ -64,6 +64,7 @@ import {
     sanitizeCommand
 } from './commands.ts';
 import type { PlayerCommand } from './commands.ts';
+import { Forestry } from './forestry.ts';
 import { MAX_PLAYERS, MAX_STRESS, createLabEntities } from './lab-entities.ts';
 import type { SimEntity } from './lab-entities.ts';
 import { addDummy, addLabKinematics, buildLabPhysics, launchDummy, propBody, stressDef } from './lab-physics.ts';
@@ -73,6 +74,7 @@ import { CHARACTER } from './physics/world.ts';
 import type { HeldInfo, PhysicsWorld } from './physics/world.ts';
 import { PlayerAnimator } from './player-anim.ts';
 import type { AnimEvents, AnimOutput } from './player-anim.ts';
+import { Sawmill } from './sawmill.ts';
 import { ANIM_MAX, SnapshotRing, writeEntity } from './snapshots.ts';
 import { WATER } from './water.ts';
 
@@ -103,7 +105,7 @@ export interface LabSimOptions {
 /** Something the player should be told (objective reached, fell in the creek, ...). */
 export interface SimEvent {
     tick: number;
-    kind: 'goal' | 'fell' | 'recovered' | 'step' | 'ute' | 'water';
+    kind: 'goal' | 'fell' | 'recovered' | 'step' | 'ute' | 'water' | 'wood';
     text: string;
 }
 
@@ -206,6 +208,10 @@ export class LabSim {
     readonly pouring: boolean[] = Array.from({ length: MAX_PLAYERS }, () => false);
     /** The bucket sat in the goal without enough water (said once per visit). */
     private dryNoticed = false;
+    /** Logging (Epic 6): the stand's trees, felled logs, the axe (src/sim/forestry.ts). */
+    readonly forestry: Forestry;
+    /** The level's sawmill, if it has one (src/sim/sawmill.ts). */
+    readonly sawmill: Sawmill | null;
 
     constructor(opts: LabSimOptions = {}) {
         this.level = opts.level ?? riverLabLevel;
@@ -230,6 +236,10 @@ export class LabSim {
         this.player2Entity = c.player2;
         this.eyes = c.eyes;
         this.water = new BucketWaterState(this.level);
+        const levelLogs = c.entities.filter((e) => e.name === 'log' || e.name.startsWith('extra-log'));
+        this.forestry = new Forestry(this.level, c.forestry, levelLogs);
+        const saw = this.level.forestry?.sawmill;
+        this.sawmill = saw ? new Sawmill(saw, c.forestry.sawmill, this.forestry) : null;
         const sp = this.level.spawn;
         this.player.x = sp.x;
         this.player.z = sp.z;
@@ -300,6 +310,7 @@ export class LabSim {
             this.bucket,
             this.held,
             ...this.extras,
+            ...this.forestry.props,
             ...this.stress,
             ...this.dummy
         ];
@@ -325,6 +336,8 @@ export class LabSim {
             pw.setEnabled(this.held.id, false);
             for (const e of [this.plank, this.log, this.cube, this.sphere, this.bucket, ...this.extras])
                 if (!pw.bodies.has(e.id)) e.visible = false;
+            this.forestry.build(pw);
+            this.sawmill?.build(pw);
             for (let n = 0; n < this.stress.length; n++) {
                 const d = stressDef(this.level, this.stress[n].id, n);
                 pw.addDynamic(d.id, d.shape, d.spawn, d.opts);
@@ -479,6 +492,8 @@ export class LabSim {
                 if (this.vehicle) pw.respawn(this.vehicle.id);
                 this.water.teleported();
                 this.water.refillSources();
+                this.forestry.resetProps();
+                this.sawmill?.build(pw);
             }
             this.updateStress();
         }
@@ -501,6 +516,7 @@ export class LabSim {
         this.readVehicle();
         this.stepWater();
         this.watchUte();
+        if (this.physicsProps) this.stepWood();
         this.applyRules();
         const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
         this.physicsMs = t1 - t0;
@@ -574,9 +590,17 @@ export class LabSim {
             if (pw.heldIdOf(i) >= 0) ev.thrown = true;
             pw.throwHeld(cmd.yaw, cmd.pitch, i);
         } else if (cmd.grab) {
-            // a hanging bucket is set down rather than dropped (letGo); again while lowering drops it
-            if (pw.heldIdOf(i) >= 0) pw.letGo(i);
-            else if (!pw.tryGrab(eye, cmd.yaw, cmd.pitch, i) && !this.enterUte(i, eye, cmd)) ev.missed = true;
+            // holding the axe, a grab at a tree or a log is a blow; with empty hands, at a tree, a bite;
+            // a hanging bucket is set down rather than dropped (letGo), again while lowering drops it
+            const held = pw.heldIdOf(i);
+            if (held >= 0) {
+                if (this.forestry.strike(i, eye, p, cmd.yaw, cmd.pitch, held)) ev.missed = true;
+                else pw.letGo(i);
+            } else if (pw.tryGrab(eye, cmd.yaw, cmd.pitch, i)) {
+                // grabbed
+            } else if (this.sawmill?.pressLever(eye, cmd.yaw, cmd.pitch)) ev.grabbed = true;
+            else if (this.forestry.strike(i, eye, p, cmd.yaw, cmd.pitch, -1)) ev.missed = true;
+            else if (!this.enterUte(i, eye, cmd)) ev.missed = true;
         }
         pw.applyGrab(eye, cmd.yaw, cmd.pitch, i);
         const heldAfter = pw.heldIdOf(i);
@@ -843,7 +867,23 @@ export class LabSim {
         this.jumped = false;
     }
 
-    /** Copies dynamic body poses into their entities (physics props mode). */
+    // ------------------------------------------------------------------------------- wood
+
+    /** Logging and the sawmill, after the physics step (src/sim/forestry.ts, sawmill.ts). */
+    private stepWood(): void {
+        const feet: { x: number; z: number }[] = [];
+        for (let i = 0; i < this.players.length; i++)
+            if (this.playerActive(i) && this.seatOf(i) < 0) feet.push(this.players[i]);
+        const props = this.propEntities;
+        this.forestry.step(this.tick, (x, z, r) => {
+            for (const f of feet) if (Math.hypot(f.x - x, f.z - z) < r) return true;
+            for (const e of props) if (e.visible && Math.hypot(e.pose.p.x - x, e.pose.p.z - z) < r) return true;
+            return false;
+        });
+        this.sawmill?.step(feet);
+        for (const text of this.forestry.drain()) this.events.push({ tick: this.tick, kind: 'wood', text });
+    }
+
     // ------------------------------------------------------------------------------- the ute
 
     /** The ute entity's pose and wheel animation from the vehicle; the driver rides in the seat. */
@@ -1439,6 +1479,10 @@ export class LabSim {
         const held = pw.heldIdOf(i);
         const eye = { x: p.x, y: p.y + EYE_HEIGHT, z: p.z };
         let target = held >= 0 ? -1 : pw.probe(eye, p.yaw, p.pitch, i);
+        // what a grab would cut (a stand tree with empty hands; a tree or a log with the axe)
+        if (target < 0) target = this.forestry.aim(eye, p.yaw, p.pitch, i, held);
+        // the sawmill's mode lever (with empty hands)
+        if (target < 0 && held < 0 && this.sawmill?.aimLever(eye, p.yaw, p.pitch)) target = this.sawmill.entity.id;
         if (
             held < 0 &&
             target < 0 &&

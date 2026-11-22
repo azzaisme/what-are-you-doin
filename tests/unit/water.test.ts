@@ -194,10 +194,11 @@ describe('the bucket in the level (#61, #63)', () => {
         // walk, stop, turn, walk on: twice round a loop in the open yard, stopping at each corner
         let yaw = 0;
         const corners = [
-            [5.6, 8.5],
-            [0.5, 8.5],
-            [0.5, 6.5],
-            [3.5, 6.5]
+            // (clear of the sawmill to the north, the log pile to the east and the tank by the stump)
+            [6.2, 6.9],
+            [1.0, 6.9],
+            [1.0, 5.8],
+            [3.5, 5.8]
         ];
         for (let lap = 0; lap < 2; lap++)
             for (const [x, z] of corners) {
@@ -225,9 +226,10 @@ describe('the bucket in the level (#61, #63)', () => {
         step({}, 40);
         const mid = s.water.volume;
         expect(mid).toBeLessThan(9);
-        // the water leaves on the side away from you
-        const lip = s.water.water.lip;
-        expect(Math.hypot(lip.x, lip.z)).toBeGreaterThan(0.1);
+        // it tips away from you: its mouth (up axis) points the way you look (yaw 0 looks along -z)
+        const q = s.bucket.pose.q;
+        const upZ = 2 * (q.y * q.z + q.w * q.x);
+        expect(upZ).toBeLessThan(-0.5);
         step({ action: ACTION_POUR });
         expect(s.pouring[0]).toBe(false);
         step({}, 90);

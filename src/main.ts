@@ -12,6 +12,7 @@ import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs';
 import { BEAVER_ARM_REACH, BEAVER_LEAN, BEAVER_WALK_AMOUNT, BEAVER_WALK_PHASE } from './assets/beaver.ts';
 import { CELL_TIERS, assetTier, tierCellCm } from './assets/cell-tier.ts';
 import type { CellTier } from './assets/cell-tier.ts';
+import { SAW_MODE, TREE_CUT } from './assets/forestry.ts';
 import { BUCKET_CAPACITY } from './assets/props.ts';
 import { DebugPanel } from './debug/panel.ts';
 import type { PanelHost } from './debug/panel.ts';
@@ -19,6 +20,7 @@ import { DESIGN_KEY, Designer, loadDraft } from './editor/designer.ts';
 import { ParticleFX } from './fx/particles.ts';
 import type { WatchedEntity } from './fx/particles.ts';
 import { CALM, windAt } from './fx/wind.ts';
+import { WoodFX } from './fx/wood-fx.ts';
 import { FirstPersonInput } from './input/first-person.ts';
 import { PadManager } from './input/gamepad.ts';
 import { TouchControls, isTouchDevice } from './input/touch.ts';
@@ -52,6 +54,7 @@ import { SettingsMenu } from './ui/settings-menu.ts';
 import type { SettingValue } from './ui/settings-menu.ts';
 import { DEFAULT_SETTINGS, SETTING_RANGES, loadSettings, saveSettings, urlOverrides } from './ui/settings-store.ts';
 import type { Settings } from './ui/settings-store.ts';
+import { woodLabel, woodPrompt } from './ui/wood-prompt.ts';
 import {
     CELL_SIZE_MAX_CM,
     CELL_SIZE_DEFAULT_CM,
@@ -209,6 +212,8 @@ for (const e of sim.entities) {
     else if (e.name.startsWith('crate-')) watch(e.name, 0.25, true);
 }
 for (const n of ['log', 'extra-log-0', 'extra-log-1']) watch(n, 0.2, true);
+for (const e of sim.entities)
+    if (e.name.startsWith('felled-log') || e.name.startsWith('short-log')) watch(e.name, 0.2, true);
 watch('cube', 0.25, true);
 watch('sphere', 0.3, false);
 watch('bucket', 0, false);
@@ -216,6 +221,14 @@ for (const d of sim.dummy) watch(d.name, 0.15, false);
 for (const e of sim.eyes) watched.push({ slot: e.slot, bottom: 0, timber: false, eyeHeight: EYE_HEIGHT });
 const fx = new ParticleFX(level, watched);
 fx.bucketSlot = level.props.some((p) => p.name === 'bucket') && sim.physicsProps ? sim.bucket.slot : -1;
+// logging: chips, needles and sawdust (src/fx/wood-fx.ts)
+if (level.forestry) {
+    const f = sim.forestry.ents;
+    fx.wood = new WoodFX(
+        { chips: f.chips.slot, needles: f.needles.slot, sawmill: f.sawmill.slot },
+        level.forestry.sawmill
+    );
+}
 pipeline.particles = (time) => {
     const cp = camera.getPosition();
     fx.update(time, sim.ring, { x: cp.x, z: cp.z });
@@ -1134,7 +1147,7 @@ const propLabel = (name: string) =>
               ? 'beam'
               : name.startsWith('extra-log')
                 ? 'log (heavy)'
-                : name);
+                : (woodLabel(name) ?? name));
 
 // ---- objective line and toasts for level events (fell in, bucket recovered, goal reached)
 const toast = document.createElement('div');
@@ -1229,6 +1242,8 @@ function interactionText(i: number, pad: boolean): string {
             : 'Driving · W/S throttle · A/D steer · Space brake · Q recover · click or E to get out';
     if (it.seat >= 0) return pad ? 'Riding along · RT get out' : 'Riding along · click or E to get out';
     if (it.target === 'ute') return pad ? 'RT to drive the ute' : 'Click to drive the ute';
+    const wood = woodPrompt(it, pad ? 'pad' : 'mouse', treeCut, sawBeams());
+    if (wood) return wood;
     if (it.holding === 'bucket')
         return pad
             ? `Holding the bucket${both} · Y pour · RT release · RB throw`
@@ -1239,6 +1254,22 @@ function interactionText(i: number, pad: boolean): string {
             : `Holding ${propLabel(it.holding)}${both} · click to release · right-click to throw · wheel to adjust reach`;
     if (it.target) return pad ? `RT to grab ${propLabel(it.target)}` : `Click to grab ${propLabel(it.target)}`;
     return '';
+}
+
+/** A stand tree's cut so far, from the newest snapshot (the same for host and guests). */
+const cutPose = pose();
+const cutAnim = new Float64Array(ANIM_MAX);
+function treeCut(marker: string): number {
+    const e = sim.entities.find((x) => x.name === marker);
+    if (!e || !sim.ring.sample(e.slot, sim.ring.newestTick * SIM_DT, cutPose, cutAnim)) return 0;
+    return cutAnim[TREE_CUT];
+}
+
+/** Whether the sawmill is set to beams, from the newest snapshot. */
+function sawBeams(): boolean {
+    const e = sim.forestry.ents.sawmill;
+    if (!sim.ring.sample(e.slot, sim.ring.newestTick * SIM_DT, cutPose, cutAnim)) return false;
+    return cutAnim[SAW_MODE] > 0.5;
 }
 
 /** A guest's prompt comes from the host (guests run no physics). */
@@ -1290,15 +1321,17 @@ function updatePrompt(): void {
             touch.setHolding(!!it.holding, it.holding === 'bucket');
             t = it.driving
                 ? 'Driving · stick to drive · jump to brake · drop to recover · grab to get out'
-                : it.seat >= 0
-                  ? 'Riding along · grab to get out'
-                  : it.holding
-                    ? `Holding ${propLabel(it.holding)}${it.shared ? ' together' : ''}`
-                    : it.target === 'ute'
-                      ? 'Grab to drive the ute'
-                      : it.target
-                        ? `Grab ${propLabel(it.target)}`
-                        : '';
+                : woodPrompt(it, 'touch', treeCut, sawBeams())
+                  ? woodPrompt(it, 'touch', treeCut, sawBeams())!
+                  : it.seat >= 0
+                    ? 'Riding along · grab to get out'
+                    : it.holding
+                      ? `Holding ${propLabel(it.holding)}${it.shared ? ' together' : ''}`
+                      : it.target === 'ute'
+                        ? 'Grab to drive the ute'
+                        : it.target
+                          ? `Grab ${propLabel(it.target)}`
+                          : '';
         } else if (!fpInput.locked && !pads.players[0]) t = 'Click to look around';
         else t = interactionText(0, !fpInput.locked);
     }
@@ -2204,6 +2237,13 @@ window.__riverLab = {
         return true;
     },
     interaction: () => sim.interaction(),
+    /** Logging: each stand tree's phase and cut, and the sawmill's state and totals. */
+    wood: () => ({
+        trees: Array.from({ length: sim.forestry.treeCount }, (_, n) => sim.forestry.treeState(n)),
+        sawmill: sim.sawmill
+            ? { phase: sim.sawmill.phase, stopped: sim.sawmill.stopped, mode: sim.sawmill.mode, ...sim.sawmill.stats }
+            : null
+    }),
     /** The ute: where it is, which way it faces (yaw 0 = +z), its speed and who drives it (-1: nobody). */
     ute() {
         const p = sim.ute.pose;

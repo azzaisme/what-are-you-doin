@@ -102,7 +102,7 @@ export class Player {
             const rx = Math.cos(this.yaw);
             const rz = -Math.sin(this.yaw);
             // gentle: a hanging bucket swings if you hurry it, so creep, and stand still when close
-            const k = Math.hypot(ex, ez) < 0.08 ? 0 : 0.8;
+            const k = Math.hypot(ex, ez) < 0.2 ? 0 : 0.5;
             const clamp = (v: number) => Math.max(-0.25, Math.min(0.25, v));
             const mouth = b.y + 0.3;
             this.pitch = Math.max(-1.3, Math.min(0.5, this.pitch + (mouthY - mouth) * 0.03));

@@ -28,6 +28,7 @@ import { hash3 } from '../voxels/volumes.ts';
 
 import { CALM, windTravel } from './wind.ts';
 import type { WindSpec } from './wind.ts';
+import type { WoodFX } from './wood-fx.ts';
 
 /**
  * Leaf slots. Each falling leaf dirties one dynamic chunk per voxel frame (re-meshed), so the number
@@ -66,12 +67,14 @@ interface Crown {
     r: number;
 }
 
+type BurstKind = 'dust' | 'chips' | 'splash' | 'needles' | 'sawdust' | 'pour' | 'fill';
+
 interface Burst {
     t0: number;
     x: number;
     y: number;
     z: number;
-    kind: 'dust' | 'chips' | 'splash' | 'pour' | 'fill';
+    kind: BurstKind;
     /** Pour: the direction droplets leave in (horizontal, unit). */
     dx?: number;
     dz?: number;
@@ -105,7 +108,9 @@ export class ParticleFX {
     private readonly p = pose();
     private readonly anim = new Float64Array(ANIM_MAX);
     /** Effects spawned (cumulative, for tests and the debug panel). */
-    readonly spawned = { dust: 0, chips: 0, splash: 0, pour: 0, fill: 0 };
+    readonly spawned = { dust: 0, chips: 0, splash: 0, needles: 0, sawdust: 0, pour: 0, fill: 0 };
+    /** Logging effects (levels with a logging stand or a sawmill): chips, needles, sawdust. */
+    wood: WoodFX | null = null;
     /** The bucket's entity slot (-1: none) and its litres at the last sample. */
     bucketSlot = -1;
     private bucketLitres = -1;
@@ -127,6 +132,7 @@ export class ParticleFX {
             // seek or reset: forget motion history and live bursts
             this.prev.clear();
             this.bursts = [];
+            this.wood?.reset();
         }
         const dt = this.lastTime >= 0 ? time - this.lastTime : 0;
         this.lastTime = time;
@@ -135,6 +141,9 @@ export class ParticleFX {
             this.detect(time, dt, ring);
             this.bucketWater(time, ring);
         } else this.bucketLitres = -1;
+        this.wood?.update(time, ring, (kind, x, y, z) =>
+            this.spawn(time, x, y, z, kind, kind === 'needles' ? 40 : kind === 'sawdust' ? 6 : 8)
+        );
         this.drawBursts(time);
         return this.count;
     }
@@ -274,7 +283,7 @@ export class ParticleFX {
         }
     }
 
-    private spawn(t0: number, x: number, y: number, z: number, kind: Burst['kind'], n: number, dx = 0, dz = 0): void {
+    private spawn(t0: number, x: number, y: number, z: number, kind: BurstKind, n: number, dx = 0, dz = 0): void {
         this.spawned[kind]++;
         this.bursts.push({ t0, x, y, z, kind, n, seed: ++this.burstSeq, dx, dz });
         if (this.bursts.length > MAX_BURSTS) this.bursts.shift();
@@ -289,13 +298,21 @@ export class ParticleFX {
                     ? 0.7
                     : b.kind === 'chips'
                       ? 0.8
-                      : b.kind === 'pour'
-                        ? 0.6
-                        : b.kind === 'fill'
-                          ? 0.25
-                          : 1.1;
+                      : b.kind === 'needles'
+                        ? 1.6
+                        : b.kind === 'sawdust'
+                          ? 0.6
+                          : b.kind === 'pour'
+                            ? 0.6
+                            : b.kind === 'fill'
+                              ? 0.25
+                              : 1.1;
             if (age < 0 || age > life) continue;
             live.push(b);
+            if (b.kind === 'needles' || b.kind === 'sawdust') {
+                this.drawWood(b, age);
+                continue;
+            }
             if (b.kind === 'pour' || b.kind === 'fill') {
                 this.drawWater(b, age);
                 continue;
@@ -340,6 +357,27 @@ export class ParticleFX {
                 if (y < b.y - 0.28) continue;
             }
             this.push(x, y, z, voxel(M.BucketWater, i & 3));
+        }
+    }
+
+    /**
+     * Needles: a cloud from a crown, drifting down slowly and spreading (about the crown's size).
+     * Sawdust: a short low spray out of the blade.
+     */
+    private drawWood(b: Burst, age: number): void {
+        const needles = b.kind === 'needles';
+        for (let i = 0; i < b.n; i++) {
+            const a = u(b.seed, i, 1) * Math.PI * 2;
+            const r0 = needles ? 1.4 * Math.sqrt(u(b.seed, i, 2)) : 0;
+            const sp = needles ? 0.4 + 0.5 * u(b.seed, i, 3) : 0.8 + 1.2 * u(b.seed, i, 3);
+            const x = b.x + Math.cos(a) * (r0 + sp * age);
+            const z = b.z + Math.sin(a) * (r0 + sp * age);
+            const y0 = b.y + (needles ? (u(b.seed, i, 4) - 0.5) * 1.6 : 0);
+            const y = needles ? y0 - (0.7 + 0.5 * u(b.seed, i, 5)) * age : y0 + 1.2 * age - 4.9 * age * age;
+            const g = this.level.terrainHeight(cellCentre(x), cellCentre(z));
+            const yy = Math.max(y, restY(g));
+            const mat = needles ? (i % 3 ? M.Needle : M.NeedleLight) : i % 2 ? M.TimberEnd : M.Dust;
+            this.push(x, yy, z, voxel(mat, i & 3));
         }
     }
 }

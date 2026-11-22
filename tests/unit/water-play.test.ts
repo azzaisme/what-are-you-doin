@@ -36,10 +36,9 @@ function pickUp(s: LabSim): Player {
     return pl;
 }
 
-/** Walks round to the east of the stump (the butt stands west of it) and faces the tap. */
+/** Walks to just north of the stump (the tank's post stands east of it) and faces the tap. */
 function toTap(pl: Player): void {
-    pl.walkTo(BUCKET_STUMP.x + 2.2, BUCKET_STUMP.z + 1.5);
-    pl.walkTo(BUCKET_STUMP.x + 1.5, BUCKET_STUMP.z);
+    pl.walkTo(BUCKET_STUMP.x - 0.3, BUCKET_STUMP.z + 1.6);
     pl.lookAt(BUCKET_STUMP.x, pl.s.player.y + EYE_HEIGHT - 0.6, BUCKET_STUMP.z, 30);
 }
 
@@ -240,7 +239,7 @@ describe('the flower, played (#64)', () => {
         pl.step({}, 60);
         // back down to the butt for more, and pour again: welcome, but no second win
         const butt = s.water.sources[2].def;
-        expect(pl.walkTo(butt.x + 0.9, butt.z + 0.9, 0.4)).toBe(true);
+        expect(pl.walkTo(butt.x - 0.9, butt.z - 0.9, 0.4)).toBe(true);
         pl.holdOver(butt.x, butt.z, butt.y + 0.55, 1200, () => s.water.volume >= WATER.capacity - 1e-9);
         expect(s.water.volume).toBeCloseTo(WATER.capacity, 6);
         for (let u = 178; u <= 196; u += 3) pl.walkTo(routeToWorld(u, roadT(u)).x, routeToWorld(u, roadT(u)).z, 0.6);

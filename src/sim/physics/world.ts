@@ -227,6 +227,7 @@ export class Rig {
 }
 
 const _wristTarget: Quat = { x: 0, y: 0, z: 0, w: 1 };
+const _up = { x: 0, y: 0, z: 0 };
 const _wrist: WristResult = { tx: 0, ty: 0, tz: 0, angle: 0, load: 0 };
 const AXIS_X = { x: 1, y: 0, z: 0 };
 const AXIS_Y = { x: 0, y: 1, z: 0 };
@@ -1016,27 +1017,54 @@ export class PhysicsWorld {
      */
     private applyPour(r: Rig, pb: PhysBody, yaw: number): void {
         const b = pb.body;
-        const a = -POUR_ANGLE / 2;
-        const sy = Math.sin(yaw / 2);
-        const cy = Math.cos(yaw / 2);
-        const sx = Math.sin(a);
-        const cx = Math.cos(a);
-        // target = yawQ * pitchQ (about local x)
-        _wristTarget.x = cy * sx;
-        _wristTarget.y = sy * cx;
-        _wristTarget.z = -sy * sx;
-        _wristTarget.w = cy * cx;
-        const t = wristTorque(
-            b.rotation(),
-            _wristTarget,
-            b.angvel(),
-            b.effectiveWorldInvInertia(),
-            _wrist,
-            GRAB.maxTorque
-        );
-        b.applyTorqueImpulse({ x: t.tx * SIM_DT, y: t.ty * SIM_DT, z: t.tz * SIM_DT }, true);
-        r.wristLoad = t.load;
-        r.wristAngle = t.angle;
+        // swing only: turn the body's up axis towards "forward and down by POUR_ANGLE from up",
+        // whichever way the bucket happens to face about its own axis
+        const sa = Math.sin(POUR_ANGLE);
+        const ca = Math.cos(POUR_ANGLE);
+        const wx = -Math.sin(yaw) * sa;
+        const wy = ca;
+        const wz = -Math.cos(yaw) * sa;
+        rotate(b.rotation(), 0, 1, 0, _up);
+        let ax = _up.y * wz - _up.z * wy;
+        let ay = _up.z * wx - _up.x * wz;
+        let az = _up.x * wy - _up.y * wx;
+        const sn = Math.hypot(ax, ay, az);
+        const angle = Math.atan2(sn, _up.x * wx + _up.y * wy + _up.z * wz);
+        if (sn > 1e-9) {
+            ax /= sn;
+            ay /= sn;
+            az /= sn;
+        } else ax = ay = az = 0;
+        // the swinging part of the spin (not about its own axis)
+        const w = b.angvel();
+        const along = w.x * _up.x + w.y * _up.y + w.z * _up.z;
+        const sx = w.x - along * _up.x;
+        const sy = w.y - along * _up.y;
+        const sz = w.z - along * _up.z;
+        // it turns about the hand, not its own centre: size the spring for that (parallel axis),
+        // or gravity about the handle holds it short of the pour
+        const invI = b.effectiveWorldInvInertia();
+        const com = b.worldCom();
+        const t0 = b.translation();
+        rotate(b.rotation(), r.heldLocal.x, r.heldLocal.y, r.heldLocal.z, _v);
+        const lever = Math.hypot(t0.x + _v.x - com.x, t0.y + _v.y - com.y, t0.z + _v.z - com.z);
+        const inertia = 3 / Math.max(1e-9, invI.m11 + invI.m22 + invI.m33) + b.mass() * lever * lever;
+        const w0 = 2 * Math.PI * GRAB.wristFrequency;
+        const c = 2 * GRAB.wristDamping * w0;
+        let tx = inertia * (w0 * w0 * angle * ax - c * sx);
+        let ty = inertia * (w0 * w0 * angle * ay - c * sy);
+        let tz = inertia * (w0 * w0 * angle * az - c * sz);
+        const mag = Math.hypot(tx, ty, tz);
+        if (mag > GRAB.maxTorque) {
+            const k = GRAB.maxTorque / mag;
+            tx *= k;
+            ty *= k;
+            tz *= k;
+        }
+        if (!Number.isFinite(tx + ty + tz)) tx = ty = tz = 0;
+        b.applyTorqueImpulse({ x: tx * SIM_DT, y: ty * SIM_DT, z: tz * SIM_DT }, true);
+        r.wristLoad = GRAB.maxTorque > 0 ? mag / GRAB.maxTorque : 0;
+        r.wristAngle = angle;
     }
 
     /**
