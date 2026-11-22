@@ -56,6 +56,12 @@ export const WOOD = {
     spin0: 0.55,
     /** The crown breaks off once the trunk has tipped this far from upright (rad), or after this long. */
     crownBreakTilt: (62 * Math.PI) / 180,
+    /**
+     * Angular damping of a felled log while it falls, and once it is down (the crown has broken
+     * off): bark on the ground, so it stops rolling within a second or two and lies where it fell.
+     */
+    fallDamping: 0.4,
+    lyingDamping: 20,
     crownMaxTicks: 240,
     /** Axe blows to buck a log into two short logs. */
     buckBlows: 3,
@@ -461,6 +467,8 @@ export class Forestry {
         const pb = pw.bodies.get(log.id)!;
         // lost (out of the world) while falling: it comes back lying beside the stump
         setPose(pb.spawn, t.x + d.x * 1.4, g + LOG_RADIUS + 0.05, t.z + d.z * 1.4, yawQuat(Math.atan2(-d.z, d.x)));
+        pb.baseAngularDamping = WOOD.fallDamping;
+        pb.body.setAngularDamping(WOOD.fallDamping);
         pw.setEnabled(log.id, true);
         pw.place(log.id, at, lin, w);
         this.felled[k] = { used: true, tree: n, fellTick: this.tick, crown: true };
@@ -601,6 +609,9 @@ export class Forestry {
             const tilt = Math.acos(Math.max(-1, Math.min(1, _v.y)));
             if (tilt > WOOD.crownBreakTilt || tick - f.fellTick > WOOD.crownMaxTicks) {
                 f.crown = false;
+                const pb = pw.bodies.get(log.id)!;
+                pb.baseAngularDamping = WOOD.lyingDamping;
+                if (pw.holders(log.id) === 0) pb.body.setAngularDamping(WOOD.lyingDamping);
                 const c = log.pose.p;
                 this.needles(c.x + _v.x * 3.4, c.y + _v.y * 3.4, c.z + _v.z * 3.4);
             }

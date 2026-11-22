@@ -1,5 +1,49 @@
 # Progress log
 
+## Epic 6 follow-ups: beams by hand, felled logs lie still, a determinism check (2026-11-22)
+
+### What changed in the game
+
+- **A felled log stops where it lands.** Until now a felled log could keep rolling slowly
+  sideways for many seconds after it landed (nothing in the physics stops a round log rolling on
+  flat ground). Once the crown has broken off, a felled log now gets much more spin damping (bark
+  on the ground), so it settles in about two seconds, close to where the toast said it would fall.
+  Carrying is unchanged: a held log uses the grab's own damping. Measured over 24 fellings (all
+  six trees, cut from four sides):
+    - **Before:** 11 of the 24 logs were still rolling 15 s after landing, and one ended 2.2 m to
+      the side of its fall line.
+    - **Now:** 23 of 24 are still within 2.7 s. 18 of 24 lie within 0.1 m of the fall line; the
+      worst is 0.53 m (the hard-leaning tree, whose top lands on the bank north of the stand).
+
+### What the tests now prove
+
+- **Beams by player input only:**
+    - A beaver walks to the sawmill and pulls its lever: the mill is set to beams.
+    - Two beavers fell two trees and carry each whole log into the guide; each comes out as one
+      beam (`beam-12`, `beam-13`) and no planks.
+    - One beaver shoulders the two sawn beams across the creek as the bridge's stringers. The yard's
+      own beams are never touched.
+    - The other decks them with three planks from the yard's stack, and a player walks over to the
+      far bank without falling in.
+- **Determinism of sawing and regrowth:**
+    - Every command of a two-beaver run is recorded: fell tree 2, carry the log in, saw it into three
+      planks, wait for the stump to regrow.
+    - The recording is played into a fresh game with nothing steering it. At five points (felled,
+      taken, half sawn, planks out, regrown) the sawmill's state and counts, every tree's state and
+      cut, and every object's pose, visibility and animation match exactly.
+    - Changing ten ticks of one player's input makes the check fail, so it does catch differences.
+- **Logs lie flat, back to the 0.2 tolerance:**
+    - The old 0.3 allowance was there because the test looked 2 s after the fall. By then the log
+      can still be sliding its foot off the stump: −0.22 tilt, and 0.4 m higher than lying flat.
+    - The tests now wait until the log is still, then check that it lies within 0.2 of flat and that
+      its foot is on the ground, not up on the stump. This is checked for the chewing test and for
+      all eight sides of the fall-direction test.
+    - Worst measured: 0.075 (about 4°), the hard-leaning tree whose top rests on the bank; the
+      other seven are at most 0.03. Every foot lies on the ground, within 3 mm.
+    - In a wider sweep (48 fellings), one log had looked propped (0.24), but it was lying on the
+      chewer, who stood in its path. No log was left resting on its stump, so no "kick off the
+      stump" was needed.
+
 ## Epic 6: logging and the sawmill (2026-11-22)
 
 East of the Timber Yard there is now a logging stand: six pines with an orange band round the

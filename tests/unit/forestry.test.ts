@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { SAW_MODE, TREE_CUT, TREE_STATE } from '../../src/assets/forestry.ts';
+import { LOG_RADIUS } from '../../src/assets/props.ts';
 import { MAX_PARTICLES, ParticleFX } from '../../src/fx/particles.ts';
 import { WoodFX } from '../../src/fx/wood-fx.ts';
 import { PINE_TRUNK_HEIGHT } from '../../src/levels/common.ts';
@@ -84,6 +85,29 @@ function axisOf(p: Pose): { x: number; y: number; z: number } {
     return v;
 }
 
+/**
+ * Steps until a felled log has come to rest (moving the chewer well clear first, so it cannot lie
+ * on them), then says how it lies: its tilt from flat (|axis.y|), and how high its end nearer the
+ * stump is above the ground there (about 0.3 if that end were up on the stump).
+ */
+function atRest(s: LabSim, tree: number, from: { k: number }): { flat: number; footUp: number } {
+    s.placePlayer(4, 4, 0);
+    const log = s.forestry.logOf(tree)!;
+    const b = s.physics.bodies.get(log.id)!.body;
+    for (let k = 0; k < 600; k++) {
+        s.step(cmd(from.k++));
+        const v = b.linvel();
+        const w = b.angvel();
+        if (k > 30 && Math.hypot(v.x, v.y, v.z) < 0.02 && Math.hypot(w.x, w.y, w.z) < 0.05) break;
+    }
+    const t = YARD_FORESTRY.trees[tree];
+    const a = axisOf(log.pose);
+    const c = log.pose.p;
+    const e = (c.x - t.x) * a.x + (c.z - t.z) * a.z > 0 ? -1 : 1;
+    const foot = { x: c.x + a.x * e, y: c.y + a.y * e, z: c.z + a.z * e };
+    return { flat: Math.abs(a.y), footUp: foot.y - LOG_RADIUS - YARD_FORESTRY.ground(foot.x, foot.z) };
+}
+
 /** A pose lying in the sawmill's infeed guide, along it. */
 function inGuide(dy = 0.05): Pose {
     const G = SAWMILL.guide;
@@ -143,9 +167,12 @@ describe('forestry: the logging stand', () => {
         expect(p.y).toBeLessThan(YARD_Y + 0.6);
         expect(p.x - t.x).toBeGreaterThan(0.8);
         expect(Math.abs(p.z - t.z)).toBeLessThan(0.4);
-        // lying (its foot may rest on its own stump: up to ~15 degrees)
-        expect(Math.abs(axisOf(log.pose).y)).toBeLessThan(0.3);
         expect(Math.abs(axisOf(log.pose).x)).toBeGreaterThan(0.9);
+        // at rest it lies flat, its foot on the ground and not up on the stump (just after landing
+        // the foot may still be sliding off the stump)
+        const rest = atRest(s, tree, from);
+        expect(rest.flat).toBeLessThan(0.2);
+        expect(rest.footUp).toBeLessThan(0.05);
         // only a stump is left: a ray at chest height passes where the trunk stood
         expect(s.forestry.aimTree({ x: t.x - 1.5, y: YARD_Y + 1, z: t.z }, -Math.PI / 2, 0)).toBe(-1);
         const g = s.physics.groundY(t.x, t.z, YARD_Y + 3)!;
@@ -153,8 +180,9 @@ describe('forestry: the logging stand', () => {
         expect(g).toBeGreaterThan(YARD_Y + 0.2);
     });
 
-    it('falls the predicted way, from every side, every time (within 15 degrees)', () => {
+    it('falls the predicted way, from every side, every time (within 15 degrees), and lies flat', () => {
         const worst: number[] = [];
+        const flats: number[] = [];
         for (let side = 0; side < 8; side++) {
             const s = yard();
             const from = { k: 100 };
@@ -174,8 +202,13 @@ describe('forestry: the logging stand', () => {
             const want = Math.atan2(d.z, d.x);
             const err = Math.abs(Math.atan2(Math.sin(got - want), Math.cos(got - want)));
             worst.push((err * 180) / Math.PI);
+            // and at rest, flat, its foot on the ground and not up on the stump
+            const rest = atRest(s, tree, from);
+            flats.push(rest.flat);
+            expect(rest.footUp).toBeLessThan(0.05);
         }
         expect(Math.max(...worst)).toBeLessThan(15);
+        expect(Math.max(...flats)).toBeLessThan(0.2);
     }, 60_000);
 
     it("a tree's weight biases the fall: a leaning tree falls between the push and its lean", () => {

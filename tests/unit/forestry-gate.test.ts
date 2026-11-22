@@ -107,6 +107,9 @@ class Play {
 
     private clock: () => number = () => 0;
 
+    /** When set, every step's two commands are recorded here (to replay them elsewhere). */
+    script: [PlayerCommand, PlayerCommand][] | null = null;
+
     /** Steps with player 0's and player 1's commands (each gets its kept look unless given). */
     step(a: Cmd = {}, b: Cmd = {}, k = 1): void {
         for (let i = 0; i < k; i++) {
@@ -116,6 +119,7 @@ class Play {
             this.pitch[0] = c0.pitch;
             this.yaw[1] = c1.yaw;
             this.pitch[1] = c1.pitch;
+            this.script?.push([c0, c1]);
             if (this.gs && this.hs) {
                 // the guest's device sends its input; the host steps with what arrived
                 this.gs.sendInput(c1);
@@ -215,6 +219,14 @@ function carryIntoGuide(
 ): number {
     const s = g.s;
     const lp = log.pose.p;
+    // ---- wait until it lies still (a log still rolling would be gone from where they reach)
+    const body = s.physics.bodies.get(log.id)!.body;
+    for (let k = 0; k < 900; k++) {
+        const v = body.linvel();
+        const w = body.angvel();
+        if (Math.hypot(v.x, v.y, v.z) < 0.01 && Math.hypot(w.x, w.y, w.z) < 0.03) break;
+        g.step();
+    }
     // ---- both come round to its north side (away from the mill) and take it either side of
     // its middle, facing it
     const side = sideOf(log.pose);
@@ -293,6 +305,130 @@ function carryIntoGuide(
     return minY - y0;
 }
 
+/**
+ * Player 0 shoulders a lying beam (along x) across the creek by one end (`end` +1: its east end,
+ * standing east of it; -1: its west end) and lays it at `x` on the bridge line, by input only.
+ * With `north` it first carries it north to that z on its own line, then steps across to `x`.
+ */
+function shoulderBeam(
+    g: Play,
+    beam: {
+        id: number;
+        pose: { p: { x: number; y: number; z: number }; q: { x: number; y: number; z: number; w: number } };
+    },
+    x: number,
+    end: 1 | -1,
+    north?: number
+): void {
+    const s = g.s;
+    const b = beam.pose.p;
+    // along it (it may lie a little skewed, more so once brushed past): its axis, pointing east
+    // (the yard's beams, taken by their east end, keep the yard bridge test's moves: along x)
+    const axis = () => {
+        const q = beam.pose.q;
+        const sx = 1 - 2 * (q.y * q.y + q.z * q.z);
+        const sz = 2 * (q.x * q.z - q.w * q.y);
+        const n = Math.sign(sx) / Math.hypot(sx, sz);
+        return end > 0 ? { x: 1, z: 0 } : { x: sx * n, z: sz * n };
+    };
+    let a = axis();
+    g.walkTo(0, b.x + a.x * end * 2.4, b.z + a.z * end * 2.4 + 1.0);
+    a = axis();
+    g.walkTo(0, b.x + a.x * end * 2.4, b.z + a.z * end * 2.4);
+    a = axis();
+    g.turn(0, (end * Math.PI) / 2); // facing along it, at that end
+    expect(g.grabAt(0, b.x + a.x * end * 1.45, b.y, b.z + a.z * end * 1.45)).toBe(beam.id);
+    g.tilt(0, -0.25, 40);
+    g.one(0, {}, 30);
+    // turn to the creek: the beam turns with you and points out over the gap
+    g.turn(0, 0, 120);
+    const p0 = s.players[0];
+    // (steering by the beam itself: it is held a little to one side)
+    const bx = () => beam.pose.p.x;
+    if (north !== undefined) {
+        const x0 = bx();
+        for (let k = 0; k < 1200 && p0.z > north; k++)
+            g.one(0, { moveZ: 0.5, moveX: Math.max(-0.2, Math.min(0.2, (x0 - bx()) * 2)) });
+        g.one(0, {}, 30);
+    }
+    // (the yard bridge test's moves: across to the line, then straight to the bank)
+    for (let k = 0; k < 900 && Math.abs(bx() - x) > 0.04; k++) g.one(0, { moveX: bx() > x ? -0.3 : 0.3 });
+    for (let k = 0; k < 900 && p0.z > BRIDGE.nearEdge + 0.4; k++)
+        g.one(0, { moveZ: 0.5, moveX: Math.max(-0.2, Math.min(0.2, (x - bx()) * 2)) });
+    g.one(0, {}, 30);
+    for (let k = 0; k < 60 && Math.abs(bx() - x) > 0.03; k++)
+        g.one(0, { moveX: Math.max(-0.2, Math.min(0.2, (x - bx()) * 2)) });
+    g.tilt(0, -0.7, 40);
+    g.one(0, {}, 30);
+    g.one(0, { grab: true });
+    g.one(0, {}, 120);
+    expect(s.physics.heldIdOf(0)).toBe(-1);
+    expect(Math.abs(beam.pose.p.z - BRIDGE.zc)).toBeLessThan(0.3);
+    expect(Math.abs(beam.pose.p.y - (YARD_Y + 0.12))).toBeLessThan(0.25);
+    g.walkTo(0, x + 1.5, BRIDGE.nearEdge + 2.5);
+}
+
+/**
+ * Player 1 carries a plank (lying along x) from where it lies, out along the beams, and lays it
+ * across them at `deckZ`: takes it by its middle from its north side (at `pickZ`), turns to the
+ * creek, goes to the bridge's end (by way of `via`, if given), walks out, sets it down, backs off.
+ */
+function layPlank(
+    g: Play,
+    plank: { id: number; pose: { p: { x: number; y: number; z: number } } },
+    deckZ: number,
+    pickZ: number,
+    via?: { x: number; z: number }
+): void {
+    const s = g.s;
+    const p = plank.pose.p;
+    // from its north side, facing south, take it by its middle
+    g.walkTo(1, p.x, pickZ);
+    g.turn(1, Math.PI);
+    expect(g.grabAt(1, p.x, p.y, p.z)).toBe(plank.id);
+    g.tilt(1, -0.2, 30);
+    // turn round to face the creek (yaw 0 faces north, -z); the plank stays across the view
+    g.turn(1, 0, 90);
+    if (via) g.shuffleTo(1, via.x, via.z);
+    g.shuffleTo(1, BRIDGE_X, BRIDGE.nearEdge + 2.0);
+    // out along the beams until the plank is over its spot, then set it down
+    const p1 = s.players[1];
+    for (let k = 0; k < 900 && plank.pose.p.z > deckZ + 0.05; k++) {
+        const dx = Math.max(-0.2, Math.min(0.2, (BRIDGE_X - p1.x) * 2));
+        // (onto the beams at a walk: the step up from the bank wants some pace)
+        g.one(1, { moveZ: p1.z > BRIDGE.nearFace ? 0.8 : 0.3, moveX: dx });
+    }
+    g.one(1, {}, 20);
+    g.tilt(1, -0.6, 40);
+    g.one(1, {}, 30);
+    g.one(1, { grab: true });
+    g.one(1, {}, 90);
+    expect(s.physics.heldIdOf(1)).toBe(-1);
+    // it lies across the beams over the gap
+    expect(plank.pose.p.y).toBeGreaterThan(YARD_Y + 0.15);
+    expect(Math.abs(plank.pose.p.x - BRIDGE_X)).toBeLessThan(0.6);
+    // back to the bank (backing up along the beams), then out of the way
+    for (let k = 0; k < 900 && p1.z < BRIDGE.nearEdge + 0.8; k++) g.one(1, { moveZ: -0.3 });
+    g.walkTo(1, BRIDGE_X + 3, BRIDGE.nearEdge + 3);
+}
+
+/** Player 0 walks over the bridge's deck to the far bank, without falling in. */
+function walkOver(g: Play, planks: { pose: { p: { y: number } } }[]): void {
+    const s = g.s;
+    g.walkTo(0, BRIDGE_X, BRIDGE.nearEdge + 1.2);
+    g.turn(0, 0);
+    let topY = 0;
+    for (let k = 0; k < 600 && s.players[0].z > BRIDGE.farEdge - 1; k++) {
+        g.one(0, { moveZ: 0.8 });
+        if (s.players[0].z < BRIDGE.nearFace && s.players[0].z > BRIDGE.farFace) topY = Math.max(topY, s.players[0].y);
+    }
+    expect(s.progress.falls).toBe(0);
+    expect(s.players[0].z).toBeLessThan(BRIDGE.farEdge - 0.5);
+    // stepped up onto the planks (plank top is 0.1 above the beams)
+    expect(topY).toBeGreaterThan(YARD_Y + 0.25);
+    for (const p of planks) expect(p.pose.p.y).toBeGreaterThan(YARD_Y + 0.15);
+}
+
 describe('the gate, by player input only', () => {
     it('two beavers fell a tree, carry its log into the sawmill, the sawn planks deck the bridge, a player walks over', () => {
         const g = new Play(2);
@@ -325,96 +461,111 @@ describe('the gate, by player input only', () => {
         expect(planks.length).toBe(3);
 
         // ---- the bridge: player 0 shoulders the yard's two beams across the creek (by an end)
-        for (const [name, x] of [
-            ['beam-0', BRIDGE_X - 0.12],
-            ['beam-1', BRIDGE_X + 0.12]
-        ] as const) {
-            const beam = g.entity(name);
-            const b = beam.pose.p;
-            g.walkTo(0, b.x + 2.4, b.z + 1.0);
-            g.walkTo(0, b.x + 2.4, b.z);
-            g.turn(0, Math.PI / 2); // facing -x, at the beam's +x end
-            expect(g.grabAt(0, b.x + 1.45, b.y, b.z)).toBe(beam.id);
-            g.tilt(0, -0.25, 40);
-            g.one(0, {}, 30);
-            // turn to the creek: the beam turns with you and points out over the gap
-            g.turn(0, 0, 120);
-            // (the yard bridge test's moves: across to the line, then straight to the bank)
-            const p0 = s.players[0];
-            // (steering by the beam itself: it is held a little to one side)
-            const bx = () => beam.pose.p.x;
-            for (let k = 0; k < 900 && Math.abs(bx() - x) > 0.04; k++) g.one(0, { moveX: bx() > x ? -0.3 : 0.3 });
-            for (let k = 0; k < 900 && p0.z > BRIDGE.nearEdge + 0.4; k++)
-                g.one(0, { moveZ: 0.5, moveX: Math.max(-0.2, Math.min(0.2, (x - bx()) * 2)) });
-            g.one(0, {}, 30);
-            for (let k = 0; k < 60 && Math.abs(bx() - x) > 0.03; k++)
-                g.one(0, { moveX: Math.max(-0.2, Math.min(0.2, (x - bx()) * 2)) });
-            g.tilt(0, -0.7, 40);
-            g.one(0, {}, 30);
-            g.one(0, { grab: true });
-            g.one(0, {}, 120);
-            expect(s.physics.heldIdOf(0)).toBe(-1);
-            expect(Math.abs(beam.pose.p.z - BRIDGE.zc)).toBeLessThan(0.3);
-            expect(Math.abs(beam.pose.p.y - (YARD_Y + 0.12))).toBeLessThan(0.25);
-            g.walkTo(0, x + 1.5, BRIDGE.nearEdge + 2.5);
-        }
+        shoulderBeam(g, g.entity('beam-0'), BRIDGE_X - 0.12, 1);
+        shoulderBeam(g, g.entity('beam-1'), BRIDGE_X + 0.12, 1);
         expect(s.progress.falls).toBe(0);
 
         // ---- player 1 carries each sawn plank off the rack, walks out along the beams with it and
         // lays it across them (the far one first, so it never steps over one it has laid)
         const deckZ = [BRIDGE.farFace + 0.6, BRIDGE.zc, BRIDGE.nearFace - 0.6];
-        planks.forEach((plank, n) => {
-            const p = plank.pose.p;
-            // from the rack's north side, facing south, take it by its middle
-            g.walkTo(1, p.x, SPOT.z - 1.6);
-            g.turn(1, Math.PI);
-            expect(g.grabAt(1, p.x, p.y, p.z)).toBe(plank.id);
-            g.tilt(1, -0.2, 30);
-            // turn round to face the creek (yaw 0 faces north, -z); the plank stays across the view
-            g.turn(1, 0, 90);
-            g.shuffleTo(1, BRIDGE_X, BRIDGE.nearEdge + 2.0);
-            // out along the beams until the plank is over its spot, then set it down
-            const p1 = s.players[1];
-            for (let k = 0; k < 900 && plank.pose.p.z > deckZ[n] + 0.05; k++) {
-                const dx = Math.max(-0.2, Math.min(0.2, (BRIDGE_X - p1.x) * 2));
-                // (onto the beams at a walk: the step up from the bank wants some pace)
-                g.one(1, { moveZ: p1.z > BRIDGE.nearFace ? 0.8 : 0.3, moveX: dx });
-            }
-            g.one(1, {}, 20);
-            g.tilt(1, -0.6, 40);
-            g.one(1, {}, 30);
-            g.one(1, { grab: true });
-            g.one(1, {}, 90);
-            expect(s.physics.heldIdOf(1)).toBe(-1);
-            // it lies across the beams over the gap
-            expect(plank.pose.p.y).toBeGreaterThan(YARD_Y + 0.15);
-            expect(Math.abs(plank.pose.p.x - BRIDGE_X)).toBeLessThan(0.6);
-            // back to the bank (backing up along the beams), then out of the way
-            for (let k = 0; k < 900 && p1.z < BRIDGE.nearEdge + 0.8; k++) g.one(1, { moveZ: -0.3 });
-            g.walkTo(1, BRIDGE_X + 3, BRIDGE.nearEdge + 3);
-        });
+        planks.forEach((plank, n) => layPlank(g, plank, deckZ[n], SPOT.z - 1.6));
         const decked = planks.filter((p) => p.pose.p.z < BRIDGE.nearFace && p.pose.p.z > BRIDGE.farFace);
         expect(decked.length).toBe(3);
 
         // ---- player 0 walks over the bridge, over the planks, to the far bank
-        g.walkTo(0, BRIDGE_X, BRIDGE.nearEdge + 1.2);
-        g.turn(0, 0);
-        let topY = 0;
-        for (let k = 0; k < 600 && s.players[0].z > BRIDGE.farEdge - 1; k++) {
-            g.one(0, { moveZ: 0.8 });
-            if (s.players[0].z < BRIDGE.nearFace && s.players[0].z > BRIDGE.farFace)
-                topY = Math.max(topY, s.players[0].y);
-        }
-        expect(s.progress.falls).toBe(0);
-        expect(s.players[0].z).toBeLessThan(BRIDGE.farEdge - 0.5);
-        // stepped up onto the planks (plank top is 0.1 above the beams)
-        expect(topY).toBeGreaterThan(YARD_Y + 0.25);
-        for (const p of planks) expect(p.pose.p.y).toBeGreaterThan(YARD_Y + 0.15);
+        walkOver(g, planks);
 
         // ---- its log was sawn, so the stump has regrown meanwhile (it waits WOOD.regrowTicks)
         expect(s.forestry.treeState(tree).phase).toBe('standing');
         expect(s.forestry.stats.regrown).toBe(1);
     }, 240_000);
+
+    it('beams by input: switch the lever, carry two whole logs in, the sawn beams are the bridge stringers', () => {
+        const g = new Play(2);
+        const s = g.s;
+        // ---- player 0 walks to the sawmill's lever and pulls it (grab while looking at it)
+        const L = SAWMILL.lever;
+        const lever = sawmillToWorld(SPOT, L.x, L.y + 0.12, L.z);
+        g.walkTo(0, lever.x + 0.2, lever.z - 1.2);
+        expect(s.sawmill!.mode).toBe('planks');
+        g.grabAt(0, lever.x, lever.y, lever.z);
+        expect(s.physics.heldIdOf(0)).toBe(-1);
+        expect(s.sawmill!.mode).toBe('beam');
+        expect(s.events.some((e) => e.text.startsWith('The sawmill is set to beams'))).toBe(true);
+        g.walkTo(0, lever.x + 0.2, lever.z - 3);
+
+        // ---- fell two trees (each falls west, towards the mill), carry each whole log in
+        const beams: ReturnType<Play['entity']>[] = [];
+        for (const tree of [2, 4]) {
+            const t = YARD_FORESTRY.trees[tree];
+            // round the tree (coming from the mill, west of it) to its east side
+            for (const [i, dz] of [
+                [0, -1],
+                [1, 1]
+            ] as const) {
+                g.walkTo(i, t.x - 1.2, t.z + dz * 1.4);
+                g.walkTo(i, t.x + 1.0, t.z + dz * 1.4);
+                g.walkTo(i, t.x + 1.0, t.z + dz * 0.4);
+            }
+            const chew = (i: number) => g.lookAt(i, t.x + (t.lean?.x ?? 0) * 0.6, YARD_Y + 0.6, t.z);
+            const c0 = chew(0);
+            const c1 = chew(1);
+            for (let k = 0; k < 600 && s.forestry.treeState(tree).phase === 'standing'; k++)
+                g.step({ ...c0, grab: k % 30 === 0 }, { ...c1, grab: k % 30 === 0 });
+            expect(s.forestry.treeState(tree).phase).toBe('down');
+            expect(s.forestry.fallDirection(tree).x).toBeLessThan(-0.9);
+            g.step({}, {}, 300);
+            const log = s.forestry.logOf(tree)!;
+            carryIntoGuide(g, log);
+            for (let k = 0; k < 240 && s.sawmill!.phase === 'ready'; k++) g.step();
+            expect(s.sawmill!.stats.takenIds.at(-1)).toBe(log.id);
+            for (let k = 0; k < SAW.cutTicks + 30; k++) g.step();
+            // a whole log in beam mode: one beam, no planks
+            const out = s.entities.filter((e) => e.name.startsWith('beam-') && e.visible && e.id >= 396);
+            expect(out.length).toBe(beams.length + 1);
+            beams.push(out.find((b) => !beams.includes(b))!);
+            // (stats.planks counts every piece out; none of the sawn planks is showing)
+            expect(s.sawmill!.stats.planks).toBe(beams.length);
+            expect(s.entities.some((e) => e.name.startsWith('extra-plank-') && e.visible && e.id >= 380)).toBe(false);
+        }
+        expect(beams.map((b) => b.name)).toEqual(['beam-12', 'beam-13']);
+        expect(s.sawmill!.stats.taken).toBe(2);
+        // the yard's own beams have not moved
+        const yardBeams = ['beam-0', 'beam-1'].map((n) => ({ ...g.entity(n).pose.p }));
+
+        // ---- player 0 shoulders the two sawn beams across the creek, each by its west end (the
+        // mill is east of the rack), north on its own line clear of the yard's beams, then across
+        // (the second may lie partly on the first, on the rack's upper layer: the top one first)
+        const [top, under] = [...beams].sort((a, b) => b.pose.p.y - a.pose.p.y);
+        shoulderBeam(g, top, BRIDGE_X - 0.12, -1, BRIDGE.nearEdge + 2.0);
+        shoulderBeam(g, under, BRIDGE_X + 0.12, -1, BRIDGE.nearEdge + 2.0);
+        expect(s.progress.falls).toBe(0);
+        // both under the deck (a plank is 2.4 m long), side by side
+        for (const b of beams) expect(Math.abs(b.pose.p.x - BRIDGE_X)).toBeLessThan(0.6);
+        expect(Math.abs(beams[0].pose.p.x - beams[1].pose.p.x)).toBeGreaterThan(0.15);
+
+        // ---- player 1 decks them with three planks off the yard's stack (top first), round the
+        // west end of the yard's beams
+        const stack = ['extra-plank-4', 'extra-plank-3', 'extra-plank-2'].map((n) => g.entity(n));
+        const deckZ = [BRIDGE.farFace + 0.6, BRIDGE.zc, BRIDGE.nearFace - 0.6];
+        stack.forEach((plank, n) =>
+            layPlank(g, plank, deckZ[n], plank.pose.p.z - 1.6, { x: plank.pose.p.x, z: BRIDGE.nearEdge + 2.0 })
+        );
+        const decked = stack.filter((p) => p.pose.p.z < BRIDGE.nearFace && p.pose.p.z > BRIDGE.farFace);
+        expect(decked.length).toBe(3);
+
+        // ---- player 0 walks over: the sawn beams carry the deck
+        walkOver(g, stack);
+        for (const b of beams) {
+            expect(Math.abs(b.pose.p.z - BRIDGE.zc)).toBeLessThan(0.3);
+            expect(b.pose.p.y).toBeGreaterThan(YARD_Y);
+        }
+        // and the yard's beams were never used
+        ['beam-0', 'beam-1'].forEach((n, i) => {
+            const p = g.entity(n).pose.p;
+            expect(Math.hypot(p.x - yardBeams[i].x, p.z - yardBeams[i].z)).toBeLessThan(0.05);
+        });
+    }, 300_000);
 
     it('solo: pick up the axe, chop a tree down, buck the log, carry a half into the sawmill', () => {
         const g = new Play(1);
@@ -503,6 +654,90 @@ describe('the gate, by player input only', () => {
         };
         expect(run()).toEqual(run());
     }, 60_000);
+});
+
+/**
+ * Everything sawing and regrowth decide, for comparing two runs: the sawmill (phase, mode, its
+ * counts and which logs it took), every stand tree's state and cut, the forestry counts, and every
+ * entity's visibility, pose and animation channels (props, sawn pieces, markers, the saw itself).
+ */
+function woodState(s: LabSim): unknown {
+    const m = s.sawmill!;
+    return {
+        sawmill: { phase: m.phase, mode: m.mode, stats: { ...m.stats, takenIds: [...m.stats.takenIds] } },
+        trees: YARD_FORESTRY.trees.map((_, n) => s.forestry.treeState(n)),
+        forestry: { ...s.forestry.stats },
+        entities: s.entities.map((e) => [
+            e.name,
+            e.visible,
+            e.pose.p.x,
+            e.pose.p.y,
+            e.pose.p.z,
+            e.pose.q.x,
+            e.pose.q.y,
+            e.pose.q.z,
+            e.pose.q.w,
+            ...e.anim
+        ])
+    };
+}
+
+describe('determinism: sawing and regrowth', () => {
+    it('one command script, run twice, gives the same sawmill, the same regrowth and the same prop poses', () => {
+        // ---- run 1: two beavers fell tree 2, carry the log in, it is sawn into planks, the stump
+        // regrows; every command is recorded, with the steps at which to compare
+        const g = new Play(2);
+        const s = g.s;
+        g.script = [];
+        const marks: number[] = [];
+        const want: unknown[] = [];
+        const mark = () => {
+            marks.push(g.script!.length);
+            want.push(woodState(s));
+        };
+        const tree = 2;
+        const t = YARD_FORESTRY.trees[tree];
+        g.walkTo(0, t.x + 1.0, t.z - 0.4);
+        g.walkTo(1, t.x + 1.0, t.z + 0.4);
+        const c0 = g.lookAt(0, t.x + (t.lean?.x ?? 0) * 0.6, YARD_Y + 0.6, t.z);
+        const c1 = g.lookAt(1, t.x + (t.lean?.x ?? 0) * 0.6, YARD_Y + 0.6, t.z);
+        for (let k = 0; k < 600 && s.forestry.treeState(tree).phase === 'standing'; k++)
+            g.step({ ...c0, grab: k % 30 === 0 }, { ...c1, grab: k % 30 === 0 });
+        g.step({}, {}, 300);
+        mark(); // felled and lying
+        const log = s.forestry.logOf(tree)!;
+        carryIntoGuide(g, log);
+        for (let k = 0; k < 240 && s.sawmill!.phase === 'ready'; k++) g.step();
+        expect(s.sawmill!.stats.takenIds).toEqual([log.id]);
+        mark(); // taken by the sawmill
+        for (let k = 0; k < SAW.cutTicks / 2; k++) g.step();
+        mark(); // half sawn
+        for (let k = 0; k < SAW.cutTicks / 2 + 30; k++) g.step();
+        expect(s.sawmill!.stats.planks).toBe(3);
+        mark(); // the planks on the rack
+        // the players walk off; the stump regrows
+        g.step({ moveX: 0.5 }, { moveX: 0.5 }, 120);
+        for (let k = 0; k < 4000 && s.forestry.treeState(tree).phase === 'down'; k++) g.step();
+        expect(s.forestry.treeState(tree).phase).toBe('standing');
+        expect(s.forestry.stats.regrown).toBe(1);
+        g.step({}, {}, 60);
+        mark(); // regrown
+
+        // ---- run 2: a fresh sim (set up as run 1's: two players, the same 30 idle steps) fed the
+        // recorded commands, open loop (nothing steers it back on course)
+        const replay = new Play(2).s;
+        const got: unknown[] = [];
+        let m = 0;
+        g.script.forEach(([a, b], k) => {
+            replay.step(a, b);
+            while (m < marks.length && marks[m] === k + 1) {
+                got.push(woodState(replay));
+                m++;
+            }
+        });
+        expect(got.length).toBe(want.length);
+        for (let k = 0; k < want.length; k++) expect(got[k]).toEqual(want[k]);
+    }, 300_000);
 });
 
 describe('online: a guest logs and saws with the host', () => {
