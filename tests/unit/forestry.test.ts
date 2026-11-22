@@ -7,6 +7,8 @@ import { PINE_TRUNK_HEIGHT } from '../../src/levels/common.ts';
 import { SAWMILL, STAND_CROWN_RADIUS, sawmillToWorld } from '../../src/levels/forestry.ts';
 import { BRIDGE, BRIDGE_X, YARD_FORESTRY, YARD_Y, timberYardLevel } from '../../src/levels/timber-yard.ts';
 import { GORGE, ROUTE_YAW, roadT, routeToWorld, routeU, valleyHeight, valleyLevel } from '../../src/levels/valley.ts';
+import { GuestSession, HostSession, listGames } from '../../src/net/session.ts';
+import { MemoryHub } from '../../src/net/transport.ts';
 import { SIM_DT } from '../../src/sim/clock.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
@@ -747,4 +749,51 @@ describe('the Valley: the yard’s stand and sawmill, and sawn planks across the
         expect(routeU(s.player.x, s.player.z)).toBeGreaterThan(b + 0.5);
         for (const p of planks.slice(0, 4)) expect(p.pose.p.y).toBeGreaterThan(fall);
     }, 120_000);
+});
+
+describe('online: a guest logs too', () => {
+    it("a guest's grab presses chew a tree on the host; the guest sees the cut and the felled tree", async () => {
+        const hub = new MemoryHub();
+        const host = new LabSim({ level: timberYardLevel });
+        host.step(cmd(0));
+        host.fpActive = true;
+        const hs = await HostSession.start(hub.transport('host'), host, 'yard', 'wood');
+        let clock = 0;
+        const guestSim = new LabSim({ level: timberYardLevel });
+        const gs = await GuestSession.join(
+            hub.transport('guest'),
+            guestSim,
+            listGames(hub.channel('lobby', 'w'))[0],
+            () => clock
+        );
+        expect(gs.slot).toBe(1);
+        const tree = 5;
+        const t = YARD_FORESTRY.trees[tree];
+        host.placePlayer(t.x - 1, t.z, 0, 1);
+        let n = 0;
+        const tick = (c: Partial<PlayerCommand>) => {
+            gs.sendInput(cmd(n, c));
+            host.step(cmd(n), hs.commandFor(1), [hs.commandFor(2), hs.commandFor(3)]);
+            hs.afterStep((slot) => host.interactionIds(slot));
+            clock += 1000 / 60;
+            n++;
+        };
+        for (let i = 0; i < 10; i++) tick({});
+        const look = lookAt(host, 1, t.x, YARD_Y + 0.6, t.z);
+        for (let i = 0; i < 12; i++) tick(look);
+        // the host tells the guest what its grab would do: chew this tree
+        const marker = byName(guestSim, `tree-${tree}`);
+        expect(gs.hud[1]?.target).toBe(marker.id);
+        for (let i = 0; i < 600 && host.forestry.treeState(tree).phase === 'standing'; i++)
+            tick({ ...look, grab: i % 30 === 0 });
+        expect(host.forestry.treeState(tree).phase).toBe('down');
+        for (let i = 0; i < 9; i++) tick({});
+        // the guest's snapshots say so (the voxel worker and the prompt read the marker there)
+        const out = pose();
+        const anim = new Float64Array(10);
+        expect(guestSim.ring.sample(marker.slot, guestSim.ring.newestTick / 60, out, anim)).toBe(true);
+        expect(anim[TREE_STATE]).toBe(1);
+        gs.leave();
+        hs.stop();
+    });
 });
