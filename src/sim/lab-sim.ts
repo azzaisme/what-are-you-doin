@@ -65,6 +65,7 @@ import {
 } from './commands.ts';
 import type { PlayerCommand } from './commands.ts';
 import { Forestry } from './forestry.ts';
+import { HazardDirector, PHASE } from './hazards.ts';
 import { nailCode } from './joints/graph.ts';
 import { JointSystem } from './joints/joints.ts';
 import type { NailPreview } from './joints/joints.ts';
@@ -102,12 +103,16 @@ export interface LabSimOptions {
     props?: PropsMode;
     /** The level to simulate (default: the River Lab test scene). */
     level?: LevelDef;
+    /** The game's hazard seed (the host picks one per game); default: the level's. */
+    hazardSeed?: number;
+    /** False: the level's hazards are off (tests of other mechanics). Default true. */
+    hazards?: boolean;
 }
 
 /** Something the player should be told (objective reached, fell in the creek, ...). */
 export interface SimEvent {
     tick: number;
-    kind: 'goal' | 'fell' | 'recovered' | 'step' | 'ute' | 'wood';
+    kind: 'goal' | 'fell' | 'recovered' | 'step' | 'ute' | 'hazard' | 'wood';
     text: string;
 }
 
@@ -195,6 +200,8 @@ export class LabSim {
     /** Every player's eye entity, by slot. */
     readonly eyes: SimEntity[];
     readonly level: LevelDef;
+    /** The world fighting back (Epic 8): the flood and the aimed gust (src/sim/hazards.ts). */
+    readonly hazards: HazardDirector;
     /** Level progress (rules): the objective, once reached, stays reached until reset. */
     readonly progress = { goalReached: false, goalTick: -1, falls: 0, recoveries: 0, step: 0 };
     private lookAccum = 0;
@@ -213,6 +220,8 @@ export class LabSim {
 
     constructor(opts: LabSimOptions = {}) {
         this.level = opts.level ?? riverLabLevel;
+        this.hazards = new HazardDirector(this.level, opts.hazards ?? true);
+        if (opts.hazardSeed !== undefined) this.hazards.seed = opts.hazardSeed >>> 0;
         this.propsMode = this.level.scriptedProps ? (opts.props ?? 'physics') : 'physics';
         const c = createLabEntities();
         this.entities = c.entities;
@@ -275,6 +284,7 @@ export class LabSim {
             pl.safe.valid = false;
         }
         this.ring.clear();
+        this.hazards.reset();
         this.evaluate();
         this.buildPhysics();
         this.readPhysics();
@@ -504,6 +514,7 @@ export class LabSim {
                 if (k === 0) this.driveInput = { ...NO_DRIVE };
             }
         }
+        if (this.physicsProps) this.hazards.step(this);
         // nobody driving: the handbrake is on
         this.vehicle?.drive(this.driver >= 0 ? this.driveInput : PARKED);
         pw.step();
@@ -642,8 +653,12 @@ export class LabSim {
             this.applySteps(rules);
             return;
         }
-        // essential item: lost in the creek for 1.5 s -> back on its stump
-        this.lostTicks = bk.pose.p.y < rules.lostY && pw.holders(bk.id) === 0 ? this.lostTicks + 1 : 0;
+        // essential item: lost in the creek for 1.5 s -> back on its stump (in a flood, afloat in it)
+        const p0 = bk.pose.p;
+        const lost =
+            p0.y < rules.lostY ||
+            (this.hazards.rise > 0 && p0.y < rules.lostY + this.hazards.rise && !rules.isSafe(p0.x, p0.z));
+        this.lostTicks = lost && pw.holders(bk.id) === 0 ? this.lostTicks + 1 : 0;
         if (this.lostTicks > 90) {
             this.lostTicks = 0;
             this.progress.recoveries++;
@@ -1116,8 +1131,18 @@ export class LabSim {
         ws.visible = !!spot && !!this.level.wind;
         if (!spot || !this.level.wind) return;
         const w = windAt(t, this.level.wind, _windTmp);
-        const a = Math.atan2(w.z, w.x) + 0.06 * Math.sin(t * 5.3) * w.gustiness;
-        const droop = (1 - Math.min(1, w.speed / 5.5)) * 1.15 + 0.04 * Math.sin(t * 7.1);
+        let a = Math.atan2(w.z, w.x) + 0.06 * Math.sin(t * 5.3) * w.gustiness;
+        let droop = (1 - Math.min(1, w.speed / 5.5)) * 1.15 + 0.04 * Math.sin(t * 7.1);
+        // the aimed gust's tell: the sock swings round to it and stands out, flapping
+        const hz = this.hazards;
+        if (hz.gustPhase !== PHASE.idle) {
+            const k = Math.min(1, hz.gustT / 30);
+            const ga = Math.atan2(hz.gustDirZ, hz.gustDirX);
+            let d = ga - a;
+            d = Math.atan2(Math.sin(d), Math.cos(d));
+            a += d * k + 0.15 * Math.sin(t * 13) * k;
+            droop = droop * (1 - k) + 0.05 * k;
+        }
         ws.pose.p.x = spot.x;
         ws.pose.p.y = this.level.terrainHeight(spot.x, spot.z) + spot.height;
         ws.pose.p.z = spot.z;

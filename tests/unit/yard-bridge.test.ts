@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { BRIDGE, BRIDGE_X, YARD_Y, timberYardLevel } from '../../src/levels/timber-yard.ts';
 import { ACTION_NAIL, neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
+import { HAZARD, PHASE } from '../../src/sim/hazards.ts';
 import { GROUND } from '../../src/sim/joints/graph.ts';
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
@@ -39,10 +40,98 @@ function buildAndCross(pullPlankNails = false) {
     let yaw = 0;
     let pitch = 0;
     const log: string[] = [];
+    /** Where each deck plank came to rest against its spot (m): height over the deck plane, along z. */
+    const landed: { id: number; dy: number; dz: number }[] = [];
     const phases: { tick: number; name: string }[] = [];
     const phase = (name: string) => phases.push({ tick: s.tick, name });
     const step = (c: Partial<PlayerCommand> = {}, k = 1) => {
-        for (let i = 0; i < k; i++) s.step({ ...neutralCommand(n++), yaw, pitch, ...c });
+        for (let i = 0; i < k; i++) {
+            // a gust coming for what you carry (the windsock swings round): hold it down by your
+            // knees until it has blown over (near the ground it catches a fifth of it); out over the
+            // creek there is no ground under it, so first back off onto the bank
+            if (s.hazards.gustPhase !== PHASE.idle && s.physics.heldId >= 0 && !c.grab && !c.action) {
+                const back = s.player.z < BRIDGE.nearEdge + 2.4 ? 1 : 0;
+                // world +z: forward is (-sin yaw, -cos yaw), right is (cos yaw, -sin yaw)
+                s.step({
+                    ...neutralCommand(n++),
+                    yaw,
+                    pitch: -1.1,
+                    moveZ: -Math.cos(yaw) * back,
+                    moveX: -Math.sin(yaw) * back
+                });
+                continue;
+            }
+            s.step({ ...neutralCommand(n++), yaw, pitch, ...c });
+        }
+    };
+    // ---- the flood (Epic 8): a finished crossing sets it off. A player hears the siren and sees the
+    // water; the test notes when each flood ends, and how far it moved what was on the crossing.
+    const floods: { tell: number; end: number; moved: number }[] = [];
+    let floodWas: number = PHASE.idle;
+    let floodBefore = new Map<number, { x: number; y: number; z: number }>();
+    const onCrossing = () => [...beams, ...landed.map((l) => s.entities.find((e) => e.id === l.id)!)];
+    const rawStep = s.step.bind(s);
+    s.step = ((...args: Parameters<LabSim['step']>) => {
+        const px = s.player.x,
+            py = s.player.y,
+            pz = s.player.z,
+            falls = s.progress.falls;
+        const gw = s.hazards.gustPhase;
+        rawStep(...args);
+        if (process.env.GATE_DEBUG && gw === PHASE.idle && s.hazards.gustPhase !== PHASE.idle)
+            log.push(
+                `gust at ${(s.tick / 60).toFixed(1)} s holding ${s.physics.heldId} at (${s.player.x.toFixed(2)}, ${s.player.z.toFixed(2)})`
+            );
+        if (process.env.GATE_DEBUG && s.progress.falls > falls && log.length < 60)
+            log.push(
+                `fell at ${(s.tick / 60).toFixed(1)} s from (${px.toFixed(2)}, ${py.toFixed(2)}, ${pz.toFixed(2)}) holding ${s.physics.heldId} water ${s.hazards.net().waterY.toFixed(2)} gust ${s.hazards.gustPhase}`
+            );
+        const ph = s.hazards.floodPhase;
+        if (floodWas === PHASE.idle && ph !== PHASE.idle) {
+            floods.push({ tell: s.tick, end: -1, moved: 0 });
+            floodBefore = new Map(onCrossing().map((e) => [e.id, { ...e.pose.p }]));
+        }
+        if (floodWas !== PHASE.idle && ph === PHASE.idle) {
+            const f = floods[floods.length - 1];
+            f.end = s.tick;
+            for (const e of onCrossing()) {
+                const a = floodBefore.get(e.id);
+                if (a) f.moved = Math.max(f.moved, Math.hypot(e.pose.p.x - a.x, e.pose.p.y - a.y, e.pose.p.z - a.z));
+            }
+        }
+        floodWas = ph;
+    }) as LabSim['step'];
+    const sec = (t: number) => Math.round(t * 60);
+    /**
+     * In the yard, before a trip onto the crossing that takes up to `trip` s: wait while the creek is
+     * up, and if the next flood could come (after the last one's cooldown) before you are back, wait
+     * for it to come and go.
+     */
+    const F = HAZARD.flood;
+    const waitForSafe = (trip: number) => {
+        const t0 = s.tick;
+        waitInner(trip);
+        if (process.env.GATE_DEBUG)
+            log.push(
+                `waited ${((s.tick - t0) / 60).toFixed(0)} s from ${(t0 / 60).toFixed(0)} s (${floods.length} floods, phase ${s.hazards.floodPhase})`
+            );
+    };
+    const waitInner = (trip: number) => {
+        const tooLate = () => {
+            const last = floods[floods.length - 1];
+            if (!last || floods.length >= F.max) return false;
+            // the siren is due at the earliest this long after the last flood, and the water rises
+            // after its tell
+            const danger = last.end + sec(F.cooldownS + F.holdToTrigger + F.delayS + F.tellS - 5);
+            return s.tick + sec(trip) > danger;
+        };
+        for (let k = 0; k < sec(300) && (s.hazards.floodPhase !== PHASE.idle || tooLate()); k += 30) {
+            if (tooLate() && s.hazards.floodPhase === PHASE.idle && floods.length < F.max) {
+                const before = floods.length;
+                for (let t = 0; t < sec(200) && floods.length === before; t += 30) step({}, 30);
+            }
+            step({}, 30);
+        }
     };
     const ease = (to: number, k: number, set: (v: number) => void, from: number) => {
         for (let i = 1; i <= k; i++) {
@@ -63,7 +152,8 @@ function buildAndCross(pullPlankNails = false) {
             // forward is (-sin yaw, -cos yaw), right is (cos yaw, -sin yaw)
             const f = -Math.sin(yaw) * wx - Math.cos(yaw) * wz;
             const r = Math.cos(yaw) * wx - Math.sin(yaw) * wz;
-            const k = Math.min(1, (0.5 * Math.min(1, Math.abs(d) * 3)) / Math.max(1e-6, Math.hypot(f, r)));
+            // (with some pace even close in: stepping up onto a plank wants it)
+            const k = Math.min(1, Math.max(0.3, 0.6 * Math.min(1, Math.abs(d) * 3)) / Math.max(1e-6, Math.hypot(f, r)));
             step({ moveX: r * k, moveZ: f * k });
         }
     };
@@ -81,14 +171,14 @@ function buildAndCross(pullPlankNails = false) {
         pitch = Math.atan2(dy, Math.hypot(dx, dz));
     };
     /**
-     * Steps up to a spot (not past `stopZ`: the end of the deck laid so far) until it is within 30
-     * degrees of straight down from the eye, whatever its height, looks at it and swings the hammer;
+     * Steps up to a spot (not past `stopZ`: the end of the deck laid so far) until it is within 33
+     * degrees of straight down from the eye (the hammer takes 35), whatever its height, looks at it and swings the hammer;
      * returns whether a nail went in.
      */
     const nail = (at: { x: number; y: number; z: number }, what: string, stopZ = -Infinity) => {
         const before = s.joints.graph.nailCount;
         const flat = () => Math.hypot(at.x - s.player.x, at.z - s.player.z);
-        const near = () => 0.55 * (s.player.y + EYE_HEIGHT - at.y);
+        const near = () => 0.65 * (s.player.y + EYE_HEIGHT - at.y);
         if (flat() > near()) {
             const k = Math.max(0, 1 - (0.9 * near()) / flat());
             walkTo(s.player.x + (at.x - s.player.x) * k, Math.max(stopZ, s.player.z + (at.z - s.player.z) * k));
@@ -99,7 +189,10 @@ function buildAndCross(pullPlankNails = false) {
         const code = s.interactionIds(0).nail;
         step({ action: ACTION_NAIL });
         const ok = s.joints.graph.nailCount > before;
-        if (!ok) log.push(`${what}: no nail (code ${code}) ${JSON.stringify(s.nailPreview(0))}`);
+        if (!ok)
+            log.push(
+                `${what}: no nail (code ${code}) from (${s.player.x.toFixed(2)}, ${s.player.y.toFixed(2)}, ${s.player.z.toFixed(2)}) at (${at.x.toFixed(2)}, ${at.y.toFixed(2)}, ${at.z.toFixed(2)}), ${((Math.atan2(Math.hypot(at.x - s.player.x, at.z - s.player.z), s.player.y + EYE_HEIGHT - at.y) * 180) / Math.PI).toFixed(0)} deg ${JSON.stringify(s.nailPreview(0))}`
+            );
         yaw = 0;
         pitch = 0;
         step({}, 4);
@@ -143,6 +236,12 @@ function buildAndCross(pullPlankNails = false) {
         const end = beam.pose.p.z + 1.6;
         for (const dz of [0.07, 0.14]) nail(onBeam(beam, end - dz), `beam ${b} near end`);
     }
+    // the beams span the gap: the flood comes. Back off the crossing into the yard and wait it out:
+    // the beams are nailed down at their near ends
+    yaw = 0;
+    pitch = 0;
+    walkTo(s.player.x, BRIDGE.nearEdge + 3.5, true);
+    for (let k = 0; k < sec(120) && !(floods.length >= 1 && s.hazards.floodPhase === PHASE.idle); k++) step();
     const beamMid = (beams[0].pose.p.z + beams[1].pose.p.z) / 2;
     const beamNear = beamMid + 1.6;
     const beamFar = beamMid - 1.6;
@@ -161,8 +260,6 @@ function buildAndCross(pullPlankNails = false) {
     // the last plank waits until the far ends are nailed (it covers them)
     const farNailZ = Math.min(BRIDGE.farFace - 0.06, beamFar + 0.16);
     let placed = 0;
-    /** Where each deck plank came to rest against its spot (m): height over the deck plane, along z. */
-    const landed: { id: number; dy: number; dz: number }[] = [];
     /** A held plank turns with you: turn by its skew so it lies square across the beams. */
     const straighten = (p: (typeof s.entities)[number]) => {
         quatRotate(p.pose.q, 1, 0, 0, axis);
@@ -180,6 +277,7 @@ function buildAndCross(pullPlankNails = false) {
         yaw = 0;
         walkTo(s.player.z < BRIDGE.nearEdge + 3 ? BRIDGE_X : s.player.x, p.pose.p.z + 0.9, true);
         walkTo(p.pose.p.x, p.pose.p.z + 0.9);
+        waitForSafe(90);
         look({ x: p.pose.p.x, y: p.pose.p.y + 0.05, z: p.pose.p.z });
         step({}, 4);
         step({ grab: true });
@@ -200,6 +298,8 @@ function buildAndCross(pullPlankNails = false) {
         // the deck plane: the beams' tops plus half a plank
         const restY = (onBeam(beams[0], z).y + onBeam(beams[1], z).y) / 2 + 0.05;
         for (let attempt = 0; attempt < 3; attempt++) {
+            // square it up again (a gust, held low, can leave it askew in your hands), lower it
+            if (s.physics.heldId === p.id) straighten(p);
             ease(-0.8, 30, (v) => (pitch = v), pitch);
             step({}, 30);
             // lowered just above the beams: shuffle until it hangs over its spot, then let go
@@ -210,13 +310,8 @@ function buildAndCross(pullPlankNails = false) {
             step({ grab: true });
             pitch = 0;
             step({}, 60);
-            // landed flat on the beams, where it should be (closer than the pass mark)? if not,
-            // pick it up again
-            if (
-                Math.abs(p.pose.p.z - z) < 0.75 * PLANK_ALONG_TOL &&
-                Math.abs(p.pose.p.y - restY) < 0.75 * PLANK_HEIGHT_TOL
-            )
-                break;
+            // landed flat on the beams, where it should be? if not, pick it up again
+            if (Math.abs(p.pose.p.z - z) <= PLANK_ALONG_TOL && Math.abs(p.pose.p.y - restY) <= PLANK_HEIGHT_TOL) break;
             log.push(
                 `plank ${placed}: landed at z ${p.pose.p.z.toFixed(2)} y ${p.pose.p.y.toFixed(2)} (wanted ${z.toFixed(2)}, ${restY.toFixed(2)})`
             );
@@ -231,13 +326,25 @@ function buildAndCross(pullPlankNails = false) {
             step({}, 20);
         }
         landed.push({ id: p.id, dy: p.pose.p.y - restY, dz: p.pose.p.z - z });
+        // up the deck's middle to just short of it (clear of its edge: you are 0.3 m round): both
+        // beam lines are then within the hammer's 35 degrees, without touching the loose plank
+        yaw = 0;
+        pitch = 0;
+        walkTo(BRIDGE_X, Math.max(p.pose.p.z + 0.45, s.player.z - 1.5), true);
+        let held = 0;
         for (const beam of beams) {
             const at = onBeam(beam, p.pose.p.z);
-            nail({ x: at.x, y: p.pose.p.y + 0.05, z: p.pose.p.z }, `plank ${placed} over ${beam.name}`);
+            if (nail({ x: at.x, y: p.pose.p.y + 0.05, z: p.pose.p.z }, `plank ${placed} over ${beam.name}`)) held++;
         }
+        if (process.env.GATE_DEBUG)
+            log.push(
+                `plank ${placed} done at ${(s.tick / 60).toFixed(0)} s: z ${p.pose.p.z.toFixed(2)} y ${p.pose.p.y.toFixed(2)} (wanted ${z.toFixed(2)}), ${held} nails`
+            );
     };
     for (const z of deck.slice(0, -1)) layPlank(z);
     phase('far ends');
+    walkTo(BRIDGE_X, BRIDGE.nearEdge + 3.5, true);
+    waitForSafe(60);
     // ---- 3. out on the deck: nail both beams' far ends into the far capstone
     walkTo(BRIDGE_X, deck[deck.length - 2] + 0.5);
     for (let b = 0; b < 2; b++) nail(onBeam(beams[b], farNailZ), `beam ${b} far end`, deck[deck.length - 2]);
@@ -268,6 +375,8 @@ function buildAndCross(pullPlankNails = false) {
     // the deck as it lies before the ute comes
     const before = new Map(landed.map((l) => [l.id, { ...s.entities.find((e) => e.id === l.id)!.pose.p }]));
 
+    // no flood while driving over (the turn in the yard and the crossing take about a minute)
+    waitForSafe(90);
     phase('drive');
     /** Drives (moveZ > 0) or reverses at a crawl with this steer for up to `ticks`, until `done`. */
     const drive = (dir: 1 | -1, steerOf: () => number, done: () => boolean, ticks: number, speed = 1.2) => {
@@ -337,7 +446,7 @@ function buildAndCross(pullPlankNails = false) {
         const b = s.entities.find((e) => e.id === l.id)!.pose.p;
         return Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
     });
-    return { s, log, deck, placed, target, minY, beams, phases, landed, shift, atStart, u0 };
+    return { s, log, deck, placed, target, minY, beams, phases, landed, shift, atStart, u0, floods };
 }
 
 /** A nailed deck barely moves under the ute; the same planks only laid are shoved about (m). */
@@ -356,7 +465,12 @@ function report(name: string, r: ReturnType<typeof buildAndCross>) {
     console.log(
         `${name}: ${r.placed} planks (landed within ${(worst((l) => l.dy) * 100).toFixed(1)} cm of the deck plane, ${(worst((l) => l.dz) * 100).toFixed(1)} cm along), ${anchors} anchors, ${deckJoints} deck joints, ${g.nailCount} nails; ute from (${r.u0.x.toFixed(1)}, ${r.u0.z.toFixed(1)}) crossed the start line ${r.atStart ? `${(r.atStart.x * 100).toFixed(1)} cm off the line, ${r.atStart.yaw.toFixed(3)} rad askew` : 'never'}, reached z ${r.s.ute.pose.p.z.toFixed(2)} (target ${r.target.toFixed(2)}), lowest over the gap ${(r.minY - YARD_Y).toFixed(2)} m above the yard; planks shifted up to ${(Math.max(...r.shift) * 100).toFixed(1)} cm under it`
     );
+    console.log(
+        `   floods: ${r.floods.map((f) => `siren at ${(f.tell / 60).toFixed(0)} s, over at ${(f.end / 60).toFixed(0)} s, the crossing moved up to ${(f.moved * 100).toFixed(1)} cm`).join('; ')}; ${r.s.hazards.floodMoved} pieces washed away, ${r.s.hazards.gustCount} gusts`
+    );
     for (const l of r.log) console.log('  ', l);
+    if (process.env.GATE_DEBUG)
+        console.log('   phases', r.phases.map((ph) => `${ph.name}@${(ph.tick / 60).toFixed(0)}`).join(' '));
     for (const e of r.s.events)
         if (e.kind === 'fell')
             console.log('   FELL at tick', e.tick, r.phases.filter((ph) => ph.tick <= e.tick).pop()?.name);
@@ -384,6 +498,11 @@ describe('the yard crossing, built by a player and driven over (Epic 5 gate)', (
         expect(Math.abs(r.atStart!.yaw)).toBeLessThan(0.05);
         expect(r.s.ute.pose.p.z).toBeLessThan(r.target);
         expect(r.minY).toBeGreaterThan(YARD_Y);
+        // both floods came while it was being built, and moved nothing nailed down: the beams
+        // (nailed at their near ends) through the first, the half-built deck through the second
+        expect(r.floods.length).toBe(2);
+        for (const f of r.floods) expect(f.moved).toBeLessThan(NAILED_SHIFT_MAX);
+        expect(r.s.hazards.floodMoved).toBe(0);
         // the nailed deck held its shape under the ute
         expect(Math.max(...r.shift)).toBeLessThan(NAILED_SHIFT_MAX);
         expect(r.s.progress.falls).toBe(0);

@@ -354,6 +354,23 @@ export function yardPieces(): StaticPiece[] {
         )
     );
 
+    // ---- the flood gauge (Epic 8): a banded post in the creek by the crossing; its marks going
+    // under is the rising river's tell (§2.9). Bands every 10 cm, one world-aligned set.
+    const gaugeTop = YARD_Y + 0.45;
+    const gaugeHalf = (gaugeTop - CREEK_BED_Y) / 2;
+    const gaugeY = (gaugeTop + CREEK_BED_Y) / 2;
+    P.push(
+        piece(
+            'flood-gauge',
+            boxS(0.05, gaugeHalf, 0.05),
+            FLOOD_GAUGE.x,
+            gaugeY,
+            FLOOD_GAUGE.z,
+            (_x, y) => voxel(Math.floor((y + gaugeY) / 0.1 + 1e-6) & 1 ? M.HiVis : M.HiVisStripe, 0),
+            { priority: 3 }
+        )
+    );
+
     // ---- the far-bank goal flag
     const goal = YARD_GOAL;
     const gx = (goal.minX + goal.maxX) / 2;
@@ -704,6 +721,32 @@ export function yardDeckPlanks(): PropPlacement[] {
     return P;
 }
 
+/** The flood gauge post, upstream of the crossing by the near bank. */
+export const FLOOD_GAUGE = { x: BRIDGE_X - 2.1, z: BRIDGE.nearEdge - 0.45 };
+/** The flood's peak: over the capstones (0.5 / 0.6 m), a hand above the banks. */
+export const FLOOD_PEAK_Y = 0.6;
+
+/**
+ * Where the flood leaves the timber it took: the near bank downstream of the yard, side by side,
+ * in the clear (between the sign and the oak, and past the rock), so each piece can be picked up
+ * by either end.
+ */
+function floodWashup(): { x: number; y: number; z: number }[] {
+    return [
+        [8, 0.6],
+        [8, 1.0],
+        [14.4, 0.6],
+        [14.4, 1.0]
+    ].map(([x, out]) => {
+        const z = creekCenterZ(x) + creekHalfWidth(x) + out;
+        // dropped onto the highest ground under a 3.2 m beam's whole length (the bank is uneven)
+        let top = -Infinity;
+        for (let dx = -1.7; dx <= 1.7; dx += 0.1)
+            for (const dz of [-0.15, 0, 0.15]) top = Math.max(top, yardHeight(x + dx, z + dz));
+        return { x, y: top + 0.2, z };
+    });
+}
+
 export const timberYardLevel: LevelDef = {
     id: 'yard',
     name: 'Timber Yard',
@@ -717,6 +760,18 @@ export const timberYardLevel: LevelDef = {
     sun: { elevation: 7, azimuth: 105 },
     wind: { dir: Math.PI * 0.3, base: 1.4, gust: 3.6 },
     windsock: WINDSOCK,
+    // the world fights back (Epic 8): finishing the bridge brings the flood; carrying a plank by
+    // the creek brings a gust aimed at it
+    hazards: {
+        seed: 1,
+        flood: {
+            peakY: FLOOD_PEAK_Y,
+            current: { x: 1.3, z: 0 },
+            crossing: { x: BRIDGE_X, halfX: BRIDGE.halfWidth + 0.3, z0: BRIDGE.nearFace, z1: BRIDGE.farFace },
+            washup: floodWashup()
+        },
+        gust: { force: 1050 }
+    },
     spawn: { x: 1.2, z: 6.2, yaw: 0.12, pitch: -0.1 },
     orbitHome: { pos: [9, 4.2, 12], focus: [-1, 0.5, 0] },
     startFirstPerson: true,

@@ -403,7 +403,10 @@ describe('ute recovery (#46)', () => {
 });
 
 describe('the ute crosses a beam bridge (Epic 4 gate)', () => {
-    it('two loose beams laid under its wheel tracks carry it over the creek', async () => {
+    // Since Epic 5 the yard's banks have a stone lip at deck height behind each seat, and a centred
+    // beam leaves a 0.3 m gap to it: climbing out of that gap, the wheels shove loose bare beams
+    // aside. Nailed down at both ends (as the yard bridge is built now), two bare beams carry it.
+    it('two beams laid under its wheel tracks, nailed down at both ends, carry it over the creek', async () => {
         const { LabSim } = await import('../../src/sim/lab-sim.ts');
         const { timberYardLevel, BRIDGE, BRIDGE_X, YARD_Y } = await import('../../src/levels/timber-yard.ts');
         const { neutralCommand } = await import('../../src/sim/commands.ts');
@@ -416,11 +419,24 @@ describe('the ute crosses a beam bridge (Epic 4 gate)', () => {
         beams.forEach((b, i) =>
             s.physics.place(
                 b.id,
-                pose(BRIDGE_X + (i === 0 ? -1 : 1) * UTE_TRACK_HALF, YARD_Y + 0.12, BRIDGE.zc, flatAlongZ)
+                // dropped from just above both capstones (the far one is 10 cm higher; put into
+                // them, a beam was thrown out and could come to rest on its edge)
+                pose(BRIDGE_X + (i === 0 ? -1 : 1) * UTE_TRACK_HALF, YARD_Y + 0.3, BRIDGE.zc, flatAlongZ)
             )
         );
         let n = 0;
         for (; n < 60; n++) s.step(neutralCommand(n));
+        // a hammer blow through each beam end into its capstone (from 0.9 m above, 0.3 m back)
+        beams.forEach((b, i) => {
+            const x = BRIDGE_X + (i === 0 ? -1 : 1) * UTE_TRACK_HALF;
+            for (const end of [-1, 1]) {
+                const at = { x, y: b.pose.p.y + 0.12, z: BRIDGE.zc + end * (BRIDGE.gap / 2 + 0.13) };
+                const eye = { x: at.x, y: at.y + 0.9, z: at.z + 0.3 };
+                const yaw = Math.atan2(-(at.x - eye.x), -(at.z - eye.z));
+                const pitch = Math.atan2(at.y - eye.y, Math.hypot(at.x - eye.x, at.z - eye.z));
+                expect(s.joints.nail(eye, yaw, pitch, 0, n).refusal).toBe('none');
+            }
+        });
         // the ute on the yard bank, lined up with the bridge, facing the creek (-z)
         const v = s.vehicle!;
         s.physics.place(

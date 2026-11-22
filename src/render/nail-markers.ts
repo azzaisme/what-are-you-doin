@@ -43,6 +43,8 @@ export class NailMarkers {
     private readonly iron = iron();
     /** Nail heads placed by the last update. */
     drawn = 0;
+    /** Tests: false hides the hammer outlines (to tell their pixels from the rest of the frame). */
+    showOutlines = true;
     /** Per local view, the player slots whose hammer outline the last update drew into it. */
     outlineSlots: number[][] = [];
 
@@ -91,7 +93,7 @@ export class NailMarkers {
         this.outlineSlots = this.views.map((_, v) => previews.filter((p) => p.view === v).map((p) => p.slot));
         for (const preview of previews) {
             const view = this.views[preview.view];
-            if (!view) continue;
+            if (!view || !this.showOutlines) continue;
             const h = cell * 0.56;
             const x = snap(preview.x);
             const y = snap(preview.y);
