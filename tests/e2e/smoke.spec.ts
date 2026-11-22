@@ -23,7 +23,7 @@ type Lab = {
     input(c: Record<string, unknown>): void;
     action(id: string): void;
     paused(): boolean;
-    player(): { x: number; y: number; z: number; holding: number; grounded: boolean; eyeHeight: number };
+    player(): { x: number; y: number; z: number; pitch: number; holding: number; grounded: boolean; eyeHeight: number };
     look(yaw: number, pitch: number): void;
     level: string;
     progress(): { goalReached: boolean; falls: number; recoveries: number; events: string[] };
@@ -1331,6 +1331,13 @@ test('logging in the Timber Yard: chew a pine down, the voxel tree becomes a stu
     await lab(page, (l) => l.look(-Math.PI / 2 + 0.3, -0.45));
     await page.waitForTimeout(1500);
     await page.screenshot({ path: 'test-results/logging-felled.png' });
+    // a grab press that landed after the fall picks the log up (on a slow software renderer the
+    // presses queue up), and full hands never aim at the lever: let go first
+    for (let tries = 0; tries < 20 && (await lab(page, (l) => l.interaction().holding)) !== null; tries++) {
+        await lab(page, (l) => l.input({ grab: true }));
+        await page.waitForTimeout(500);
+    }
+    expect(await lab(page, (l) => l.interaction().holding)).toBeNull();
     // the sawmill's lever: walk up to the near post and grab it to set the saw to beams
     await lab(page, (l) => {
         // the lever is on the near (north) post: stand north of it, facing south (+z)
@@ -1340,6 +1347,7 @@ test('logging in the Timber Yard: chew a pine down, the voxel tree becomes a stu
     // look down until the view is on the lever (where depends on the body's eye height). The sim
     // reads the look when it steps, so wait for it to step at each pitch: on a slow software
     // renderer a fixed wait can sweep past the lever before the sim ever looks there
+    const sweep: string[] = [];
     for (let p = -0.2; p > -1.0; p -= 0.04) {
         const t0 = await page.evaluate((pitch) => {
             const l = (window as unknown as { __riverLab: Lab }).__riverLab;
@@ -1351,8 +1359,16 @@ test('logging in the Timber Yard: chew a pine down, the voxel tree becomes a stu
             t0,
             { timeout: 30_000 }
         );
-        if ((await lab(page, (l) => l.interaction().target)) === 'sawmill') break;
+        const seen = await lab(page, (l) => {
+            const pl = l.player();
+            const it = l.interaction();
+            return `pitch ${pl.pitch.toFixed(2)} at (${pl.x.toFixed(2)}, ${pl.y.toFixed(2)}, ${pl.z.toFixed(2)}): target ${it.target}, holding ${it.holding}`;
+        });
+        sweep.push(seen);
+        if (seen.includes('target sawmill')) break;
     }
+    // if the sweep missed, the failure says what the player saw at each pitch
+    expect(sweep.at(-1), sweep.join('\n')).toContain('target sawmill');
     await page.waitForFunction(
         () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().target === 'sawmill',
         null,
