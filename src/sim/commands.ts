@@ -13,7 +13,9 @@ export const ACTION_DROP_TEST = 2;
 export const ACTION_RESET_PROPS = 3;
 /** Let go of whatever is held (Q). */
 export const ACTION_DROP = 4;
-export const ACTION_MAX = 4;
+/** Start or stop pouring the bucket you hold (R): tip it forward, or let it hang again (Epic 7). */
+export const ACTION_POUR = 5;
+export const ACTION_MAX = 5;
 
 export interface PlayerCommand {
     seq: number;

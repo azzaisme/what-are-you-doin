@@ -107,6 +107,8 @@ export interface PhysBody {
  * without this, Rapier's penetration recovery could fling it (measured: a plank at 21 m/s).
  */
 export const RELEASE_GUARD_TICKS = 30;
+/** How far a poured bucket tips from hanging (rad): past horizontal, mouth down towards the view. */
+export const POUR_ANGLE = (115 * Math.PI) / 180;
 export const RELEASE_MIN_CAP = 8;
 
 export interface PhysicsStats {
@@ -193,9 +195,13 @@ export class Rig {
     /** Twist the wrist wants over what it can give (1 or more: tipping), and the angle off (rad). */
     wristLoad = 0;
     wristAngle = 0;
+    /** Tipping what hangs from its grab point forward (pouring the bucket, Epic 7). */
+    pour = false;
     stretchTime = 0;
     prevTarget = { x: 0, y: 0, z: 0 };
     hasPrevTarget = false;
+    /** The hold point relative to the eye last tick (a hanging bucket's hand eases, see GRAB.handSpeed). */
+    prevOffset = { x: 0, y: 0, z: 0 };
     grabError = 0;
     grabForce = 0;
     readonly body: RAPIER.RigidBody;
@@ -710,6 +716,7 @@ export class PhysicsWorld {
         r.wristValid = false;
         r.wristLoad = 0;
         r.wristAngle = 0;
+        r.pour = false;
         r.stretchTime = 0;
         r.hasPrevTarget = false;
         const n = (this.holdCount.get(pb.id) ?? 0) + 1;
@@ -753,6 +760,7 @@ export class PhysicsWorld {
         const pb = r?.held;
         if (!r || !pb) return;
         r.held = null;
+        r.pour = false;
         const n = (this.holdCount.get(pb.id) ?? 1) - 1;
         if (n <= 0) {
             this.holdCount.delete(pb.id);
@@ -793,6 +801,18 @@ export class PhysicsWorld {
         if (g) g.cap += j / Math.max(pb.body.mass(), 1e-3);
     }
 
+    /**
+     * Pouring (Epic 7): a player holding something by its fixed grab point (the bucket by its
+     * handle) tips it forward, mouth towards where they look, or lets it hang again. Returns whether
+     * they are now pouring.
+     */
+    setPour(on: boolean, p = 0): boolean {
+        const r = this.rigs[p];
+        if (!r) return false;
+        r.pour = on && !!r.held?.grabPoint;
+        return r.pour;
+    }
+
     adjustHold(delta: number, p = 0): void {
         const r = this.rigs[p];
         if (!r) return;
@@ -816,9 +836,31 @@ export class PhysicsWorld {
             else if (r.holdDist > want) r.holdDist = Math.max(want, r.holdDist - 3 * SIM_DT);
             else r.holdDist = Math.min(want, r.holdDist + 1 * SIM_DT);
         }
-        _target.x = eye.x + d.x * r.holdDist;
-        _target.y = eye.y + d.y * r.holdDist;
-        _target.z = eye.z + d.z * r.holdDist;
+        let ox = d.x * r.holdDist;
+        let oy = d.y * r.holdDist;
+        let oz = d.z * r.holdDist;
+        if (pb.grabPoint && r.hasPrevTarget) {
+            // something hanging from your hand (the bucket) follows a flick of the view at the
+            // speed a hand moves, not at once: snapping the view up from the ground would otherwise
+            // yank it a metre in a tick and fling its water out (Epic 7)
+            const ex = ox - r.prevOffset.x;
+            const ey = oy - r.prevOffset.y;
+            const ez = oz - r.prevOffset.z;
+            const e = Math.hypot(ex, ey, ez);
+            const max = GRAB.handSpeed * SIM_DT;
+            if (e > max) {
+                const k = max / e;
+                ox = r.prevOffset.x + ex * k;
+                oy = r.prevOffset.y + ey * k;
+                oz = r.prevOffset.z + ez * k;
+            }
+        }
+        r.prevOffset.x = ox;
+        r.prevOffset.y = oy;
+        r.prevOffset.z = oz;
+        _target.x = eye.x + ox;
+        _target.y = eye.y + oy;
+        _target.z = eye.z + oz;
         const b = pb.body;
         const t = b.translation();
         const q = b.rotation();
@@ -895,6 +937,7 @@ export class PhysicsWorld {
         r.wristAngle = 0;
         if (pb.grabPoint) {
             r.wristValid = false;
+            if (r.pour) this.applyPour(r, pb, yaw);
             return;
         }
         // shared: each grip gives its share, so two wrists that disagree (the carriers turn
@@ -925,6 +968,35 @@ export class PhysicsWorld {
             b.effectiveWorldInvInertia(),
             _wrist,
             (pb.wristTorque ?? GRAB.maxTorque) * share
+        );
+        b.applyTorqueImpulse({ x: t.tx * SIM_DT, y: t.ty * SIM_DT, z: t.tz * SIM_DT }, true);
+        r.wristLoad = t.load;
+        r.wristAngle = t.angle;
+    }
+
+    /**
+     * Tips a hanging body forward about the player's right (yaw 0 looks along -z: the body's +y
+     * turns towards -z and down by POUR_ANGLE), with one wrist's strength.
+     */
+    private applyPour(r: Rig, pb: PhysBody, yaw: number): void {
+        const b = pb.body;
+        const a = -POUR_ANGLE / 2;
+        const sy = Math.sin(yaw / 2);
+        const cy = Math.cos(yaw / 2);
+        const sx = Math.sin(a);
+        const cx = Math.cos(a);
+        // target = yawQ * pitchQ (about local x)
+        _wristTarget.x = cy * sx;
+        _wristTarget.y = sy * cx;
+        _wristTarget.z = -sy * sx;
+        _wristTarget.w = cy * cx;
+        const t = wristTorque(
+            b.rotation(),
+            _wristTarget,
+            b.angvel(),
+            b.effectiveWorldInvInertia(),
+            _wrist,
+            GRAB.maxTorque
         );
         b.applyTorqueImpulse({ x: t.tx * SIM_DT, y: t.ty * SIM_DT, z: t.tz * SIM_DT }, true);
         r.wristLoad = t.load;

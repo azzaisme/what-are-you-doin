@@ -10,7 +10,7 @@
  */
 
 import { SIM_HZ } from '../sim/clock.ts';
-import { ACTION_DROP, ACTION_NONE, ACTION_RAGDOLL, neutralCommand } from '../sim/commands.ts';
+import { ACTION_DROP, ACTION_NONE, ACTION_POUR, ACTION_RAGDOLL, neutralCommand } from '../sim/commands.ts';
 import type { PlayerCommand } from '../sim/commands.ts';
 import type { LabSim } from '../sim/lab-sim.ts';
 
@@ -189,9 +189,10 @@ export class HostSession {
                 jump: input.j > prev.j,
                 grab: input.g > prev.g,
                 throw: input.t > prev.t,
-                // guests may only drop or launch the dummy (no scene resets or drop tests)
+                // guests may only drop, pour or launch the dummy (no scene resets or drop tests)
                 action:
-                    input.an > prev.an && (input.a === ACTION_DROP || input.a === ACTION_RAGDOLL)
+                    input.an > prev.an &&
+                    (input.a === ACTION_DROP || input.a === ACTION_RAGDOLL || input.a === ACTION_POUR)
                         ? input.a
                         : ACTION_NONE
             };
@@ -223,6 +224,8 @@ export class HostSession {
             hud: huds,
             goal: sim.progress.goalReached,
             step: sim.progress.step,
+            // the bucket's water (Epic 7): litres in it and litres the flower has had
+            wat: [Math.round(sim.water.volume * 100) / 100, Math.round(sim.water.poured * 100) / 100],
             ev: this.recent
         });
     }
@@ -282,6 +285,8 @@ export class GuestSession {
     goal = false;
     /** The host's tutorial step. */
     step = 0;
+    /** The host's bucket water (litres) and what the flower has had. */
+    water = { volume: 0, poured: 0 };
     events: NetEvent[] = [];
     hostGone = false;
     /** Snapshots applied (for the debug panel). */
@@ -328,6 +333,13 @@ export class GuestSession {
         this.slot = typeof mine === 'number' && mine >= 1 && mine < this.sim.players.length ? mine : -1;
         this.goal = st.goal === true;
         this.step = num(st.step);
+        if (Array.isArray(st.wat)) {
+            const w = st.wat as unknown[];
+            this.water = {
+                volume: Math.max(0, Math.min(100, num(w[0]))),
+                poured: Math.max(0, Math.min(1e4, num(w[1])))
+            };
+        }
         if (Array.isArray(st.hud)) {
             this.hud = (st.hud as unknown[]).map((x) => {
                 const a = Array.isArray(x) ? x : [];

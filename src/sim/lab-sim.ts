@@ -25,7 +25,7 @@ import {
     BEAVER_WALK_PHASE
 } from '../assets/beaver.ts';
 import { BODY } from '../assets/player-body.ts';
-import { BUCKET_HANDLE_TOP, LOG_RADIUS } from '../assets/props.ts';
+import { BUCKET_HANDLE_TOP, BUCKET_LITRES, LOG_RADIUS } from '../assets/props.ts';
 import {
     UTE_ANIM_CHANNELS,
     UTE_DROP_0,
@@ -52,10 +52,12 @@ import {
     vec3
 } from '../voxels/math.ts';
 
+import { BucketWaterState } from './bucket-water.ts';
 import { SIM_DT } from './clock.ts';
 import {
     ACTION_DROP,
     ACTION_DROP_TEST,
+    ACTION_POUR,
     ACTION_RAGDOLL,
     ACTION_RESET_PROPS,
     neutralCommand,
@@ -72,6 +74,7 @@ import type { HeldInfo, PhysicsWorld } from './physics/world.ts';
 import { PlayerAnimator } from './player-anim.ts';
 import type { AnimEvents, AnimOutput } from './player-anim.ts';
 import { ANIM_MAX, SnapshotRing, writeEntity } from './snapshots.ts';
+import { WATER } from './water.ts';
 
 export type { PlayerCommand, SimEntity };
 export { MAX_PLAYERS, MAX_STRESS };
@@ -91,7 +94,7 @@ export interface LabSimOptions {
 /** Something the player should be told (objective reached, fell in the creek, ...). */
 export interface SimEvent {
     tick: number;
-    kind: 'goal' | 'fell' | 'recovered' | 'step' | 'ute';
+    kind: 'goal' | 'fell' | 'recovered' | 'step' | 'ute' | 'water';
     text: string;
 }
 
@@ -188,6 +191,12 @@ export class LabSim {
     private goalTicks = 0;
     /** Not voxelized: carries the walker's pose through the snapshot ring for interpolation. */
     readonly playerEntity: SimEntity;
+    /** The bucket's water (Epic 7): volume, slosh, refills, the flower. */
+    readonly water: BucketWaterState;
+    /** Who is pouring the bucket they hold (ACTION_POUR toggles it). */
+    readonly pouring: boolean[] = Array.from({ length: MAX_PLAYERS }, () => false);
+    /** The bucket sat in the goal without enough water (said once per visit). */
+    private dryNoticed = false;
 
     constructor(opts: LabSimOptions = {}) {
         this.level = opts.level ?? riverLabLevel;
@@ -211,6 +220,7 @@ export class LabSim {
         this.playerEntity = c.player;
         this.player2Entity = c.player2;
         this.eyes = c.eyes;
+        this.water = new BucketWaterState(this.level);
         const sp = this.level.spawn;
         this.player.x = sp.x;
         this.player.z = sp.z;
@@ -243,6 +253,11 @@ export class LabSim {
         this.jumped = false;
         this.events.length = 0;
         this.lostTicks = this.goalTicks = 0;
+        this.water.reset();
+        // the first snapshot already shows a full bucket
+        this.bucket.anim[BUCKET_LITRES] = this.water.volume;
+        this.pouring.fill(false);
+        this.dryNoticed = false;
         for (const pl of this.players) {
             pl.fallTicks = 0;
             pl.safe.valid = false;
@@ -437,6 +452,7 @@ export class LabSim {
             else if (cmd.action === ACTION_RESET_PROPS) {
                 for (const e of this.propEntities) pw.respawn(e.id);
                 if (this.vehicle) pw.respawn(this.vehicle.id);
+                this.water.teleported();
             }
             this.updateStress();
         }
@@ -457,6 +473,7 @@ export class LabSim {
         pw.step();
         this.readPhysics();
         this.readVehicle();
+        this.stepWater();
         this.watchUte();
         this.applyRules();
         const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -523,6 +540,8 @@ export class LabSim {
             p.prevCarry = cmd.carry;
         }
         if (cmd.reach) pw.adjustHold(cmd.reach, i);
+        // pour (R): tip the bucket you hold forward, or let it hang again
+        if (cmd.action === ACTION_POUR) this.pouring[i] = pw.setPour(!this.pouring[i], i);
         const eye = { x: p.x, y: p.y + EYE_HEIGHT, z: p.z };
         if (cmd.action === ACTION_DROP) pw.release(i);
         if (cmd.throw) {
@@ -534,6 +553,7 @@ export class LabSim {
         }
         pw.applyGrab(eye, cmd.yaw, cmd.pitch, i);
         const heldAfter = pw.heldIdOf(i);
+        if (heldAfter !== this.bucket.id) this.pouring[i] = false;
         if (heldAfter >= 0 && heldAfter !== heldBefore) ev.grabbed = true;
         if (heldBefore >= 0 && heldAfter < 0 && !ev.thrown) ev.dropped = true;
     }
@@ -585,6 +605,8 @@ export class LabSim {
         if (this.lostTicks > 90) {
             this.lostTicks = 0;
             this.progress.recoveries++;
+            this.water.bucketLost();
+            this.water.teleported();
             const st = this.stage;
             if (st) {
                 // journeys: the bucket comes back at the last checkpoint reached
@@ -592,14 +614,16 @@ export class LabSim {
                 this.events.push({
                     tick: this.tick,
                     kind: 'recovered',
-                    text: `The bucket fell in. A spare one is waiting at the ${st.name} start.`
+                    text: `The bucket fell in. A spare (empty) one is waiting at the ${st.name} start.`
                 });
             } else {
                 pw.respawn(bk.id);
                 this.events.push({
                     tick: this.tick,
                     kind: 'recovered',
-                    text: 'The bucket floated off. A spare one is back on the stump.'
+                    text: this.water.sources.length
+                        ? 'The bucket floated off. A spare one is back on the stump: fill it at the water butt.'
+                        : 'The bucket floated off. A spare one is back on the stump.'
                 });
             }
         }
@@ -610,14 +634,30 @@ export class LabSim {
             const inside = bk.pose.p.x > g.minX && bk.pose.p.x < g.maxX && bk.pose.p.z > g.minZ && bk.pose.p.z < g.maxZ;
             const resting = Math.hypot(v.x, v.y, v.z) < 0.4 && pw.holders(bk.id) === 0;
             this.goalTicks = inside && resting ? this.goalTicks + 1 : 0;
-            if (this.goalTicks > 30) {
+            if (!inside) this.dryNoticed = false;
+            // Epic 7: a level may ask for water in it, not just the bucket
+            const wet = this.water.volume >= (rules.minLitres ?? 0);
+            if (this.goalTicks > 30 && !wet && !this.dryNoticed) {
+                this.dryNoticed = true;
+                this.events.push({
+                    tick: this.tick,
+                    kind: 'water',
+                    text: 'The bucket made it, but it is empty. Fill it at the water butt and bring it back.'
+                });
+            }
+            if (this.goalTicks > 30 && wet) {
                 this.progress.goalReached = true;
                 this.progress.goalTick = this.tick;
                 const steps = rules.steps;
+                const litres = this.water.volume.toFixed(1);
                 this.events.push({
                     tick: this.tick,
                     kind: 'goal',
-                    text: steps ? 'Bucket delivered!' : 'Bucket delivered across the creek!'
+                    text: steps
+                        ? 'Bucket delivered!'
+                        : rules.minLitres
+                          ? `Bucket delivered across the creek with ${litres} L of water!${waterPraise(this.water.volume)}`
+                          : 'Bucket delivered across the creek!'
                 });
             }
         }
@@ -643,6 +683,10 @@ export class LabSim {
     ): void {
         const k = this.progress.step;
         if (k >= stages.length) return;
+        if (stages[k].flower) {
+            this.applyFlower(stages, k);
+            return;
+        }
         const g = stages[k].goal;
         const inside = p.x > g.minX && p.x < g.maxX && p.z > g.minZ && p.z < g.maxZ;
         const resting = Math.hypot(v.x, v.y, v.z) < 0.4 && holders === 0;
@@ -662,6 +706,44 @@ export class LabSim {
                 ? 'The bucket made it to the flower! The valley is yours.'
                 : `✓ ${stages[k].name} done! Next: ${stages[k + 1].name}`
         });
+    }
+
+    /**
+     * The flower stage (Epic 7): done once enough water has been poured into the flower and the pour
+     * has stopped (so the praise can say how much it got). Fires once.
+     */
+    private applyFlower(stages: LevelStage[], k: number): void {
+        const w = this.water;
+        if (w.poured < WATER.minDelivery || w.pourQuiet < 0) return;
+        if (w.pourQuiet < POUR_DONE_TICKS) return;
+        this.progress.step++;
+        const last = this.progress.step >= stages.length;
+        if (last) {
+            this.progress.goalReached = true;
+            this.progress.goalTick = this.tick;
+        }
+        this.events.push({
+            tick: this.tick,
+            kind: last ? 'goal' : 'step',
+            text: last
+                ? `The flower drank ${w.poured.toFixed(1)} L!${waterPraise(w.poured)} The valley is yours.`
+                : `✓ ${stages[k].name} done! Next: ${stages[k + 1].name}`
+        });
+    }
+
+    /** The bucket's water for one tick (after the physics step): slosh, spill, refill, the flower. */
+    private stepWater(): void {
+        const bk = this.bucket;
+        if (!this.physicsProps) {
+            bk.anim[BUCKET_LITRES] = WATER.capacity;
+            return;
+        }
+        const pb = this.physics.bodies.get(bk.id);
+        if (!pb) return;
+        const st = this.stage;
+        const flower = st && this.progress.step < (this.level.rules?.stages?.length ?? 0) ? (st.flower ?? null) : null;
+        for (const text of this.water.step(pb, bk.pose, bk.anim, flower))
+            this.events.push({ tick: this.tick, kind: 'water', text });
     }
 
     /** The current tutorial step's text ("" when the level has none or all are done). */
@@ -1342,6 +1424,17 @@ export class LabSim {
     get dummyActive(): boolean {
         return this.dummy[0].visible;
     }
+}
+
+/** How long the flower waits after the last water reaches it before it counts the pour (ticks). */
+export const POUR_DONE_TICKS = 45;
+
+/** Positive feedback for arriving with more water (design doc §2.8). */
+function waterPraise(litres: number): string {
+    if (litres >= 8) return ' Hardly a drop spilled.';
+    if (litres >= 4) return ' A good drink.';
+    if (litres >= 1) return ' Every drop counts.';
+    return ' Just enough.';
 }
 
 export function beaverWalkAmount(t: number): number {

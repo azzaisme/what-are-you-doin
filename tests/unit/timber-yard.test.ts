@@ -11,7 +11,7 @@ import {
     timberYardLevel,
     yardHeight
 } from '../../src/levels/timber-yard.ts';
-import { neutralCommand } from '../../src/sim/commands.ts';
+import { ACTION_POUR, neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
@@ -177,8 +177,10 @@ describe('level 1: the timber yard', () => {
         expect(maxTilt).toBeLessThan(22);
     });
 
-    it('finishable with inputs only: carry the bucket to the near abutment and throw it over', () => {
-        // the shortcut (freeform, design doc §2.1): played through player commands only, no bridge
+    it('the old shortcut no longer wins: a bucket thrown over the creek lands without its water', () => {
+        // Epic 7: the yard wants water delivered. A full bucket (11.5 kg) is too heavy to throw
+        // across, so pour it out and throw the empty one: it lands on the far bank, empty, and the
+        // level says so instead of completing. Played through player commands only.
         const s = yard();
         let n = 0;
         let pitch = 0;
@@ -199,15 +201,24 @@ describe('level 1: the timber yard', () => {
             step({ moveX: s.player.x > BRIDGE_X ? -0.6 : 0.6 });
         for (let i = 0; i < 900 && s.player.z > BRIDGE.nearFace + 0.25; i++) step({ moveZ: 0.6 });
         expect(s.progress.falls).toBe(0);
+        // carried steadily, it still holds (nearly) all its water
+        expect(s.water.volume).toBeGreaterThan(9.5);
         step({}, 30);
+        step({ action: ACTION_POUR });
+        step({}, 240);
+        expect(s.water.volume).toBeLessThan(0.25);
+        step({ action: ACTION_POUR });
+        step({}, 60);
         for (let i = 0; i < 20; i++) {
-            pitch += (0.5 - pitch) / 6;
+            pitch += (0.4 - pitch) / 6;
             step();
         }
         step({}, 20);
         step({ throw: true });
         step({}, 240);
-        expect(s.progress.goalReached).toBe(true);
+        expect(bucket.pose.p.z).toBeLessThan(YARD_GOAL.maxZ);
+        expect(s.progress.goalReached).toBe(false);
+        expect(s.events.filter((e) => e.kind === 'water' && e.text.includes('empty'))).toHaveLength(1);
         expect(s.player.z).toBeGreaterThan(BRIDGE.nearFace); // the player never crossed
     }, 60_000);
 
@@ -273,10 +284,15 @@ describe('level 1: the timber yard', () => {
         expect(s.physics.heldId).toBe(bucket.id);
         pitch = 0;
         goTo(BRIDGE_X, (YARD_GOAL.minZ + YARD_GOAL.maxZ) / 2);
+        // carried steadily over the bridge: not a drop lost
+        expect(s.water.volume).toBe(10);
         expect(s.progress.falls).toBe(0);
         expect(s.player.z).toBeLessThan(BRIDGE.farEdge);
         step({ grab: true });
         step({}, 90);
         expect(s.progress.goalReached).toBe(true);
+        // let go from the hands, it drops to the ground and splashes some out (measured 8.4 L left)
+        expect(s.water.volume).toBeGreaterThan(7.5);
+        expect(s.events.find((e) => e.kind === 'goal')!.text).toMatch(/with \d+\.\d L of water/);
     }, 120_000);
 });

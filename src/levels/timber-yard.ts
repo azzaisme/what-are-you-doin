@@ -23,6 +23,7 @@ import { fbm, lerp, oak, patchShade, pine, rasterizeTerrain, rng, rock, smoothst
 import type { RockSpot, TreeSpot } from './common.ts';
 import { rasterizePieces } from './level.ts';
 import type { LevelBuildResult, LevelDef, LevelLayout, PropPlacement, StaticPiece } from './level.ts';
+import { waterButt } from './water-butt.ts';
 
 export const YARD_BOUNDS = { minX: -28, maxX: 28, minZ: -42, maxZ: 14 };
 export const CUT_BASE_Y = -2;
@@ -388,6 +389,7 @@ export function yardPieces(): StaticPiece[] {
                 )
         )
     );
+    P.push(...yardButt().pieces);
     P.push(piece('sign-post-l', boxS(0.05, 0.75, 0.05), 6.4, YARD_Y + 0.75, 2.6, darkTimber));
     P.push(piece('sign-post-r', boxS(0.05, 0.75, 0.05), 8.2, YARD_Y + 0.75, 2.6, darkTimber));
     P.push(
@@ -467,6 +469,8 @@ export const WINDSOCK = { x: 4.6, z: 1.6, height: 3.2 };
 
 /** Bucket stump in the yard. */
 export const BUCKET_STUMP = { x: 5.6, z: 4.4, top: YARD_Y + 0.44 };
+/** The water butt by the stump (Epic 7): its tap fills a bucket standing on the stump. */
+export const yardButt = () => waterButt('water butt', BUCKET_STUMP.x, BUCKET_STUMP.z, BUCKET_STUMP.top, YARD_Y, 0, 40);
 /** Far-bank goal area for the bucket. */
 export const YARD_GOAL = { minX: BRIDGE_X - 3.5, maxX: BRIDGE_X + 3.5, minZ: -9.5, maxZ: -5.2 };
 
@@ -642,8 +646,10 @@ export const timberYardLevel: LevelDef = {
     },
     props: yardProps(),
     rules: {
-        objective: 'Get the bucket across the creek to the flag',
+        objective: 'Get the bucket of water across the creek to the flag',
         goal: YARD_GOAL,
+        minLitres: 0.25,
+        waterSources: [yardButt().source],
         fallY: -0.2,
         isSafe: (x, z) => Math.abs(z - creekCenterZ(x)) > creekHalfWidth(x) + 0.9,
         lostY: CREEK_WATER_Y + 0.15

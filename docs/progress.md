@@ -1,5 +1,85 @@
 # Progress log
 
+## Epic 7, part 1: the bucket holds real water (2026-11-22)
+
+The bucket now carries water the game keeps track of. Carry it steadily and it stays full. Jerk it, drop it or tip it and water slops out. In the Valley you win by pouring water on the flower, not by setting the bucket down beside it.
+
+### How to play it
+
+- **The HUD** shows the bucket's water under the objective, for example `Bucket ▮▮▮▮▮▮▮▮▮▯ 9.4 L`. On the flower stage it also shows what the flower has had.
+- **Carry it gently.** Walking, stopping and turning are fine. A sprint that you stop dead slops some out. So does a drop, a hard hit or a big tilt.
+- **Pour:** while holding the bucket, press R (LB on a pad, the Pour button on touch). The bucket tips forward, mouth towards where you look. Press again to stop. Letting go also stops it.
+- **Refill:** stand the bucket under a water butt's tap. On the Timber Yard stump, the tap is right above it. It fills at 4 L/s.
+    - Each butt holds a fixed amount: the yard's 40 L, the Valley works tank 30 L, the mountain spring butt 20 L.
+    - The creek is not a refill point.
+- **Timber Yard:** the goal is now the bucket at the flag **with water in it** (at least 0.25 L). An empty bucket gets "The bucket made it, but it is empty", and the level stays open.
+- **The Valley:** stages 1–6 are unchanged. Stage 7, Flower Summit, says "Water the flower: hold the bucket inside the ring of stones and pour (R)".
+    - At least 0.25 L has to land inside the ring.
+    - The stage completes once the pour stops, and says how much the flower drank, with praise for more.
+    - The win fires once.
+- **A lost bucket:** the spare comes back empty. Its water went into the creek. In the yard the spare reappears on its stump under the tap, so it refills by itself. In the Valley there are butts at the works and on the summit road.
+
+### What was built
+
+- **Volume and slosh (#61, #62), `src/sim/water.ts`:**
+    - Litres are kept between 0 and 10 and stepped at 60 Hz.
+    - The surface is one plane, driven by a damped oscillator. The force on it is gravity minus the bucket's acceleration. The model uses the bucket's own first slosh frequency, 1.9 Hz when full.
+    - Water spills over the low point of the rim when the tilted surface holds less than the bucket has.
+    - Hard impacts splash some out.
+    - Spinning the bucket dishes the surface. The water picks up the spin slowly.
+    - Every input is checked, so there is no NaN and never negative water.
+- **In the level, `src/sim/bucket-water.ts`:**
+    - Runs on the host, from the bucket's physics body.
+    - The water's weight goes onto the bucket (11.5 kg full), updated in 0.5 L steps.
+    - Refills come from the level's water sources.
+    - Water poured within the flower's radius counts for the flower.
+    - It keeps a ledger: bucket + butts + spilled + lost + flower always equals the starting total. That is how "no duplicate refill" is checked.
+- **Pour (#63):** a new action, `ACTION_POUR`. Guests may send it, because it is on the guest whitelist. A wrist torque tips the held bucket 115° forward.
+- **Flower goal (#64):** the Valley's last stage has a `flower` target. Tipping the bucket over inside the ring also counts.
+- **Online:**
+    - Litres and the surface slope ride in the bucket's snapshot animation channels, so every device draws the same water.
+    - The host state carries `wat: [litres, flower litres]` for the HUD.
+- **Visible water and droplets (#65):**
+    - The 1 cm water in the bucket follows the volume and tilts with the surface.
+    - When water leaves, blue voxel droplets fall from the rim. When it fills, a stream falls from the tap.
+    - The droplets are drawn from a fixed pool of particles and are decoration only. They never decide the volume.
+- **Water butts:** a timber barrel with hoops, water on top and a spout with an orange tap (`src/levels/water-butt.ts`).
+- **Steadier bucket handling:** a hanging bucket's hand now moves at most 1.5 m/s relative to your eye.
+    - So a flick of the view swings the bucket round instead of whipping it.
+    - Before this, looking up quickly after picking it up flung out 7 of the 10 litres.
+
+### Test results (actual)
+
+| Test                                                               | Result                                                                                 |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| Still bucket, 60 s                                                 | 10.00 L, surface level                                                                 |
+| Two laps of the yard carrying it (walk, stop, 180° turns in 0.5 s) | **10.00 L** kept                                                                       |
+| Timber Yard by the bridge, inputs only                             | 10.00 L over the bridge; 8.4 L after letting go at the flag (it drops from your hands) |
+| Tipped 60° and held                                                | keeps exactly what fits under the rim                                                  |
+| Dropped at 4 m/s / swung into a wall at 4 m/s                      | 0.63 L / 1.14 L splashed out                                                           |
+| In the ute's bed: gentle drive / full throttle then a hard stop    | 10.00 L / 9.27 L                                                                       |
+| Pouring                                                            | below 9 L in 0.7 s, down to the dregs (under 0.3 L) in 5 s                             |
+| Refill at the yard butt                                            | 4 L/s to exactly 10 L, then nothing more; four fills, then the butt is dry             |
+| Valley flower                                                      | setting the bucket down does not win; tipping it in the ring does, once                |
+| Garbage input (NaN, infinities) for 600 ticks                      | every value finite, volume within 0–10 L                                               |
+| Online                                                             | the guest's HUD and snapshot show the host's litres                                    |
+
+- Unit tests: 354 runs pass (every test runs at both the 5 cm and the 10 cm voxel size).
+- Browser tests pass: the Timber Yard objective and delivery, the Valley stages, online co-op in the Valley (the guest's HUD shows the host's litres), and UI boxes don't overlap.
+
+### Changed on purpose
+
+- **The bucket-throw shortcut in the yard no longer wins.**
+    - A full bucket weighs 11.5 kg, too heavy to throw across.
+    - If you pour it out and throw the empty one over, it lands at the flag and the level says it is empty.
+    - The test now checks exactly that.
+
+### Known limits
+
+- **Letting go of the bucket drops it from your hands**, which splashes about 1.6 L out. Look down first to set it lower.
+- **Tuned by feel.** The water's damping is set well above real water's so a swinging carry doesn't build up waves. Owner playtesting should set how forgiving it is: the thresholds are in `WATER` in `src/sim/water.ts`.
+- **Not tried on a real phone.** The Pour touch button only appears while you hold the bucket.
+
 ## Epic 4: the ute drives (2026-11-22)
 
 You can now drive the ute in the Timber Yard and the Valley. A friend can ride along.

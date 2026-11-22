@@ -12,6 +12,7 @@ import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs';
 import { BEAVER_ARM_REACH, BEAVER_LEAN, BEAVER_WALK_AMOUNT, BEAVER_WALK_PHASE } from './assets/beaver.ts';
 import { CELL_TIERS, assetTier, tierCellCm } from './assets/cell-tier.ts';
 import type { CellTier } from './assets/cell-tier.ts';
+import { BUCKET_CAPACITY } from './assets/props.ts';
 import { DebugPanel } from './debug/panel.ts';
 import type { PanelHost } from './debug/panel.ts';
 import { DESIGN_KEY, Designer, loadDraft } from './editor/designer.ts';
@@ -42,6 +43,7 @@ import { EYE_HEIGHT, LabSim } from './sim/lab-sim.ts';
 import type { PropsMode } from './sim/lab-sim.ts';
 import { initPhysics } from './sim/physics/world.ts';
 import { ANIM_MAX } from './sim/snapshots.ts';
+import { WATER } from './sim/water.ts';
 import type { CameraControlsApi } from './types/engine-scripts.ts';
 import { OnlinePanel } from './ui/online-panel.ts';
 import { SettingsMenu } from './ui/settings-menu.ts';
@@ -211,6 +213,7 @@ watch('bucket', 0, false);
 for (const d of sim.dummy) watch(d.name, 0.15, false);
 for (const e of sim.eyes) watched.push({ slot: e.slot, bottom: 0, timber: false, eyeHeight: EYE_HEIGHT });
 const fx = new ParticleFX(level, watched);
+fx.bucketSlot = level.props.some((p) => p.name === 'bucket') && sim.physicsProps ? sim.bucket.slot : -1;
 pipeline.particles = (time) => {
     const cp = camera.getPosition();
     fx.update(time, sim.ring, { x: cp.x, z: cp.z });
@@ -574,6 +577,7 @@ class LabDirector extends Script {
         if (panel.visible && (frameTimeHead & 7) === 0) panel.setStats(statsText());
         if ((frameTimeHead & 3) === 0) updatePrompt();
         pollEvents();
+        if ((frameTimeHead & 7) === 0) updateWater();
     }
 }
 const directorEntity = new Entity('LabDirector');
@@ -1008,6 +1012,7 @@ hud.className = 'hud';
 hud.innerHTML = `
   <div class="hud-title"><b>(Un)civil Engineers</b> <span>${level.id === 'lab' ? 'River Lab · voxel tech demo' : level.id === 'yard' ? `Level 1 · ${level.name}` : level.name}</span></div>
   <div class="hud-objective" id="hud-objective"></div>
+  <div class="hud-water" id="hud-water"></div>
   <div class="hud-help" id="hud-help"></div>
   <div class="hud-prompt" id="hud-prompt"></div>`;
 document.body.append(hud);
@@ -1075,7 +1080,7 @@ function updateHud(): void {
         state.mode === 'orbit'
             ? 'Drag to orbit · right-drag to pan · wheel to zoom · <kbd>V</kbd> first person · <kbd>H</kbd> hide UI'
             : sim.physicsProps
-              ? 'Click to look · <kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>LMB</kbd>/<kbd>E</kbd> grab / release · <kbd>RMB</kbd> throw · wheel reach · <kbd>Q</kbd> drop · <kbd>G</kbd> plank · <kbd>T</kbd> ragdoll · <kbd>Esc</kbd> release mouse · <kbd>V</kbd> orbit'
+              ? 'Click to look · <kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>LMB</kbd>/<kbd>E</kbd> grab / release · <kbd>RMB</kbd> throw · wheel reach · <kbd>Q</kbd> drop · <kbd>R</kbd> pour · <kbd>G</kbd> plank · <kbd>T</kbd> ragdoll · <kbd>Esc</kbd> release mouse · <kbd>V</kbd> orbit'
               : 'Click to look · <kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>G</kbd> carry plank · <kbd>Esc</kbd> release mouse · <kbd>V</kbd> orbit';
     const short =
         state.mode === 'orbit'
@@ -1083,13 +1088,13 @@ function updateHud(): void {
             : 'Click to look · WASD move · click grab · V orbit';
     if (touchSeen && state.mode === 'firstPerson') {
         help.innerHTML =
-            'Left thumb: move (push to the edge to run) · right thumb: look · buttons: jump, grab, throw, drop';
+            'Left thumb: move (push to the edge to run) · right thumb: look · buttons: jump, grab, throw, drop, pour';
         crosshair.style.display = !state.uiHidden ? '' : 'none';
         return;
     }
     if (state.players > 1 || pads.players[0]) {
         help.innerHTML =
-            'Pads: left stick move · right stick look · A jump · RT grab / release · RB throw · B drop · X ragdoll · D-pad reach';
+            'Pads: left stick move · right stick look · A jump · RT grab / release · RB throw · B drop · LB pour · X ragdoll · D-pad reach';
         crosshair.style.display = state.mode === 'firstPerson' && !state.uiHidden ? '' : 'none';
         return;
     }
@@ -1168,6 +1173,28 @@ function updateObjective(): void {
     el.textContent = r ? `${done ? '✓' : '○'} ${r.objective}` : '';
     el.classList.toggle('done', done);
 }
+/** The bucket's water (Epic 7): litres in it, and on the flower stage what the flower has had. */
+const hasBucket = !!level.rules && level.props.some((p) => p.name === 'bucket');
+let waterText = '';
+function updateWater(): void {
+    const el = document.getElementById('hud-water');
+    if (!el) return;
+    let t = '';
+    if (hasBucket && sim.physicsProps) {
+        const w = guestSession ? guestSession.water : { volume: sim.water.volume, poured: sim.water.poured };
+        const stages = level.rules?.stages;
+        const k = guestSession ? guestSession.step : sim.progress.step;
+        const flower = stages && stages[Math.min(k, stages.length - 1)]?.flower;
+        const full = Math.max(0, Math.min(10, Math.round((w.volume / BUCKET_CAPACITY) * 10)));
+        t = `Bucket ${'▮'.repeat(full)}${'▯'.repeat(10 - full)} ${w.volume.toFixed(1)} L`;
+        if (flower) t += ` · flower ${w.poured.toFixed(1)} / ${WATER.minDelivery} L`;
+    }
+    if (t !== waterText) {
+        waterText = t;
+        el.textContent = t;
+    }
+}
+
 function pollEvents(): void {
     if (guestSession) {
         for (const e of guestSession.events) {
@@ -1197,6 +1224,10 @@ function interactionText(i: number, pad: boolean): string {
             : 'Driving · W/S throttle · A/D steer · Space brake · Q recover · click or E to get out';
     if (it.seat >= 0) return pad ? 'Riding along · RT get out' : 'Riding along · click or E to get out';
     if (it.target === 'ute') return pad ? 'RT to drive the ute' : 'Click to drive the ute';
+    if (it.holding === 'bucket')
+        return pad
+            ? `Holding the bucket${both} · LB pour · RT release · RB throw`
+            : `Holding the bucket${both} · R to pour (again to stop) · click to release · right-click to throw`;
     if (it.holding)
         return pad
             ? `Holding ${propLabel(it.holding)}${both} · RT release · RB throw · B drop`
@@ -1251,7 +1282,7 @@ function updatePrompt(): void {
     if (state.mode === 'firstPerson') {
         if (touch.enabled) {
             const it = guestInteraction() ?? sim.interaction(0);
-            touch.setHolding(!!it.holding);
+            touch.setHolding(!!it.holding, it.holding === 'bucket');
             t = it.driving
                 ? 'Driving · stick to drive · jump to brake · drop to recover · grab to get out'
                 : it.seat >= 0
@@ -2107,6 +2138,9 @@ window.__riverLab = {
     nearBuiltAt: (x: number, z: number, half = 3) => pipeline.nearCovers(x - half, x + half, z - half, z + half),
     level: level.id,
     progress: () => ({ ...sim.progress, events: sim.events.map((e) => e.kind), stepText: sim.stepText }),
+    /** The bucket's water (Epic 7): litres in it and poured into the flower; a guest's from the host. */
+    water: () => (guestSession ? { ...guestSession.water } : { volume: sim.water.volume, poured: sim.water.poured }),
+    hudWater: () => document.getElementById('hud-water')?.textContent ?? '',
     /** Places a named prop at a pose (tests and the evidence capture), as a teleport. */
     placeProp(name: string, x: number, y: number, z: number, yaw = 0) {
         const e = sim.entities.find((n) => n.name === name);

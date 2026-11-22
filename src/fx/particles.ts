@@ -7,18 +7,22 @@
  *   a flutter and drifting with the integrated wind, resting on the ground (or floating on water)
  *   until their slot recycles;
  * - dust and chips when a prop lands hard, and splashes when anything (a player too) drops into the
- *   water, detected from the interpolated poses (a sudden stop, or crossing the water surface).
+ *   water, detected from the interpolated poses (a sudden stop, or crossing the water surface);
+ * - the bucket's water (Epic 7): droplets leaving its rim while it spills or pours, and a stream
+ *   from the tap while it fills, from its litres and surface channels. Decorative only: the volume
+ *   is the simulation's, never the droplet count.
  *
  * Engine-free; output is a flat buffer of x, y, z, voxel value per cell for the voxel worker.
  */
 
+import { BUCKET_LITRES, BUCKET_SLOPE_X, BUCKET_SLOPE_Z } from '../assets/props.ts';
 import type { TreeSpot } from '../levels/common.ts';
 import { oakCrown } from '../levels/common.ts';
 import type { LevelDef } from '../levels/level.ts';
 import { ANIM_MAX } from '../sim/snapshots.ts';
 import type { SnapshotRing } from '../sim/snapshots.ts';
 import { GRID_SIZE } from '../voxels/grid.ts';
-import { pose } from '../voxels/math.ts';
+import { pose, quatRotate } from '../voxels/math.ts';
 import { M, voxel } from '../voxels/palette.ts';
 import { hash3 } from '../voxels/volumes.ts';
 
@@ -48,6 +52,9 @@ function cellCentre(v: number): number {
     return (Math.floor(v / GRID_SIZE) + 0.5) * GRID_SIZE;
 }
 export const MAX_PARTICLES = 700;
+/** Live bursts at most (oldest go first): bounds the bucket's droplets too. */
+const MAX_BURSTS = 32;
+const _lip = { x: 0, y: 0, z: 0 };
 const LEAF_MATS = [M.Leaf, M.LeafGold, M.LeafGold, M.LeafRed];
 
 const u = (a: number, b: number, c: number) => hash3(a, b, c, 911) / 4294967296;
@@ -64,7 +71,10 @@ interface Burst {
     x: number;
     y: number;
     z: number;
-    kind: 'dust' | 'chips' | 'splash';
+    kind: 'dust' | 'chips' | 'splash' | 'pour' | 'fill';
+    /** Pour: the direction droplets leave in (horizontal, unit). */
+    dx?: number;
+    dz?: number;
     n: number;
     seed: number;
 }
@@ -95,7 +105,10 @@ export class ParticleFX {
     private readonly p = pose();
     private readonly anim = new Float64Array(ANIM_MAX);
     /** Effects spawned (cumulative, for tests and the debug panel). */
-    readonly spawned = { dust: 0, chips: 0, splash: 0 };
+    readonly spawned = { dust: 0, chips: 0, splash: 0, pour: 0, fill: 0 };
+    /** The bucket's entity slot (-1: none) and its litres at the last sample. */
+    bucketSlot = -1;
+    private bucketLitres = -1;
 
     constructor(level: LevelDef, watched: WatchedEntity[]) {
         this.level = level;
@@ -118,7 +131,10 @@ export class ParticleFX {
         const dt = this.lastTime >= 0 ? time - this.lastTime : 0;
         this.lastTime = time;
         this.leaves(time);
-        if (dt > 0 && dt < 0.5) this.detect(time, dt, ring);
+        if (dt > 0 && dt < 0.5) {
+            this.detect(time, dt, ring);
+            this.bucketWater(time, ring);
+        } else this.bucketLitres = -1;
         this.drawBursts(time);
         return this.count;
     }
@@ -228,19 +244,62 @@ export class ParticleFX {
         }
     }
 
-    private spawn(t0: number, x: number, y: number, z: number, kind: Burst['kind'], n: number): void {
+    /** Droplets from the bucket: over the rim when it loses water, from above when it fills. */
+    private bucketWater(t: number, ring: SnapshotRing): void {
+        if (this.bucketSlot < 0) return;
+        if (!ring.sample(this.bucketSlot, t, this.p, this.anim)) {
+            this.bucketLitres = -1;
+            return;
+        }
+        const litres = this.anim[BUCKET_LITRES];
+        const prev = this.bucketLitres;
+        this.bucketLitres = litres;
+        if (prev < 0) return;
+        const d = litres - prev;
+        const q = this.p.q;
+        if (d < -0.004) {
+            // over the rim where the surface stands highest
+            const sx = this.anim[BUCKET_SLOPE_X];
+            const sz = this.anim[BUCKET_SLOPE_Z];
+            const s = Math.hypot(sx, sz);
+            const lx = s > 1e-3 ? (0.15 * sx) / s : 0.15;
+            const lz = s > 1e-3 ? (0.15 * sz) / s : 0;
+            const lip = quatRotate(q, lx, 0.3, lz, _lip);
+            const h = Math.hypot(lip.x, lip.z) || 1;
+            const n = Math.min(8, 2 + Math.round(-d * 20));
+            this.spawn(t, this.p.p.x + lip.x, this.p.p.y + lip.y, this.p.p.z + lip.z, 'pour', n, lip.x / h, lip.z / h);
+        } else if (d > 0.004) {
+            const m = quatRotate(q, 0, 0.3, 0, _lip);
+            this.spawn(t, this.p.p.x + m.x, this.p.p.y + m.y + 0.25, this.p.p.z + m.z, 'fill', 5);
+        }
+    }
+
+    private spawn(t0: number, x: number, y: number, z: number, kind: Burst['kind'], n: number, dx = 0, dz = 0): void {
         this.spawned[kind]++;
-        this.bursts.push({ t0, x, y, z, kind, n, seed: ++this.burstSeq });
-        if (this.bursts.length > 24) this.bursts.shift();
+        this.bursts.push({ t0, x, y, z, kind, n, seed: ++this.burstSeq, dx, dz });
+        if (this.bursts.length > MAX_BURSTS) this.bursts.shift();
     }
 
     private drawBursts(t: number): void {
         const live: Burst[] = [];
         for (const b of this.bursts) {
             const age = t - b.t0;
-            const life = b.kind === 'splash' ? 0.7 : b.kind === 'chips' ? 0.8 : 1.1;
+            const life =
+                b.kind === 'splash'
+                    ? 0.7
+                    : b.kind === 'chips'
+                      ? 0.8
+                      : b.kind === 'pour'
+                        ? 0.6
+                        : b.kind === 'fill'
+                          ? 0.25
+                          : 1.1;
             if (age < 0 || age > life) continue;
             live.push(b);
+            if (b.kind === 'pour' || b.kind === 'fill') {
+                this.drawWater(b, age);
+                continue;
+            }
             for (let i = 0; i < b.n; i++) {
                 const a = u(b.seed, i, 1) * Math.PI * 2;
                 const sp = b.kind === 'dust' ? 0.5 + 0.6 * u(b.seed, i, 2) : 1.0 + 1.6 * u(b.seed, i, 2);
@@ -258,5 +317,29 @@ export class ParticleFX {
             }
         }
         this.bursts = live;
+    }
+
+    /** Bucket droplets: falling off the rim (pour) or down the tap's stream into it (fill). */
+    private drawWater(b: Burst, age: number): void {
+        const ground = this.level.terrainHeight(cellCentre(b.x), cellCentre(b.z));
+        for (let i = 0; i < b.n; i++) {
+            const t = age - u(b.seed, i, 4) * 0.12;
+            if (t < 0) continue;
+            let x = b.x;
+            let y = b.y;
+            let z = b.z;
+            if (b.kind === 'pour') {
+                const sp = 0.3 + 0.5 * u(b.seed, i, 2);
+                const side = (u(b.seed, i, 3) - 0.5) * 0.3;
+                x += ((b.dx ?? 0) * sp - (b.dz ?? 0) * side) * t;
+                z += ((b.dz ?? 0) * sp + (b.dx ?? 0) * side) * t;
+                y -= 0.5 * 9.81 * t * t;
+                if (y < ground) continue;
+            } else {
+                y -= 1.2 * t + 0.5 * 9.81 * t * t;
+                if (y < b.y - 0.28) continue;
+            }
+            this.push(x, y, z, voxel(M.BucketWater, i & 3));
+        }
     }
 }

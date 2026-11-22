@@ -10,11 +10,12 @@
  *   left stick  move            right stick  look            L3 or LT (held)  sprint
  *   A           jump            RT           grab / release   RB               throw
  *   B           drop            Y            plank (player 1) X                ragdoll
+ *   LB          pour the bucket you hold (again: stop)
  *   D-pad up/down  hold further / closer
  *   Start (menu)   settings (any pad, joined or not)
  */
 
-import { ACTION_DROP, ACTION_NONE, ACTION_RAGDOLL, PITCH_LIMIT } from '../sim/commands.ts';
+import { ACTION_DROP, ACTION_NONE, ACTION_POUR, ACTION_RAGDOLL, PITCH_LIMIT } from '../sim/commands.ts';
 import type { PlayerCommand } from '../sim/commands.ts';
 
 export const PAD = {
@@ -88,6 +89,7 @@ export class PadPlayer {
         if (edge(PAD.RB)) this.q.throw = true;
         if (edge(PAD.B)) this.q.action = ACTION_DROP;
         if (edge(PAD.X)) this.q.action = ACTION_RAGDOLL;
+        if (edge(PAD.LB)) this.q.action = ACTION_POUR;
         if (edge(PAD.UP)) this.q.reach += 0.25;
         if (edge(PAD.DOWN)) this.q.reach -= 0.25;
         if (allowCarry && edge(PAD.Y)) this.carry = !this.carry;
