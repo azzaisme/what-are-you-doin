@@ -8,6 +8,7 @@ import { aabb, composePose, copyPose, pose, quatFromYawPitchRoll } from '../voxe
 import type { Pose } from '../voxels/math.ts';
 import { M, voxel } from '../voxels/palette.ts';
 import { box, cup, ellipsoid, grain, implicit, latticeShade, solid } from '../voxels/volumes.ts';
+import type { Volume } from '../voxels/volumes.ts';
 
 import { ASSET_SCHEMA_VERSION } from './asset.ts';
 import type { AssetPart, VoxelAsset } from './asset.ts';
@@ -65,7 +66,6 @@ export function logAsset(): VoxelAsset {
 /** Bucket: ~0.32 m diameter, 0.3 m tall (about 10 L), origin at the bottom centre, with a handle arc. */
 export const BUCKET_HEIGHT = 0.3;
 export const BUCKET_HANDLE_TOP = 0.46;
-export const BUCKET_WATER_LEVEL = 0.22;
 export const BUCKET_INNER_RADIUS = 0.08;
 export function bucketAsset(): VoxelAsset {
     // The wall and handle are drawn as thick as the lattice needs to show them: on the 1 cm lattice
@@ -88,20 +88,57 @@ export function bucketAsset(): VoxelAsset {
         },
         solid(M.Steel)
     );
-    // the water inside: fills the hollow up to the water level (on coarse cells it also reaches
-    // into the wall a little, so it shows as a blue disc in the narrow opening)
+    // the water inside (Epic 7): fills the hollow up to the surface the simulation gives it (litres
+    // and the surface's slope in the bucket's frame, animation channels BUCKET_LITRES.. below). On
+    // coarse cells it also reaches into the wall a little, so it shows as a blue disc in the narrow
+    // opening. The surface is set by evaluate() just before each rasterization of this asset.
     const inner = (y: number) => 0.13 + 0.03 * (y / BUCKET_HEIGHT) - wallT;
-    const water = implicit(
-        aabb(-0.16, baseT, -0.16, 0.16, BUCKET_WATER_LEVEL, 0.16),
-        (x, y, z) => Math.hypot(x, z) < inner(y) + (fine ? 0 : 0.02),
-        (x, y, z) => voxel(M.BucketWater, latticeShade(x, y, z, fine ? 0.03 : 0.1, 4))
-    );
-    return rigid('bucket', [
+    const surface = { h: 0, sx: 0, sz: 0 };
+    const top = BUCKET_HEIGHT - 0.005;
+    const shade = (x: number, y: number, z: number) =>
+        voxel(M.BucketWater, latticeShade(x, y, z, fine ? 0.03 : 0.1, 4));
+    const water: Volume = {
+        bounds: aabb(-0.16, baseT, -0.16, 0.16, top, 0.16),
+        shape: { type: 'custom' },
+        sample(x, y, z) {
+            if (y < baseT || y > top) return 0;
+            if (y > surface.h + surface.sx * x + surface.sz * z) return 0;
+            return Math.hypot(x, z) < inner(y) + (fine ? 0 : 0.02) ? shade(x, y, z) : 0;
+        }
+    };
+    const parts: AssetPart[] = [
         { name: 'bucket', volume: wall, priority: 2, refColor: 0xa9b0b4 },
         { name: 'water', volume: water, priority: 3, policy: fine ? 'coverage50' : 'conservative', refColor: 0x3a9ee0 },
         { name: 'handle', volume: handle, priority: 3, policy: 'conservative', refColor: 0x9aa0a6 }
-    ]);
+    ];
+    return {
+        schema: ASSET_SCHEMA_VERSION,
+        name: 'bucket',
+        parts,
+        animChannels: BUCKET_ANIM_CHANNELS,
+        evaluate(root: Pose, anim: ArrayLike<number>, out: Pose[]) {
+            const litres = Math.max(0, Math.min(BUCKET_CAPACITY, anim[BUCKET_LITRES] || 0));
+            surface.h = BUCKET_FLOOR + litres / BUCKET_LITRES_PER_M;
+            surface.sx = clampSlope(anim[BUCKET_SLOPE_X]);
+            surface.sz = clampSlope(anim[BUCKET_SLOPE_Z]);
+            for (let i = 0; i < parts.length; i++) copyPose(root, out[i]);
+        },
+        partHidden(anim: ArrayLike<number>, part: number) {
+            return part === 1 && !((anim[BUCKET_LITRES] || 0) > 0.02);
+        }
+    };
 }
+
+/** Bucket animation channels: litres of water, and the water surface's slope in the bucket's frame. */
+export const BUCKET_LITRES = 0;
+export const BUCKET_SLOPE_X = 1;
+export const BUCKET_SLOPE_Z = 2;
+export const BUCKET_ANIM_CHANNELS = 3;
+/** Matches src/sim/water.ts (WATER): a full bucket, its floor, and litres per metre of depth. */
+export const BUCKET_CAPACITY = 10;
+const BUCKET_FLOOR = 0.02;
+const BUCKET_LITRES_PER_M = Math.PI * 0.13 * 0.13 * 1000;
+const clampSlope = (s: number) => (Number.isFinite(s) ? Math.max(-6, Math.min(6, s)) : 0);
 
 export function cubeAsset(size = 0.5, material: number = M.TestOrange): VoxelAsset {
     const h = size / 2;

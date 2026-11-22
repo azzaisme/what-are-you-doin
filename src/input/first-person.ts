@@ -8,7 +8,7 @@
  * Which key or mouse button does what comes from the player's bindings (bindings.ts).
  */
 
-import { ACTION_DROP, ACTION_NONE, ACTION_RAGDOLL, PITCH_LIMIT } from '../sim/commands.ts';
+import { ACTION_DROP, ACTION_NONE, ACTION_POUR, ACTION_RAGDOLL, PITCH_LIMIT } from '../sim/commands.ts';
 import type { PlayerCommand } from '../sim/commands.ts';
 
 import { actionForKey, defaultBindings } from './bindings.ts';
@@ -95,6 +95,7 @@ export class FirstPersonInput {
         if (action === 'grab') this.grabQueued = true;
         else if (action === 'throw') this.throwQueued = true;
         else if (action === 'drop') this.actionQueued = ACTION_DROP;
+        else if (action === 'pour') this.actionQueued = ACTION_POUR;
         else if (action === 'ragdoll') this.actionQueued = ACTION_RAGDOLL;
         else if (action === 'reachFar') this.reachQueued += 0.2;
         else if (action === 'reachNear') this.reachQueued -= 0.2;
