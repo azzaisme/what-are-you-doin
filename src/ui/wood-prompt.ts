@@ -20,22 +20,24 @@ const isLog = (name: string) => name === 'log' || name.startsWith('extra-log') |
 
 /**
  * The prompt for a stand tree or a log being cut, or null when the generic prompt applies.
- * `cut(name)` is a stand tree's cut so far (0-1).
+ * `cut(name)` is a stand tree's cut so far (0-1). `names` are the player's bound grab and drop
+ * controls (remappable, see input/bindings.ts); the defaults when omitted.
  */
 export function woodPrompt(
     it: { holding: string | null; target: string | null },
     input: PromptInput,
     cut: (marker: string) => number,
-    sawBeams = false
+    sawBeams = false,
+    names?: { press: string; drop: string }
 ): string | null {
     const t = it.target;
     if (!t) return null;
-    const press = input === 'mouse' ? 'Click' : input === 'pad' ? 'RT' : 'Grab';
+    const press = names?.press ?? (input === 'mouse' ? 'Click' : input === 'pad' ? 'RT' : 'Grab');
     if (t === 'sawmill' && !it.holding)
         return sawBeams
             ? `Saw set to beams (one per log) · ${press} to set it to planks`
             : `Saw set to planks (three per log) · ${press} to set it to beams`;
-    const drop = input === 'mouse' ? 'Q' : input === 'pad' ? 'B' : 'drop';
+    const drop = names?.drop ?? (input === 'mouse' ? 'Q' : input === 'pad' ? 'B' : 'drop');
     const tree = /^tree-\d+$/.test(t);
     const pct = tree ? Math.round(cut(t) * 100) : 0;
     const so = tree && pct > 0 ? ` · cut ${pct}%` : '';
