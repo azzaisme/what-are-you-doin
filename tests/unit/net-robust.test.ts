@@ -7,9 +7,9 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import { timberYardLevel } from '../../src/levels/timber-yard.ts';
 import { valleyLevel } from '../../src/levels/valley.ts';
+import { SnapshotDecoder, encodeSnapshot } from '../../src/net/codec.ts';
 import { VirtualClock, degradedTransport, parseConditions } from '../../src/net/netsim.ts';
 import type { NetConditions } from '../../src/net/netsim.ts';
-import { SnapshotDecoder, encodeSnapshot } from '../../src/net/codec.ts';
 import {
     GuestSession,
     HOST_GRACE_MS,
