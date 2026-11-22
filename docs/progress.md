@@ -44,6 +44,18 @@ to beat it, and a test that plays it out.
 - **On screen:** rain and snow fall round the camera as voxel particles (at most 90 cells). Mist
   and fog are drawn with the fog alone.
 - **Timber Yard unchanged:** all its hazard tests pass untouched.
+- **Seen in a real browser** (`docs/screenshots/epic9/weather-*.jpg`): each zone at Low and High.
+    - Fog closes in on the far trees and landmarks.
+    - At Low, the 24 m near world fades into the fog with no hard edge.
+    - The mist over the gorge leaves the near sign readable.
+    - Rain and snow show as a light scatter of 10 cm cells.
+    - The screenshots switch each weather on with a debug hook (`__riverLab.weather(n)`). In a
+      software-rendered browser the simulation runs at about 4 ticks a second, so waiting for the
+      weather to arrive would take minutes per shot.
+    - The fog eases in with the frame time, which is capped. In those captures it went from
+      260 m to 93 m in 16 s; at normal frame rates it settles in a couple of seconds.
+- **The handbrake prank** (merged in from Epic 8) and the weather wait for each other too
+  (tested). The weather's net fields come after the prank's.
 
 ## Epic 7, part 1: the bucket holds real water (2026-11-22)
 
