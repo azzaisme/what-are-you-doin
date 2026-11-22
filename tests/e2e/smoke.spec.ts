@@ -576,7 +576,7 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
         Math.abs(rowBrightness(Math.floor(shot.height * 0.3)) - rowBrightness(Math.floor(shot.height * 0.8)))
     ).toBeGreaterThan(1);
     const s = await lab(page, (l) => l.stats());
-    expect(s.voxel.objects).toBe(18); // the yard's 16 plus two voxel beaver bodies
+    expect(s.voxel.objects).toBe(26); // the yard's 24 plus two voxel beaver bodies
     // player 2 walks on their own commands
     const before = await page.evaluate(
         () =>
@@ -605,7 +605,7 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
     await lab(page, (l) => (l as unknown as { setPlayers(n: number): void }).setPlayers(1));
     // player 2's body leaves with the next applied voxel frame (wait on it: slow CI runners lag)
     await page.waitForFunction(
-        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 17,
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 25,
         null,
         { timeout: 60_000 }
     );
@@ -707,7 +707,7 @@ for (const transport of ['local', 'p2p'] as const)
         // the guest renders the host's world: both beaver bodies and every prop, all on the grid
         // (voxel frames lag the snapshots in software GL, so wait for the frame that has both beavers)
         await guest.waitForFunction(
-            () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 18,
+            () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 26,
             null,
             { timeout: 60_000 }
         );
