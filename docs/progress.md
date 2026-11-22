@@ -1,5 +1,22 @@
 # Progress log
 
+## Your limbs stay with the camera (2026-11-22, owner report from a phone)
+
+Owner: "The biggest problem is the player character being out of sync with the player camera."
+
+- **Cause:** your first-person limbs are voxelized in a worker and only reach the screen when every
+  lane has finished the voxel frame. The camera moves every render frame. On a phone, and in the
+  Valley while the base lane builds tiles (up to 500–700 ms a frame in the container), the limbs
+  fell behind the camera. The old fix sampled them up to 250 ms ahead, which can't cover a longer
+  wait or a turn of the look.
+- **Fix:** the limbs get a 1 cm lane of their own (`voxels-self`). Every render frame that lane is
+  moved as one rigid piece, from the pose the limbs were built at to where you are now with your
+  look's yaw (`VoxelClient.lockBody`, `bodyLockOffset`). Their animation (walk, reach) still
+  updates with voxel frames. The look-ahead sampling is gone.
+- **Tests:** a unit test that a limb point built at one pose lands where it should at the pose now;
+  302 unit tests pass; the grid, first-person, Timber Yard, Valley and split-screen browser tests
+  pass.
+
 ## Beams are shouldered: level 1's bridge can be built (2026-11-22, owner request)
 
 Owner asked whether the Timber Yard is finishable. Played through with player inputs only, it

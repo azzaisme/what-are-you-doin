@@ -77,10 +77,12 @@ export class VoxelClient {
     /** Sim slot of the 1 cm first-person limbs drawn in its place (beaverFirstPersonAsset), or -1. */
     firstPersonBodySlot = -1;
     /**
-     * How far ahead (s) of a voxel frame's time its meshes are on screen, on average: your own limbs
-     * are sampled that much later, so they keep up with the camera instead of trailing it.
+     * Your own limbs' root pose (x, y, z, yaw) in the voxel frame in flight and in the one on screen,
+     * or null when it has no first-person body. lockBody moves the on-screen limbs from the pose they
+     * were built at to where you are now, every render frame.
      */
-    firstPersonLead = 0;
+    private bodyInFlight: [number, number, number, number] | null = null;
+    private bodyOnScreen: [number, number, number, number] | null = null;
     build: BuildInfo | null = null;
     lastStats: FrameStats | null = null;
     /** The last voxel frame's stats per lane (same order as the lanes). */
@@ -133,6 +135,25 @@ export class VoxelClient {
                 this.readyReject?.(new Error(e.message));
             };
         }
+    }
+
+    /**
+     * Keeps your own limbs with the camera between voxel frames. They are rebuilt only as often as
+     * voxel frames land (slower on phones, and every lane must finish first), while the camera moves
+     * every render frame; so the lane that draws only them is turned and shifted as one piece, from
+     * the pose they were built at to `x, y, z, yaw` (your root now, your look's yaw). Their animation
+     * still updates with voxel frames. Does nothing when the limbs share a lane with anything else.
+     */
+    lockBody(bodyId: number, now: { x: number; y: number; z: number; yaw: number } | null): void {
+        const lane = this.lanes.find((l) => l.objects?.length === 1 && l.objects[0] === bodyId);
+        if (!lane) return;
+        const b = this.bodyOnScreen;
+        if (!b || !now) {
+            lane.renderer.setRootTransform(0, 0, 0, 0);
+            return;
+        }
+        const o = bodyLockOffset(b, now);
+        lane.renderer.setRootTransform(o[0], o[1], o[2], o[3]);
     }
 
     /** The renderers of every lane (stats, grid checks). */
@@ -222,6 +243,7 @@ export class VoxelClient {
         });
         if (tilesChanged) this.nearTileList = Int32Array.from(this.nearTileArray());
         this.uploadMs = uploadMs;
+        this.bodyOnScreen = this.bodyInFlight;
         this.lastStats = this.combine();
         this.appliedFrame = this.lastStats.frame;
         this.busy = false;
@@ -285,17 +307,17 @@ export class VoxelClient {
             for (let c = 0; c < ANIM_MAX; c++) states[o + 8 + c] = this.anim[c];
             if (this.slots[n] === this.firstPersonSlot) states[o + 8 + BEAVER_FIRST_PERSON] = 1;
         }
-        // first person: your own beaver gives way to your 1 cm limbs, sampled closer to the camera
+        // first person: your own beaver gives way to your 1 cm limbs
+        this.bodyInFlight = null;
         if (this.firstPersonSlot >= 0 && this.firstPersonBodySlot >= 0) {
             const a = this.slots.indexOf(this.firstPersonSlot);
             const b = this.slots.indexOf(this.firstPersonBodySlot);
             if (a >= 0 && b >= 0) {
-                const visible = this.sim.ring.sample(
-                    this.firstPersonSlot,
-                    time + this.firstPersonLead,
-                    this.root,
-                    this.anim
-                );
+                const visible = this.sim.ring.sample(this.firstPersonSlot, time, this.root, this.anim);
+                if (visible) {
+                    const p = this.root.p;
+                    this.bodyInFlight = [p.x, p.y, p.z, yawOf(this.root.q)];
+                }
                 const o = b * STATE_STRIDE;
                 states[o] = visible ? 1 : 0;
                 states[o + 1] = this.root.p.x;
@@ -365,4 +387,23 @@ export class VoxelClient {
                 break;
         }
     }
+}
+
+/**
+ * The rigid move (shift x, y, z after a turn of yaw about Y, as an entity transform) that takes a
+ * body built at `built` (x, y, z, yaw) to `now`: T(now) * inverse(T(built)).
+ */
+export function bodyLockOffset(
+    built: readonly [number, number, number, number],
+    now: { x: number; y: number; z: number; yaw: number }
+): [number, number, number, number] {
+    const d = now.yaw - built[3];
+    const c = Math.cos(d);
+    const s = Math.sin(d);
+    return [now.x - (c * built[0] + s * built[2]), now.y - built[1], now.z - (-s * built[0] + c * built[2]), d];
+}
+
+/** Yaw (about Y) of a rotation, in the engine's convention (yaw 0 looks along -Z). */
+function yawOf(q: { x: number; y: number; z: number; w: number }): number {
+    return Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.x * q.x));
 }

@@ -259,6 +259,16 @@ export class VoxelRenderer {
         };
     }
 
+    /**
+     * Moves this lattice's meshes as one rigid body: a turn of `yaw` (radians, about Y) then a
+     * shift. Only for a lane that draws nothing but your own first-person limbs, between voxel
+     * frames (see VoxelClient.lockBody); the units themselves stay at identity.
+     */
+    setRootTransform(x: number, y: number, z: number, yaw: number): void {
+        this.root.setLocalPosition(x, y, z);
+        this.root.setLocalEulerAngles(0, (yaw * 180) / Math.PI, 0);
+    }
+
     /** Render units must stay at the origin with identity rotation. */
     unitsAtIdentity(): boolean {
         for (const u of [...this.dynUnits.values(), ...this.staticUnits.values()]) {
