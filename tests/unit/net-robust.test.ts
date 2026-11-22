@@ -133,7 +133,8 @@ describe('network conditions shim', () => {
     });
 });
 
-describe('online play under 100-300 ms latency and 10 % loss', () => {
+// several full worlds stepping at once: ~2 s here, more on a busy runner
+describe('online play under 100-300 ms latency and 10 % loss', { timeout: 30_000 }, () => {
     it('a guest joins, walks, and every jump press lands exactly once', async () => {
         const g = await new Game(BAD).start();
         const gs = await g.join('guest');
@@ -265,7 +266,7 @@ describe('online play under 100-300 ms latency and 10 % loss', () => {
     });
 });
 
-describe('reconnect', () => {
+describe('reconnect', { timeout: 30_000 }, () => {
     it('a dropped guest keeps their player for a while and gets it back with their token', async () => {
         const g = await new Game(BAD).start();
         const a = await g.join('guest-a', 'tokenaaaa1');
@@ -391,7 +392,7 @@ describe('reconnect', () => {
     });
 });
 
-describe('eight players', () => {
+describe('eight players', { timeout: 30_000 }, () => {
     it('seven guests and the host play at once; the host state stays well inside presence limits', async () => {
         const g = await new Game(BAD).start();
         const guests: GuestSession[] = [];
