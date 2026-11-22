@@ -1,5 +1,55 @@
 # Progress log
 
+## Epic 6 follow-ups: beams by hand, felled logs lie still, a determinism check (2026-11-22)
+
+### What changed in the game
+
+- **A felled log stops where it lands, and still moves when pushed.** A round log on flat
+  ground has nothing in the physics to stop it rolling, so a felled log could roll on sideways for
+  many seconds after it landed. Now, while it settles from its fall and whenever it lies slow
+  (turning slower than 0.5 rad/s and moving slower than 0.3 m/s), it gets strong spin damping:
+  bark on the ground. Moved faster than that (shoved, walked into, dropped, thrown) it rolls and
+  tumbles as freely as before, then settles again. Carrying is unchanged: a held log has the
+  grab's own damping, and letting go restores the log's.
+    - **Settling** (a test fells every tree from four sides, 24 fellings, the chewer walking out of
+      the way): 22 lie still within 3.6 s of the trunk starting to fall, the fall included. The
+      other two lie partly on sloping ground at the stand's edges and creep slowly down it.
+      21 of the 24 lie within 0.1 m of the line the toast predicted; the worst is 0.57 m (the
+      hard-leaning tree, whose top lands on the bank north of the stand).
+    - **Not sticky** (a test against the same log with the lying damping switched off): a 2 m/s
+      shove rolls it 5.84 m (5.97 m undamped), and a beaver running into it moves it 0.93 m
+      (1.01 m undamped).
+
+### What the tests now prove
+
+- **Beams by player input only:**
+    - A beaver walks to the sawmill and pulls its lever: the mill is set to beams.
+    - Two beavers fell two trees and carry each whole log into the guide; each comes out as one
+      beam (`beam-12`, `beam-13`) and no planks.
+    - One beaver shoulders the two sawn beams across the creek as the bridge's stringers. The yard's
+      own beams are never touched. (A beaver carries a beam lower than the old person did: low
+      enough to catch the creek's warning sign by the bridge, so the route goes north just west
+      of it.)
+    - The other decks them with three planks from the yard's stack, and a player walks over to the
+      far bank without falling in.
+- **Determinism of sawing and regrowth:**
+    - Every command of a two-beaver run is recorded: fell tree 2, carry the log in, saw it into three
+      planks, wait for the stump to regrow.
+    - The recording is played into a fresh game with nothing steering it. At five points (felled,
+      taken, half sawn, planks out, regrown) the sawmill's state and counts, every tree's state and
+      cut, and every object's pose, visibility and animation match exactly.
+    - The test also replays the recording with ten ticks of one player's input changed, and checks
+      that the result differs, so the comparison does catch a difference.
+- **Logs lie flat, back to the 0.2 tolerance:**
+    - The old 0.3 allowance was there because the test looked 2 s after the fall, while the log
+      could still be sliding its foot off the stump.
+    - The tests now wait until the log is still (the chewer walking out of its way first), then
+      check that it lies within 0.2 of flat and that its foot is on the ground, not up on the
+      stump. This is checked for the chewing test and for all eight sides of the fall-direction
+      test. No log was left resting on its stump, so no "kick off the stump" was needed.
+    - Worst measured: 0.073 (about 4°), the hard-leaning tree whose top rests on the bank; the
+      other seven are at most 0.03. Every foot lies on the ground, within 3 mm.
+
 ## Epic 8, part 2: the handbrake prank, and sound for the other epics (2026-11-22)
 
 - **The handbrake prank (#75):**

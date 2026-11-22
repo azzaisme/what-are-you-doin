@@ -1337,10 +1337,20 @@ test('logging in the Timber Yard: chew a pine down, the voxel tree becomes a stu
         l.teleport(4.8, 7.6, Math.PI);
         l.look(Math.PI, -0.2);
     });
-    // look down until the view is on the lever (where depends on the body's eye height)
+    // look down until the view is on the lever (where depends on the body's eye height). The sim
+    // reads the look when it steps, so wait for it to step at each pitch: on a slow software
+    // renderer a fixed wait can sweep past the lever before the sim ever looks there
     for (let p = -0.2; p > -1.0; p -= 0.04) {
-        await page.evaluate((pitch) => (window as unknown as { __riverLab: Lab }).__riverLab.look(Math.PI, pitch), p);
-        await page.waitForTimeout(250);
+        const t0 = await page.evaluate((pitch) => {
+            const l = (window as unknown as { __riverLab: Lab }).__riverLab;
+            l.look(Math.PI, pitch);
+            return l.hazards().tick;
+        }, p);
+        await page.waitForFunction(
+            (t) => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().tick >= t + 2,
+            t0,
+            { timeout: 30_000 }
+        );
         if ((await lab(page, (l) => l.interaction().target)) === 'sawmill') break;
     }
     await page.waitForFunction(
