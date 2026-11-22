@@ -1,5 +1,6 @@
 /**
- * A tall, lanky, simple person: the stand-in player body (owner request, 2026-11-21: "replace
+ * A tall, lanky, simple person: the stand-in player body from 2026-11-21 to 2026-11-22, kept behind
+ * PLAYER_BODY in player-body.ts (owner request, 2026-11-21: "replace
  * (temporarily) the beavers with people… tall lanky simple people"). About 2 m tall: a small head,
  * a narrow torso, and very long thin arms and legs (fingertips just above the knee). Hard hat and
  * hi-vis vest, like the beavers.
@@ -27,7 +28,8 @@ import {
     BEAVER_HEAD_YAW,
     BEAVER_LEAN,
     BEAVER_WALK_AMOUNT,
-    BEAVER_WALK_PHASE
+    BEAVER_WALK_PHASE,
+    REACH_RISE
 } from './beaver.ts';
 import { attach, evaluateAttachments, Rig } from './rig.ts';
 import type { Attachment } from './rig.ts';
@@ -242,7 +244,7 @@ function poseRig(root: Pose, anim: ArrayLike<number>): void {
     const keep = SHOULDER_ABOVE_SPINE * Math.tan(Math.max(0, -spinePitch)) * raised;
     rig.setShift(J.spine, 0, 0, fp ? FP_SPINE_Z : 0);
     const sz = (ready ? FP_SHOULDER.z : 0) - (fp ? FP_SPINE_Z : 0) + reach + keep;
-    const sy = (fp ? FP_SHOULDER.y : 0) + 0.3 * Math.max(0, reach);
+    const sy = (fp ? FP_SHOULDER.y : 0) + REACH_RISE * Math.max(0, reach);
     rig.setShift(J.shoulderL, fp ? -FP_SHOULDER.x : 0, sy, sz);
     rig.setShift(J.shoulderR, fp ? FP_SHOULDER.x : 0, sy, sz);
     // raised arms stop swinging; hanging arms swing fully

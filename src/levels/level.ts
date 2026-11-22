@@ -14,6 +14,7 @@ import type { ColumnRect, VoxelWorld } from '../voxels/world.ts';
 
 import type { RockSpot, TreeSpot } from './common.ts';
 import type { LevelData } from './data.ts';
+import type { ForestryDef } from './forestry.ts';
 
 export type LevelId = string;
 
@@ -135,6 +136,8 @@ export interface LevelDef {
     props: PropPlacement[];
     /** Objective and recovery rules; absent for the test lab. */
     rules?: LevelRules;
+    /** Logging and sawing (Epic 6): a stand of trees that can be felled, and a sawmill. */
+    forestry?: ForestryDef;
     /** Whether the Epic 1 scripted-props comparison mode applies. */
     scriptedProps: boolean;
     /** The data this level was made from (data levels and designer levels), sent to the worker. */

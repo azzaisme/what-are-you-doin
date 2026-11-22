@@ -3,12 +3,14 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { YARD_Y, timberYardLevel } from '../../src/levels/timber-yard.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
-import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
+import { EYE_HEIGHT, LabSim, MAX_PLAYERS } from '../../src/sim/lab-sim.ts';
 import { GRAB } from '../../src/sim/physics/grab.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
 
 beforeAll(() => initPhysics());
 
+/** Which avatars are visible: the first `n` slots. */
+const firstN = (n: number) => Array.from({ length: MAX_PLAYERS }, (_, i) => i < n);
 const cmd = (n: number, c: Partial<PlayerCommand> = {}): PlayerCommand => ({ ...neutralCommand(n), ...c });
 
 /** Two-player yard sim with both players in first person. */
@@ -37,9 +39,9 @@ describe('local co-op: two players, one world', () => {
         expect(solo.avatars.some((a) => a.visible)).toBe(false);
         solo.fpActive = true;
         solo.step(cmd(1));
-        expect(solo.avatars.map((a) => a.visible)).toEqual([true, false, false, false]);
+        expect(solo.avatars.map((a) => a.visible)).toEqual(firstN(1));
         const s = coop();
-        expect(s.avatars.map((a) => a.visible)).toEqual([true, true, false, false]);
+        expect(s.avatars.map((a) => a.visible)).toEqual(firstN(2));
         const a0 = { ...s.players[0] };
         const b0 = { ...s.players[1] };
         // player 2 starts on player 1's right: walk apart (walking into each other, they bump)
@@ -52,7 +54,7 @@ describe('local co-op: two players, one world', () => {
         );
         s.setPlayerCount(1);
         s.step(cmd(500));
-        expect(s.avatars.map((a) => a.visible)).toEqual([true, false, false, false]);
+        expect(s.avatars.map((a) => a.visible)).toEqual(firstN(1));
     });
 
     it('one beaver cannot lift the 113 kg log; two beavers together can', () => {

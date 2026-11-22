@@ -24,6 +24,7 @@ import { hash3 } from '../voxels/volumes.ts';
 
 import { CALM, windTravel } from './wind.ts';
 import type { WindSpec } from './wind.ts';
+import type { WoodFX } from './wood-fx.ts';
 
 /**
  * Leaf slots. Each falling leaf dirties one dynamic chunk per voxel frame (re-meshed), so the number
@@ -59,12 +60,14 @@ interface Crown {
     r: number;
 }
 
+type BurstKind = 'dust' | 'chips' | 'splash' | 'needles' | 'sawdust' | 'gust';
+
 interface Burst {
     t0: number;
     x: number;
     y: number;
     z: number;
-    kind: 'dust' | 'chips' | 'splash' | 'gust';
+    kind: BurstKind;
     n: number;
     seed: number;
     /** A gust's direction (unit, XZ). */
@@ -98,7 +101,9 @@ export class ParticleFX {
     private readonly p = pose();
     private readonly anim = new Float64Array(ANIM_MAX);
     /** Effects spawned (cumulative, for tests and the debug panel). */
-    readonly spawned = { dust: 0, chips: 0, splash: 0, gust: 0 };
+    readonly spawned = { dust: 0, chips: 0, splash: 0, needles: 0, sawdust: 0, gust: 0 };
+    /** Logging effects (levels with a logging stand or a sawmill): chips, needles, sawdust. */
+    wood: WoodFX | null = null;
 
     /** The water surface now (it rises in a flood). */
     waterY: number;
@@ -121,11 +126,15 @@ export class ParticleFX {
             // seek or reset: forget motion history and live bursts
             this.prev.clear();
             this.bursts = [];
+            this.wood?.reset();
         }
         const dt = this.lastTime >= 0 ? time - this.lastTime : 0;
         this.lastTime = time;
         this.leaves(time);
         if (dt > 0 && dt < 0.5) this.detect(time, dt, ring);
+        this.wood?.update(time, ring, (kind, x, y, z) =>
+            this.spawn(time, x, y, z, kind, kind === 'needles' ? 40 : kind === 'sawdust' ? 6 : 8)
+        );
         this.drawBursts(time);
         return this.count;
     }
@@ -249,7 +258,7 @@ export class ParticleFX {
         x: number,
         y: number,
         z: number,
-        kind: Burst['kind'],
+        kind: BurstKind,
         n: number,
         dx?: number,
         dz?: number
@@ -263,11 +272,26 @@ export class ParticleFX {
         const live: Burst[] = [];
         for (const b of this.bursts) {
             const age = t - b.t0;
-            const life = b.kind === 'splash' ? 0.7 : b.kind === 'chips' ? 0.8 : b.kind === 'gust' ? 2.6 : 1.1;
+            const life =
+                b.kind === 'splash'
+                    ? 0.7
+                    : b.kind === 'chips'
+                      ? 0.8
+                      : b.kind === 'needles'
+                        ? 1.6
+                        : b.kind === 'sawdust'
+                          ? 0.6
+                          : b.kind === 'gust'
+                            ? 2.6
+                            : 1.1;
             if (age < 0 || age > life) continue;
             live.push(b);
             if (b.kind === 'gust') {
                 this.drawGust(b, age);
+                continue;
+            }
+            if (b.kind === 'needles' || b.kind === 'sawdust') {
+                this.drawWood(b, age);
                 continue;
             }
             for (let i = 0; i < b.n; i++) {
@@ -305,6 +329,27 @@ export class ParticleFX {
             const y = b.y - 1.2 + 2.4 * u(b.seed, i, 7) + 0.3 * Math.sin(a * 6 + i * 1.7);
             const mat = LEAF_MATS[Math.floor(u(b.seed, i, 8) * LEAF_MATS.length)];
             this.push(x, y, z, voxel(mat, i & 3));
+        }
+    }
+
+    /**
+     * Needles: a cloud from a crown, drifting down slowly and spreading (about the crown's size).
+     * Sawdust: a short low spray out of the blade.
+     */
+    private drawWood(b: Burst, age: number): void {
+        const needles = b.kind === 'needles';
+        for (let i = 0; i < b.n; i++) {
+            const a = u(b.seed, i, 1) * Math.PI * 2;
+            const r0 = needles ? 1.4 * Math.sqrt(u(b.seed, i, 2)) : 0;
+            const sp = needles ? 0.4 + 0.5 * u(b.seed, i, 3) : 0.8 + 1.2 * u(b.seed, i, 3);
+            const x = b.x + Math.cos(a) * (r0 + sp * age);
+            const z = b.z + Math.sin(a) * (r0 + sp * age);
+            const y0 = b.y + (needles ? (u(b.seed, i, 4) - 0.5) * 1.6 : 0);
+            const y = needles ? y0 - (0.7 + 0.5 * u(b.seed, i, 5)) * age : y0 + 1.2 * age - 4.9 * age * age;
+            const g = this.level.terrainHeight(cellCentre(x), cellCentre(z));
+            const yy = Math.max(y, restY(g));
+            const mat = needles ? (i % 3 ? M.Needle : M.NeedleLight) : i % 2 ? M.TimberEnd : M.Dust;
+            this.push(x, yy, z, voxel(mat, i & 3));
         }
     }
 }
