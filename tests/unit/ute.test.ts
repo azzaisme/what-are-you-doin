@@ -134,6 +134,38 @@ describe('wheels load what holds them up (Epic 4 gate)', () => {
         expect(plat.body.translation().y).toBeGreaterThan(0.08);
     });
 
+    it('drives across a loose deck laid over a gap: the deck carries it and stays on its supports', () => {
+        const pw = new PhysicsWorld();
+        // two banks with a 2.4 m gap between them, a 4 m deck laid loose across it
+        pw.addStatic(RAPIER.ColliderDesc.cuboid(6, 0.5, 10).setTranslation(0, -0.5, -11.2).setFriction(0.9));
+        pw.addStatic(RAPIER.ColliderDesc.cuboid(6, 0.5, 10).setTranslation(0, -0.5, 11.2).setFriction(0.9));
+        const deck = pw.addDynamic(2, { type: 'box', hx: 1.2, hy: 0.06, hz: 2 }, pose(0, 0.06, 0), {
+            density: 450,
+            friction: 0.8
+        });
+        const u = new UteVehicle(pw, 1, pose(0, 0.3, 6));
+        // facing -z, across the deck to the far bank
+        u.pb.body.setRotation(quatFromYawPitchRoll(Math.PI, 0, 0), true);
+        run(pw, u, NO_DRIVE, 60);
+        let onDeck = 0;
+        let maxLoad = 0;
+        for (let k = 0; k < 60 * 10 && u.pb.body.translation().z > -6; k++) {
+            run(pw, u, { throttle: 0.4, steer: 0, brake: false }, 1);
+            const n = u.groundIds.filter((g) => g === 2).length;
+            onDeck = Math.max(onDeck, n);
+            if (n > 0) maxLoad = Math.max(maxLoad, u.lastGroundImpulse * 60);
+        }
+        const p = u.pb.body.translation();
+        const d = deck.body.translation();
+        expect(p.z).toBeLessThan(-6);
+        expect(p.y).toBeGreaterThan(-0.05);
+        expect(onDeck).toBe(4);
+        // the deck felt the whole ute at some point, and is still across the gap
+        expect(maxLoad).toBeGreaterThan(0.8 * u.weight());
+        expect(Math.abs(d.z)).toBeLessThan(0.5);
+        expect(d.y).toBeGreaterThan(0);
+    });
+
     it('accelerating on a free platform on ice pushes the platform backwards (momentum is shared)', () => {
         const pw = new PhysicsWorld();
         // ice: a frictionless static floor
@@ -230,5 +262,58 @@ describe('driving the Timber Yard ute with player commands', () => {
         const p1 = { ...ute.pose.p };
         step({}, 60);
         expect(Math.hypot(ute.pose.p.x - p1.x, ute.pose.p.z - p1.z)).toBeLessThan(0.05);
+    }, 60_000);
+});
+
+describe('the ute crosses a beam bridge (Epic 4 gate)', () => {
+    it('two loose beams laid under its wheel tracks take its weight over the creek', async () => {
+        const { LabSim } = await import('../../src/sim/lab-sim.ts');
+        const { timberYardLevel, BRIDGE, BRIDGE_X, YARD_Y } = await import('../../src/levels/timber-yard.ts');
+        const { neutralCommand } = await import('../../src/sim/commands.ts');
+        const { quatMul } = await import('../../src/voxels/math.ts');
+        const { UTE_TRACK_HALF } = await import('../../src/assets/ute.ts');
+        const s = new LabSim({ level: timberYardLevel });
+        const byName = (n: string) => s.entities.find((e) => e.name === n)!;
+        const flatAlongZ = quatMul(quatFromYawPitchRoll(Math.PI / 2, 0, 0), quatFromYawPitchRoll(0, Math.PI / 2, 0));
+        const beams = [byName('beam-0'), byName('beam-1')];
+        beams.forEach((b, i) =>
+            s.physics.place(b.id, pose(BRIDGE_X + (i === 0 ? -1 : 1) * UTE_TRACK_HALF, YARD_Y + 0.12, BRIDGE.zc, flatAlongZ))
+        );
+        let n = 0;
+        for (; n < 60; n++) s.step(neutralCommand(n));
+        // the ute on the yard bank, lined up with the bridge, facing the creek (-z)
+        const v = s.vehicle!;
+        s.physics.place(v.id, pose(BRIDGE_X, YARD_Y + 0.25, BRIDGE.nearEdge + 3.2, quatFromYawPitchRoll(Math.PI, 0, 0)));
+        for (; n < 120; n++) s.step(neutralCommand(n));
+        // player 1 in the driver's seat, easing forward
+        s.fpActive = true;
+        s.step(neutralCommand(n++));
+        expect(s.takeDriverSeat(0)).toBe(true);
+        const seen = new Set<number>();
+        let maxLoad = 0;
+        // out to the middle of the gap (unfastened 20 cm beams under 24 cm tyres: past here the
+        // tyres' sideways push walks a beam out from under a wheel; fastening is Epic 5)
+        for (let k = 0; k < 60 * 12 && s.ute.pose.p.z > BRIDGE.zc; k++, n++) {
+            // a careful driver keeps the wheels on the beams: steer back onto the line and heading
+            const q = s.ute.pose.q;
+            const yaw = Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.x * q.x));
+            let dy = yaw - Math.PI;
+            dy -= Math.round(dy / (2 * Math.PI)) * 2 * Math.PI;
+            const steer = Math.max(-1, Math.min(1, 4 * (s.ute.pose.p.x - BRIDGE_X) + 3 * dy));
+            s.step({ ...neutralCommand(n, Math.PI), moveZ: 0.35, moveX: steer });
+            for (const id of v.groundIds) if (id >= 0) seen.add(id);
+            if (v.groundIds.some((id) => id === beams[0].id || id === beams[1].id))
+                maxLoad = Math.max(maxLoad, v.lastGroundImpulse * 60);
+        }
+        const u = s.ute.pose.p;
+        // over the middle of the creek, up on the beams (not down in the water)
+        expect(u.z).toBeLessThan(BRIDGE.zc + 0.1);
+        expect(u.y).toBeGreaterThan(YARD_Y);
+        // its wheels stood on both beams and pressed on them with a good share of its weight
+        expect(seen.has(beams[0].id)).toBe(true);
+        expect(seen.has(beams[1].id)).toBe(true);
+        expect(maxLoad).toBeGreaterThan(0.3 * v.weight());
+        // the beams are still across the gap afterwards
+        for (const b of beams) expect(Math.abs(b.pose.p.z - BRIDGE.zc)).toBeLessThan(0.4);
     }, 60_000);
 });

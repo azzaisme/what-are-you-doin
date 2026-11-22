@@ -750,6 +750,12 @@ export class LabSim {
     private enterUte(i: number, eye: { x: number; y: number; z: number }, cmd: PlayerCommand): boolean {
         if (!this.vehicle || this.driver >= 0) return false;
         if (this.physics.probeAny(eye, cmd.yaw, cmd.pitch, i) !== this.ute.id) return false;
+        return this.takeDriverSeat(i);
+    }
+
+    /** Puts a player in the driver's seat (if it is free); also for tests and scripted starts. */
+    takeDriverSeat(i: number): boolean {
+        if (!this.vehicle || this.driver >= 0 || !this.playerActive(i)) return false;
         this.driver = i;
         this.driveInput = { ...NO_DRIVE };
         this.physics.setCharacterEnabled(false, i);

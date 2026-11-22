@@ -29,6 +29,8 @@ export const UTE = {
     stiffness: 60,
     compression: 4.4,
     relaxation: 5.5,
+    /** Largest suspension force per wheel (N): about three times its share of the weight. */
+    maxSuspension: 6000,
     /** Tyre grip (a friction coefficient: the largest friction impulse per suspension impulse). */
     grip: 1.4,
     /** Engine force (N) shared by the two rear wheels, top speeds (m/s). */
@@ -84,8 +86,10 @@ export class UteVehicle {
         this.pb = pw.addDynamicCompound(
             id,
             [
-                { shape: { type: 'box', hx: 0.8, hy: 0.32, hz: 1.84 }, x: 0, y: 0.5, z: 0, density: 120 },
-                { shape: { type: 'box', hx: 0.6, hy: 0.08, hz: 1.4 }, x: 0, y: 0.3, z: 0, density: 500 },
+                // the body's collider rides 0.32 m up (the voxel skirts hang lower): a ute clears a
+                // beam end or a kerb its wheels can climb
+                { shape: { type: 'box', hx: 0.8, hy: 0.25, hz: 1.84 }, x: 0, y: 0.57, z: 0, density: 150 },
+                { shape: { type: 'box', hx: 0.6, hy: 0.08, hz: 1.4 }, x: 0, y: 0.42, z: 0, density: 500 },
                 { shape: { type: 'box', hx: 0.76, hy: 0.3, hz: 0.55 }, x: 0, y: 1.0, z: 0.15, density: 60 }
             ],
             spawn,
@@ -110,7 +114,7 @@ export class UteVehicle {
             c.setWheelSuspensionStiffness(i, UTE.stiffness);
             c.setWheelSuspensionCompression(i, UTE.compression);
             c.setWheelSuspensionRelaxation(i, UTE.relaxation);
-            c.setWheelMaxSuspensionForce(i, 60_000);
+            c.setWheelMaxSuspensionForce(i, UTE.maxSuspension);
             c.setWheelFrictionSlip(i, UTE.grip);
             c.setWheelSideFrictionStiffness(i, 1);
         }
