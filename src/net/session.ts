@@ -226,7 +226,8 @@ export class HostSession {
             goal: sim.progress.goalReached,
             step: sim.progress.step,
             ev: this.recent,
-            hz: packHazardNet(sim.hazards.net())
+            hz: packHazardNet(sim.hazards.net()),
+            seed: sim.hazards.seed
         });
     }
 
@@ -286,8 +287,9 @@ export class GuestSession {
     /** The host's tutorial step. */
     step = 0;
     events: NetEvent[] = [];
-    /** The host's hazards (water height, flood and gust phases). */
+    /** The host's hazards (water height, flood and gust phases) and the game's hazard seed. */
     hazard: HazardNet;
+    hazardSeed = 0;
     hostGone = false;
     /** Snapshots applied (for the debug panel). */
     received = 0;
@@ -335,6 +337,7 @@ export class GuestSession {
         this.goal = st.goal === true;
         this.step = num(st.step);
         this.hazard = readHazardNet(st.hz, this.sim.level.water.y);
+        this.hazardSeed = num(st.seed) >>> 0;
         if (Array.isArray(st.hud)) {
             this.hud = (st.hud as unknown[]).map((x) => {
                 const a = Array.isArray(x) ? x : [];

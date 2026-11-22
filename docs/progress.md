@@ -24,7 +24,7 @@
       to copy.
 - **Playtest kit:** the log's summary also counts handbrake pranks, and the script says what to
   watch for and how the prank works.
-- **Tests:** 370 unit tests pass at both voxel sizes. New: three handbrake tests, and `sfx.hold` in
+- **Tests:** 388 unit tests pass at both voxel sizes (with the audit fixes merged in). New: three handbrake tests, and `sfx.hold` in
   the sound API test.
 
 ## Epic 8: the world fights back, sound, and a playtest kit (2026-11-22)
@@ -36,26 +36,38 @@ for running the playtest gate.
 ### The hazards (#18, #71–#73)
 
 The world answers your progress on purpose. The hazard director runs inside the host's
-simulation, so it is deterministic (two runs of the same inputs give the same floods and gusts,
-tested) and guests see exactly what the host sees.
+simulation, so it is deterministic, and guests see exactly what the host sees.
+
+- **A seed per game:** the host picks one each visit (`?seed=` replays one) and sends it to guests.
+- **What it varies:** the siren's delay (3–5 s), how long a carry takes to bring a gust (1.5–2.5 s),
+  and the gust's direction (straight across the creek, or slanting up- or downstream).
+- **Tested:** the same seed and inputs give the same floods, gusts and world. Four different seeds
+  gave four different sets of hazards.
 
 - **The creek floods when the bridge is finished (#72):**
-    - **When:** 4 s after a beam (or plank) first lies across the gap and is let go.
+    - **When:** the bridge is finished, meaning two pieces lie across the gap, still and let go (or
+      one piece left across for 20 s). The siren comes 4–6 s later.
     - **The tell:** a siren, a rumble, and the new banded gauge post by the crossing going under.
       The toast says what to do.
     - **What happens:** the water rises from −0.45 m to 0.60 m, just over the capstones, over 18 s.
       It stays up for 14 s and falls over 12 s. Floodwater floats timber and runs downstream at 1.3 m/s.
     - **Nothing is lost for good:** whatever it carried off is left on the near bank downstream when
       the water is down.
+    - **Normal play isn't punished:** the bridge-building playthrough walks back to the stump for
+      the bucket and carries it over at a normal walk, with no sprint. It crosses 14 s after the
+      bridge is finished, with the water still at −0.17 m, 0.67 m below the capstones.
     - **Counterplay, all tested:**
-        - carry the bucket across at a run before the peak (the bridge-building playthrough now does
-          this);
+        - carry the bucket across before the water rises;
         - stand on the beams, one player on each;
         - hold the beams.
           Left alone, both beams wash away.
+    - **Still winnable after a washout (tested with player inputs only):** walk to both beams on
+      the bank downstream, carry them back, lay the bridge again and walk the bucket over.
 - **A gust goes for the plank you carry (#73):**
-    - **When:** after 1.5 s of carrying a plank within 4 m of the creek.
-    - **The tell:** the windsock swings round and stands out, a warning gust blows, and a toast warns.
+    - **When:** after 1.5–2.5 s (from the seed) of carrying a plank within 4 m of the creek. It goes
+      only for planks, never the bucket, a crate or a shouldered beam.
+    - **The tell:** the windsock swings round and stands out, a stream of leaves blows past, a
+      warning gust sounds, and a toast warns.
     - **What happens:** 2.2 s later, a 2 s gust pushes the plank towards the creek with 1,050 N, more
       than one grip (650 N). It tears the plank out of your hands, and it lands in the creek
       by the bank.
@@ -64,16 +76,27 @@ tested) and guests see exactly what the host sees.
           keep it;
         - carry it with a friend: two grips give 1,300 N;
         - put it down: things lying still are left alone.
-- **Budget (#71):**
+- **Budget (#71), each rule tested over long runs:**
     - one hazard at a time, and 15 s of quiet after each;
     - nothing in the first 20 s of a run, and nothing after the goal;
-    - at most 2 floods (75 s apart), and none once the bucket is across;
-    - at most 3 gusts (40 s apart), and only while 3 or more planks are still out of the creek.
+    - at most 2 floods, the second at least 75 s after the first ends, and none once the bucket is
+      across (six minutes of rebuilding brought exactly two);
+    - at most 3 gusts, 40 s apart (four minutes of carrying brought exactly three), and only while
+      3 or more planks are still out of the creek.
 - **Screenshots:** the crossing with the bridge just laid
   (`docs/screenshots/epic8/01-flood-before.jpg`), and the same view at the flood's peak, with the
   loose beams afloat (`02-flood-peak.jpg`).
-- **Online:** the host sends the water level and the hazard phases with each snapshot. A guest's
-  river rises with the host's (browser test: the drawn water is within 5 cm of the simulation's).
+- **Online:** the host sends the water level, the hazard phases and the seed with its state.
+  Guests run no hazards of their own.
+    - **Unit tests, through real host and guest sessions:**
+        - a flood reaches the guest: the seed, the siren toast, the phases, and the water height,
+          within 2 mm of the host's;
+        - a gust reaches the guest: its phase, target and direction.
+    - **The guest's windsock:** a guest never runs its own simulation, so its windsock comes from the
+      host's snapshots. During the gust warning it points within 0.02 rad of the host's, downwind
+      into the gust (tested).
+    - **Browser test, two pages over the local transport:** the host finishes the bridge, and on
+      the guest's screen the river rises, the siren toast shows and the siren plays.
 
 ### Sound (#19, #79–#82)
 
@@ -90,7 +113,8 @@ tested) and guests see exactly what the host sees.
     - **Hazard tells:** the siren and the flood's rumble, the warning gust and the gust.
     - **Progress:** a ding for each step and a fanfare at the goal.
 - **Sound tab in Settings:** Volume, Effects and Ambience, saved like the other settings.
-  `?sound=off` mutes for one visit.
+  `?sound=off` mutes for one visit. Music and Voice sliders come when there is music or voice to
+  play, so #79 stays open for those.
 - **For Epic 5 (bridges):** `sfx.creak(position, strain)` and `sfx.snap(position)` in
   `src/audio/sfx.ts`. Creaks are louder and deeper as strain goes up, and calls before the sound has
   started do nothing.
@@ -114,10 +138,12 @@ tested) and guests see exactly what the host sees.
 
 ### Tests
 
-- Unit tests: 364 pass (was 326), at both voxel sizes. New: `hazards.test.ts`, `audio.test.ts` and
-  `playtest.test.ts`.
-- New browser test: a finished bridge in the Timber Yard brings the flood and its siren, the drawn
-  river rises with it, and the sound starts only after a key press, with no console errors.
+- Unit tests: 382 pass (was 326), at both voxel sizes. New: `hazards.test.ts` (flood, gust,
+  budget, seed, online, rebuild after a washout), `audio.test.ts` and `playtest.test.ts`.
+- New browser tests:
+    - a finished bridge in the Timber Yard brings the flood and its siren, the drawn river rises
+      with it, the sound starts only after a key press, and the playtest log records it;
+    - over the local transport, the host's flood reaches the guest: its river, toast and siren.
 
 ## Epic 4: the ute drives (2026-11-22)
 

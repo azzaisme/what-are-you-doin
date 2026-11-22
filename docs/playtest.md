@@ -44,7 +44,7 @@ Then start a timer and stay quiet.
 - **Watch for these moments:**
     - **The first minute:** do they find out how to move, look and grab without help?
     - **The plan:** do they build a bridge, throw the bucket over, or try something else?
-    - **The flood** (when a beam first lies across the gap): do they notice the siren, the rumble and
+    - **The flood** (when the bridge is finished): do they notice the siren, the rumble and
       the gauge post's marks going under? What do they do? Run with the bucket, stand on the beams,
       hold them, or watch?
     - **The gust** (when carrying a plank near the creek): do they notice the windsock swing round and
@@ -83,16 +83,19 @@ slice may be too short.
 
 ## What the game does (for you, not the tester)
 
-- **The flood:** it starts 4 s after a beam (or plank) first lies across the gap and is let go, but
-  never in the first 20 s of a run, never once the bucket is across, and at most twice.
+- **The flood:** the siren goes 4–6 s after the bridge is finished, meaning two pieces lie across
+  the gap and are let go, or one piece is left across for 20 s. It never comes in the first 20 s of
+  a run or once the bucket is across, and comes at most twice. A player who walks back for the
+  bucket at a normal pace has time to cross.
     1. 8 s of warning: a siren, a rumble, and the gauge post's marks starting to go under.
     2. 10 s of rising water, then 14 s at the peak, just over the capstones.
     3. 12 s of falling water.
     - Loose timber floats off and drifts downstream. When the water is down, it is left on the near bank
       downstream of the yard, so the run is never lost.
     - What saves the bridge: carrying the bucket over before the peak, a player standing on each beam,
-      holding the beams, or raising their ends.
-- **The gust:** it comes after 1.5 s of carrying a plank within 4 m of the creek. It needs a quiet
+      or holding the beams.
+- **The gust:** it comes after 1.5–2.5 s of carrying a plank (only a plank) within 4 m of the
+  creek. A stream of leaves blows past as part of the warning. It needs a quiet
   spell after any other hazard, and comes at most three times, and only while three or more planks
   are still out of the creek.
     1. 2.2 s of warning: the windsock swings round and a warning gust blows.

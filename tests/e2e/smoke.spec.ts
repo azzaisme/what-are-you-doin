@@ -448,7 +448,7 @@ test('level 1, the Timber Yard: starts in first person with the objective, and t
 test('the Timber Yard fights back: the finished bridge brings the flood, with its siren; sound starts on a key', async ({
     page
 }) => {
-    const problems = await boot(page, '?level=yard&t=0.01&quality=low#cell100');
+    const problems = await boot(page, '?level=yard&t=0.01&quality=low&seed=1#cell100');
     // no sound (and no audio context) before the player does something: browser and itch.io rules
     expect((await lab(page, (l) => l.audio())).context).toBe('locked');
     await page.keyboard.press('Shift');
@@ -462,11 +462,12 @@ test('the Timber Yard fights back: the finished bridge brings the flood, with it
         l.placeProp('beam-0', -1.105, 0.62, -2, Math.PI / 2);
         l.placeProp('beam-1', -0.895, 0.62, -2, Math.PI / 2);
     });
-    await lab(page, (l) => l.seek(26));
+    // (a finished bridge, 1 s still, then the siren within 3-5 s: the delay varies with the seed)
+    await lab(page, (l) => l.seek(28));
     expect((await lab(page, (l) => l.hazards())).floods).toBe(1);
     await expect(page.locator('.toast')).toContainText('siren');
     // the river's surface rises on screen with the simulation's water
-    await lab(page, (l) => l.seek(37));
+    await lab(page, (l) => l.seek(40));
     await page.waitForFunction(
         () => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().planeY > -0.2,
         null,
@@ -770,6 +771,95 @@ for (const transport of ['local', 'p2p'] as const)
         expect(problems).toEqual([]);
         expect(guestProblems).toEqual([]);
     });
+
+test('online co-op: the host’s flood reaches the guest — its river rises, the siren toast and sound', async ({
+    page,
+    context
+}) => {
+    test.setTimeout(600_000);
+    const query = '?level=yard&t=0.01&quality=low&net=local&seed=7#cell100';
+    const problems = await boot(page, query);
+    const guest = await context.newPage();
+    const guestProblems: string[] = [];
+    guest.on('console', (m) => {
+        if ((m.type() === 'error' || m.type() === 'warning') && !IGNORED.some((r) => r.test(m.text())))
+            guestProblems.push(`${m.type()}: ${m.text()}`);
+    });
+    guest.on('pageerror', (e) => guestProblems.push(`pageerror: ${e.message}`));
+    await guest.goto(`/${query}`);
+    await guest.waitForFunction(() => (window as unknown as { __riverLab?: Lab }).__riverLab?.ready === true, null, {
+        timeout: 150_000
+    });
+    type Net = {
+        net: {
+            host(): Promise<void>;
+            games(): { code: string }[];
+            join(c: string): Promise<void>;
+            connect(): Promise<void>;
+            status(): { hosting: string | null; guest: { slot: number; received: number } | null };
+        };
+    };
+    const call = (p: Page, src: string, arg?: unknown) =>
+        p.evaluate(
+            ([s2, a]) =>
+                new Function('l', 'a', `return (${s2})(l, a)`)(
+                    (window as unknown as { __riverLab: Net & Lab }).__riverLab,
+                    a
+                ),
+            [src, arg] as const
+        );
+    // the host plays on from the quiet start's end
+    await lab(page, (l) => l.seek(21));
+    await lab(page, (l) => l.action('pause'));
+    await Promise.all([call(page, '(l) => l.net.connect()'), call(guest, '(l) => l.net.connect()')]);
+    await call(page, '(l) => l.net.host()');
+    const code = ((await call(page, '(l) => l.net.status()')) as { hosting: string }).hosting;
+    await guest.waitForFunction(
+        (c) => (window as unknown as { __riverLab: Net }).__riverLab.net.games().some((g) => g.code === c),
+        code,
+        { timeout: 120_000 }
+    );
+    await call(guest, '(l, c) => l.net.join(c)', code);
+    await guest.waitForFunction(
+        () => ((window as unknown as { __riverLab: Net }).__riverLab.net.status().guest?.received ?? 0) > 5,
+        null,
+        { timeout: 120_000 }
+    );
+    // the guest's player presses a key: its sound may start (browser rules)
+    await guest.keyboard.press('Shift');
+    await guest.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.audio().started, null, {
+        timeout: 10_000
+    });
+    const baseY = (await lab(guest, (l) => l.hazards())).planeY;
+    // the host finishes the bridge
+    await lab(page, (l) => {
+        l.placeProp('beam-0', -1.105, 0.62, -2, Math.PI / 2);
+        l.placeProp('beam-1', -0.895, 0.62, -2, Math.PI / 2);
+    });
+    // the guest hears of the flood from the host (software GL runs only a few ticks a second here)
+    await guest.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().flood >= 1,
+        null,
+        {
+            timeout: 300_000
+        }
+    );
+    await expect(guest.locator('.toast')).toContainText('siren');
+    await guest.waitForFunction(
+        (b) => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().planeY > b + 0.02,
+        baseY,
+        { timeout: 300_000 }
+    );
+    const ga = await lab(guest, (l) => l.audio());
+    expect(ga.recent).toContain('siren');
+    // the guest's water follows the host's
+    const [hh, gh] = [await lab(page, (l) => l.hazards()), await lab(guest, (l) => l.hazards())];
+    expect(gh.floods).toBe(0); // the guest runs no director of its own
+    expect(Math.abs(gh.waterY - hh.waterY)).toBeLessThan(0.25);
+    expect(Math.abs(gh.planeY - gh.waterY)).toBeLessThan(0.01);
+    expect(problems).toEqual([]);
+    expect(guestProblems).toEqual([]);
+});
 
 test("online co-op in the Valley: the guest streams its own world and follows the host's stages", async ({
     page,

@@ -3,10 +3,10 @@
  * success. It runs inside the simulation on the host, so it is deterministic and seeded, and it
  * schedules authored events from gameplay conditions, never random per-frame destruction:
  *
- * - **Rising river** (#72): a piece laid across the crossing ("the bridge is finished") sets off
- *   the flood. Tell: a siren, the gauge post's marks going under, an upstream rumble. The water
+ * - **Rising river** (#72): a finished bridge (two pieces across the crossing, or one left across
+ *   for 20 s) sets off the flood. Tell: a siren, the gauge post's marks going under, an upstream rumble. The water
  *   rises, floats timber and runs fast downstream. Counterplay: get the bucket across before the
- *   peak, weigh the bridge down (stand on it, hold it, load it), or raise its ends on packing.
+ *   peak, or weigh the bridge down (a player standing on each beam, or holding them).
  *   Timber the flood takes is left on the bank downstream when the water goes down, so a flood
  *   costs time, never the run.
  * - **Gust at the carried plank** (#73): carrying a light piece near the water for a moment brings
@@ -67,9 +67,24 @@ export const HAZARD = {
     graceS: 20,
     /** Quiet spell after any hazard ends. */
     safeS: 15,
-    flood: { holdToTrigger: 1, delayS: 3, tellS: 8, riseS: 10, holdS: 14, fallS: 12, cooldownS: 75, max: 2 },
+    flood: {
+        holdToTrigger: 1,
+        /** One piece alone across the gap counts as a bridge after this long. */
+        oneBeamS: 20,
+        delayS: 3,
+        /** Up to this much more delay, from the game's seed. */
+        delayJitterS: 2,
+        tellS: 8,
+        riseS: 10,
+        holdS: 14,
+        fallS: 12,
+        cooldownS: 75,
+        max: 2
+    },
     gust: {
         carryS: 1.5,
+        /** Up to this much longer carrying, from the game's seed. */
+        carryJitterS: 1,
         tearS: 0.35,
         tellS: 2.2,
         blowS: 2.0,
@@ -153,6 +168,12 @@ export class HazardDirector {
     private gustEnded = -1e9;
     /** Ticks a piece has lain across the crossing; ticks each player has carried near the water. */
     private spanTicks = 0;
+    private spanOneTicks = 0;
+    /**
+     * The game's seed (the host picks one per game and sends it to guests): it varies the flood's
+     * delay, how long a carry takes to bring a gust, and the gust's direction. Set before a reset.
+     */
+    seed: number;
     private floodPending = -1;
     private readonly carryTicks: number[] = [];
     /** Bodies the flood touched this time (washed up when it ends). */
@@ -175,6 +196,7 @@ export class HazardDirector {
 
     constructor(level: LevelDef) {
         this.spec = level.hazards;
+        this.seed = level.hazards?.seed ?? 1;
         this.baseY = level.water.y;
         this.waterY = this.baseY;
     }
@@ -188,7 +210,7 @@ export class HazardDirector {
         this.gustSlot = this.gustBody = -1;
         this.quietFrom = 0;
         this.floodEnded = this.gustEnded = -1e9;
-        this.spanTicks = 0;
+        this.spanTicks = this.spanOneTicks = 0;
         this.floodPending = -1;
         this.carryTicks.length = 0;
         this.floodTouched.clear();
@@ -233,7 +255,7 @@ export class HazardDirector {
         if (!spec) return;
         const tick = h.tick;
         if (spec.flood) this.stepFlood(h, spec.flood, tick);
-        if (spec.gust) this.stepGust(h, spec.gust, tick, spec.seed);
+        if (spec.gust) this.stepGust(h, spec.gust, tick, this.seed);
         if (spec.handbrake) this.stepHandbrake(h, spec.handbrake, tick);
         if (this.busy) this.quietFrom = tick + S(HAZARD.safeS);
     }
@@ -254,18 +276,21 @@ export class HazardDirector {
         const pw = h.physics;
         // trigger: a piece lies across the crossing, still and let go, for a moment
         if (this.floodPhase === PHASE.idle && this.floodPending < 0) {
+            // finished: two pieces across (the bridge you walk on), or one left across a while
             const spanned = this.crossingSpanned(pw, f);
-            this.spanTicks = spanned ? this.spanTicks + 1 : 0;
+            this.spanTicks = spanned >= 2 ? this.spanTicks + 1 : 0;
+            this.spanOneTicks = spanned >= 1 ? this.spanOneTicks + 1 : 0;
             const bucketAcross = h.bucket.pose.p.z < f.crossing.z1;
             if (
-                this.spanTicks >= S(F.holdToTrigger) &&
+                (this.spanTicks >= S(F.holdToTrigger) || this.spanOneTicks >= S(F.oneBeamS)) &&
                 this.floodCount < F.max &&
                 tick - this.floodEnded >= S(F.cooldownS) &&
                 !bucketAcross &&
                 this.canStart(h, tick)
             ) {
-                this.floodPending = tick + S(F.delayS);
-                this.spanTicks = 0;
+                // the siren's delay varies with the game's seed
+                this.floodPending = tick + S(F.delayS + F.delayJitterS * rand(this.seed, 101 + this.floodCount, 0));
+                this.spanTicks = this.spanOneTicks = 0;
             }
         }
         if (this.floodPending >= 0 && tick >= this.floodPending) {
@@ -337,8 +362,9 @@ export class HazardDirector {
         }
     }
 
-    /** A resting, unheld timber piece lying across the crossing. */
-    crossingSpanned(pw: PhysicsWorld, f: FloodSpec): boolean {
+    /** How many resting, unheld timber pieces lie across the crossing. */
+    crossingSpanned(pw: PhysicsWorld, f: FloodSpec): number {
+        let n = 0;
         const c = f.crossing;
         for (const pb of pw.bodies.values()) {
             const s = pb.shape;
@@ -359,9 +385,9 @@ export class HazardDirector {
                 2 * (q.y * q.z + q.w * q.x) * ay +
                 (1 - 2 * (q.x * q.x + q.y * q.y)) * az;
             const ez = Math.abs(dz) * long;
-            if (t.z + ez > c.z0 && t.z - ez < c.z1) return true;
+            if (t.z + ez > c.z0 && t.z - ez < c.z1) n++;
         }
-        return false;
+        return n;
     }
 
     /** The water goes down: timber it took is left on the bank downstream (in the spots' order). */
@@ -405,14 +431,18 @@ export class HazardDirector {
                 const p = h.players[i];
                 const dx = Math.max(0, Math.abs(p.x - area.cx) - area.halfX);
                 const dz = Math.max(0, Math.abs(p.z - area.cz) - area.halfZ);
-                const light = !!pb && pb.windArea > 0 && pb.body.mass() < G.maxMass;
+                const light = !!pb && isPlank(pb);
                 this.carryTicks[i] = light && Math.hypot(dx, dz) < G.nearWater ? (this.carryTicks[i] ?? 0) + 1 : 0;
-                if (!ready || !pb || this.carryTicks[i] < S(G.carryS) || this.planksLeft(h) < G.minPlanks) continue;
-                // aim: across the water from where the piece is, with a seeded wobble
+                // how long a carry takes to bring the gust varies with the game's seed
+                const carry = G.carryS + G.carryJitterS * rand(seed, 201 + this.gustCount, 0);
+                if (!ready || !pb || this.carryTicks[i] < S(carry) || this.planksLeft(h) < G.minPlanks) continue;
+                // aim: across the water from where the piece is; the seed picks straight across,
+                // or slanting upstream or downstream, and a small wobble
                 const t = pb.body.translation();
                 const along = area.halfX > area.halfZ;
                 const sign = along ? Math.sign(area.cz - t.z) || 1 : Math.sign(area.cx - t.x) || 1;
-                const a = (rand(seed, this.gustCount, tick) - 0.5) * 0.7;
+                const slant = [-0.6, 0, 0.6][Math.floor(rand(seed, 301 + this.gustCount, 0) * 3)];
+                const a = slant + (rand(seed, this.gustCount, tick) - 0.5) * 0.4;
                 const bx = along ? 0 : sign;
                 const bz = along ? sign : 0;
                 this.gustDirX = bx * Math.cos(a) - bz * Math.sin(a);
@@ -518,12 +548,26 @@ export class HazardDirector {
         const lostY = h.level.rules?.lostY ?? this.baseY;
         let n = 0;
         for (const pb of h.physics.bodies.values()) {
-            if (pb.kind !== 'dynamic' || !pb.enabled || !pb.grabbable || pb.windArea <= 0) continue;
-            if (pb.body.mass() >= HAZARD.gust.maxMass) continue;
+            if (pb.kind !== 'dynamic' || !pb.enabled || !isPlank(pb)) continue;
             if (pb.body.translation().y > lostY) n++;
         }
         return n;
     }
+}
+
+/**
+ * A plank: long (a metre or more), light (under 30 kg) timber you carry in your hands. The gust
+ * goes for these, never the bucket, a crate or a shouldered beam.
+ */
+function isPlank(pb: {
+    kind: string;
+    grabbable: boolean;
+    shape?: { type: string };
+    body: { mass(): number };
+}): boolean {
+    const s = pb.shape as { type: string; hx?: number; hy?: number; hz?: number } | undefined;
+    if (pb.kind !== 'dynamic' || !pb.grabbable || !s || s.type !== 'box') return false;
+    return Math.max(s.hx!, s.hy!, s.hz!) >= 0.5 && pb.body.mass() < HAZARD.gust.maxMass;
 }
 
 /**
