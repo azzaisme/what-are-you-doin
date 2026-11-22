@@ -448,7 +448,7 @@ describe('hazard director: online, through real host and guest sessions', () => 
         const ad = listGames(hub.channel('lobby', 'watcher'))[0];
         let clock = 0;
         const guestSim = new LabSim({ level: timberYardLevel });
-        const gs = await GuestSession.join(hub.transport('guest'), guestSim, ad, () => clock);
+        const gs = await GuestSession.join(hub.transport('guest'), guestSim, ad, { now: () => clock });
         const run = (ticks: number, c: Partial<PlayerCommand> = {}) => {
             for (let i = 0; i < ticks; i++) {
                 gs.sendInput(cmd(host.tick));

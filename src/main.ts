@@ -24,8 +24,10 @@ import { PadManager } from './input/gamepad.ts';
 import { TouchControls, isTouchDevice } from './input/touch.ts';
 import { levelFromData } from './levels/data.ts';
 import { LEVEL_MENU, getLevel } from './levels/index.ts';
+import { degradedTransport, parseConditions } from './net/netsim.ts';
 import type { P2PTransport } from './net/p2p.ts';
-import { GuestSession, HostSession, listGames } from './net/session.ts';
+import { forgetGame, gameToRejoin, rejoinToken, rememberGame } from './net/rejoin.ts';
+import { GuestSession, HostSession, NET_PROTOCOL, listGames } from './net/session.ts';
 import type { GameAd } from './net/session.ts';
 import { localTransport, roomTransport } from './net/transport.ts';
 import type { NetTransport } from './net/transport.ts';
@@ -40,7 +42,7 @@ import { FixedStepClock, SIM_DT, VOXEL_RATES, VoxelClock } from './sim/clock.ts'
 import type { VoxelRate } from './sim/clock.ts';
 import { ACTION_DROP_TEST, ACTION_RAGDOLL, ACTION_RESET_PROPS, neutralCommand } from './sim/commands.ts';
 import type { PlayerCommand } from './sim/commands.ts';
-import { EYE_HEIGHT, LabSim } from './sim/lab-sim.ts';
+import { EYE_HEIGHT, LabSim, MAX_PLAYERS } from './sim/lab-sim.ts';
 import type { PropsMode } from './sim/lab-sim.ts';
 import { initPhysics } from './sim/physics/world.ts';
 import { ANIM_MAX } from './sim/snapshots.ts';
@@ -539,12 +541,15 @@ class LabDirector extends Script {
         if (guestSession) {
             guestSession.sendInput(playerOneCommand());
             renderTime = guestSession.renderTime();
-            if (guestSession.hostGone) leaveOnline('The host left the game.');
+            if (guestSession.incompatible)
+                leaveOnline('That game runs another version: reload both pages to play together');
+            else if (guestSession.hostGone) leaveOnline('The host left the game.');
+            else noteReconnect(guestSession);
         } else if (!state.paused) {
             const steps = clock.advance(dt);
             for (let s = 0; s < steps; s++) {
                 const c = slotCommands();
-                sim.step(playerOneCommand(), c[1], [c[2], c[3]]);
+                sim.step(playerOneCommand(), c[1], c.slice(2));
                 hostSession?.afterStep((slot) => sim.interactionIds(slot));
                 physTimes[physHead] = sim.physicsMs;
                 physHead = (physHead + 1) % physTimes.length;
@@ -753,10 +758,10 @@ function playerTwoCommand() {
     return base;
 }
 
-/** Commands for slots 1..3 this tick: remote guests (when hosting) and the local second player. */
+/** Commands for slots 1.. this tick: remote guests (when hosting) and the local second player. */
 function slotCommands(): (PlayerCommand | undefined)[] {
-    const out: (PlayerCommand | undefined)[] = [undefined, undefined, undefined, undefined];
-    for (let slot = 1; slot < 4; slot++) {
+    const out: (PlayerCommand | undefined)[] = [];
+    for (let slot = 1; slot < MAX_PLAYERS; slot++) {
         if (slot === localSlot2) out[slot] = playerTwoCommand();
         else if (hostSession) out[slot] = hostSession.commandFor(slot);
     }
@@ -1615,6 +1620,7 @@ async function startTransport(): Promise<void> {
     const net = params.get('net');
     if (net === 'local') transport = localTransport();
     else if (net !== 'p2p' && net !== 'off') transport = await roomTransport();
+    if (transport && netConditions) transport = degradedTransport(transport, netConditions);
     if (transport) {
         transportKind = transport.kind === 'room' ? 'room' : 'local';
         watchLobby();
@@ -1647,7 +1653,7 @@ function connectP2P(): Promise<void> {
                       }
                     : undefined
             });
-            transport = p2p;
+            transport = netConditions ? degradedTransport(p2p, netConditions) : p2p;
             watchLobby();
             online.render();
         })
@@ -1663,7 +1669,7 @@ function watchLobby(): void {
     transport?.lobby.onChange(() => {
         online.render();
         // arrived with ?join=CODE (switched level to join a game): join as soon as it is listed
-        const code = params.get('join');
+        const code = params.get('join') ?? rejoinCode;
         if (code && !guestSession && !hostSession && !autoJoinTried) {
             const g = listGames(transport!.lobby).find((x) => x.code === code);
             if (g) {
@@ -1674,6 +1680,26 @@ function watchLobby(): void {
     });
 }
 let autoJoinTried = false;
+/** Testing on a bad network on purpose: `?netsim=latency,jitter,loss` (ms, ms, 0..1). */
+const netConditions = parseConditions(params.get('netsim'));
+/** A game this tab was playing as a guest before a reload: rejoined (as the same player) when listed. */
+const rejoinCode = gameToRejoin(level.id);
+let wasReconnecting = false;
+
+/** Tells a guest when the host goes quiet and when it is back. */
+function noteReconnect(g: GuestSession): void {
+    if (g.reconnecting !== wasReconnecting) {
+        wasReconnecting = g.reconnecting;
+        showToast(g.reconnecting ? 'Lost the host: reconnecting…' : 'Reconnected', g.reconnecting ? 'warn' : 'info');
+    }
+    // keep the rejoin record fresh, so a reload within the host's grace period comes back
+    const now = Date.now();
+    if (!g.reconnecting && g.received > 0 && now - lastRemembered > 5000) {
+        lastRemembered = now;
+        rememberGame(g.code, level.id, now);
+    }
+}
+let lastRemembered = 0;
 
 async function hostOnline(): Promise<void> {
     await connectP2P();
@@ -1685,9 +1711,11 @@ async function hostOnline(): Promise<void> {
     }
     hostSession = await HostSession.start(transport, sim, level.id);
     playtest.note(performance.now(), 'online', `hosting game ${hostSession.code}`);
-    hostSession.onGuestsChanged = (joined, left) => {
+    hostSession.onGuestsChanged = (joined, left, dropped, back) => {
         for (const s of joined) showToast(`Player ${s + 1} joined`);
         for (const s of left) showToast(`Player ${s + 1} left`);
+        for (const s of dropped) showToast(`Player ${s + 1} lost their connection: keeping their place for a minute`);
+        for (const s of back) showToast(`Player ${s + 1} is back`);
         online.render();
     };
     showToast(`Hosting game ${hostSession.code}`);
@@ -1696,6 +1724,10 @@ async function hostOnline(): Promise<void> {
 
 async function joinOnline(ad: GameAd): Promise<void> {
     if (!transport || hostSession || guestSession) return;
+    if (ad.v !== NET_PROTOCOL) {
+        showToast('That game runs another version: reload both pages to play together', 'warn');
+        return;
+    }
     if (ad.level !== level.id && LEVEL_MENU.some((l) => l.id === ad.level)) {
         // the voxel world is built per level: reload into the host's level and join from there
         goToLevel(ad.level, { join: ad.code });
@@ -1703,8 +1735,10 @@ async function joinOnline(ad: GameAd): Promise<void> {
     }
     setPlayers(1);
     if (state.paused) setPaused(false);
-    guestSession = await GuestSession.join(transport, sim, ad);
+    guestSession = await GuestSession.join(transport, sim, ad, { token: rejoinToken() });
     playtest.note(performance.now(), 'online', `joined game ${ad.code}`);
+    rememberGame(ad.code, level.id);
+    wasReconnecting = false;
     guestEventsSeen = 0;
     state.forceVoxel = true;
     if (state.mode !== 'firstPerson') setMode('firstPerson', false);
@@ -1729,6 +1763,7 @@ function leaveOnline(message?: string): void {
     if (guestSession) {
         guestSession.leave();
         guestSession = null;
+        forgetGame();
         sim.reset();
         clock.reset(0);
         state.forceVoxel = true;
@@ -1748,13 +1783,24 @@ const online = new OnlinePanel(
         level: level.id,
         status: () =>
             hostSession
-                ? { mode: 'host', code: hostSession.code, players: sim.playerCount }
+                ? {
+                      mode: 'host',
+                      code: hostSession.code,
+                      players: sim.playerCount,
+                      max: MAX_PLAYERS,
+                      guests: [...hostSession.slots.values()]
+                          .sort((a, b) => a - b)
+                          .map((s) => ({ slot: s, lagMs: hostSession!.lagMs(s) })),
+                      dropped: hostSession.droppedSlots()
+                  }
                 : guestSession
                   ? {
                         mode: 'guest',
                         code: guestSession.code,
                         slot: guestSession.slot,
-                        waiting: guestSession.received === 0
+                        waiting: guestSession.received === 0,
+                        lagMs: guestSession.lagMs,
+                        reconnecting: guestSession.reconnecting
                     }
                   : { mode: 'off' },
         host: hostOnline,
@@ -2257,8 +2303,16 @@ window.__riverLab = {
             p2p: p2p ? p2p.status() : null,
             hosting: hostSession?.code ?? null,
             guests: hostSession?.guestCount ?? 0,
+            dropped: hostSession?.droppedSlots() ?? [],
+            lag: hostSession ? [...hostSession.slots.values()].map((s) => hostSession!.lagMs(s)) : [],
             guest: guestSession
-                ? { code: guestSession.code, slot: guestSession.slot, received: guestSession.received }
+                ? {
+                      code: guestSession.code,
+                      slot: guestSession.slot,
+                      received: guestSession.received,
+                      lagMs: guestSession.lagMs,
+                      reconnecting: guestSession.reconnecting
+                  }
                 : null
         })
     },

@@ -76,6 +76,15 @@ import { ANIM_MAX, SnapshotRing, writeEntity } from './snapshots.ts';
 
 export type { PlayerCommand, SimEntity };
 export { MAX_PLAYERS, MAX_STRESS };
+
+/**
+ * Where player slot i (1..) stands relative to player 1, in metres: rows of four to player 1's
+ * right (slots 1-4 on player 1's row, 5-7 a row behind), so eight players stay close together.
+ */
+export function slotOffset(i: number): { right: number; back: number } {
+    if (i <= 0) return { right: 0, back: 0 };
+    return { right: 1.2 * (((i - 1) % 4) + 1), back: 1.2 * Math.floor((i - 1) / 4) };
+}
 export type PropsMode = 'physics' | 'scripted';
 
 /** The player body's eye height (2026-11-21: the lanky stand-in people, 1.86 m; beavers 1.22 m). */
@@ -225,9 +234,10 @@ export class LabSim {
         this.player.yaw = sp.yaw;
         for (let i = 1; i < MAX_PLAYERS; i++) {
             const pi = this.players[i];
-            // a row to player 1's right
-            pi.x = sp.x + Math.cos(sp.yaw) * 1.2 * i;
-            pi.z = sp.z - Math.sin(sp.yaw) * 1.2 * i;
+            // rows to player 1's right
+            const o = slotOffset(i);
+            pi.x = sp.x + Math.cos(sp.yaw) * o.right + Math.sin(sp.yaw) * o.back;
+            pi.z = sp.z - Math.sin(sp.yaw) * o.right + Math.cos(sp.yaw) * o.back;
             pi.y = this.level.terrainHeight(pi.x, pi.z);
             pi.yaw = sp.yaw;
         }
@@ -386,7 +396,22 @@ export class LabSim {
         if (active) {
             const p1 = this.player;
             const pi = this.players[i];
-            this.placePlayer(p1.x + Math.cos(p1.yaw) * 1.2 * i, p1.z - Math.sin(p1.yaw) * 1.2 * i, p1.yaw, i);
+            // their spot in the rows, or the next one nobody is standing on (players who walked off
+            // leave theirs free; two characters placed into each other stick together)
+            let x = 0;
+            let z = 0;
+            for (let k = i; k < i + 4 * MAX_PLAYERS; k++) {
+                const o = slotOffset(k);
+                x = p1.x + Math.cos(p1.yaw) * o.right + Math.sin(p1.yaw) * o.back;
+                z = p1.z - Math.sin(p1.yaw) * o.right + Math.cos(p1.yaw) * o.back;
+                let clear = true;
+                for (let j = 0; j < MAX_PLAYERS && clear; j++) {
+                    if (j === i || !this.isSlotActive(j)) continue;
+                    clear = Math.hypot(this.players[j].x - x, this.players[j].z - z) > 0.9;
+                }
+                if (clear) break;
+            }
+            this.placePlayer(x, z, p1.yaw, i);
             pi.pitch = p1.pitch;
             pi.walkDist = 0;
             pw.setCharacterEnabled(true, i);
@@ -572,8 +597,8 @@ export class LabSim {
                 const sp = p.safe.valid
                     ? p.safe
                     : st
-                      ? { x: st.start.x + i * 1.2, z: st.start.z }
-                      : { x: this.level.spawn.x + i * 1.2, z: this.level.spawn.z };
+                      ? { x: st.start.x + slotOffset(i).right, z: st.start.z + slotOffset(i).back }
+                      : { x: this.level.spawn.x + slotOffset(i).right, z: this.level.spawn.z + slotOffset(i).back };
                 this.placePlayer(sp.x, sp.z, p.yaw, i);
                 const who = this.playerCount > 1 ? `Player ${i + 1}: splash!` : 'Splash!';
                 this.events.push({
