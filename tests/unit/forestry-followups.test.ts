@@ -64,7 +64,9 @@ class Play {
     readonly pitch: number[];
 
     constructor(players: number) {
-        this.s = new LabSim({ level: timberYardLevel });
+        // the hazards are off, as in forestry-gate.test.ts: the beams laid across the creek would
+        // set off the flood while the deck goes on
+        this.s = new LabSim({ level: timberYardLevel, hazards: false });
         this.s.step(neutralCommand(0));
         this.s.fpActive = true;
         if (players > 1) this.s.setPlayerCount(players);
@@ -352,15 +354,17 @@ function shoulderBeam(
 
 /**
  * Player 1 carries a plank (lying along x) from where it lies, out along the beams, and lays it
- * across them at `deckZ`: takes it by its middle from its north side (at `pickZ`), turns to the
- * creek, goes to the bridge's end (by way of `via`, if given), walks out, sets it down, backs off.
+ * across them at `deckZ`: takes it by its middle from its north side (at `pickZ`), steps `aside`
+ * along it (if given), turns to the creek, goes to the bridge's end (by way of `via`, if given),
+ * walks out, sets it down, backs off.
  */
 function layPlank(
     g: Play,
     plank: { id: number; pose: { p: { x: number; y: number; z: number } } },
     deckZ: number,
     pickZ: number,
-    via?: { x: number; z: number }
+    via?: { x: number; z: number },
+    aside?: number
 ): void {
     const s = g.s;
     const p = plank.pose.p;
@@ -369,6 +373,8 @@ function layPlank(
     g.turn(1, Math.PI);
     expect(g.grabAt(1, p.x, p.y, p.z)).toBe(plank.id);
     g.tilt(1, -0.2, 30);
+    // (first, still facing it, step `aside` m along it: room to turn)
+    if (aside) g.shuffleTo(1, s.players[1].x + aside, s.players[1].z);
     // turn round to face the creek (yaw 0 faces north, -z); the plank stays across the view
     g.turn(1, 0, 90);
     if (via) g.shuffleTo(1, via.x, via.z);
@@ -397,6 +403,9 @@ function layPlank(
 /** Player 0 walks over the bridge's deck to the far bank, without falling in. */
 function walkOver(g: Play, planks: { pose: { p: { y: number } } }[]): void {
     const s = g.s;
+    // (player 1 first stands back further, off player 0's way to the bridge end: walked into, a
+    // player is shoved)
+    g.walkTo(1, BRIDGE_X + 3, BRIDGE.nearEdge + 5.5);
     g.walkTo(0, BRIDGE_X, BRIDGE.nearEdge + 1.2);
     g.turn(0, 0);
     let topY = 0;
@@ -481,12 +490,16 @@ describe('beams by player input', () => {
 
         // ---- player 1 decks them with three planks off the yard's stack (top first), round the
         // west end of the yard's beams
+        // (player 0 stands well clear of the planks' way first: walked into, a player is shoved)
+        g.walkTo(0, 3, 6);
         const stack = ['extra-plank-4', 'extra-plank-3', 'extra-plank-2'].map((n) => g.entity(n));
         const deckZ = [BRIDGE.farFace + 0.6, BRIDGE.zc, BRIDGE.nearFace - 0.6];
         stack.forEach((plank, n) => {
             // (back from the bridge round the yard's beams' east end, south of them)
             g.walkTo(1, 0, 4.7);
-            layPlank(g, plank, deckZ[n], plank.pose.p.z - 1.6, { x: plank.pose.p.x, z: BRIDGE.nearEdge + 2.0 });
+            // (each taken to the west, clear of the yard's beams' west end, before turning north)
+            const x = plank.pose.p.x - 1.5;
+            layPlank(g, plank, deckZ[n], plank.pose.p.z - 1.6, { x, z: BRIDGE.nearEdge + 2.0 }, -1.5);
         });
         const decked = stack.filter((p) => p.pose.p.z < BRIDGE.nearFace && p.pose.p.z > BRIDGE.farFace);
         expect(decked.length).toBe(3);
@@ -573,18 +586,28 @@ describe('determinism: sawing and regrowth', () => {
         mark(); // regrown
 
         // ---- run 2: a fresh sim (set up as run 1's: two players, the same 30 idle steps) fed the
-        // recorded commands, open loop (nothing steers it back on course)
-        const replay = new Play(2).s;
-        const got: unknown[] = [];
-        let m = 0;
-        g.script.forEach(([a, b], k) => {
-            replay.step(a, b);
-            while (m < marks.length && marks[m] === k + 1) {
-                got.push(woodState(replay));
-                m++;
-            }
-        });
+        // recorded commands, open loop (nothing steers it back on course). Run 3, the check that
+        // the comparison can fail: the same, but player 1 sidesteps for 10 ticks during the carry
+        const replay = (alter: (k: number, b: PlayerCommand) => PlayerCommand): unknown[] => {
+            const r = new Play(2).s;
+            const got: unknown[] = [];
+            let m = 0;
+            g.script!.forEach(([a, b], k) => {
+                r.step(a, alter(k, b));
+                while (m < marks.length && marks[m] === k + 1) {
+                    got.push(woodState(r));
+                    m++;
+                }
+            });
+            return got;
+        };
+        const got = replay((_k, b) => b);
         expect(got.length).toBe(want.length);
         for (let k = 0; k < want.length; k++) expect(got[k]).toEqual(want[k]);
+        const k0 = marks[0] + 300; // carrying the log
+        const altered = replay((k, b) => (k >= k0 && k < k0 + 10 ? { ...b, moveX: 1 } : b));
+        expect(altered.length).toBe(want.length);
+        expect(altered[1]).not.toEqual(want[1]); // the sawmill takes the log
+        expect(altered.at(-1)).not.toEqual(want.at(-1));
     }, 300_000);
 });
