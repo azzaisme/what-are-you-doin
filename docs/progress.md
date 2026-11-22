@@ -1,5 +1,21 @@
 # Progress log
 
+## Epic 8: the logging sounds (2026-11-22, #82)
+
+The Timber Yard's logging now sounds as it looks. Before, the sounds existed but nothing played them.
+
+- **Chewing and the axe:** a chop at every bite or blow on a tree (`chop`).
+- **The tree comes down:** a heavy, low thud when the felled tree's crown breaks off.
+- **The sawmill:** its motor (`saw`, a loop) runs while the blade cuts, rising a little in pitch
+  through the cut, and fades out when the planks or the beam come out.
+- **Online:** every device works these out from the same snapshots as the chips, needles and
+  sawdust, so guests hear them too. Nothing new is sent.
+- **Tested:** in the wood-effects test, ten bites give ten chops and the crown gives one thud.
+  While a log is sawn the motor is held on every frame (over 60), its pitch rising, and it stops
+  being held once the sawmill stops.
+- **Still waiting:** the joint creaks (Epic 5) and the bucket slosh and pour (Epic 7), whose
+  mechanics aren't in yet. Their calls are in `docs/sound.md`.
+
 ## Epic 8, part 2: the handbrake prank, and sound for the other epics (2026-11-22)
 
 - **The handbrake prank (#75):**
