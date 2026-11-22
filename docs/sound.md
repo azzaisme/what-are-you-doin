@@ -53,7 +53,7 @@ sfx.snap({ x, y, z }); // something breaks
 | `siren`, `gust-warn`, `gust`        | hazard warnings                      | the flood and the gust (automatic)                                                                                                              |
 | `ding`, `fanfare`                   | a two-note ding and a little fanfare | a step done and the goal (automatic)                                                                                                            |
 | `bird` (3)                          | bird calls                           | ambience (automatic)                                                                                                                            |
-| `engine`, `river`, `wind`, `rumble` | the game's own loops                 | (the ute, the creek, the wind, the flood)                                                                                                       |
+| `engine`, `river`, `wind`, `rumble` | the game's own loops                 | (the ute, the creek and the Valley's waterfall, the wind, the flood)                                                                            |
 
 To add a sound:
 
