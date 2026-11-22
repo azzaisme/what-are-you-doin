@@ -508,7 +508,8 @@ export class LabSim {
         }
         if (this.physicsProps) this.hazards.step(this);
         // nobody driving: the handbrake is on
-        this.vehicle?.drive(this.driver >= 0 ? this.driveInput : PARKED);
+        // (unless the handbrake prank has let it off: src/sim/hazards.ts)
+        this.vehicle?.drive(this.driver >= 0 ? this.driveInput : this.hazards.handbrakeOff ? NO_DRIVE : PARKED);
         pw.step();
         this.readPhysics();
         this.readVehicle();

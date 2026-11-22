@@ -8,7 +8,9 @@ import {
     CREEK_WATER_Y,
     YARD_Y,
     creekCenterZ,
-    timberYardLevel
+    roadCenterX,
+    timberYardLevel,
+    yardHeight
 } from '../../src/levels/timber-yard.ts';
 import {
     CHECKPOINTS,
@@ -547,20 +549,97 @@ describe('weather and the one-hazard-at-a-time budget', () => {
         expect(gustDuringWeather).toBe(false);
         expect(s.hazards.gustCount).toBe(0);
     }, 120_000);
+
+    it('and with the handbrake prank (the same yard, mist over it): each waits for the other and its quiet spell', () => {
+        const H = HAZARD.handbrake;
+        const mist = {
+            ...VALLEY_WEATHER_ZONES[zoneOf(WEATHER.mist)],
+            contains: () => true,
+            delayS: 0,
+            delayJitterS: 0
+        };
+        const misty = (z: Partial<typeof mist> = {}): LevelDef => ({
+            ...timberYardLevel,
+            hazards: { ...timberYardLevel.hazards!, weather: { zones: [{ ...mist, ...z }] } }
+        });
+        /** The ute on the far bank's road where it climbs, nose downhill (the prank tests' spot). */
+        const parkOnRoad = (s: LabSim, z = -13.5) => {
+            const x = roadCenterX(z);
+            s.physics.place(s.vehicle!.id, pose(x, yardHeight(x, z) + 0.3, z, quatFromYawPitchRoll(0, 0, 0)));
+        };
+        const both = (s: LabSim) => s.hazards.weather!.busy && s.hazards.brakePhase !== PHASE.idle;
+
+        // the weather first: the ute parked on the slope while the mist is down waits for it
+        const a = new LabSim({ level: misty() });
+        a.fpActive = true;
+        runUntil(a, () => a.hazards.weather!.busy, S(HAZARD.graceS) + 10);
+        expect(a.hazards.weather!.busy).toBe(true);
+        parkOnRoad(a);
+        let clear = -1;
+        let overlap = false;
+        runUntil(
+            a,
+            () => {
+                overlap ||= both(a);
+                if (clear < 0 && !a.hazards.weather!.busy) clear = a.tick;
+                return a.hazards.brakePhase === PHASE.tell;
+            },
+            S(mist.tellS + mist.activeS + mist.clearS + HAZARD.safeS + H.parkedS + 10)
+        );
+        expect(overlap).toBe(false);
+        expect(a.hazards.brakePhase).toBe(PHASE.tell);
+        expect(a.tick - clear).toBeGreaterThanOrEqual(S(HAZARD.safeS) - 1);
+
+        // the prank first: parked from the start, it goes at the end of the grace period; the mist
+        // (due straight away) waits for it and its quiet spell
+        const b = new LabSim({ level: misty() });
+        b.fpActive = true;
+        parkOnRoad(b);
+        runUntil(b, () => b.hazards.brakePhase !== PHASE.idle, S(HAZARD.graceS + H.parkedS) + 10);
+        expect(b.hazards.brakePhase).toBe(PHASE.tell);
+        expect(b.hazards.weather!.busy).toBe(false);
+        let over = -1;
+        overlap = false;
+        runUntil(
+            b,
+            () => {
+                overlap ||= both(b);
+                if (over < 0 && b.hazards.brakePhase === PHASE.idle) over = b.tick;
+                return b.hazards.weather!.busy;
+            },
+            S(H.tellS + H.offS + HAZARD.safeS + 10)
+        );
+        expect(overlap).toBe(false);
+        expect(b.hazards.weather!.busy).toBe(true);
+        expect(b.tick - over).toBeGreaterThanOrEqual(S(HAZARD.safeS) - 1);
+    }, 120_000);
 });
 
 describe('weather online: guests get it from the host', () => {
     it('the net state carries the weather’s zone and strength, bounded; an older host’s reads as none', () => {
-        const net = { waterY: -0.3, flood: 0, gust: 0, gustDir: 0, gustSlot: -1, weatherZone: 2, weather: 0.625 };
-        expect(readHazardNet(packHazardNet(net), CREEK_WATER_Y)).toEqual(net);
-        // a host from before the weather (or a level without it): five fields, read as none
-        const old = readHazardNet([-0.45, 0, 0, 0, -1], CREEK_WATER_Y);
+        const net = {
+            waterY: -0.3,
+            flood: 0,
+            gust: 0,
+            gustDir: 0,
+            gustSlot: -1,
+            brake: 2,
+            weatherZone: 2,
+            weather: 0.625
+        };
+        const packed = packHazardNet(net);
+        // appended after the handbrake prank's phase (index 5): the weather's zone + 1, its strength
+        expect(packed.slice(5)).toEqual([2, 3, 0.625]);
+        expect(readHazardNet(packed, CREEK_WATER_Y)).toEqual(net);
+        // a host from before the weather (or a level without it): six fields, read as none
+        const old = readHazardNet([-0.45, 0, 0, 0, -1, 1], CREEK_WATER_Y);
+        expect(old.brake).toBe(1);
         expect(old.weatherZone ?? -1).toBe(-1);
         expect(old.weather ?? 0).toBe(0);
-        expect(packHazardNet(old)).toHaveLength(5);
+        expect(packHazardNet(old)).toHaveLength(6);
         // and a level without weather sends none
         expect(new LabSim({ level: timberYardLevel }).hazards.net().weatherZone).toBeUndefined();
-        const wild = readHazardNet([-0.45, 0, 0, 0, -1, 1e9, -5], CREEK_WATER_Y);
+        const wild = readHazardNet([-0.45, 0, 0, 0, -1, 0, 1e9, -5], CREEK_WATER_Y);
         expect(wild.weatherZone).toBeLessThan(64);
         expect(wild.weather).toBe(0);
     });

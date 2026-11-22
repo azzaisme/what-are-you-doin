@@ -45,6 +45,60 @@ to beat it, and a test that plays it out.
   and fog are drawn with the fog alone.
 - **Timber Yard unchanged:** all its hazard tests pass untouched.
 
+## Epic 8, part 2: the handbrake prank, and sound for the other epics (2026-11-22)
+
+- **The handbrake prank (#75):**
+    - **When:** the ute is left parked on a slope (3.5° or more) with nobody in it for 6 s.
+    - **The tell:** a ratchet clicks, and a toast says "Get in and hold the brake, or chock a
+      downhill wheel".
+    - **What happens:** 2.5 s later the handbrake lets go and the ute rolls, for up to 20 s or until
+      someone takes the driver's seat. Tested by driving the ute up the far bank's road (about 10°),
+      braking, getting out: it rolls more than 3 m back down towards the creek.
+    - **Counterplay, each tested:**
+        - park on the flat (the yard: nothing happens);
+        - get in at the warning: look at the door and grab, as a player does (the ute stays within
+          0.5 m);
+        - chock a downhill wheel: the cube against the front wheel, or a beam on its edge across the
+          front tyres, holds it (asserted under 5 cm in 5 s with the handbrake off; measured 0 mm),
+          against more than 3 m unchocked. A plank lying flat (0.1 m) is a step the wheel climbs: no
+          chock. Chocks are a rule, not physics: the wheels are rays that would roll over a prop, so
+          the game checks for one standing at least 0.13 m high from under a tyre's centre to 0.4 m
+          past its downhill face (out to the bumper), and while it stands there the brake stays on.
+          Pull the chock out during the prank and the ute rolls (tested: more than 3 m in 4 s).
+    - **Fixed on the way (an Epic 4 bug):** a parked ute with its handbrake on crept down a slope,
+      2.5 cm a second on the far bank's road, because the wheel brake is a capped friction impulse
+      that gravity wins back a little of every tick. Now a parked ute that is nearly still and
+      standing on its wheels on fixed ground is held where it stands, gravity off while it holds,
+      until something moves it faster than 0.1 m/s. Any sideways push lets go of it for half a
+      second, so players can still shove a parked ute against its brake as before. Tested: parked
+      on that slope for 30 s it moves under 2 cm (measured 0 mm); two beavers pushing it on the flat
+      move it (measured 4.9 m in 3 s) and it holds again when they stop; a slow steady push of
+      3.5 m/s² still moves it (measured 5 cm in 2 s, where a lock that swallowed it gave 0). The ute's driving, braking, deck and platform tests pass unchanged;
+      on a deck or beam that can move it rides along as before.
+    - **Recovery:** if it ends up in the creek, the ute's usual recovery applies.
+    - **Budget, tested:** one hazard at a time (no flood or gust during a prank, and no prank during
+      a flood or a gust, each then waiting out the 15 s quiet), at most 2 pranks, 60 s apart.
+    - **Online, tested:** the guest gets the toast and the brake phase, and sees the ute roll in the
+      host's snapshots (within 5 cm of the host's).
+    - #75 can close except for tying it off (there are no ropes yet).
+- **Sound for the other epics (`docs/sound.md`):**
+    - **New sounds:** a sawmill motor (`saw`, a loop), `chop`, `slosh`, pouring water (`pour`, a loop)
+      and the handbrake's `ratchet`.
+    - **New call:** `sfx.hold(key, name, position)` keeps a loop playing for as long as a feature
+      calls it each frame, such as a sawmill running or water pouring. A quarter of a second after
+      the calls stop it fades out (under a second), then it is stopped and removed (tested).
+    - Epic 5 (creaks, breaks), Epic 6 (sawmill, chopping) and Epic 7 (slosh, pour) each have a line
+      to copy.
+- **Playtest kit:** the log's summary also counts handbrake pranks (tested with a real prank fed in
+  as the game feeds it), and the script says what to watch for and how the prank works.
+- **Tests:** unit tests pass at both voxel sizes, on top of `epics-5-10` (67cdc30, with Epic 9
+  part 2). New:
+    - the prank: driven onto the slope and parked, a braked ute holding for 30 s, the flat yard,
+      getting in at the warning, the cube and the beam chocks, the flat plank that isn't one, the budget, one hazard at a time
+      both ways round, and online;
+    - `sfx.hold`'s fade, stop and removal;
+    - the playtest log counting a real prank.
+
 ## Side paths in the Valley (2026-11-22, Epic 9, towards #87)
 
 Two tracks now leave the Forest Road. Neither goes near a crossing: the Epic 5 session is
