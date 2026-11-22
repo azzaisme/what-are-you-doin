@@ -18,9 +18,13 @@ const _pose = pose();
 const _anim = new Float64Array(ANIM_MAX);
 const _v = vec3();
 
-function iron(): StandardMaterial {
+function metal(r: number, g: number, b: number, glow = 0): StandardMaterial {
     const m = new StandardMaterial();
-    m.diffuse = new Color(0.16, 0.16, 0.18);
+    m.diffuse = new Color(r, g, b);
+    if (glow) {
+        m.emissive = new Color(r, g, b);
+        m.emissiveIntensity = glow;
+    }
     m.useMetalness = true;
     m.metalness = 0.6;
     m.gloss = 0.5;
@@ -40,7 +44,8 @@ export class NailMarkers {
     private readonly layer: Layer;
     private readonly overlay: Layer;
     private readonly app: AppBase;
-    private readonly iron = iron();
+    /** Nail heads by strain: calm iron, creaking (amber), groaning (red): a warning in colour too. */
+    private readonly heads3 = [metal(0.16, 0.16, 0.18), metal(0.95, 0.6, 0.1, 0.5), metal(0.95, 0.15, 0.1, 0.9)];
     /** Nail heads placed by the last update. */
     drawn = 0;
 
@@ -76,7 +81,9 @@ export class NailMarkers {
             if (!ring.sample(m.a, time, _pose, _anim)) continue;
             quatRotate(_pose.q, m.x, m.y, m.z, _v);
             let e = this.heads[n];
-            if (!e) this.heads.push((e = this.cube(this.iron)));
+            if (!e) this.heads.push((e = this.cube(this.heads3[0])));
+            const mat = this.heads3[Math.max(0, Math.min(2, m.strain))];
+            if (e.render!.material !== mat) e.render!.material = mat;
             e.enabled = true;
             // a hair larger than a cell, so it shows over the piece's own cell there
             e.setLocalScale(cell * 1.04, cell * 1.04, cell * 1.04);

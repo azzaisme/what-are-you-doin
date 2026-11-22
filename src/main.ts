@@ -15,6 +15,7 @@ import type { CellTier } from './assets/cell-tier.ts';
 import { DebugPanel } from './debug/panel.ts';
 import type { PanelHost } from './debug/panel.ts';
 import { DESIGN_KEY, Designer, loadDraft } from './editor/designer.ts';
+import { playJoint } from './fx/joint-audio.ts';
 import { ParticleFX } from './fx/particles.ts';
 import type { WatchedEntity } from './fx/particles.ts';
 import { CALM, windAt } from './fx/wind.ts';
@@ -1180,6 +1181,7 @@ function pollEvents(): void {
             if (e.n <= guestEventsSeen) continue;
             guestEventsSeen = e.n;
             showToast(e.text, e.kind);
+            jointSound(e.kind, e.text);
         }
         updateObjective();
         return;
@@ -1188,10 +1190,17 @@ function pollEvents(): void {
     while (seenEvents < sim.events.length) {
         const e = sim.events[seenEvents++];
         showToast(e.text, e.kind);
+        jointSound(e.kind, e.text);
         updateObjective();
     }
 }
 let promptText = '';
+
+/** Creaks, groans and cracks for structural events (Epic 5). */
+function jointSound(kind: string, text: string): void {
+    if (kind === 'break') playJoint('break');
+    else if (kind === 'creak') playJoint(text.includes('groan') ? 'groan' : 'creak');
+}
 
 /** Context prompt (design doc §2.3): what a click (or a trigger) would do right now. */
 function interactionText(i: number, pad: boolean): string {
@@ -1247,6 +1256,8 @@ function guestInteraction(): {
 let hostNails: NailMark[] = [];
 let hostNailsKey: unknown = null;
 let hostNailsVersion = -1;
+/** The connection of each host nail mark (its strain). */
+let hostNailConn: number[] = [];
 function updateNails(time: number): void {
     let marks: NailMark[];
     if (guestSession) marks = guestSession.nails;
@@ -1257,7 +1268,10 @@ function updateNails(time: number): void {
             hostNailsVersion = g.version;
             const index = new Map(sim.entities.map((e, i) => [e.id, i]));
             hostNails = nailMarks(g, (id) => index.get(id) ?? -1);
+            hostNailConn = [];
+            for (const c of g.connections()) for (let k = 0; k < c.nails.length; k++) hostNailConn.push(c.id);
         }
+        hostNails.forEach((m, i) => (m.strain = sim.joints.strainLevel(hostNailConn[i])));
         marks = hostNails;
     }
     let preview: { x: number; y: number; z: number; ok: boolean } | null = null;

@@ -2,8 +2,7 @@
 import { UTE_TRACK_HALF } from '../../src/assets/ute.ts';
 import { BRIDGE, BRIDGE_X, YARD_Y, timberYardLevel } from '../../src/levels/timber-yard.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
-import type { NailPreview } from '../../src/sim/joints/joints.ts';
-import type { JointSystem } from '../../src/sim/joints/joints.ts';
+import type { JointSystem, NailPreview } from '../../src/sim/joints/joints.ts';
 import { LabSim } from '../../src/sim/lab-sim.ts';
 import { pose, quatFromYawPitchRoll, quatMul } from '../../src/voxels/math.ts';
 

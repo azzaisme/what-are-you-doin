@@ -244,3 +244,46 @@ describe('the yard bridge under the ute (Epic 5 gate)', () => {
         expect(b).toEqual(a);
     }, 60_000);
 });
+
+describe('breaks and strain online (#50, #53)', () => {
+    it('guests see the joints strain, hear the creak and lose the nails when they break', async () => {
+        const { GuestSession, HostSession, listGames } = await import('../../src/net/session.ts');
+        const { MemoryHub } = await import('../../src/net/transport.ts');
+        const { LabSim } = await import('../../src/sim/lab-sim.ts');
+        const { timberYardLevel } = await import('../../src/levels/timber-yard.ts');
+        const { s } = yardBridge([1], 2);
+        const hub = new MemoryHub();
+        const hs = await HostSession.start(hub.transport('host'), s, 'yard', 'brk1');
+        const ad = listGames(hub.channel('lobby', 'watcher'))[0];
+        const guests = [];
+        for (let k = 0; k < 3; k++)
+            guests.push(await GuestSession.join(hub.transport(`g${k}`), new LabSim({ level: timberYardLevel }), ad));
+        hs.afterStep((slot) => s.interactionIds(slot));
+        // nails reach guests once the host publishes
+        for (let k = 0; k < 3; k++) {
+            s.step({ ...(await import('../../src/sim/commands.ts')).neutralCommand(s.tick + 1) });
+            hs.afterStep((slot) => s.interactionIds(slot));
+        }
+        for (const g of guests) expect(g.nails.length).toBe(4);
+        let maxStrain = 0;
+        const kinds = new Set<string>();
+        driveOver(s, () => {
+            hs.afterStep((slot) => s.interactionIds(slot));
+            for (const g of guests) {
+                for (const m of g.nails) maxStrain = Math.max(maxStrain, m.strain);
+                for (const e of g.events) kinds.add(e.kind);
+            }
+        });
+        for (let k = 0; k < 6; k++) {
+            s.step((await import('../../src/sim/commands.ts')).neutralCommand(s.tick + 1));
+            hs.afterStep((slot) => s.interactionIds(slot));
+        }
+        console.log(`guests saw strain up to ${maxStrain}, events ${[...kinds].join(', ')}`);
+        expect(s.joints.graph.size).toBe(0);
+        expect(maxStrain).toBeGreaterThan(0);
+        expect(kinds.has('creak')).toBe(true);
+        expect(kinds.has('break')).toBe(true);
+        for (const g of guests) expect(g.nails.length).toBe(0);
+        hs.stop();
+    }, 60_000);
+});

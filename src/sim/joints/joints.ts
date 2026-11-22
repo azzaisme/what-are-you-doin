@@ -303,6 +303,11 @@ export class JointSystem {
         for (const c of [...this.graph.connections()]) this.remove(c.id);
     }
 
+    /** 0 calm, 1 creaking, 2 groaning: how hard a connection is working (nail heads, guests). */
+    strainLevel(id: number): number {
+        return this.health.states.get(id)?.level ?? 0;
+    }
+
     /** The Rapier joint behind a connection (tests, stress readout). */
     jointOf(id: number): RAPIER.ImpulseJoint | undefined {
         return this.rapier.get(id);
