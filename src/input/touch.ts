@@ -6,7 +6,7 @@
  * rate. Shown on coarse-pointer devices, or after the first touch.
  */
 
-import { ACTION_DROP, ACTION_NONE, ACTION_POUR, PITCH_LIMIT } from '../sim/commands.ts';
+import { ACTION_DROP, ACTION_NAIL, ACTION_NONE, ACTION_POUR, PITCH_LIMIT } from '../sim/commands.ts';
 import type { PlayerCommand } from '../sim/commands.ts';
 
 const STICK_RADIUS = 56;
@@ -39,6 +39,7 @@ export class TouchControls {
         el.innerHTML = `
           <div class="touch-stick"><div class="touch-knob"></div></div>
           <div class="touch-buttons">
+            <button type="button" data-b="nail" class="touch-nail" aria-label="Nail">Nail</button>
             <button type="button" data-b="pour" class="touch-pour" aria-label="Pour" hidden>Pour</button>
             <button type="button" data-b="drop" aria-label="Drop">Drop</button>
             <button type="button" data-b="throw" aria-label="Throw">Throw</button>
@@ -60,6 +61,7 @@ export class TouchControls {
                 else if (k === 'grab') this.q.grab = true;
                 else if (k === 'throw') this.q.throw = true;
                 else if (k === 'drop') this.q.action = ACTION_DROP;
+                else if (k === 'nail') this.q.action = ACTION_NAIL;
                 else if (k === 'pour') this.q.action = ACTION_POUR;
                 b.classList.add('down');
             });

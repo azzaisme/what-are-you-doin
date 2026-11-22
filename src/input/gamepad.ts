@@ -10,12 +10,12 @@
  *   left stick  move            right stick  look            L3 or LT (held)  sprint
  *   A           jump            RT           grab / release   RB               throw
  *   B           drop            Y            pour the bucket you hold (again: stop)
- *   X           ragdoll
+ *   X           ragdoll         LB           nail (hammer)
  *   D-pad up/down  hold further / closer   D-pad right  plank (player 1, River Lab)
  *   Start (menu)   settings (any pad, joined or not; not rebindable)
  */
 
-import { ACTION_DROP, ACTION_NONE, ACTION_POUR, ACTION_RAGDOLL, PITCH_LIMIT } from '../sim/commands.ts';
+import { ACTION_DROP, ACTION_NAIL, ACTION_NONE, ACTION_POUR, ACTION_RAGDOLL, PITCH_LIMIT } from '../sim/commands.ts';
 import type { PlayerCommand } from '../sim/commands.ts';
 
 import { PAD_ACTIONS, defaultBindings } from './bindings.ts';
@@ -103,6 +103,7 @@ export class PadPlayer {
         if (edge('grab')) this.q.grab = true;
         if (edge('throw')) this.q.throw = true;
         if (edge('drop')) this.q.action = ACTION_DROP;
+        if (edge('nail')) this.q.action = ACTION_NAIL;
         if (edge('pour')) this.q.action = ACTION_POUR;
         if (edge('ragdoll')) this.q.action = ACTION_RAGDOLL;
         if (edge('reachFar')) this.q.reach += 0.25;

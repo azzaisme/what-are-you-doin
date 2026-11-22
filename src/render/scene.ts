@@ -100,6 +100,11 @@ export interface LabScene {
     waterEntity: Entity;
     worldLayer: Layer;
     immediateLayer: Layer;
+    /**
+     * Per-view immediate layers: the main camera draws `viewLayers[0]`, player 2's camera
+     * `viewLayers[1]`, so one local player's aim marks never show in the other's view.
+     */
+    viewLayers: [Layer, Layer];
     quality: Quality;
     setSun(elevationDeg: number, azimuthDeg: number): void;
     /**
@@ -154,6 +159,11 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
     // excluded from its own reflection / refraction cameras
     const waterLayer = new Layer({ name: 'Water' });
     layers.insert(waterLayer, layers.getTransparentIndex(worldLayer) + 1);
+    // one immediate layer per local view. Inserted before the shared Immediate layer's transparent
+    // part: CameraFrame renders layers up to that one in its scene pass (kept to the camera's half
+    // in split screen); later layers go to a pass over the whole back buffer
+    const viewLayers: [Layer, Layer] = [new Layer({ name: 'View1' }), new Layer({ name: 'View2' })];
+    for (const l of viewLayers) layers.insert(l, layers.getTransparentIndex(immediateLayer));
 
     // ---- sun: soft cascaded shadows sized for 10 cm detail near the camera
     const sun = new Entity('Sun');
@@ -178,7 +188,15 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
         fov: 52,
         nearClip: 0.05,
         farClip: 600,
-        layers: [worldLayer.id, LAYERID_DEPTH, skyboxLayer.id, waterLayer.id, immediateLayer.id, uiLayer.id]
+        layers: [
+            worldLayer.id,
+            LAYERID_DEPTH,
+            skyboxLayer.id,
+            waterLayer.id,
+            immediateLayer.id,
+            viewLayers[0].id,
+            uiLayer.id
+        ]
     });
     app.root.addChild(camera);
 
@@ -277,7 +295,15 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
         fov: 52,
         nearClip: 0.05,
         farClip: 600,
-        layers: [worldLayer.id, LAYERID_DEPTH, skyboxLayer.id, waterLayer.id, immediateLayer.id, uiLayer.id]
+        layers: [
+            worldLayer.id,
+            LAYERID_DEPTH,
+            skyboxLayer.id,
+            waterLayer.id,
+            immediateLayer.id,
+            viewLayers[1].id,
+            uiLayer.id
+        ]
     });
     camera2.enabled = false;
     app.root.addChild(camera2);
@@ -402,6 +428,7 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
         waterEntity,
         worldLayer,
         immediateLayer,
+        viewLayers,
         quality,
         sunElevation: level.sun.elevation,
         sunAzimuth: level.sun.azimuth,

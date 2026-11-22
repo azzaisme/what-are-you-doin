@@ -171,7 +171,12 @@ describe('hazard director: the rising river (#72)', () => {
         ] as const) {
             const b = byName(s, name).pose.p;
             s.placePlayer(b.x, BRIDGE.nearEdge + 0.9, 0, i);
-            s.physics.grabById(byName(s, name).id, { x: b.x, y: b.y, z: BRIDGE.nearFace - 0.3 }, 1.6, i);
+            s.step(cmd(0), cmd(0));
+            // held where it is taken (the bank's ramp puts you higher: a fixed reach would lift it)
+            const grip = { x: b.x, y: b.y, z: BRIDGE.nearFace - 0.3 };
+            const p = s.players[i];
+            const reach = Math.hypot(grip.x - p.x, grip.y - (p.y + EYE_HEIGHT), grip.z - p.z);
+            s.physics.grabById(byName(s, name).id, grip, reach, i);
         }
         let n = 0;
         // looking down at the beam end, so the hold point stays where the beam lies
@@ -347,10 +352,13 @@ describe('hazard director: the gust aimed at the carried plank (#73)', () => {
         const s = yard();
         s.runTo(S(HAZARD.graceS) + 10);
         s.fpActive = true;
-        // four of the five other planks are already lost in the creek: two planks left
-        ['extra-plank-0', 'extra-plank-1', 'extra-plank-2', 'extra-plank-3'].forEach((n, k) =>
-            s.physics.place(byName(s, n).id, pose(-8 + k * 3, CREEK_WATER_Y - 0.4, creekCenterZ(-8 + k * 3)))
-        );
+        // all but two planks are already lost in the creek (with the deck planks stacked by the
+        // bridge, extra-plank-5 to 11): two planks left
+        [0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11]
+            .map((k) => `extra-plank-${k}`)
+            .forEach((n, k) =>
+                s.physics.place(byName(s, n).id, pose(-8 + k * 3, CREEK_WATER_Y - 0.4, creekCenterZ(-8 + k * 3)))
+            );
         s.runTo(s.tick + 60);
         carrying(s);
         run(s, TO_GUST + S(5));
@@ -1319,7 +1327,7 @@ describe('hazard director: online, through real host and guest sessions', () => 
 });
 
 describe('hazard director: the level stays winnable', () => {
-    it('after the flood washes the bridge away: fetch both beams from downstream, rebuild, carry the bucket over (player inputs only)', () => {
+    it('after the flood washes the bridge away: fetch both beams from downstream, rebuild, carry the bucket over (placed setup: the player is put at the start, then plays by input)', () => {
         const s = yard();
         s.runTo(S(HAZARD.graceS) + 10);
         bridgeBeams(s);
@@ -1377,7 +1385,8 @@ describe('hazard director: the level stays winnable', () => {
             step({}, 20);
             // turn to the creek: the beam swings out over the gap
             ease(0, 120, (v) => (yaw = v), yaw);
-            for (let i = 0; i < 900 && s.player.z > BRIDGE.nearEdge + 0.4; i++) step({ moveZ: 0.5 });
+            // up the ramp onto the lip behind the seat, so the beam reaches the far seat
+            for (let i = 0; i < 900 && s.player.z > BRIDGE.nearEdge + 0.05; i++) step({ moveZ: 0.5 });
             step({}, 30);
             ease(-0.7, 40, (v) => (pitch = v), pitch);
             step({}, 30);
