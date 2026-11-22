@@ -33,7 +33,6 @@ import {
     keysText,
     loadBindings,
     padLabel,
-    padText,
     saveBindings
 } from './input/bindings.ts';
 import type { Action, PadAction } from './input/bindings.ts';
@@ -65,6 +64,7 @@ import { initPhysics } from './sim/physics/world.ts';
 import { ANIM_MAX } from './sim/snapshots.ts';
 import type { CameraControlsApi } from './types/engine-scripts.ts';
 import { OnlinePanel } from './ui/online-panel.ts';
+import { controlNames, interactionPrompt } from './ui/prompts.ts';
 import { SettingsMenu } from './ui/settings-menu.ts';
 import type { SettingValue } from './ui/settings-menu.ts';
 import { DEFAULT_SETTINGS, SETTING_RANGES, loadSettings, saveSettings, urlOverrides } from './ui/settings-store.ts';
@@ -1116,14 +1116,14 @@ function updateHud(): void {
     // long help for keyboard screens, short help for narrow / touch screens (chosen in CSS)
     const long =
         state.mode === 'orbit'
-            ? 'Drag to orbit · right-drag to pan · wheel to zoom · <kbd>V</kbd> first person · <kbd>H</kbd> hide UI'
+            ? `Drag to orbit · right-drag to pan · wheel to zoom${hotkey('KeyV', 'first person')}${hotkey('KeyH', 'hide UI')}`
             : sim.physicsProps
-              ? `Click to look · ${kbd(moveKeys())} move · ${kbd(keysText(bindings, 'sprint'))} run · ${kbd(keysText(bindings, 'jump'))} jump · ${kbd(keysText(bindings, 'grab'))} grab / release · ${kbd(keysText(bindings, 'throw'))} throw · ${kbd(keyVerb('reachFar'))} reach · ${kbd(keysText(bindings, 'drop'))} drop · ${kbd(keysText(bindings, 'plank'))} plank · ${kbd(keysText(bindings, 'ragdoll'))} ragdoll · <kbd>Esc</kbd> release mouse · <kbd>V</kbd> orbit`
-              : `Click to look · ${kbd(moveKeys())} move · ${kbd(keysText(bindings, 'sprint'))} run · ${kbd(keysText(bindings, 'jump'))} jump · ${kbd(keysText(bindings, 'plank'))} carry plank · <kbd>Esc</kbd> release mouse · <kbd>V</kbd> orbit`;
+              ? `Click to look · ${kbd(moveKeys())} move · ${kbd(keysText(bindings, 'sprint'))} run · ${kbd(keysText(bindings, 'jump'))} jump · ${kbd(keysText(bindings, 'grab'))} grab / release · ${kbd(keysText(bindings, 'throw'))} throw · ${kbd(keyVerb('reachFar'))} reach · ${kbd(keysText(bindings, 'drop'))} drop · ${kbd(keysText(bindings, 'plank'))} plank · ${kbd(keysText(bindings, 'ragdoll'))} ragdoll · <kbd>Esc</kbd> release mouse${hotkey('KeyV', 'orbit')}`
+              : `Click to look · ${kbd(moveKeys())} move · ${kbd(keysText(bindings, 'sprint'))} run · ${kbd(keysText(bindings, 'jump'))} jump · ${kbd(keysText(bindings, 'plank'))} carry plank · <kbd>Esc</kbd> release mouse${hotkey('KeyV', 'orbit')}`;
     const short =
         state.mode === 'orbit'
             ? 'Drag to orbit · two fingers to pan and zoom'
-            : `Click to look · ${moveKeys()} move · ${lower(keyVerb('grab'))} grab · V orbit`;
+            : `Click to look · ${moveKeys()} move · ${lower(keyVerb('grab'))} grab${hotkey('KeyV', 'orbit', false)}`;
     if (touchSeen && state.mode === 'firstPerson') {
         help.innerHTML =
             'Left thumb: move (push to the edge to run) · right thumb: look · buttons: jump, grab, throw, drop';
@@ -1231,61 +1231,15 @@ function pollEvents(): void {
 let promptText = '';
 
 /** Context prompt (design doc §2.3): what a click (or a trigger) would do right now. */
-// ---- control names in hints and prompts, from the player's bindings
-
-/** The first key bound to an action, as a prompt says it ('Click', 'E', 'Space'). */
-function keyVerb(a: Action): string {
-    const code = bindings.keys[a].find(Boolean) ?? '';
-    if (code === 'Mouse0') return 'Click';
-    if (code === 'Mouse2') return 'Right-click';
-    if (code === 'WheelUp' || code === 'WheelDown') return 'Wheel';
-    return keyLabel(code);
-}
-const lower = (s: string) => (/^[A-Z][a-z]/.test(s) ? s[0].toLowerCase() + s.slice(1) : s);
-/** Every key bound to an action, joined ('click or E'). */
-function keysVerb(a: Action): string {
-    const names = bindings.keys[a].filter(Boolean).map((c) => (c === 'Mouse0' ? 'click' : keyLabel(c)));
-    return names.length ? names.join(' or ') : 'unbound';
-}
-const padVerb = (a: PadAction) => padText(bindings, a).replace(' / ', ' or ');
-/** The four move keys as one word when they are letters ('WASD'), else listed. */
-function moveKeys(): string {
-    const k = (['forward', 'left', 'back', 'right'] as const).map((a) =>
-        keyLabel(bindings.keys[a].find(Boolean) ?? '')
-    );
-    return k.every((x) => /^[A-Z0-9]$/.test(x)) ? k.join('') : k.join('/');
-}
-const kbd = (s: string) => `<kbd>${s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!)}</kbd>`;
+// ---- control names in hints and prompts, from the player's bindings (src/ui/prompts.ts)
+const names = controlNames(bindings);
+const { keyVerb, lower, moveKeys, kbd, hotkey } = names;
 
 function interactionText(i: number, pad: boolean): string {
     const it = guestInteraction() ?? sim.interaction(i);
-    const both = it.shared ? ' together' : '';
-    const fw = keyVerb('forward');
-    const bk = keyVerb('back');
-    if (it.driving)
-        return pad
-            ? `Driving · left stick drive and steer · ${padVerb('jump')} brake · ${padVerb('drop')} recover · ${padVerb('grab')} get out`
-            : `Driving · ${fw}/${bk} throttle · ${keyVerb('left')}/${keyVerb('right')} steer · ${keyVerb('jump')} brake · ${keyVerb('drop')} recover · ${keysVerb('grab')} to get out`;
-    if (it.seat >= 0)
-        return pad ? `Riding along · ${padVerb('grab')} get out` : `Riding along · ${keysVerb('grab')} to get out`;
-    if (it.target === 'ute') return pad ? `${padVerb('grab')} to drive the ute` : `${keyVerb('grab')} to drive the ute`;
-    const wood = woodPrompt(
-        it,
-        pad ? 'pad' : 'mouse',
-        treeCut,
-        sawBeams(),
-        pad ? { press: padVerb('grab'), drop: padVerb('drop') } : { press: keyVerb('grab'), drop: keyVerb('drop') }
+    return interactionPrompt(it, pad, names, propLabel, (n) =>
+        woodPrompt(it, pad ? 'pad' : 'mouse', treeCut, sawBeams(), n)
     );
-    if (wood) return wood;
-    if (it.holding)
-        return pad
-            ? `Holding ${propLabel(it.holding)}${both} · ${padVerb('grab')} release · ${padVerb('throw')} throw · ${padVerb('drop')} drop`
-            : `Holding ${propLabel(it.holding)}${both} · ${lower(keyVerb('grab'))} to release · ${lower(keyVerb('throw'))} to throw · ${lower(keyVerb('reachFar'))} to adjust reach`;
-    if (it.target)
-        return pad
-            ? `${padVerb('grab')} to grab ${propLabel(it.target)}`
-            : `${keyVerb('grab')} to grab ${propLabel(it.target)}`;
-    return '';
 }
 
 /** A stand tree's cut so far, from the newest snapshot (the same for host and guests). */
@@ -1981,7 +1935,12 @@ const menu = new SettingsMenu(
                     menu.sync();
                     break;
                 }
-                case 'resetAll':
+                case 'resetAll': {
+                    // everything: the settings and the remapped keys and buttons
+                    const d = defaultBindings();
+                    Object.assign(bindings.keys, d.keys);
+                    Object.assign(bindings.pad, d.pad);
+                    saveBindings(settingsStorage, bindings);
                     for (const k of Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]) {
                         const v = DEFAULT_SETTINGS[k];
                         const pid = PANEL_ID[k];
@@ -1990,9 +1949,11 @@ const menu = new SettingsMenu(
                     }
                     applyInputSettings();
                     applyUiSettings();
+                    updateHud();
                     panel.sync();
                     menu.sync();
                     break;
+                }
             }
         },
         binding(device, action, slot) {

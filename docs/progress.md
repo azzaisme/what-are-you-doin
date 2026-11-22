@@ -13,7 +13,8 @@ sections: **Keys** and **Pad**.
     - **Esc** cancels (Start on a pad). **Backspace** or **Delete** empties the slot.
     - A key does one thing: put W on Jump and it comes off Move forward. The menu says so ("W was
       Move forward: that is now unbound there").
-- **Reset keys to defaults** and **Reset gamepad buttons to defaults** put everything back.
+- **Reset keys to defaults** and **Reset gamepad buttons to defaults** put each set back.
+  **Reset all settings** (Interface) resets them too.
 - Saved per browser (only what you changed), so a later change to the defaults still reaches you.
 - The control hints and prompts follow your keys: the hint reads "F jump" with jump on F, and the
   prompt reads "E to grab …" with grab on E.
@@ -26,7 +27,7 @@ sections: **Keys** and **Pad**.
   inversion are settings.
 - **Not remappable**, so you can always get back to the menu: Esc, Start, F3 (debug panel) and Tab.
 - A key bound to an action wins over the game's own hotkeys (V, P, C, L, H): bind V to jump and V
-  jumps.
+  jumps. The hint then stops offering "V orbit".
 - Keys are by position on the keyboard (`KeyboardEvent.code`), so the defaults sit in the same
   place on AZERTY or Dvorak keyboards.
 
@@ -45,13 +46,24 @@ sections: **Keys** and **Pad**.
     - a pad press puts X on the pad's Jump (taken off the ragdoll).
     - In the game, F jumps and Space no longer does. The hint reads "F jump".
     - After a reload both are still there, and Reset puts the keys back.
-- The settings, UI-layout, first-person, Timber Yard, ute and split-screen browser tests pass.
+- Unit (`tests/unit/prompts.test.ts`): prompts read as before with the defaults. They name a rebound
+  key or button the moment it changes ("R to grab the bucket", "RB to grab", "ZASD"). The axe
+  prompt says the rebound grab and drop ("F to chop the pine · X to put the axe down"). A hotkey's
+  hint disappears while its key is bound to an action.
+- Browser test, continued: V bound to Jump jumps and stays in first person, and the hint drops
+  "V orbit". Reset keys, Reset gamepad buttons and Reset all settings each clear what they cover.
+- UI layout test: now also at 360 × 740. With the Keys section open, nothing in it sticks out of
+  the dialog, and the current section tab is fully in view (also after switching to Interface and
+  back to Game).
+- The settings, UI-layout, first-person, Timber Yard, ute, split-screen and logging browser tests
+  pass.
 
 ### Known limits
 
 - **On a phone the six Settings sections don't all fit:** the section row scrolls sideways and
   keeps the current section in view.
 - **Touch controls aren't remappable.** The on-screen buttons stay where they are.
+- **A pad joins with A**, whatever A is bound to (the joining press is not also an action).
 - **Analogue triggers count from part way down** (40 %). Bound to an action, they press it like a
   button.
 

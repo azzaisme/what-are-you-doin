@@ -374,14 +374,59 @@ test('remappable controls: rebind a key and a pad button in Settings; they work 
     await page.locator('.settings-chip').click();
     await page.locator('.settings-tabs button', { hasText: 'Keys' }).click();
     await expect(jump.locator('.settings-bind').first()).toHaveText('F');
+    const stored = () => page.evaluate(() => localStorage.getItem('uncivil.bindings'));
+    const mode = () =>
+        page.evaluate(() => (window as unknown as { __riverLab: { state: { mode: string } } }).__riverLab.state.mode);
+
+    // a bound key beats the game's hotkey: V on Jump jumps instead of switching to the orbit view,
+    // and the hint stops offering "V orbit"
+    await jump.locator('.settings-bind').nth(1).click();
+    await page.keyboard.press('KeyV');
+    await expect(jump.locator('.settings-bind').nth(1)).toHaveText('V');
+    await page.keyboard.press('Escape');
+    await expect(backdrop).toBeHidden();
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await expect(page.locator('#hud-help')).not.toContainText('orbit');
+    const ground2 = await eyeY();
+    let top2 = ground2;
+    await page.keyboard.down('KeyV');
+    for (let n = 0; n < 20 && top2 < ground2 + 0.2; n++) {
+        await frames();
+        top2 = Math.max(top2, await eyeY());
+    }
+    await page.keyboard.up('KeyV');
+    expect(top2).toBeGreaterThan(ground2 + 0.2);
+    expect(await mode()).toBe('firstPerson');
+
+    // Reset keys: the keys come back (V orbits again), the pad keeps its change
+    await page.locator('.settings-chip').click();
+    await page.locator('.settings-tabs button', { hasText: 'Keys' }).click();
     await page.locator('.settings-row button', { hasText: 'Reset keys to defaults' }).click();
     await expect(jump.locator('.settings-bind').first()).toHaveText('Space');
-    const after = await page.evaluate(() => JSON.parse(localStorage.getItem('uncivil.bindings') ?? '{}'));
-    expect(after).toEqual({ pad: { jump: [2, -1], ragdoll: [-1, -1] } });
+    expect(JSON.parse((await stored())!)).toEqual({ pad: { jump: [2, -1], ragdoll: [-1, -1] } });
+    await expect(page.locator('#hud-help')).toContainText('V orbit');
+    // Reset gamepad buttons: the pad's too; nothing left stored
+    await page.locator('.settings-tabs button', { hasText: 'Pad' }).click();
+    await page.locator('.settings-row button', { hasText: 'Reset gamepad buttons to defaults' }).click();
+    await expect(padJump.locator('.settings-bind').first()).toHaveText('A');
+    expect(await stored()).toBeNull();
+    // Reset all settings resets the bindings as well
+    await page.locator('.settings-tabs button', { hasText: 'Keys' }).click();
+    await jump.locator('.settings-bind').first().click();
+    await page.keyboard.press('KeyF');
+    await expect(jump.locator('.settings-bind').first()).toHaveText('F');
+    expect(await stored()).not.toBeNull();
+    await page.locator('.settings-tabs button', { hasText: 'Interface' }).click();
+    await page.locator('.settings-row button', { hasText: 'Reset all settings' }).click();
+    expect(await stored()).toBeNull();
+    await page.locator('.settings-tabs button', { hasText: 'Keys' }).click();
+    await expect(jump.locator('.settings-bind').first()).toHaveText('Space');
     expect(problems).toEqual([]);
 });
 
-test('UI boxes never overlap: portrait phone, portrait tablet, desktop and landscape phone', async ({ page }) => {
+test('UI boxes never overlap: small and large portrait phones, portrait tablet, desktop and landscape phone', async ({
+    page
+}) => {
     const problems = await boot(page, '?level=yard&t=4&debug&quality=low#cell100');
     type Rect = { l: number; t: number; r: number; b: number };
     const rects = () =>
@@ -416,6 +461,7 @@ test('UI boxes never overlap: portrait phone, portrait tablet, desktop and lands
         return r;
     };
     for (const [w, h] of [
+        [360, 740],
         [390, 844],
         [768, 1408],
         [1280, 720],
@@ -436,6 +482,41 @@ test('UI boxes never overlap: portrait phone, portrait tablet, desktop and lands
             await assertLayout(`${w}x${h} panel closed`, w, h);
         }).toPass({ timeout: 20_000 });
     }
+    // the settings menu at 360 px: the Keys section's rows stay inside the dialog, and the six section
+    // tabs scroll with the current one fully in view
+    await page.setViewportSize({ width: 360, height: 740 });
+    await page.locator('.settings-chip').click();
+    await page.locator('.settings-tabs button', { hasText: 'Keys' }).click();
+    await expect(async () => {
+        const fit = await page.evaluate(() => {
+            const d = document.querySelector('.settings')!.getBoundingClientRect();
+            const bar = document.querySelector('.settings-tabs')!.getBoundingClientRect();
+            const sel = document.querySelector('.settings-tabs [aria-selected=true]')!.getBoundingClientRect();
+            const out = [...document.querySelectorAll('.settings-panel *')].filter((e) => {
+                const b = e.getBoundingClientRect();
+                return b.width > 0 && (b.left < d.left - 0.5 || b.right > d.right + 0.5);
+            }).length;
+            return {
+                out,
+                selIn: sel.left >= bar.left - 0.5 && sel.right <= bar.right + 0.5,
+                page: document.documentElement.scrollWidth
+            };
+        });
+        expect(fit.out).toBe(0);
+        expect(fit.selIn).toBe(true);
+        expect(fit.page).toBeLessThanOrEqual(360);
+    }).toPass({ timeout: 20_000 });
+    for (const t of ['Interface', 'Game']) {
+        await page.locator('.settings-tabs button', { hasText: t }).click();
+        const inView = await page.evaluate(() => {
+            const bar = document.querySelector('.settings-tabs')!.getBoundingClientRect();
+            const sel = document.querySelector('.settings-tabs [aria-selected=true]')!.getBoundingClientRect();
+            return sel.left >= bar.left - 0.5 && sel.right <= bar.right + 0.5;
+        });
+        expect(inView, `${t} tab in view`).toBe(true);
+    }
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.settings-backdrop')).toBeHidden();
     // narrow screens get >= 40 px touch targets
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator('.debug-chip').click();
