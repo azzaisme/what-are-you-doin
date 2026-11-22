@@ -2493,6 +2493,12 @@ window.__riverLab = {
         sim.physics.place(e.id, { p: { x, y, z }, q });
         return true;
     },
+    /** Turns weather zone `n` on at full strength now (host only; tests and screenshots). */
+    weather: (n: number) => {
+        if (guestSession || !sim.hazards.weather) return false;
+        sim.hazards.weather.startNow(n, 60);
+        return true;
+    },
     interaction: () => sim.interaction(),
     /** The hazards (Epic 8): water level, phases, and the rendered water plane's height. */
     hazards: () => ({

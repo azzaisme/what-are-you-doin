@@ -103,4 +103,17 @@ describe('weather along the journey', () => {
         expect(a.s.phase).toBe(W_PHASE.idle);
         expect(a.s.kind).toBe(WEATHER.none);
     });
+
+    it('startNow: the weather at full strength straight away, then it runs out and clears as usual', () => {
+        const s = new WeatherScheduler({ zones: [zone({}), zone({ kind: WEATHER.fog, fogEnd: 30 })] });
+        s.startNow(1, HZ);
+        expect(s.kind).toBe(WEATHER.fog);
+        expect(s.strength).toBeCloseTo(1, 6);
+        const r = run(s, 60 * 30, () => [{ x: 0, z: 0 }]);
+        expect(r.said.map((m) => m.text)).toEqual(['clearing']);
+        expect(s.phase).toBe(W_PHASE.idle);
+        // it has been: it does not come again
+        run(s, 60 * 30, () => [{ x: -20, z: 0 }]);
+        expect(s.phase).toBe(W_PHASE.idle);
+    });
 });

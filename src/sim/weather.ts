@@ -124,6 +124,21 @@ export class WeatherScheduler {
         return w && this.phase !== W_PHASE.idle ? { force: w.force * this.strength, dir: w.dir } : null;
     }
 
+    /**
+     * Zone `n`'s weather now, at full strength, as if it had come and built up (tests and the
+     * screenshots, where waiting for it in a software-rendered browser takes minutes). It then runs
+     * out its time and clears as usual.
+     */
+    startNow(n: number, hz: number): void {
+        const z = this.spec.zones[n];
+        if (!z) return;
+        this.zone = n;
+        this.phase = W_PHASE.active;
+        this.t = Math.ceil(0.15 * z.activeS * hz);
+        this.done[n] = true;
+        if (this.reached[n] < 0) this.reached[n] = 0;
+    }
+
     /** One tick. Returns a message to say, if any. */
     step(i: WeatherInput): string | null {
         const zones = this.spec.zones;
