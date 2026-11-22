@@ -1,6 +1,6 @@
 /**
  * Player settings: what the settings menu changes, saved in local storage per browser. URL
- * parameters (?quality=, ?look=, ?bob=, ?view=) still win for that visit, so test and share links
+ * parameters (?quality=, ?look=, ?bob=, ?view=, ?sound=off) still win for that visit, so test and share links
  * keep working, but they are not saved.
  *
  * The voxel size is a setting too, but it keeps its own storage key and URL hash (see
@@ -30,6 +30,10 @@ export interface Settings {
     uiScale: number;
     /** Control hints at the top of the screen. */
     controlHints: boolean;
+    /** Sound: everything, effects (impacts, steps, the ute, the hazards' tells), ambience (creek, wind, birds). */
+    volumeMaster: number;
+    volumeEffects: number;
+    volumeAmbience: number;
 }
 
 export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
@@ -45,7 +49,10 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
     particles: true,
     overShoulder: false,
     uiScale: 1,
-    controlHints: true
+    controlHints: true,
+    volumeMaster: 0.8,
+    volumeEffects: 1,
+    volumeAmbience: 0.7
 });
 
 /** Ranges for the numeric settings (min, max, step). */
@@ -54,7 +61,10 @@ export const SETTING_RANGES = {
     padLookSpeed: { min: 0.3, max: 3, step: 0.1 },
     touchLookSpeed: { min: 0.3, max: 3, step: 0.1 },
     fov: { min: 40, max: 100, step: 1 },
-    uiScale: { min: 0.8, max: 1.6, step: 0.1 }
+    uiScale: { min: 0.8, max: 1.6, step: 0.1 },
+    volumeMaster: { min: 0, max: 1, step: 0.05 },
+    volumeEffects: { min: 0, max: 1, step: 0.05 },
+    volumeAmbience: { min: 0, max: 1, step: 0.05 }
 } as const satisfies Partial<Record<keyof Settings, { min: number; max: number; step: number }>>;
 
 export const SETTINGS_STORAGE_KEY = 'uncivil.settings';
@@ -132,6 +142,7 @@ export function urlOverrides(params: URLSearchParams): Partial<Settings> {
     const look = params.get('look');
     if (look === 'pixel' || look === 'default') o.look = look;
     if (params.get('bob') === 'off') o.cameraBob = false;
+    if (params.get('sound') === 'off') o.volumeMaster = 0;
     const view = params.get('view');
     if (view === 'chase' || view === 'side') o.overShoulder = true;
     return o;

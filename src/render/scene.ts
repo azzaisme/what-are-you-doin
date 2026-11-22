@@ -12,6 +12,8 @@ import {
     ADDRESS_REPEAT,
     AppBase,
     AppOptions,
+    AudioHandler,
+    AudioListenerComponentSystem,
     CameraComponentSystem,
     CameraFrame,
     Color,
@@ -34,6 +36,8 @@ import {
     SHADOW_PCF5_16F,
     SHADOWUPDATE_REALTIME,
     ScriptComponentSystem,
+    SoundComponentSystem,
+    SoundManager,
     StandardMaterial,
     TONEMAP_ACES2,
     Texture,
@@ -124,9 +128,13 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
         RenderComponentSystem,
         CameraComponentSystem,
         LightComponentSystem,
-        ScriptComponentSystem
+        ScriptComponentSystem,
+        // sound (src/audio): the Web Audio context is only created on the first user gesture
+        SoundComponentSystem,
+        AudioListenerComponentSystem
     ];
-    options.resourceHandlers = [TextureHandler];
+    options.resourceHandlers = [TextureHandler, AudioHandler];
+    options.soundManager = new SoundManager();
 
     const app = new AppBase(canvas);
     app.init(options);
