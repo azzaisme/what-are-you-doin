@@ -298,7 +298,9 @@ describe('reconnect', () => {
         expect(c.slot).not.toBe(slotA);
         // a stranger reusing a connected guest's token gets no one else's player
         const copy = await g.join('guest-copy', 'tokenbbbb2');
-        g.until(() => copy.slot > 0);
+        g.run(300);
+        expect(copy.slot).toBe(-1); // waits: b might be a page that just reloaded
+        g.until(() => copy.slot > 0, 900);
         expect(copy.slot).not.toBe(b.slot);
         expect(copy.slot).not.toBe(slotA);
         // newcomers appear clear of everyone, the held player included
@@ -316,6 +318,22 @@ describe('reconnect', () => {
         g.inputs.set(again, cmd(0, { moveZ: 1 }));
         g.run(90);
         expect(g.sim.players[slotA].z).toBeLessThan(where.z - 1);
+    });
+
+    it('a reloaded page that arrives before its old one has gone gets its player back', async () => {
+        const g = await new Game(BAD).start();
+        const old = await g.join('guest-old', 'tokenaaaa1');
+        g.until(() => old.slot > 0);
+        const slot = old.slot;
+        // the new page is in the room while the host still sees the old one (a missed goodbye)
+        const fresh = await g.join('guest-new', 'tokenaaaa1');
+        g.run(120);
+        expect(fresh.slot).toBe(-1);
+        g.inputs.delete(old);
+        old.leave();
+        g.until(() => fresh.slot > 0);
+        expect(fresh.slot).toBe(slot);
+        expect(g.hs.droppedSlots()).toEqual([]);
     });
 
     it('a dropped player lets go of what they carried (the bucket); past the grace period their slot frees', async () => {

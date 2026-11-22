@@ -35,6 +35,12 @@ export const SNAPSHOT_EVERY = 3;
 export const GUEST_DELAY_TICKS = 9;
 /** A dropped guest's player stays in the world this long for them to come back (60 s). */
 export const REJOIN_GRACE_TICKS = 60 * SIM_HZ;
+/**
+ * A newcomer whose token is still in use by a connected guest waits this long for that guest to
+ * drop (a reloaded page can arrive before the host notices the old one went) before it gets a
+ * place of its own (a duplicated tab carries the same token, and never takes a live player).
+ */
+export const TOKEN_WAIT_TICKS = 10 * SIM_HZ;
 /** A guest waits this long for a host that went quiet before leaving the game. */
 export const HOST_GRACE_MS = 20_000;
 
@@ -129,6 +135,8 @@ export class HostSession {
     private readonly dropped = new Map<number, { token: string; tick: number; released: boolean }>();
     /** guest peer id -> rejoin token */
     private readonly tokens = new Map<string, string>();
+    /** newcomer peer id -> tick it first showed a token a connected guest holds */
+    private readonly waiting = new Map<string, number>();
     /** guest peer id -> newest snapshot tick that guest applied */
     private readonly acks = new Map<string, number>();
     /** snapshot tick -> when it was published (this.now() ms), for the last 10 s */
@@ -217,9 +225,17 @@ export class HostSession {
                 left.push(slot);
             }
         }
+        for (const id of this.waiting.keys()) if (!ids.has(id)) this.waiting.delete(id);
+        const inUse = new Set(this.tokens.values());
         for (const g of guests) {
             if (this.slots.has(g.id)) continue;
             const token = readToken(g.state.rj);
+            if (token && inUse.has(token)) {
+                const since = this.waiting.get(g.id) ?? this.sim.tick;
+                this.waiting.set(g.id, since);
+                if (this.sim.tick - since < TOKEN_WAIT_TICKS) continue;
+            }
+            this.waiting.delete(g.id);
             let slot = -1;
             for (const [s, d] of this.dropped) {
                 if (token && d.token === token) slot = s;
@@ -234,7 +250,8 @@ export class HostSession {
                 joined.push(slot);
             }
             this.slots.set(g.id, slot);
-            if (token) this.tokens.set(g.id, token);
+            // a second holder of a token (a duplicated tab) plays without one: it can't rejoin by it
+            if (token && !inUse.has(token)) this.tokens.set(g.id, token);
             this.seen.set(g.id, readInput(g.state.in) ?? emptyInput());
         }
         this.expire(left);
@@ -329,11 +346,8 @@ export class HostSession {
             );
         }
         if (sim.events.length < this.lastEventCount) this.lastEventCount = sim.events.length; // reset
-        if (this.dropped.size) {
-            const left: number[] = [];
-            this.expire(left);
-            this.changed([], left, [], []);
-        }
+        // held places expire and waiting newcomers time out without any network event
+        if (this.dropped.size || this.waiting.size) this.reconcile();
         if (sim.tick % SNAPSHOT_EVERY !== 0) return;
         const bytes = encodeSnapshot(sim.tick, sim.entities);
         this.lastSnapshotBytes = bytes.length;
