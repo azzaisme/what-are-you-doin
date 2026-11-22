@@ -339,6 +339,8 @@ describe('forestry: the logging stand', () => {
         for (let k = 0; k < 60; k++) s.step(cmd(from.k++, lookAt(s, 0, c.x, c.y, c.z)));
         // held: the grab's own damping, not the lying damping
         expect([GRAB.heldAngularDamping, GRAB.hangingAngularDamping]).toContain(pb.body.angularDamping());
+        // and the base the grab restores on release is the free one (thrown, it keeps its spin)
+        expect(pb.baseAngularDamping).toBe(WOOD.fallDamping);
         // let go: the base comes back, and lying slow it is damped hard again
         s.step(cmd(from.k++, { grab: true }));
         expect(s.physics.heldIdOf(0)).toBe(-1);

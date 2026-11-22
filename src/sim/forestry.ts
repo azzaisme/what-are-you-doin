@@ -598,9 +598,12 @@ export class Forestry {
         const id = this.ents.felled[k].id;
         const pb = pw.bodies.get(id)!;
         if (!pb.enabled) return;
-        // held: the grab sets its own damping, and restores the base on release
+        // held: the grab sets its own damping and restores the base on release, so the base is
+        // the free one meanwhile (a log thrown or dropped keeps its spin; slow, it is damped again
+        // from the next tick)
         if (pw.holders(id) > 0) {
             f.settling = false;
+            pb.baseAngularDamping = WOOD.fallDamping;
             return;
         }
         const v = pb.body.linvel();

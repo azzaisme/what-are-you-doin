@@ -78,6 +78,9 @@ class Play {
     /** When set, every step's two commands are recorded here (to replay them elsewhere). */
     script: [PlayerCommand, PlayerCommand][] | null = null;
 
+    /** Called after every step (for watching a run). */
+    afterStep: (() => void) | null = null;
+
     /** Steps with player 0's and player 1's commands (each gets its kept look unless given). */
     step(a: Cmd = {}, b: Cmd = {}, k = 1): void {
         for (let i = 0; i < k; i++) {
@@ -89,6 +92,7 @@ class Play {
             this.pitch[1] = c1.pitch;
             this.script?.push([c0, c1]);
             this.s.step(c0, c1);
+            this.afterStep?.();
             this.n++;
         }
     }
@@ -568,7 +572,13 @@ describe('determinism: sawing and regrowth', () => {
         g.step({}, {}, 300);
         mark(); // felled and lying
         const log = s.forestry.logOf(tree)!;
+        // (which recorded steps have the log held by both: the mutation check below alters some)
+        const heldBoth = new Set<number>();
+        g.afterStep = () => {
+            if (s.physics.holders(log.id) === 2) heldBoth.add(g.script!.length - 1);
+        };
         carryIntoGuide(g, log);
+        g.afterStep = null;
         for (let k = 0; k < 240 && s.sawmill!.phase === 'ready'; k++) g.step();
         expect(s.sawmill!.stats.takenIds).toEqual([log.id]);
         mark(); // taken by the sawmill
@@ -587,13 +597,14 @@ describe('determinism: sawing and regrowth', () => {
 
         // ---- run 2: a fresh sim (set up as run 1's: two players, the same 30 idle steps) fed the
         // recorded commands, open loop (nothing steers it back on course). Run 3, the check that
-        // the comparison can fail: the same, but player 1 sidesteps for 10 ticks during the carry
-        const replay = (alter: (k: number, b: PlayerCommand) => PlayerCommand): unknown[] => {
+        // the comparison can fail: the same, but player 1 sidesteps for 10 ticks while both carry
+        // the log
+        const replay = (alter: (k: number, b: PlayerCommand, r: LabSim) => PlayerCommand): unknown[] => {
             const r = new Play(2).s;
             const got: unknown[] = [];
             let m = 0;
             g.script!.forEach(([a, b], k) => {
-                r.step(a, alter(k, b));
+                r.step(a, alter(k, b, r));
                 while (m < marks.length && marks[m] === k + 1) {
                     got.push(woodState(r));
                     m++;
@@ -604,9 +615,17 @@ describe('determinism: sawing and regrowth', () => {
         const got = replay((_k, b) => b);
         expect(got.length).toBe(want.length);
         for (let k = 0; k < want.length; k++) expect(got[k]).toEqual(want[k]);
-        const k0 = marks[0] + 300; // carrying the log
-        const altered = replay((k, b) => (k >= k0 && k < k0 + 10 ? { ...b, moveX: 1 } : b));
+        // the altered ticks: a second into the two-beaver carry (both hold it all ten ticks)
+        const k0 = Math.min(...heldBoth) + 60;
+        for (let k = k0; k < k0 + 10; k++) expect(heldBoth.has(k)).toBe(true);
+        let heldThen = -1;
+        const altered = replay((k, b, r) => {
+            if (k === k0) heldThen = r.physics.holders(log.id);
+            return k >= k0 && k < k0 + 10 ? { ...b, moveX: 1 } : b;
+        });
+        expect(heldThen).toBe(2);
         expect(altered.length).toBe(want.length);
+        expect(altered[0]).toEqual(want[0]); // (felled: before the change, the same)
         expect(altered[1]).not.toEqual(want[1]); // the sawmill takes the log
         expect(altered.at(-1)).not.toEqual(want.at(-1));
     }, 300_000);
