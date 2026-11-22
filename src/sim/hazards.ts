@@ -23,6 +23,8 @@
 import type { LevelDef } from '../levels/level.ts';
 
 import { SIM_HZ } from './clock.ts';
+import { TreeHazard } from './hazard-tree.ts';
+import type { TreeHazardHost } from './hazard-tree.ts';
 import type { SimEvent } from './lab-sim.ts';
 import { GRAB } from './physics/grab.ts';
 import { applyFlood, pressStanding } from './physics/water.ts';
@@ -59,6 +61,8 @@ export interface HazardSpec {
     flood?: FloodSpec;
     gust?: GustSpec;
     handbrake?: HandbrakeSpec;
+    /** The tree that falls towards the ute (#74, src/sim/hazard-tree.ts). */
+    tree?: boolean;
 }
 
 /** Timings (seconds) and budgets. */
@@ -126,8 +130,13 @@ export interface HazardHost {
     readonly entities: readonly { id: number; name: string }[];
     isSlotActive(i: number): boolean;
     /** The drivable ute (its body) and who drives it (-1: nobody). */
-    readonly vehicle: { pb: { body: { rotation(): Quat4; linvel(): Vec3 } }; chocked(): boolean } | null;
+    readonly vehicle: {
+        pb: { body: { rotation(): Quat4; linvel(): Vec3; translation(): Vec3 } };
+        chocked(): boolean;
+    } | null;
     readonly driver: number;
+    /** The logging stand (the falling-tree hazard). */
+    readonly forestry?: TreeHazardHost['forestry'];
 }
 
 interface Quat4 {
@@ -182,6 +191,8 @@ export class HazardDirector {
     lastGustForce = 0;
     floodMoved = 0;
     private gustOver = 0;
+    /** The tree that falls towards the ute (#74). */
+    readonly tree = new TreeHazard();
     /** The handbrake prank: phase, ticks in it, count, how long the ute has stood parked. */
     brakePhase: number = PHASE.idle;
     brakeT = 0;
@@ -206,6 +217,7 @@ export class HazardDirector {
     }
 
     reset(): void {
+        this.tree.reset();
         this.waterY = this.baseY;
         this.rise = 0;
         this.floodPhase = this.gustPhase = PHASE.idle;
@@ -233,6 +245,7 @@ export class HazardDirector {
             this.floodPhase !== PHASE.idle ||
             this.gustPhase !== PHASE.idle ||
             this.brakePhase !== PHASE.idle ||
+            this.tree.busy ||
             this.floodPending >= 0
         );
     }
@@ -262,6 +275,13 @@ export class HazardDirector {
         if (spec.flood) this.stepFlood(h, spec.flood, tick);
         if (spec.gust) this.stepGust(h, spec.gust, tick, this.seed);
         if (spec.handbrake) this.stepHandbrake(h, spec.handbrake, tick);
+        if (spec.tree && h.forestry) {
+            const ute = h.vehicle?.pb.body.translation() ?? null;
+            this.tree.step(
+                { tick, forestry: h.forestry, utePos: ute, say: (t) => this.say(h, t) },
+                this.canStart(h, tick)
+            );
+        }
         if (this.busy) this.quietFrom = tick + S(HAZARD.safeS);
     }
 

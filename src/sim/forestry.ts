@@ -144,6 +144,12 @@ export class Forestry {
     private readonly pending: string[] = [];
     /** Totals (tests, debug). */
     readonly stats = { bites: 0, blows: 0, felled: 0, bucked: 0, regrown: 0, returned: 0 };
+    /**
+     * Hazard hooks (Epic 8, src/sim/hazard-tree.ts): an extra lean (a tilt, rad, towards x/z) on a
+     * tree's fall, and whether a cut-through tree must hang on a moment before it falls.
+     */
+    fallBias: ((n: number) => { x: number; z: number } | null) | null = null;
+    holdFall: ((n: number) => boolean) | null = null;
     private tick = 0;
     private fxChips = 0;
     private fxNeedles = 0;
@@ -409,7 +415,11 @@ export class Forestry {
             st.warned = true;
             this.say(`The pine creaks. It will fall ${compass(this.fallDirection(n))}: stand clear!`);
         }
-        if (st.cut >= 1) this.fell(n);
+        if (st.cut >= 1) {
+            // a hazard holds it: it hangs on its last fibres (the next bite or blow fells it)
+            if (this.holdFall?.(n)) st.cut = 0.95;
+            else this.fell(n);
+        }
     }
 
     /**
@@ -423,8 +433,9 @@ export class Forestry {
         const len = Math.hypot(st.dirX, st.dirZ);
         let ax = len < 1e-3 ? 0 : -st.dirX / len;
         let az = len < 1e-3 ? 0 : -st.dirZ / len;
-        const x = (t.lean?.x ?? 0) + ax * WOOD.tilt0;
-        const z = (t.lean?.z ?? 0) + az * WOOD.tilt0;
+        const bias = this.fallBias?.(n);
+        const x = (t.lean?.x ?? 0) + (bias?.x ?? 0) + ax * WOOD.tilt0;
+        const z = (t.lean?.z ?? 0) + (bias?.z ?? 0) + az * WOOD.tilt0;
         if (Math.hypot(x, z) > WOOD.tilt0 * 0.25) return { x, z };
         // balanced (cut evenly all round, or the push cancels the lean): the cut decides, else
         // its crown's yaw does

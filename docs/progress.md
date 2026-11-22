@@ -1,5 +1,37 @@
 # Progress log
 
+## Epic 8: a tree falls towards the ute (2026-11-22, #74)
+
+The logging stand can now fight back. Cut a stand tree with the ute parked close by, and the pine
+leans towards the ute.
+
+- **When:** a player starts cutting (chewing or the axe) a stand tree while the ute stands within
+  5.5 m of it (trunk to the ute's nearer end).
+- **The tell:** a crack (a snap and a low creak) and a toast the moment the cut starts: "The pine
+  is leaning towards the ute! Move the ute, or cut from its side so it falls away."
+- **Time to react:** the tree can't fall for 4 s after the crack, however fast it is chewed. It
+  hangs on its last fibres, and the next bite after that fells it. Tested: chewed as fast as it
+  goes, it falls no sooner.
+- **What happens:** when it falls with the ute still in reach, a lean towards the ute (0.06 rad,
+  less than a cut's push of 0.07) joins the fall. Chewed from the north, where it would fall
+  south, square to the ute, it comes down pulled round towards the ute instead (tested: within
+  55° of it).
+- **Counterplay, each tested by player input:**
+    - **Cut from the ute's side:** the cut's push away from the cutter beats the lean, so it falls
+      away from the ute (tested: more than 120° from it).
+    - **Move the ute:** at the crack, get in, drive it out of reach, get out, then finish the tree.
+      It falls exactly as the same cut does with no hazard (tested: within 5°).
+    - **A rope** waits for ropes.
+- **Budget, tested:**
+    - not in the first 20 s;
+    - at most two, the second at least 60 s after the first ends;
+    - none while another hazard runs (a tree cut during the flood's warning brings nothing).
+- **Online, tested:** the guest gets the toast (and so the crack, which plays from it) and sees
+  the trunk come down towards the ute in the host's snapshots.
+- **Playtest log:** the summary counts falling trees, and the script says what to watch for.
+- **Code:** `src/sim/hazard-tree.ts`, with two small hooks in the forestry (an extra lean on a
+  fall, a hold on it) and a few lines in the director.
+
 ## Epic 8: the logging sounds and the Valley's waterfall (2026-11-22, #82, #80)
 
 The Timber Yard's logging now sounds as it looks. Before, the sounds existed but nothing played them.

@@ -51,6 +51,8 @@ Then start a timer and stay quiet.
       the warning? Do they lower the plank, call their teammate over, put it down, or get it blown in?
     - **The ute** (if they park it on a slope): do they hear the ratchet and read the warning? Do
       they run to get in, or wedge something against a wheel?
+    - **The falling tree** (if they cut a stand tree with the ute close by): do they hear the
+      crack and read the warning? Do they move the ute, go round to cut from its side, or carry on?
     - **Every fall into the creek:** what were they trying to do?
     - **Stuck:** a minute or more with no progress. Note what they are trying.
 
@@ -108,6 +110,10 @@ slice may be too short.
   lying flat is too low: the wheel rolls over it). If it ends up
   in the creek, the ute's usual recovery applies: it rights itself, and the driver can drop it back
   on firm ground.
+- **The falling tree:** start cutting a stand tree while the ute stands within 5.5 m of it, and
+  the pine cracks: a toast says it leans towards the ute. It can't fall for 4 s after that, however
+  fast it is chewed. Then, if the ute is still in reach, it falls pulled towards it. Moving the ute
+  out of reach, or cutting from the ute's side, makes it fall away. At most two, 60 s apart.
 - There is only one hazard at a time, and 15 s of quiet after each one.
 
 ## Recording the results

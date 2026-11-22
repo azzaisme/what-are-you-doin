@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { soundBodies } from '../../src/audio/game-audio.ts';
+import { eventSounds, soundBodies } from '../../src/audio/game-audio.ts';
 import { HOLD_FADE, HeldLoops } from '../../src/audio/held-loops.ts';
 import { sfx } from '../../src/audio/sfx.ts';
 import type { SfxName } from '../../src/audio/sfx.ts';
@@ -8,6 +8,7 @@ import { LOOPS, SOUND_NAMES, SYNTH_RATE, synthesize } from '../../src/audio/synt
 import type { SoundName, SynthSound } from '../../src/audio/synth.ts';
 import { timberYardLevel } from '../../src/levels/timber-yard.ts';
 import { valleyLevel } from '../../src/levels/valley.ts';
+import { TREE_TELL } from '../../src/sim/hazard-tree.ts';
 
 // a test that installs an sfx sink never leaves it installed for later tests, even on a failure
 afterEach(() => sfx.setSink(null));
@@ -141,6 +142,15 @@ describe('sound: every sound is synthesized (original, nothing to license)', () 
         expect(made.slice(1)).toEqual(['pump:pour', 'pump:slosh']);
         expect(destroyed.slice(1)).toEqual(['pump:pour']);
         expect(loops.size).toBe(1);
+    });
+
+    it('events sound everywhere: a ding for a step, a fanfare at the goal, the falling tree’s crack from its toast', () => {
+        expect(eventSounds('step', '').map((x) => x.name)).toEqual(['ding']);
+        expect(eventSounds('goal', '').map((x) => x.name)).toEqual(['fanfare']);
+        expect(eventSounds('hazard', TREE_TELL).map((x) => x.name)).toEqual(['snap', 'creak']);
+        // other hazard toasts sound from their state (the siren, the gust), not their text
+        expect(eventSounds('hazard', 'The handbrake is off! The ute is rolling.')).toEqual([]);
+        expect(eventSounds('fell', 'Splash!')).toEqual([]);
     });
 
     it('the Valley’s waterfall is heard from where it falls (its sound spot is the waterfall piece)', () => {

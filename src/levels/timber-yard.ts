@@ -701,7 +701,9 @@ export const timberYardLevel: LevelDef = {
         },
         gust: { force: 1050 },
         // parked on a slope (3.5 degrees or more) and left: the handbrake lets go
-        handbrake: { slope: 0.06 }
+        handbrake: { slope: 0.06 },
+        // a stand tree cut with the ute within its reach leans towards the ute
+        tree: true
     },
     spawn: { x: 1.2, z: 6.2, yaw: 0.12, pitch: -0.1 },
     orbitHome: { pos: [9, 4.2, 12], focus: [-1, 0.5, 0] },

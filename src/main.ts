@@ -1382,7 +1382,7 @@ function pollEvents(): void {
             if (e.n <= guestEventsSeen) continue;
             guestEventsSeen = e.n;
             showToast(e.text, e.kind);
-            audio.onEvent(e.kind);
+            audio.onEvent(e.kind, e.text);
             playtest.note(performance.now(), e.kind, e.text);
         }
         updateObjective();
@@ -1392,7 +1392,7 @@ function pollEvents(): void {
     while (seenEvents < sim.events.length) {
         const e = sim.events[seenEvents++];
         showToast(e.text, e.kind);
-        audio.onEvent(e.kind);
+        audio.onEvent(e.kind, e.text);
         playtest.note(performance.now(), e.kind, e.text);
         updateObjective();
     }
