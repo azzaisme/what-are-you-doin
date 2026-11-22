@@ -1193,8 +1193,8 @@ function interactionText(i: number, pad: boolean): string {
     const both = it.shared ? ' together' : '';
     if (it.driving)
         return pad
-            ? 'Driving · left stick drive and steer · A brake · RT get out'
-            : 'Driving · W/S throttle · A/D steer · Space brake · click or E to get out';
+            ? 'Driving · left stick drive and steer · A brake · B recover · RT get out'
+            : 'Driving · W/S throttle · A/D steer · Space brake · Q recover · click or E to get out';
     if (it.seat >= 0) return pad ? 'Riding along · RT get out' : 'Riding along · click or E to get out';
     if (it.target === 'ute') return pad ? 'RT to drive the ute' : 'Click to drive the ute';
     if (it.holding)
@@ -1253,7 +1253,7 @@ function updatePrompt(): void {
             const it = guestInteraction() ?? sim.interaction(0);
             touch.setHolding(!!it.holding);
             t = it.driving
-                ? 'Driving · stick to drive · jump to brake · grab to get out'
+                ? 'Driving · stick to drive · jump to brake · drop to recover · grab to get out'
                 : it.seat >= 0
                   ? 'Riding along · grab to get out'
                   : it.holding

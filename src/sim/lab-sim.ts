@@ -117,6 +117,11 @@ export class LabSim {
     private uteSpin = 0;
     /** The drivable ute's physics (levels whose ute is 'drivable'), or null. */
     vehicle: UteVehicle | null = null;
+    /** Recovery: the last place the ute stood level on solid ground, and how long it has lain tipped. */
+    private readonly uteSafe = pose();
+    private uteSafeYaw = 0;
+    private uteSafeSet = false;
+    private uteTipped = 0;
     /** Who sits where: [driver, passenger], player indices or -1. */
     readonly seats: number[] = [-1, -1];
     /** Player index in the driver's seat, or -1. */
@@ -283,6 +288,8 @@ export class LabSim {
         addLabKinematics(pw, this.beaver.id, drivable ? -1 : this.ute.id, this.beaver.pose, this.ute.pose);
         this.vehicle = drivable ? new UteVehicle(pw, this.ute.id, ute.pose) : null;
         this.seats.fill(-1);
+        this.uteSafeSet = false;
+        this.uteTipped = 0;
         if (this.physicsProps) {
             // the level places its props by entity name; entities it does not place stay hidden
             for (const placement of this.level.props) {
@@ -427,7 +434,10 @@ export class LabSim {
         if (this.physicsProps) {
             if (cmd.action === ACTION_RAGDOLL) this.launchRagdoll();
             else if (cmd.action === ACTION_DROP_TEST) this.dropTest();
-            else if (cmd.action === ACTION_RESET_PROPS) for (const e of this.propEntities) pw.respawn(e.id);
+            else if (cmd.action === ACTION_RESET_PROPS) {
+                for (const e of this.propEntities) pw.respawn(e.id);
+                if (this.vehicle) pw.respawn(this.vehicle.id);
+            }
             this.updateStress();
         }
 
@@ -440,6 +450,7 @@ export class LabSim {
         pw.step();
         this.readPhysics();
         this.readVehicle();
+        this.watchUte();
         this.applyRules();
         const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
         this.physicsMs = t1 - t0;
@@ -457,6 +468,7 @@ export class LabSim {
         if (seat >= 0) {
             // in the ute: grab gets out; the driver's W/S throttle, A/D steer, jump brakes
             if (cmd.grab) this.leaveUte(i);
+            else if (seat === 0 && cmd.action === ACTION_DROP) this.recoverUte();
             else if (seat === 0) {
                 this.driveInput.throttle = cmd.moveZ;
                 this.driveInput.steer = cmd.moveX;
@@ -729,6 +741,51 @@ export class LabSim {
         for (let w = 0; w < 4; w++) u.anim[UTE_DROP_0 + w] = Math.max(-0.15, Math.min(0.2, v.wheelDrop(w)));
         u.visible = true;
         for (let k = 0; k < this.seats.length; k++) if (this.seats[k] >= 0) this.seatPlayer(this.seats[k], k);
+    }
+
+    /**
+     * Recovery (#46): an overturned or stuck ute never loses the run. Each tick it stands level on
+     * all four wheels on solid ground, the spot is kept as its safe point; tipped over and still
+     * for a moment, it rights itself where it is; the driver's drop (Q, B, the drop button) puts
+     * it back on its safe point. Out of the world, the physics puts it back at its spawn.
+     */
+    private watchUte(): void {
+        const v = this.vehicle;
+        if (!v) return;
+        const body = v.pb.body;
+        const q = this.ute.pose.q;
+        // the ute's up axis, y component
+        const upY = 1 - 2 * (q.x * q.x + q.z * q.z);
+        const lv = body.linvel();
+        const still = Math.hypot(lv.x, lv.y, lv.z) < 1;
+        let level = upY > 0.95;
+        for (let w = 0; w < 4 && level; w++) level = v.wheelInContact(w) && v.groundIds[w] < 0;
+        if (level && Math.abs(v.speed()) < 4) {
+            this.uteSafe.p.x = this.ute.pose.p.x;
+            this.uteSafe.p.y = this.ute.pose.p.y;
+            this.uteSafe.p.z = this.ute.pose.p.z;
+            this.uteSafeYaw = uteYaw(q);
+            this.uteSafeSet = true;
+        }
+        this.uteTipped = upY < 0.5 && still ? this.uteTipped + 1 : 0;
+        if (this.uteTipped >= UTE_RIGHTING_TICKS) {
+            this.uteTipped = 0;
+            const p = this.ute.pose.p;
+            this.physics.place(v.id, pose(p.x, p.y + 0.8, p.z, quatFromYawPitchRoll(uteYaw(q), 0, 0)));
+            this.events.push({ tick: this.tick, kind: 'ute', text: 'The ute is back on its wheels.' });
+        }
+    }
+
+    /** The driver asked: the ute goes back to the last place it stood level on solid ground. */
+    private recoverUte(): void {
+        const v = this.vehicle;
+        if (!v) return;
+        if (this.uteSafeSet) {
+            const p = this.uteSafe.p;
+            this.physics.place(v.id, pose(p.x, p.y + 0.3, p.z, quatFromYawPitchRoll(this.uteSafeYaw, 0, 0)));
+        } else this.physics.respawn(v.id);
+        this.uteTipped = 0;
+        this.events.push({ tick: this.tick, kind: 'ute', text: 'The ute is back where it last stood on firm ground.' });
     }
 
     /** Ute-local point to world. */
@@ -1353,5 +1410,13 @@ export const UTE_SEATS = [
     { x: -0.36, eyeY: 1.32, z: 0.12, exitX: -1.45 },
     { x: 0.36, eyeY: 1.32, z: 0.12, exitX: 1.45 }
 ] as const;
+/** How long a tipped-over ute lies still before it rights itself (ticks). */
+export const UTE_RIGHTING_TICKS = 90;
+
+/** Heading of a ute pose (rad, about +y; 0 faces +z). */
+function uteYaw(q: { x: number; y: number; z: number; w: number }): number {
+    return Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.x * q.x));
+}
+
 /** The driver's seat. */
 export const UTE_SEAT = UTE_SEATS[0];

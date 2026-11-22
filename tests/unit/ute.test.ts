@@ -343,6 +343,56 @@ describe('driving the Timber Yard ute with player commands', () => {
     }, 60_000);
 });
 
+describe('ute recovery (#46)', () => {
+    it('an overturned ute rights itself; a stuck one goes back to firm ground on the driver’s drop', async () => {
+        const { LabSim, UTE_RIGHTING_TICKS } = await import('../../src/sim/lab-sim.ts');
+        const { timberYardLevel } = await import('../../src/levels/timber-yard.ts');
+        const { neutralCommand, ACTION_DROP } = await import('../../src/sim/commands.ts');
+        const s = new LabSim({ level: timberYardLevel });
+        let n = 0;
+        const step = (c: Record<string, unknown> = {}, k = 1) => {
+            for (let i = 0; i < k; i++) s.step({ ...neutralCommand(n++), ...c });
+        };
+        step({}, 90);
+        s.fpActive = true;
+        step();
+        const v = s.vehicle!;
+        const u = s.ute;
+        const home = { ...u.pose.p };
+        const upY = () => 1 - 2 * (u.pose.q.x * u.pose.q.x + u.pose.q.z * u.pose.q.z);
+        // rolled onto its roof beside where it was parked
+        s.physics.place(v.id, pose(home.x + 3, home.y + 1.2, home.z, quatFromYawPitchRoll(0.3, 0, Math.PI)));
+        step({}, 30);
+        expect(upY()).toBeLessThan(0);
+        let k = 0;
+        while (upY() < 0.9 && k < UTE_RIGHTING_TICKS + 240) {
+            step();
+            k++;
+        }
+        step({}, 120);
+        console.log('righted after', (k / 60).toFixed(2), 's; up', upY().toFixed(3));
+        expect(upY()).toBeGreaterThan(0.95);
+        expect(Math.hypot(u.pose.p.x - home.x - 3, u.pose.p.z - home.z)).toBeLessThan(1.5);
+        for (let w = 0; w < 4; w++) expect(v.wheelInContact(w)).toBe(true);
+        expect(s.events.some((e) => e.text.includes('back on its wheels'))).toBe(true);
+        // its safe point is where it now stands; then it ends up nose-down in the creek
+        const safe = { ...u.pose.p };
+        expect(s.takeDriverSeat(0)).toBe(true);
+        const creek = timberYardLevel.rules!.goal;
+        const cx = (creek.minX + creek.maxX) / 2;
+        s.physics.place(v.id, pose(cx, home.y - 1.5, home.z - 6, quatFromYawPitchRoll(Math.PI, 0.7, 0)));
+        step({}, 30);
+        step({ action: ACTION_DROP });
+        step({}, 90);
+        console.log('recovered to', u.pose.p.x.toFixed(2), u.pose.p.y.toFixed(2), u.pose.p.z.toFixed(2));
+        expect(Math.hypot(u.pose.p.x - safe.x, u.pose.p.z - safe.z)).toBeLessThan(1);
+        expect(Math.abs(u.pose.p.y - safe.y)).toBeLessThan(0.2);
+        expect(upY()).toBeGreaterThan(0.95);
+        // the driver rode along
+        expect(s.driver).toBe(0);
+    }, 60_000);
+});
+
 describe('the ute crosses a beam bridge (Epic 4 gate)', () => {
     it('two loose beams laid under its wheel tracks take its weight over the creek', async () => {
         const { LabSim } = await import('../../src/sim/lab-sim.ts');
