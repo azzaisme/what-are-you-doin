@@ -427,8 +427,9 @@ test('level 1, the Timber Yard: starts in first person with the objective, and t
     expect(st.mode).toBe('firstPerson');
     await expect(page.locator('#hud-objective')).toContainText('bucket across the creek');
     const s = await lab(page, (l) => l.stats());
-    // beaver, ute, bucket, six planks, two beams, three logs, the crate, the windsock
-    expect(s.voxel.objects).toBe(16);
+    // beaver, ute, bucket, six planks, two beams, three logs, the crate, the windsock, and logging:
+    // the axe, the sawmill and the six stand markers (their cut band hidden until a tree is bitten)
+    expect(s.voxel.objects).toBe(24);
     expect(s.voxel.rejected).toBe(0);
     const g = await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid());
     expect(g.misaligned).toBe(0);
