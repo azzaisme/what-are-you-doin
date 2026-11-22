@@ -22,6 +22,7 @@ type Lab = {
     entities(): Record<string, { visible: boolean; x: number; y: number; z: number }>;
     input(c: Record<string, unknown>): void;
     action(id: string): void;
+    paused(): boolean;
     player(): { x: number; y: number; z: number; holding: number; grounded: boolean; eyeHeight: number };
     look(yaw: number, pitch: number): void;
     level: string;
@@ -967,21 +968,31 @@ test('online co-op: the host’s flood reaches the guest — its river rises, th
     const ga = await lab(guest, (l) => l.audio());
     expect(ga.recent).toContain('siren');
     // the guest's water follows the host's: pause the host (it sends a state after each step, so
-    // none after this), let the guest settle on the last one and render it, then compare tightly
-    await lab(page, (l) => l.action('pause'));
+    // none after this; `pause` toggles, so only if it is running), let the guest settle on the last
+    // state and render it, then compare tightly
+    await lab(page, (l) => {
+        if (!l.paused()) l.action('pause');
+    });
     const hh = await lab(page, (l) => l.hazards());
-    await guest.waitForFunction(
-        (hostY) => {
-            const h = (window as unknown as { __riverLab: Lab }).__riverLab.hazards();
-            return Math.abs(h.waterY - hostY) < 0.01 && Math.abs(h.planeY - h.waterY) < 0.01;
-        },
-        hh.waterY,
-        { timeout: 60_000 }
-    );
-    expect((await lab(page, (l) => l.hazards())).tick).toBe(hh.tick); // the host really stopped
-    const gh = await lab(guest, (l) => l.hazards());
-    expect(Math.abs(gh.waterY - hh.waterY)).toBeLessThan(0.01);
-    expect(Math.abs(gh.planeY - gh.waterY)).toBeLessThan(0.01);
+    const gap = async () => {
+        const g = await lab(guest, (l) => l.hazards());
+        const h = await lab(page, (l) => ({ ...l.hazards(), paused: l.paused() }));
+        return {
+            hostPaused: h.paused,
+            hostTicks: h.tick - hh.tick,
+            water: Math.round(Math.abs(g.waterY - h.waterY) * 1000) / 1000,
+            plane: Math.round(Math.abs(g.planeY - g.waterY) * 1000) / 1000
+        };
+    };
+    // (the numbers are in the failure message if it never settles)
+    const settled = async () => {
+        const g = await gap();
+        return g.hostPaused && g.hostTicks === 0 && g.water <= 0.01 && g.plane <= 0.01 ? 'settled' : JSON.stringify(g);
+    };
+    await expect.poll(settled, { timeout: 120_000, intervals: [1000] }).toBe('settled');
+    const final = await gap();
+    expect(final.water).toBeLessThanOrEqual(0.01);
+    expect(final.plane).toBeLessThanOrEqual(0.01);
     expect(problems).toEqual([]);
     expect(guestProblems).toEqual([]);
 });
