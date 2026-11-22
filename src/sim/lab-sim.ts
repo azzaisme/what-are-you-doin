@@ -28,6 +28,7 @@ import { BODY } from '../assets/player-body.ts';
 import { BUCKET_HANDLE_TOP, LOG_RADIUS } from '../assets/props.ts';
 import {
     UTE_ANIM_CHANNELS,
+    UTE_DROP_0,
     UTE_PITCH,
     UTE_ROLL,
     UTE_STEER,
@@ -64,6 +65,8 @@ import type { PlayerCommand } from './commands.ts';
 import { MAX_PLAYERS, MAX_STRESS, createLabEntities } from './lab-entities.ts';
 import type { SimEntity } from './lab-entities.ts';
 import { addDummy, addLabKinematics, buildLabPhysics, launchDummy, propBody, stressDef } from './lab-physics.ts';
+import { NO_DRIVE, UteVehicle } from './physics/vehicle.ts';
+import type { DriveInput } from './physics/vehicle.ts';
 import { CHARACTER } from './physics/world.ts';
 import type { HeldInfo, PhysicsWorld } from './physics/world.ts';
 import { PlayerAnimator } from './player-anim.ts';
@@ -88,7 +91,7 @@ export interface LabSimOptions {
 /** Something the player should be told (objective reached, fell in the creek, ...). */
 export interface SimEvent {
     tick: number;
-    kind: 'goal' | 'fell' | 'recovered' | 'step';
+    kind: 'goal' | 'fell' | 'recovered' | 'step' | 'ute';
     text: string;
 }
 
@@ -112,6 +115,11 @@ export class LabSim {
     private beaverTheta = 0;
     private uteTheta = 0;
     private uteSpin = 0;
+    /** The drivable ute's physics (levels whose ute is 'drivable'), or null. */
+    vehicle: UteVehicle | null = null;
+    /** Player index in the driver's seat, or -1. */
+    driver = -1;
+    private driveInput: DriveInput = { ...NO_DRIVE };
 
     // player state (feet position; `eyeLift` smooths step-ups for the camera). Player 1 is `player`.
     readonly players: PlayerState[] = Array.from({ length: MAX_PLAYERS }, (_, i) => newPlayerState(i * 1.2, 6.5));
@@ -262,7 +270,11 @@ export class LabSim {
     private buildPhysics(): void {
         this.physics?.free();
         const pw = buildLabPhysics(this.level);
-        addLabKinematics(pw, this.beaver.id, this.ute.id, this.beaver.pose, this.ute.pose);
+        const ute = this.level.actors.ute;
+        const drivable = ute.mode === 'drivable' && this.physicsProps;
+        addLabKinematics(pw, this.beaver.id, drivable ? -1 : this.ute.id, this.beaver.pose, this.ute.pose);
+        this.vehicle = drivable ? new UteVehicle(pw, this.ute.id, ute.pose) : null;
+        this.driver = -1;
         if (this.physicsProps) {
             // the level places its props by entity name; entities it does not place stay hidden
             for (const placement of this.level.props) {
@@ -393,7 +405,7 @@ export class LabSim {
         const cmd = cmds[0];
         // kinematic colliders follow this tick's scripted poses
         pw.setKinematicTarget(this.beaver.id, this.beaver.pose);
-        pw.setKinematicTarget(this.ute.id, this.ute.pose);
+        if (!this.vehicle) pw.setKinematicTarget(this.ute.id, this.ute.pose);
 
         if (this.fpActive !== this.prevFp) {
             pw.setCharacterEnabled(this.fpActive, 0);
@@ -415,8 +427,11 @@ export class LabSim {
             windAt(this.tick * SIM_DT, this.level.wind, this.wind);
             this.windForce = pw.applyWind(this.wind.x, this.wind.z, SIM_DT);
         }
+        // nobody driving: the handbrake is on
+        this.vehicle?.drive(this.driver >= 0 ? this.driveInput : PARKED);
         pw.step();
         this.readPhysics();
+        this.readVehicle();
         this.applyRules();
         const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
         this.physicsMs = t1 - t0;
@@ -430,6 +445,16 @@ export class LabSim {
     private stepPlayer(i: number, cmd: PlayerCommand): void {
         const pw = this.physics;
         const p = this.players[i];
+        if (this.driver === i) {
+            // in the driver's seat: W/S throttle, A/D steer, jump brakes, grab gets out
+            if (cmd.grab) this.leaveUte(i);
+            else {
+                this.driveInput.throttle = cmd.moveZ;
+                this.driveInput.steer = cmd.moveX;
+                this.driveInput.brake = cmd.jump;
+            }
+            return;
+        }
         const run = cmd.sprint ? CHARACTER.run : CHARACTER.walk;
         let mx = cmd.moveX;
         let mz = cmd.moveZ;
@@ -477,7 +502,7 @@ export class LabSim {
             pw.throwHeld(cmd.yaw, cmd.pitch, i);
         } else if (cmd.grab) {
             if (pw.heldIdOf(i) >= 0) pw.release(i);
-            else if (!pw.tryGrab(eye, cmd.yaw, cmd.pitch, i)) ev.missed = true;
+            else if (!pw.tryGrab(eye, cmd.yaw, cmd.pitch, i) && !this.enterUte(i, eye, cmd)) ev.missed = true;
         }
         pw.applyGrab(eye, cmd.yaw, cmd.pitch, i);
         const heldAfter = pw.heldIdOf(i);
@@ -495,7 +520,7 @@ export class LabSim {
         if (!rules || !this.physicsProps) return;
         const pw = this.physics;
         for (let i = 0; i < this.players.length; i++) {
-            if (!this.playerActive(i)) continue;
+            if (!this.playerActive(i) || this.driver === i) continue;
             const p = this.players[i];
             if (p.grounded && p.y > rules.fallY + 0.3 && rules.isSafe(p.x, p.z)) {
                 p.safe.x = p.x;
@@ -679,6 +704,75 @@ export class LabSim {
     }
 
     /** Copies dynamic body poses into their entities (physics props mode). */
+    // ------------------------------------------------------------------------------- the ute
+
+    /** The ute entity's pose and wheel animation from the vehicle; the driver rides in the seat. */
+    private readVehicle(): void {
+        const v = this.vehicle;
+        if (!v) return;
+        const u = this.ute;
+        this.physics.readPose(u.id, u.pose);
+        u.anim[UTE_WHEEL_SPIN] = v.spin;
+        u.anim[UTE_STEER] = v.steer;
+        u.anim[UTE_SUSPENSION] = 0;
+        u.anim[UTE_PITCH] = 0;
+        u.anim[UTE_ROLL] = 0;
+        for (let w = 0; w < 4; w++) u.anim[UTE_DROP_0 + w] = Math.max(-0.15, Math.min(0.2, v.wheelDrop(w)));
+        u.visible = true;
+        if (this.driver >= 0) this.seatPlayer(this.driver);
+    }
+
+    /** Ute-local point to world. */
+    private uteToWorld(lx: number, ly: number, lz: number, out: { x: number; y: number; z: number }) {
+        const q = this.ute.pose.q;
+        quatRotate(q, lx, ly, lz, out);
+        out.x += this.ute.pose.p.x;
+        out.y += this.ute.pose.p.y;
+        out.z += this.ute.pose.p.z;
+        return out;
+    }
+
+    /** Puts a seated player's body at the driver's seat (their eye where a driver's would be). */
+    private seatPlayer(i: number): void {
+        const p = this.players[i];
+        const e = this.uteToWorld(UTE_SEAT.x, UTE_SEAT.eyeY, UTE_SEAT.z, _v);
+        p.x = e.x;
+        p.y = e.y - EYE_HEIGHT;
+        p.z = e.z;
+        p.vy = 0;
+        p.speed = 0;
+        p.grounded = true;
+        p.eyeLift = 0;
+        p.fallTicks = 0;
+    }
+
+    /** Grab with nothing grabbable in view: get into the driver's seat if you're looking at the ute. */
+    private enterUte(i: number, eye: { x: number; y: number; z: number }, cmd: PlayerCommand): boolean {
+        if (!this.vehicle || this.driver >= 0) return false;
+        if (this.physics.probeAny(eye, cmd.yaw, cmd.pitch, i) !== this.ute.id) return false;
+        this.driver = i;
+        this.driveInput = { ...NO_DRIVE };
+        this.physics.setCharacterEnabled(false, i);
+        this.seatPlayer(i);
+        this.events.push({ tick: this.tick, kind: 'ute', text: 'In the driver’s seat. E to get out.' });
+        return true;
+    }
+
+    /** Gets out on the driver's side, onto the ground beside the door. */
+    private leaveUte(i: number): void {
+        const d = this.uteToWorld(UTE_SEAT.exitX, 0, UTE_SEAT.z, _v);
+        const yaw = this.players[i].yaw;
+        this.vacateSeat(i);
+        this.placePlayer(d.x, d.z, yaw, i);
+    }
+
+    private vacateSeat(i: number): void {
+        if (this.driver !== i) return;
+        this.driver = -1;
+        this.driveInput = { ...NO_DRIVE };
+        if (this.playerActive(i)) this.physics.setCharacterEnabled(true, i);
+    }
+
     private readPhysics(): void {
         if (!this.physicsProps) return;
         const pw = this.physics;
@@ -856,6 +950,8 @@ export class LabSim {
 
     private evaluateUte(t: number): void {
         const ute = this.level.actors.ute;
+        // the vehicle's pose comes from its physics (readVehicle)
+        if (this.vehicle) return;
         if (ute.mode === 'none') {
             this.ute.visible = false;
             this.ute.pose.p.x = 0;
@@ -863,7 +959,7 @@ export class LabSim {
             this.ute.pose.p.z = 0;
             return;
         }
-        if (ute.mode === 'parked') {
+        if (ute.mode === 'parked' || ute.mode === 'drivable') {
             const u = this.ute;
             u.pose.p.x = ute.pose.p.x;
             u.pose.p.y = ute.pose.p.y;
@@ -1078,6 +1174,7 @@ export class LabSim {
 
     /** Places the character (e.g. when entering first-person mode), on the ground, inside the play area. */
     placePlayer(x: number, z: number, yaw: number, i = 0): void {
+        if (this.driver === i) this.vacateSeat(i);
         const p = this.players[i];
         const A = this.level.playArea;
         p.x = Math.max(A.minX + 0.5, Math.min(A.maxX - 0.5, x));
@@ -1096,25 +1193,34 @@ export class LabSim {
     }
 
     /** Read-only, for UI: what the player is holding and what the crosshair would grab. */
-    interaction(i = 0): { holding: string | null; target: string | null; shared: boolean } {
-        if (!this.playerActive(i) || !this.physicsProps) return { holding: null, target: null, shared: false };
-        const pw = this.physics;
-        const p = this.players[i];
+    interaction(i = 0): { holding: string | null; target: string | null; shared: boolean; driving: boolean } {
+        const ids = this.interactionIds(i);
         const name = (id: number) => (id < 0 ? null : (this.entities.find((e) => e.id === id)?.name ?? null));
-        const heldId = pw.heldIdOf(i);
-        const holding = name(heldId);
-        const target = holding ? null : name(pw.probe({ x: p.x, y: p.y + EYE_HEIGHT, z: p.z }, p.yaw, p.pitch, i));
-        return { holding, target, shared: heldId >= 0 && pw.holders(heldId) > 1 };
+        return { holding: name(ids.held), target: name(ids.target), shared: ids.shared, driving: ids.driving };
     }
 
-    /** Like `interaction`, as entity ids (-1 for none): what the host sends to guests for their prompts. */
-    interactionIds(i: number): { held: number; target: number; shared: boolean } {
-        if (!this.playerActive(i) || !this.physicsProps) return { held: -1, target: -1, shared: false };
+    /**
+     * Like `interaction`, as entity ids (-1 for none): what the host sends to guests for their
+     * prompts. The target is what a grab would do: a grabbable thing, or the ute (get in) when its
+     * driver's seat is free.
+     */
+    interactionIds(i: number): { held: number; target: number; shared: boolean; driving: boolean } {
+        if (!this.playerActive(i) || !this.physicsProps) return { held: -1, target: -1, shared: false, driving: false };
+        if (this.driver === i) return { held: -1, target: -1, shared: false, driving: true };
         const pw = this.physics;
         const p = this.players[i];
         const held = pw.heldIdOf(i);
-        const target = held >= 0 ? -1 : pw.probe({ x: p.x, y: p.y + EYE_HEIGHT, z: p.z }, p.yaw, p.pitch, i);
-        return { held, target, shared: held >= 0 && pw.holders(held) > 1 };
+        const eye = { x: p.x, y: p.y + EYE_HEIGHT, z: p.z };
+        let target = held >= 0 ? -1 : pw.probe(eye, p.yaw, p.pitch, i);
+        if (
+            held < 0 &&
+            target < 0 &&
+            this.vehicle &&
+            this.driver < 0 &&
+            pw.probeAny(eye, p.yaw, p.pitch, i) === this.ute.id
+        )
+            target = this.ute.id;
+        return { held, target, shared: held >= 0 && pw.holders(held) > 1, driving: false };
     }
 
     /** True when the voxelized dummy is in the world. */
@@ -1184,3 +1290,12 @@ function newPlayerState(x: number, z: number): PlayerState {
         safe: { x, z, valid: false }
     };
 }
+
+/** The handbrake (nobody in the driver's seat). */
+const PARKED: DriveInput = { throttle: 0, steer: 0, brake: true };
+
+/**
+ * The driver's seat in the ute's frame (+z forward): right-hand drive, so it is on the ute's right
+ * (-x); the eye sits under the cab roof; you get out a step beyond the door.
+ */
+export const UTE_SEAT = { x: -0.36, eyeY: 1.02, z: 0.12, exitX: -1.45 } as const;

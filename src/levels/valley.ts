@@ -1056,7 +1056,7 @@ export const valleyLevel: LevelDef = {
     startFirstPerson: true,
     actors: {
         beaver: { mode: 'idle', pose: yardActors.beaver },
-        ute: { mode: 'parked', pose: yardActors.ute }
+        ute: { mode: 'drivable', pose: yardActors.ute }
     },
     props: valleyProps(),
     rules: {

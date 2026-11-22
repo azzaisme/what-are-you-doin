@@ -51,6 +51,8 @@ export interface HudSlot {
     held: number;
     target: number;
     shared: boolean;
+    /** In the ute's driver's seat. */
+    driving: boolean;
 }
 
 export interface NetEvent {
@@ -209,10 +211,10 @@ export class HostSession {
         if (sim.tick % SNAPSHOT_EVERY !== 0) return;
         const bytes = encodeSnapshot(sim.tick, sim.entities);
         this.lastSnapshotBytes = bytes.length;
-        const huds: [number, number, number][] = [];
+        const huds: [number, number, number, number][] = [];
         for (let s = 0; s < sim.players.length; s++) {
             const h = hud(s);
-            huds.push([h.held, h.target, h.shared ? 1 : 0]);
+            huds.push([h.held, h.target, h.shared ? 1 : 0, h.driving ? 1 : 0]);
         }
         this.ch.setState({
             s: toBase64Chunks(bytes),
@@ -327,7 +329,7 @@ export class GuestSession {
         if (Array.isArray(st.hud)) {
             this.hud = (st.hud as unknown[]).map((x) => {
                 const a = Array.isArray(x) ? x : [];
-                return { held: num(a[0], -1), target: num(a[1], -1), shared: a[2] === 1 };
+                return { held: num(a[0], -1), target: num(a[1], -1), shared: a[2] === 1, driving: a[3] === 1 };
             });
         }
         if (Array.isArray(st.ev)) {
