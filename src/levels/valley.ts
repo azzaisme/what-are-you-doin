@@ -53,6 +53,7 @@ import { STAND_CROWN_RADIUS, drawStandTree } from './forestry.ts';
 import type { ForestryDef } from './forestry.ts';
 import { pieceVolume } from './level.ts';
 import type { LevelBuildResult, LevelDef, LevelLayout, LevelStage, PropPlacement, Rect, StaticPiece } from './level.ts';
+import { routeSign } from './route-signs.ts';
 import {
     BRIDGE_X,
     BUCKET_STUMP,
@@ -316,21 +317,22 @@ function flag(u: number, t: number, colour: number): StaticPiece[] {
     ];
 }
 
-/** A wooden signpost with a coloured board (one per area). */
-function signpost(u: number, t: number, colour: number): StaticPiece[] {
-    const y = groundUT(u, t);
-    return [
-        piece('sign-post', boxS(0.05, 0.8, 0.05), u, y + 0.8, t, darkTimber),
-        piece(
-            'sign-board',
-            boxS(0.6, 0.22, 0.03),
-            u,
-            y + 1.45,
-            t,
-            (x, yy) => voxel(Math.abs(yy) < 0.1 && Math.abs(x) < 0.5 ? colour : M.Timber, 1),
-            { priority: 3, yaw: Math.PI / 2 }
-        )
-    ];
+/**
+ * The route sign at an area's start: the area's number and the way on, on a band of its colour,
+ * beside the road facing players coming up it (route-signs.ts). The board is axis-aligned (the route
+ * runs at 45 degrees), turned to face down the road and across it.
+ */
+function signpost(u: number, t: number, stage: number): StaticPiece[] {
+    const w = routeToWorld(u, t);
+    // the road bends ahead: the arrow bears that way (+t is to the reader's right)
+    const ahead = roadT(u + 14) - roadT(u);
+    const arrow = ahead > 1.5 ? 'right' : ahead < -1.5 ? 'left' : 'up';
+    // left of the road its face looks along +z (down the route and across); right of it, along -x
+    return routeSign({ x: w.x, y: groundUT(u, t), z: w.z }, t < roadT(u) ? 0 : 3, {
+        number: stage + 1,
+        arrow,
+        colour: STAGE_COLOURS[stage]
+    });
 }
 
 /** Checkpoint centres (route frame), one per stage. */
@@ -343,7 +345,7 @@ export const CHECKPOINTS = [
     { u: 174.2, t: roadT(174.2) }, // 6: past the crevasse, on the level bench
     { u: SUMMIT_U, t: 0 } // 7: the flower
 ];
-const STAGE_COLOURS = [M.HiVis, M.TestOrange, M.Grass, M.TestBlue, M.Brick, M.Snow, M.Flower];
+export const STAGE_COLOURS = [M.HiVis, M.TestOrange, M.Grass, M.TestBlue, M.Brick, M.Snow, M.Flower];
 
 function valleyPieces(): StaticPiece[] {
     const P: StaticPiece[] = [];
@@ -400,7 +402,7 @@ function valleyPieces(): StaticPiece[] {
                 darkTimber
             )
         );
-    P.push(...signpost(8, roadT(8) - 2.4, STAGE_COLOURS[2]));
+    P.push(...signpost(8, roadT(8) - 2.4, 2));
     P.push(...flag(CHECKPOINTS[2].u, CHECKPOINTS[2].t - 2.2, STAGE_COLOURS[2]));
 
     // ---- 4: the gorge, its stone pier and a waterfall from the works' outfall
@@ -462,7 +464,7 @@ function valleyPieces(): StaticPiece[] {
         )
     );
     // the timber pile at the gorge
-    P.push(...signpost(70, roadT(70) - 2.6, STAGE_COLOURS[3]));
+    P.push(...signpost(70, roadT(70) - 2.6, 3));
     P.push(...flag(CHECKPOINTS[3].u, CHECKPOINTS[3].t - 2.4, STAGE_COLOURS[3]));
 
     // ---- 5: the old industrial works
@@ -584,7 +586,7 @@ function valleyPieces(): StaticPiece[] {
             collide: false
         })
     );
-    P.push(...signpost(96, -2.6, STAGE_COLOURS[4]));
+    P.push(...signpost(96, -2.6, 4));
     P.push(...flag(CHECKPOINTS[4].u, CHECKPOINTS[4].t - 2.4, STAGE_COLOURS[4]));
 
     // ---- 6: the mountain road and the crevasse
@@ -622,7 +624,7 @@ function valleyPieces(): StaticPiece[] {
             )
         );
     }
-    P.push(...signpost(146, roadT(146) - 2.6, STAGE_COLOURS[5]));
+    P.push(...signpost(146, roadT(146) - 2.6, 5));
     P.push(...flag(CHECKPOINTS[5].u, CHECKPOINTS[5].t - 2.4, STAGE_COLOURS[5]));
 
     // ---- 7: the flower on the summit: the goal of the whole journey
@@ -693,7 +695,110 @@ function valleyPieces(): StaticPiece[] {
             })
         );
     }
-    P.push(...signpost(192, -2.6, STAGE_COLOURS[6]));
+    P.push(...signpost(192, -2.6, 6));
+    P.push(...landmarkPieces());
+    return P;
+}
+
+/**
+ * Distant landmarks: a silhouette for each area that reads from far down the valley. Every part is
+ * at least 42 cm thick, so it survives the 40 cm far lattice (tests/unit/landmarks.test.ts). The works have their chimney and crane, the gorge its
+ * waterfall and the summit its flower; these add the forest's fire lookout on the ridge and the
+ * mountain's radio mast.
+ */
+export const LANDMARKS = {
+    lookout: { u: 58, t: 24 },
+    mast: { u: 184, t: -26 }
+};
+
+function landmarkPieces(): StaticPiece[] {
+    const P: StaticPiece[] = [];
+    // the fire lookout: a timber cabin on four braced legs, with a hip roof and a hi-vis band
+    {
+        const { u, t } = LANDMARKS.lookout;
+        const y = groundUT(u, t) - 0.3;
+        const legH = 11;
+        for (const [du, dt] of [
+            [-1.3, -1.3],
+            [-1.3, 1.3],
+            [1.3, -1.3],
+            [1.3, 1.3]
+        ] as const)
+            P.push(
+                piece('lookout-leg', boxS(0.22, legH / 2, 0.22), u + du, y + legH / 2, t + dt, darkTimber, {
+                    roll: -dt * 0.03,
+                    pitch: du * 0.03
+                })
+            );
+        // cross braces on each face
+        for (const [du, dt, yaw] of [
+            [-1.3, 0, 0],
+            [1.3, 0, 0],
+            [0, -1.3, Math.PI / 2],
+            [0, 1.3, Math.PI / 2]
+        ] as const)
+            for (const [tilt, h] of [
+                [-0.9, 0.3],
+                [0.9, 0.3],
+                [-0.9, 0.7],
+                [0.9, 0.7]
+            ] as const)
+                P.push(
+                    piece('lookout-brace', boxS(0.21, 0.21, 1.9), u + du, y + legH * h, t + dt, darkTimber, {
+                        yaw,
+                        pitch: tilt,
+                        collide: false
+                    })
+                );
+        P.push(
+            piece('lookout-cabin', boxS(1.5, 1.0, 1.5), u, y + legH + 1.0, t, grain(M.Timber, 'y', 0.2, 5), {
+                priority: 3
+            })
+        );
+        P.push(
+            piece('lookout-band', boxS(1.55, 0.21, 1.55), u, y + legH + 1.35, t, solid(M.HiVis, 0), { priority: 4 })
+        );
+        for (let n = 0; n < 3; n++)
+            P.push(
+                piece(
+                    'lookout-roof',
+                    boxS(1.8 - n * 0.55, 0.21, 1.8 - n * 0.55),
+                    u,
+                    y + legH + 2.2 + n * 0.4,
+                    t,
+                    solid(M.Galvanised, n & 1 ? 0 : 2),
+                    { priority: 3 }
+                )
+            );
+    }
+    // the radio mast: a lattice tower banded orange and white, on a concrete pad, with a dish
+    {
+        const { u, t } = LANDMARKS.mast;
+        const y = groundUT(u, t);
+        const H = 18;
+        P.push(piece('mast-pad', boxS(1.4, 0.4, 1.4), u, y + 0.1, t, concrete));
+        P.push(
+            piece('mast', boxS(0.4, H / 2, 0.4), u, y + H / 2, t, (_x, yy) =>
+                voxel(Math.floor((yy + H / 2) / 2.25) & 1 ? M.HiVisStripe : M.HiVis, 0)
+            )
+        );
+        P.push(
+            piece(
+                'mast-dish',
+                { type: 'cylinder', axis: 'z', r: 0.8, half: 0.22 },
+                u + 0.6,
+                y + H * 0.7,
+                t,
+                solid(M.Galvanised, 2),
+                {
+                    collide: false,
+                    yaw: 0.6,
+                    priority: 3
+                }
+            )
+        );
+        P.push(piece('mast-hut', boxS(1.2, 1.0, 0.9), u - 2.2, y + 0.9, t + 0.4, concrete, { priority: 3 }));
+    }
     return P;
 }
 
@@ -726,6 +831,7 @@ function clearSpot(u: number, t: number, r: number): boolean {
     if (worksWeight(u, a) > 0.02) return false;
     if (Math.abs(u - WALL.u) < 2.5) return false;
     if (Math.hypot(u - SUMMIT_U, t) < 7) return false;
+    for (const l of Object.values(LANDMARKS)) if (Math.hypot(u - l.u, t - l.t) < 4.5) return false;
     for (const c of CHECKPOINTS) if (Math.hypot(u - c.u, t - c.t) < 4) return false;
     // the timber piles
     for (const [su, st] of STAGING) if (Math.hypot(u - su, t - st) < 4.5) return false;
