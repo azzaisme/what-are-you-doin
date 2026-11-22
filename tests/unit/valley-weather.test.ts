@@ -451,7 +451,7 @@ describe('weather along the Valley (#88): each comes with its counterplay', () =
             S(HAZARD.graceS) + weatherTicks(RAIN()).wait + S(20)
         );
         expect(s.hazards.weather!.zone).toBe(RAIN());
-        expect(hazardTexts(s).at(-1)).toContain('Wet timber slips: carry it low or together');
+        expect(hazardTexts(s).at(-1)).toContain('Wet timber slips: carry heavy pieces together');
         return s;
     }
 

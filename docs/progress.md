@@ -3,59 +3,73 @@
 ## Weather along the Valley, and its flood (2026-11-22, Epic 9, towards #88)
 
 Each Valley area past the creek now gets its own weather once per run. It comes a seeded 4–22 s
-after the first player gets there. The hazard director runs it, so it takes turns with the flood
-and the gust: only one hazard at a time, with a 15 s quiet spell after each. Every kind has a way
-to beat it, and a test that plays it out.
+after the first player gets there. The hazard director runs the weather that is a hazard, so it
+takes turns with the flood, the gust and the handbrake prank: only one hazard at a time, with a
+15 s quiet spell after each. Each hazard has a way to beat it, and a test plays it out by input.
 
-- **Rain on the Forest Road.** The creek, culvert and gorge water rise 0.35 m and run
-  downstream, then fall back.
-    - A plank lying in the culvert drifted 24.8 m downstream.
-    - A beam bridge over the culvert stayed 2.2 m clear of the water and did not move at all.
-    - So: bridge above the water, and don't leave timber lying in it.
-- **Mist over the gorge, and a fog bank on the mountain road.** The view closes in to 55 m in the
-  mist and 30 m in the fog.
-    - The fog only hangs over its own area. Players further up, and the summit with its flower,
-      stay clear.
-    - It never closes in nearer than the Low preset's 24 m near world, so the coarse far ground
-      behind it stays hidden.
-    - On the fog stretch, the next edge post or sign up the road is never more than 11.6 m away,
-      so you can follow the road.
-    - When the fog lifts, the view is back to the level's own.
+- **Rain on the Forest Road: wet timber slips.** While it rains, a player under it grips with
+  less force. It scales with the rain's strength: at full rain a grip gives about 400 N instead
+  of 650 N.
+    - Alone, a beaver carrying a heavy beam from the log dump up the road lost it after 1.43 m.
+      The same carry in the dry held all 12 m.
+    - Two beavers carrying it together held it all the way in the rain.
+    - Carrying it low alone doesn't save it (it still slipped), so the toast says what does:
+      "Wet timber slips: carry heavy pieces together".
+    - A guest's carry slips the same way: the host decides everyone's grip.
+    - The river also rises 0.35 m in the rain, but that is only scenery: it reaches no bridge.
+- **A fog bank on the mountain road.** At full strength the view closes in to the near world's
+  edge: 24 m on Low, 30 m on High (its own end).
+    - The fog fully covers the near world's edge on both presets (opacity at the edge 1.0), so
+      the coarse far ground behind it never shows through.
+    - It only hangs over its own area. The summit and its flower stay clear.
+    - Played: in the fog, a beaver walked the 27.5 m stretch by input, steering only by the edge
+      posts it could see within 24 m. It never strayed more than 0.80 m from the road's middle,
+      with no falls.
+    - When it lifts, the view is back to the level's own.
+- **Mist over the gorge: atmosphere, not a hazard.** It closes the view in like the fog, but
+  there is nothing to beat. So it comes whatever else is going on, holds nothing up, and says
+  nothing.
 - **A snow squall at the crevasse.** A crosswind (up to 1000 N) pushes carried planks across the
-  road, like a weaker version of the Timber Yard's gust.
-    - Carried at chest height in one pair of hands, a plank was torn away (699 N against a 650 N
-      grip).
-    - Carried low, the push was only 200 N, and it held.
-    - Carried by two players, it held at 797 N (two grips hold 1300 N).
+  road, like a weaker version of the Timber Yard's gust. All three cases start with the plank
+  picked up by input:
+    - carried at chest height alone, it was torn away (692 N against a 650 N grip);
+    - carried low, the push was 200 N, and it held;
+    - carried by two players, it held at 1000 N (two grips hold 1300 N).
 - **The Timber Yard's flood now happens at Shallow Creek too.** It is the same flood on the same
-  crossing, turned with the yard. Finishing the bridge brings the siren; the water floats the
-  beams off and leaves them on the bank downstream.
-    - A test plays it out by input: fetch both beams, rebuild, carry the bucket to the far flag.
-    - The flood can leave a beam lying askew (13° in the test), so the test's player squares it
-      up before laying it, as a player would.
-- **One at a time:**
-    - a bridge finished while it rains waits for the rain and the quiet spell before it floods;
+  crossing, turned with the yard.
+    - Played: the flood washes both beams off and leaves them downstream on the near bank. A
+      beaver fetches them, rebuilds and carries the bucket to the far flag, all by input.
+    - The flood can leave a beam lying askew (13° in the test), so the player squares it up
+      before laying it, as a player would.
+    - **Fixed:** the Valley's water area covers the whole map, and the Timber Yard's ground
+      (0.4 m) is lower than the flood's peak (0.6 m). So the flood had been floating loose props
+      in the yard, with the water drawn over it. Now the flood's lift and current keep to the
+      creek's channel, and the drawn surface stops just under the banks.
+    - In a test, nine props lying in the yard didn't move during a flood.
+    - It is just as strong: the bridge floated off at the same tick (1175) as before.
+- **One at a time (tested):**
+    - a bridge finished in the rain waits for it and the quiet spell;
     - rain waits out a flood;
-    - in a test yard with weather over it, the aimed gust never comes during the weather.
-- **Online:** guests get the weather's area and strength from the host along with the water
-  height (tested through real host and guest sessions).
+    - the aimed gust never comes during weather;
+    - the fog and the handbrake prank each wait for the other.
+- **Online:** guests get the weather's area and strength from the host (tested through real host
+  and guest sessions).
     - An older host sends neither, and that reads as no weather.
     - The Timber Yard sends nothing new.
 - **On screen:** rain and snow fall round the camera as voxel particles (at most 90 cells). Mist
   and fog are drawn with the fog alone.
+- **Seen in a real browser** (`docs/screenshots/epic9/weather-*.jpg`): each area at full
+  strength, at Low and High.
+    - The screenshots switch each weather on with a debug hook (`__riverLab.weather(n)`). It
+      refuses while another hazard or weather is on. It skips the grace period, because in a
+      software-rendered browser the simulation runs at about 4 ticks a second.
+- **Known visuals:**
+    - The fog fades in with the frame time, which is capped. At normal frame rates it is most of
+      the way in about 4 s; in software rendering it takes much longer.
+    - At the flood's peak, a beam floating off the caps sits about 0.2 m above the drawn water.
+    - The rain's rise lifts the drawn water everywhere, so the gorge's waterfall foam sits a
+      little under the surface while it rains.
 - **Timber Yard unchanged:** all its hazard tests pass untouched.
-- **Seen in a real browser** (`docs/screenshots/epic9/weather-*.jpg`): each zone at Low and High.
-    - Fog closes in on the far trees and landmarks.
-    - At Low, the 24 m near world fades into the fog with no hard edge.
-    - The mist over the gorge leaves the near sign readable.
-    - Rain and snow show as a light scatter of 10 cm cells.
-    - The screenshots switch each weather on with a debug hook (`__riverLab.weather(n)`). In a
-      software-rendered browser the simulation runs at about 4 ticks a second, so waiting for the
-      weather to arrive would take minutes per shot.
-    - The fog eases in with the frame time, which is capped. In those captures it went from
-      260 m to 93 m in 16 s; at normal frame rates it is most of the way in about 4 s.
-- **The handbrake prank** (merged in from Epic 8) and the weather wait for each other too
-  (tested). The weather's net fields come after the prank's.
 
 ## Epic 8: the logging sounds and the Valley's waterfall (2026-11-22, #82, #80)
 

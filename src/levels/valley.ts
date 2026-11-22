@@ -1288,7 +1288,7 @@ export const VALLEY_WEATHER_ZONES: WeatherZone[] = [
         riverRise: 0.35,
         current: { x: DOWNSTREAM.x * 0.6, z: DOWNSTREAM.z * 0.6 },
         fogEnd: 150,
-        tell: '🌧 Rain on the forest road! Wet timber slips: carry it low or together.',
+        tell: '🌧 Rain on the forest road! Wet timber slips: carry heavy pieces together.',
         clear: 'The rain eases off. Grips are dry again.'
     },
     {
