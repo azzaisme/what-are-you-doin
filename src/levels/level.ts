@@ -185,8 +185,13 @@ export interface LevelStream {
      * The world's clip is already set to `r`. Returns the number of terrain columns.
      */
     buildTile(world: VoxelWorld, seed: number, r: ColumnRect, tile: { ti: number; tk: number }): number;
-    /** Near-world radius (m): tiles within it of any camera are built. */
+    /** Near-world radius (m): tiles within it of any camera are built (the High preset). */
     radius: number;
+    /**
+     * Near-world radius on the Low preset (m; default `radius`): about half the tiles, triangles
+     * and memory of 36 m at 24 m, measured in the Valley (docs/progress.md, 2026-11-22).
+     */
+    lowRadius?: number;
     /** The far lattice's cell size (cm). */
     farCm: number;
     /** Distance fog (m): starts, and is complete at. */

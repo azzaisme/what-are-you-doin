@@ -95,6 +95,122 @@ The bucket now carries water the game keeps track of. Carry it steadily and it s
 - **Tuned by feel.** The water's damping is set well above real water's so a swinging carry doesn't build up waves. Owner playtesting should set how forgiving it is: the thresholds are in `WATER` in `src/sim/water.ts`.
 - **Not tried on a real phone.** The Pour touch button only appears while you hold the bucket.
 
+## Side paths in the Valley (2026-11-22, Epic 9, towards #87)
+
+Two tracks now leave the Forest Road. Neither goes near a crossing: the Epic 5 session is
+reworking those into built bridges. Detours around the crossings themselves (the rest of #87) wait
+for the owner's call.
+
+- **The old logging track** leaves the road at 11 m past the creek crossing and rejoins it at
+  35.5 m, before the culvert.
+    - It is a 32.7 m loop through the forest on the far side of the log dump.
+    - It is wide enough for the ute, and clear of trees and scenery.
+    - It gives a road closure (an Epic 8 hazard) somewhere to send you.
+- **The lookout track** climbs 1.8 m over 18.7 m, from just past the culvert flag to the foot of
+  the fire lookout. It stops short of the lookout's legs.
+- **How they're made** (`src/levels/side-paths.ts`, with the paths listed in `valley.ts`
+  `SIDE_PATHS`):
+    - the ground is graded level across each track, following its centre line's own height;
+    - the valley-side terraces are left off them;
+    - they are painted as a dirt track with a few dry tufts;
+    - trees and flowers are kept off.
+- **Tests** (`tests/unit/side-paths.test.ts`):
+    - walking each centre line in 25 cm steps, no step rises more than 10 cm (the beaver steps
+      up 32 cm);
+    - level across, measured square to each stretch of track: within 6 cm over 1.2 m, and at
+      most half the ground's own cross-fall there (nil along the stretches, 0.4 at worst where
+      two stretches meet). The test fails with the grading off;
+    - a beaver walks each track end to end by input, at walking speed, never further than 30 cm
+      from its edge;
+    - in the Valley sim, a player drives the ute round the logging loop end to end, every wheel
+      within the track. The ground there is gentle enough to drive without the grading; what this
+      shows is that the ute fits and nothing is in its way;
+    - the logging track starts and ends on the road, and the lookout track ends at the lookout's
+      foot, clear of its legs;
+    - no tree within 2 m, and no static piece, on either track.
+- Also new, for the route signs:
+    - each sign's arrow is checked against the road as it is painted, found from the ground's
+      surface material rather than the road formula. The works' sign is the exception: its
+      concrete road can't be told from the concrete yard by surface alone.
+    - a left arrow is read back from the voxels too.
+- Unit tests: 516 pass (merged with Epics 6, 8, 9 part 1 and 10, and the controls remapping).
+
+## Valley performance: what costs what, and Low builds less (2026-11-22, Epic 9, owner question)
+
+The owner asked: could the Valley load only the current area, with a cut between areas? The
+world already culls by chunk, but there is no occlusion culling. Measured first.
+
+### What the Valley draws (one-off, in the browser)
+
+Measured by hand in the container's software renderer, with the Inspector's devtools hook
+(`globalThis.__playcanvasApps`): teleport to the spot, wait for the tiles to stop streaming, then
+read `app.stats.drawCalls.total` with each lattice's root on or off. Draw calls are counted the
+same way on any GPU; frame times there are not representative.
+
+- **The near world** (the 5 cm tiles around you) is most of the cost: 1,500–1,900 draw calls at
+  36 m.
+- **The far lattice** (the whole map at 40 cm) is about 700 meshes and 0.72 M triangles wherever
+  you are.
+    - Hiding all of it saves 20–500 draw calls. The most is at the yard looking up the valley
+      (28%); the least is at the summit.
+- **An area cut on the far lattice** (draw only the current area and its neighbours) saves 10–25%
+  of draw calls.
+    - It would also hide the distant landmarks, the summit flower above all. Seeing your goal on
+      the far ridge from the start is in the design doc.
+
+So a cut between areas buys little, and it costs the view.
+
+### What changed
+
+The near world's radius is the lever, so it now follows the quality preset
+(`src/levels/view-distance.ts`).
+
+- **High:** 36 m, as before.
+- **Low:** 24 m. The fog starts at 18 m instead of 30 m. It is light there (linear to 260 m, a few
+  percent at 24 m), so on Low the coarse far lattice can be seen beyond 24 m: that is the trade.
+- **The far lattice is not affected**, so the landmarks and the summit flower show on Low as on
+  High. A test builds the far lattice at 40 cm, gives it the Low radius, and finds the lookout,
+  the mast and the flower in it. The flower's stem and leaf were thickened so every part survives
+  40 cm cells.
+
+The bench (`tests/unit/view-distance.test.ts`, "bench"; reproducible, run with `npm test`) settles
+the near world at a fixed camera on each preset. Meshes are what the renderer draws, one per
+surface class of each static unit (draw calls for one camera pass, before culling):
+
+| Bench, 5 cm voxels     | 36 m (High)    | 24 m (Low)    |
+| ---------------------- | -------------- | ------------- |
+| Tiles (forest / works) | 131 / 119      | 65 / 57       |
+| Static cells           | 12.8 M / 8.0 M | 6.1 M / 3.0 M |
+| Meshes                 | 430 / 387      | 203 / 181     |
+| Triangles              | 5.0 M / 2.8 M  | 2.2 M / 0.9 M |
+
+At 10 cm voxels: meshes 422 / 389 → 197 / 182, triangles 1.5 M / 1.1 M → 0.7 M / 0.4 M.
+
+Measured once by hand in the browser (method above), the JS heap went from 525 / 343 MB to
+317 / 173 MB, and drawn calls from 1,920 / 1,520 to 1,323 / 974.
+
+- **Switching preset takes effect at once.** The radius goes to the voxel worker with each frame.
+- **Tiles behind you** are kept up to 1.35 × the radius (was radius + 12.8 m). High is about the
+  same (48.6 m). On Low, tiles really are let go.
+
+### Not done, and why
+
+- **Occlusion culling:** the Valley's sides and the gorge walls hide a lot, but terrain-based
+  occlusion is real work for a smaller win than the radius.
+- **Phones still start on High:** every device does. Making Low the default on phones is an easy
+  next step if the owner wants it.
+
+### Tests
+
+- The bench above, asserting Low builds under 60% of High's tiles, meshes and triangles.
+- The radius wiring, end to end:
+    - the preset gives the radius and fog start;
+    - the voxel client sends the radius with each frame to the near world lane only (not the far
+      lattice or object lanes);
+    - the real worker module, driven frame by frame, builds out to 24 m on Low and past it on High.
+- A Valley test: after switching to Low no tile is left beyond 1.35 × 24 m, and the ground under
+  you is always built.
+
 ## Remappable controls (2026-11-22, Epic 10)
 
 You can now choose your own keys, mouse buttons and gamepad buttons. Settings has two new

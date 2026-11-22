@@ -4,7 +4,16 @@ import { rasterizePieces } from '../../src/levels/level.ts';
 import type { StaticPiece } from '../../src/levels/level.ts';
 import { SIGN_BOARD, SIGN_PIXEL, routeSign } from '../../src/levels/route-signs.ts';
 import type { SignArrow } from '../../src/levels/route-signs.ts';
-import { STAGE_COLOURS, roadT, routeT, routeToWorld, routeU, valleyLayout } from '../../src/levels/valley.ts';
+import {
+    STAGE_COLOURS,
+    VALLEY_TERRAIN,
+    roadT,
+    routeT,
+    routeToWorld,
+    routeU,
+    valleyHeight,
+    valleyLayout
+} from '../../src/levels/valley.ts';
 import { GRID_SIZE, cellIndexX, cellIndexY, cellIndexZ } from '../../src/voxels/grid.ts';
 import { M, voxelMaterial } from '../../src/voxels/palette.ts';
 import { createRasterStats } from '../../src/voxels/rasterizer.ts';
@@ -65,6 +74,13 @@ describe('route signs', () => {
                 '.##.....#...'
             ]);
         }
+        expect(readFace(0, 4, 'left')).toEqual([
+            '.#.#....#...',
+            '.#.#...#....',
+            '.###..#####.',
+            '...#...#....',
+            '...#....#...'
+        ]);
         expect(readFace(3, 7, 'right')).toEqual([
             '.###....#...',
             '...#.....#..',
@@ -93,6 +109,7 @@ describe('route signs', () => {
             .map((b) => ({ b, u: routeU(b.pose.p.x, b.pose.p.z), t: routeT(b.pose.p.x, b.pose.p.z) }))
             .sort((a, b) => a.u - b.u);
         expect(boards.length).toBe(5);
+        const skipped: number[] = [];
         boards.forEach(({ b, u, t }, n) => {
             const stage = n + 2;
             // its posts are the two nearest route-sign-posts
@@ -121,7 +138,44 @@ describe('route signs', () => {
             expect(nx * toRoad.x + nz * toRoad.z, `sign ${stage + 1} faces the road`).toBeGreaterThan(0);
             // beside the road, not on it
             expect(Math.abs(t - roadT(u))).toBeGreaterThan(1.8);
+            // and against the road as it is drawn: the middle of the painted road across the route,
+            // here and up to 14 m on (short of a crossing, where nothing is painted), found from the
+            // ground's surface material (not from roadT)
+            const drawn = (uu: number): number | null => {
+                const on: number[] = [];
+                for (let tt = t - 8; tt <= t + 12; tt += 0.05) {
+                    const w = routeToWorld(uu, tt);
+                    const top = Math.floor(valleyHeight(w.x, w.z) / GRID_SIZE - 1e-9);
+                    const m = voxelMaterial(VALLEY_TERRAIN.surface(w.x, w.z, top, 0));
+                    if (m === M.Path) on.push(tt);
+                }
+                // the widest painted run is the road
+                if (on.length < 20) return null;
+                const runs: number[][] = [[on[0]]];
+                for (let k = 1; k < on.length; k++)
+                    if (on[k] - on[k - 1] > 0.11) runs.push([on[k]]);
+                    else runs[runs.length - 1].push(on[k]);
+                const road = runs.reduce((a, b) => (b.length > a.length ? b : a));
+                return (road[0] + road[road.length - 1]) / 2;
+            };
+            const here = drawn(u);
+            // (the works' road is concrete inside a concrete yard, so the surface can't tell it from
+            // the yard: there only the check above applies)
+            if (here === null) {
+                skipped.push(stage + 1);
+                return;
+            }
+            let turn = 0;
+            for (const d of [14, 12, 10, 8]) {
+                const there = drawn(u + d);
+                if (there === null) continue;
+                turn = ((there - here!) * 14) / d;
+                break;
+            }
+            const seen = turn > 1.5 ? 'right' : turn < -1.5 ? 'left' : 'up';
+            expect(seen, `sign ${stage + 1}: the road as drawn bears ${turn.toFixed(2)} m over 14 m`).toBe(arrow);
         });
+        expect(skipped).toEqual([5]);
     });
 });
 

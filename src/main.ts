@@ -43,6 +43,7 @@ import { PadManager } from './input/gamepad.ts';
 import { TouchControls, isTouchDevice } from './input/touch.ts';
 import { levelFromData } from './levels/data.ts';
 import { LEVEL_MENU, getLevel } from './levels/index.ts';
+import { viewDistance } from './levels/view-distance.ts';
 import { degradedTransport, parseConditions } from './net/netsim.ts';
 import type { P2PTransport } from './net/p2p.ts';
 import { forgetGame, gameToRejoin, rejoinToken, rememberGame } from './net/rejoin.ts';
@@ -217,6 +218,14 @@ if (level.stream)
         far: true
     });
 const pipeline = new VoxelClient(lanes, sim);
+/** Streamed levels: how far around the cameras the near world is built follows the quality preset. */
+function applyViewDistance(q: Quality): void {
+    if (!level.stream) return;
+    const v = viewDistance(level.stream, q.name);
+    pipeline.nearRadius = v.radius;
+    scene.app.scene.fog.start = v.fogStart;
+}
+applyViewDistance(initialQuality);
 const build = await pipeline.init(1, level.id, level.data);
 setLoading('Uploading meshes…');
 await nextFrame();
@@ -991,6 +1000,7 @@ const host: PanelHost = {
             case 'quality':
                 state.quality = v as Quality['name'];
                 scene.setQuality(QUALITY[state.quality]);
+                applyViewDistance(scene.quality);
                 state.refraction = scene.quality.refraction;
                 state.reflectionScale = scene.quality.reflectionScale;
                 applyWater();

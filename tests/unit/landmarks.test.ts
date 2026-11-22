@@ -18,11 +18,12 @@ import type * as WorldMod from '../../src/voxels/world.ts';
 /** Landmark piece names, by landmark. */
 const PARTS = {
     lookout: ['lookout-leg', 'lookout-brace', 'lookout-cabin', 'lookout-band', 'lookout-roof'],
-    mast: ['mast', 'mast-pad', 'mast-dish', 'mast-hut']
+    mast: ['mast', 'mast-pad', 'mast-dish', 'mast-hut'],
+    flower: ['flower-stem', 'flower-leaf', 'flower-petal', 'flower-centre']
 };
 
 describe('Valley landmarks', () => {
-    it('every part of the lookout and the mast survives the 40 cm far lattice', async () => {
+    it('every part of the lookout, the mast and the summit flower survives the 40 cm far lattice', async () => {
         // the far lattice's own cell size: a fresh module graph with 40 cm cells, as the far worker
         // gets (src/workers/voxel-worker.ts)
         vi.resetModules();
@@ -36,7 +37,7 @@ describe('Valley landmarks', () => {
             const { VoxelWorld } = (await import('../../src/voxels/world.ts')) as typeof WorldMod;
             const { createRasterStats } = (await import('../../src/voxels/rasterizer.ts')) as typeof RasterMod;
             const pieces = layout(1).pieces;
-            for (const name of [...PARTS.lookout, ...PARTS.mast]) {
+            for (const name of [...PARTS.lookout, ...PARTS.mast, ...PARTS.flower]) {
                 const mine = pieces.filter((p) => p.name === name);
                 expect(mine.length, name).toBeGreaterThan(0);
                 for (const p of mine) {
@@ -67,6 +68,49 @@ describe('Valley landmarks', () => {
             vi.resetModules();
         }
     });
+
+    it('on Low the far lattice still holds the lookout, the mast and the summit flower', async () => {
+        vi.resetModules();
+        const g = globalThis as { __UE_CELL_CM__?: number };
+        g.__UE_CELL_CM__ = 40;
+        try {
+            const grid = await import('../../src/voxels/grid.ts');
+            const { VoxelService } = await import('../../src/workers/voxel-service.ts');
+            const { createLabEntities } = await import('../../src/sim/lab-entities.ts');
+            const { STATE_STRIDE } = await import('../../src/workers/protocol.ts');
+            const { valleyLayout: layout } = (await import('../../src/levels/valley.ts')) as typeof ValleyMod;
+            // the far lattice's own service (the far worker's), given the Low radius with a frame,
+            // as the voxel client never does (it sends the radius to the near lane only)
+            const far = new VoxelService(new Set());
+            far.build(1, 'valley', undefined, true, true);
+            const count = createLabEntities().entities.filter((e) => e.asset.parts.length > 0).length;
+            const spawn = routeToWorld(-4, 0);
+            for (let f = 0; f < 5; f++)
+                far.frame(
+                    f,
+                    0,
+                    'coverage50',
+                    false,
+                    new Float64Array(count * STATE_STRIDE),
+                    undefined,
+                    0,
+                    new Float32Array([spawn.x, spawn.z]),
+                    new Int32Array(0),
+                    6.4,
+                    24
+                );
+            const pieces = layout(1).pieces;
+            for (const name of ['lookout-cabin', 'mast', 'flower-centre', 'flower-petal']) {
+                const p = pieces.find((q) => q.name === name)!;
+                const c = p.pose.p;
+                const v = far.world.staticAt(grid.cellIndexX(c.x), grid.cellIndexY(c.y), grid.cellIndexZ(c.z));
+                expect(v, `${name} in the far lattice`).toBeGreaterThan(0);
+            }
+        } finally {
+            delete g.__UE_CELL_CM__;
+            vi.resetModules();
+        }
+    }, 300_000);
 
     it('trees stay clear of the landmarks', () => {
         for (const tr of valleyLayout(1).trees) {
