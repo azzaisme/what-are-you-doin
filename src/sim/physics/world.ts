@@ -99,6 +99,8 @@ export interface PhysBody {
     wristTorque?: number;
     /** Never sleeps (the ute): left out of the active-body count, which tracks things settling. */
     alwaysAwake?: boolean;
+    /** The collision shape of a single-shape body (floodwater samples it: sim/physics/water.ts). */
+    shape?: ShapeSpec;
 }
 
 /**
@@ -402,7 +404,8 @@ export class PhysicsWorld {
             spawn: { p: { ...spawn.p }, q: { ...spawn.q } },
             baseAngularDamping: o.angularDamping ?? 0.3,
             enabled: true,
-            windArea: windArea(shape)
+            windArea: windArea(shape),
+            shape
         };
         this.bodies.set(id, pb);
         this.byCollider.set(col.handle, pb);

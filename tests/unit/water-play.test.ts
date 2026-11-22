@@ -218,6 +218,8 @@ describe('never unwinnable (#63, #64)', () => {
         // over the beams, also at half pace (as the yard's own played delivery crosses)
         expect(pl.walkTo(BRIDGE_X, (YARD_GOAL.minZ + YARD_GOAL.maxZ) / 2, 0.4, 3000, 0.5)).toBe(true);
         expect(s.progress.falls).toBe(0);
+        // the finished bridge set off the flood (Epic 8's hazards are on): this carry beat it
+        expect(s.events.some((e) => e.kind === 'hazard' && e.text.includes('siren'))).toBe(true);
         pl.step({ grab: true });
         pl.step({}, 240);
         expect(s.physics.heldIdOf(0)).toBe(-1);

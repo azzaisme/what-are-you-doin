@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { BUCKET_LITRES, BUCKET_SLOPE_X, bucketAsset } from '../../src/assets/props.ts';
+import { sfx } from '../../src/audio/sfx.ts';
 import { MAX_PARTICLES, ParticleFX } from '../../src/fx/particles.ts';
 import { BRIDGE_X, BUCKET_STUMP, YARD_TAP, timberYardLevel } from '../../src/levels/timber-yard.ts';
 import { ACTION_POUR, ACTION_RESET_PROPS, neutralCommand } from '../../src/sim/commands.ts';
@@ -381,6 +382,9 @@ describe('droplets (#65)', () => {
         const ring = new SnapshotRing(sim.entities.length, 64);
         const fx = new ParticleFX(timberYardLevel, []);
         fx.bucketSlot = sim.bucket.slot;
+        // the sounds they make (Epic 8's sfx): a splash now and then while it spills, a trickle filling
+        const heard: string[] = [];
+        sfx.setSink({ play: (name, _at, o) => heard.push(`${name}@${(o?.pitch ?? 1).toFixed(1)}`) });
         const anim = new Float64Array(ANIM_MAX);
         const at = pose(0, 1, 8, quatFromYawPitchRoll(0, 1.2, 0));
         const drops = () => {
@@ -405,6 +409,11 @@ describe('droplets (#65)', () => {
         }
         expect(fx.spawned.pour).toBeGreaterThan(20);
         expect(most).toBeGreaterThan(0);
+        // it runs dry after 1.7 s of that: a splash about every 0.2 s (8 or so), not one per frame (33)
+        const spillSounds = heard.filter((h) => h.startsWith('splash')).length;
+        expect(spillSounds).toBeGreaterThanOrEqual(6);
+        expect(spillSounds).toBeLessThanOrEqual(10);
+        heard.length = 0;
         // the pool holds at most 32 bursts of 8: a long spill never grows past that
         expect(most).toBeLessThanOrEqual(32 * 8);
         // stopped: within a second every droplet is gone
@@ -416,6 +425,8 @@ describe('droplets (#65)', () => {
             frame(tick);
         }
         expect(fx.spawned.fill).toBeGreaterThan(0);
+        expect(heard).toContain('splash-small@1.8');
+        sfx.setSink(null);
         for (const end = tick + 60; tick < end; tick += 3) frame(tick);
         expect(drops()).toBe(0);
     });

@@ -22,6 +22,8 @@
 import { SIM_HZ } from '../sim/clock.ts';
 import { ACTION_DROP, ACTION_NONE, ACTION_POUR, ACTION_RAGDOLL, neutralCommand } from '../sim/commands.ts';
 import type { PlayerCommand } from '../sim/commands.ts';
+import { packHazardNet, readHazardNet } from '../sim/hazards.ts';
+import type { HazardNet } from '../sim/hazards.ts';
 import { MAX_PLAYERS } from '../sim/lab-entities.ts';
 import type { LabSim } from '../sim/lab-sim.ts';
 
@@ -393,6 +395,8 @@ export class HostSession {
             // the bucket's water (Epic 7): litres in it and litres the flower has had
             wat: [Math.round(sim.water.volume * 100) / 100, Math.round(sim.water.poured * 100) / 100],
             ev: this.recent,
+            hz: packHazardNet(sim.hazards.net()),
+            seed: sim.hazards.seed,
             lag: Array.from({ length: sim.players.length }, (_, s) => this.lagMs(s) ?? -1)
         });
     }
@@ -467,6 +471,9 @@ export class GuestSession {
     /** The host's bucket water (litres) and what the flower has had. */
     water = { volume: 0, poured: 0 };
     events: NetEvent[] = [];
+    /** The host's hazards (water height, flood and gust phases) and the game's hazard seed. */
+    hazard: HazardNet;
+    hazardSeed = 0;
     /** Snapshots applied (for the debug panel). */
     received = 0;
     /** Round trip to the host as the host measured it, ms (null until known). */
@@ -487,6 +494,7 @@ export class GuestSession {
         this.hostId = hostId;
         this.now = opts.now ?? (() => performance.now());
         this.decoder = new SnapshotDecoder(sim.entities.length);
+        this.hazard = readHazardNet(null, sim.level.water.y);
         this.layout = layoutHash(sim.entities);
         sim.ring.clear();
         this.unsub = ch.onChange(() => this.receive());
@@ -546,6 +554,8 @@ export class GuestSession {
                 poured: Math.max(0, Math.min(1e4, num(w[1])))
             };
         }
+        this.hazard = readHazardNet(st.hz, this.sim.level.water.y);
+        this.hazardSeed = num(st.seed) >>> 0;
         const lag = Array.isArray(st.lag) && this.slot >= 0 ? num((st.lag as unknown[])[this.slot], -1) : -1;
         this.lagMs = lag >= 0 ? lag : null;
         if (Array.isArray(st.hud)) {

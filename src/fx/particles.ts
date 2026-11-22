@@ -16,6 +16,7 @@
  */
 
 import { BUCKET_LITRES, BUCKET_SLOPE_X, BUCKET_SLOPE_Z } from '../assets/props.ts';
+import { sfx } from '../audio/sfx.ts';
 import type { TreeSpot } from '../levels/common.ts';
 import { oakCrown } from '../levels/common.ts';
 import type { LevelDef } from '../levels/level.ts';
@@ -67,7 +68,7 @@ interface Crown {
     r: number;
 }
 
-type BurstKind = 'dust' | 'chips' | 'splash' | 'needles' | 'sawdust' | 'pour' | 'fill';
+type BurstKind = 'dust' | 'chips' | 'splash' | 'needles' | 'sawdust' | 'gust' | 'pour' | 'fill';
 
 interface Burst {
     t0: number;
@@ -75,7 +76,7 @@ interface Burst {
     y: number;
     z: number;
     kind: BurstKind;
-    /** Pour: the direction droplets leave in (horizontal, unit). */
+    /** Pour and gust: the direction droplets or leaves travel in (horizontal, unit). */
     dx?: number;
     dz?: number;
     n: number;
@@ -108,15 +109,21 @@ export class ParticleFX {
     private readonly p = pose();
     private readonly anim = new Float64Array(ANIM_MAX);
     /** Effects spawned (cumulative, for tests and the debug panel). */
-    readonly spawned = { dust: 0, chips: 0, splash: 0, needles: 0, sawdust: 0, pour: 0, fill: 0 };
+    readonly spawned = { dust: 0, chips: 0, splash: 0, needles: 0, sawdust: 0, gust: 0, pour: 0, fill: 0 };
     /** Logging effects (levels with a logging stand or a sawmill): chips, needles, sawdust. */
     wood: WoodFX | null = null;
     /** The bucket's entity slot (-1: none) and its litres at the last sample. */
     bucketSlot = -1;
     private bucketLitres = -1;
+    /** When the bucket's water last made a sound (s, sample time): a trickle every so often, not every frame. */
+    private waterSoundAt = -1;
+
+    /** The water surface now (it rises in a flood). */
+    waterY: number;
 
     constructor(level: LevelDef, watched: WatchedEntity[]) {
         this.level = level;
+        this.waterY = level.water.y;
         this.wind = level.wind ?? CALM;
         this.watched = watched;
         const trees: TreeSpot[] = level.layout(1).trees.filter((t) => t.kind === 'oak');
@@ -189,14 +196,15 @@ export class ParticleFX {
             let z = z0 + d.z * 0.8 + 0.18 * Math.cos(fallAge * 2.3 + fl);
             let y = y0 - vs * fallAge;
             const g = this.level.terrainHeight(cellCentre(x), cellCentre(z));
-            const inWater = g < water.y && Math.abs(x - water.cx) < water.halfX && Math.abs(z - water.cz) < water.halfZ;
+            const inWater =
+                g < this.waterY && Math.abs(x - water.cx) < water.halfX && Math.abs(z - water.cz) < water.halfZ;
             if (age >= landAge || y <= restY(g)) {
                 if (inWater) {
                     // float on the creek and keep drifting slowly downwind
                     const d2 = windTravel(tSpawn + landAge, t, this.wind, 0.5);
                     x += d2.x * 0.15;
                     z += d2.z * 0.15;
-                    y = water.y + 0.01;
+                    y = this.waterY + 0.01;
                 } else {
                     y = restY(g);
                 }
@@ -237,14 +245,14 @@ export class ParticleFX {
                     this.spawn(t, x, restY(g), z, w.timber ? 'chips' : 'dust', w.timber ? 14 : 10);
                 // dropped into the water
                 const inWaterArea =
-                    Math.abs(x - water.cx) < water.halfX && Math.abs(z - water.cz) < water.halfZ && g < water.y;
+                    Math.abs(x - water.cx) < water.halfX && Math.abs(z - water.cz) < water.halfZ && g < this.waterY;
                 if (
                     inWaterArea &&
-                    prev.y - (w.eyeHeight ? 0 : w.bottom) > water.y &&
-                    y - (w.eyeHeight ? 0 : w.bottom) <= water.y &&
+                    prev.y - (w.eyeHeight ? 0 : w.bottom) > this.waterY &&
+                    y - (w.eyeHeight ? 0 : w.bottom) <= this.waterY &&
                     prev.vy < -0.8
                 ) {
-                    this.spawn(t, x, water.y, z, 'splash', w.eyeHeight ? 26 : 18);
+                    this.spawn(t, x, this.waterY, z, 'splash', w.eyeHeight ? 26 : 18);
                 }
                 this.prev.set(w.slot, { y, vy, vx: 0, vz: 0, visible: true });
             } else {
@@ -277,10 +285,34 @@ export class ParticleFX {
             const h = Math.hypot(lip.x, lip.z) || 1;
             const n = Math.min(8, 2 + Math.round(-d * 20));
             this.spawn(t, this.p.p.x + lip.x, this.p.p.y + lip.y, this.p.p.z + lip.z, 'pour', n, lip.x / h, lip.z / h);
+            // a slosh or a pour: a splash at the rim, louder for more water, deeper for a gush
+            if (t - this.waterSoundAt > 0.18 || t < this.waterSoundAt) {
+                this.waterSoundAt = t;
+                const at = { x: this.p.p.x + lip.x, y: this.p.p.y + lip.y, z: this.p.p.z + lip.z };
+                const big = -d > 0.5;
+                sfx.play(big ? 'splash-big' : 'splash-small', at, {
+                    gain: Math.min(0.8, 0.15 - d * 0.6),
+                    pitch: big ? 1 : 1.5
+                });
+            }
         } else if (d > 0.004) {
             const m = quatRotate(q, 0, 0.3, 0, _lip);
             this.spawn(t, this.p.p.x + m.x, this.p.p.y + m.y + 0.25, this.p.p.z + m.z, 'fill', 5);
+            // filling under the tap: a soft, high trickle
+            if (t - this.waterSoundAt > 0.25 || t < this.waterSoundAt) {
+                this.waterSoundAt = t;
+                const at = { x: this.p.p.x + m.x, y: this.p.p.y + m.y, z: this.p.p.z + m.z };
+                sfx.play('splash-small', at, { gain: 0.12, pitch: 1.8 });
+            }
         }
+    }
+
+    /**
+     * The aimed gust's warning (Epic 8): a stream of leaves blowing past (x, z), along (dx, dz), from
+     * upwind of it. Every device starts it from the host's hazard state, so all see it.
+     */
+    gust(t0: number, x: number, y: number, z: number, dx: number, dz: number): void {
+        this.spawn(t0, x, y, z, 'gust', GUST_LEAVES, dx, dz);
     }
 
     private spawn(t0: number, x: number, y: number, z: number, kind: BurstKind, n: number, dx = 0, dz = 0): void {
@@ -306,9 +338,15 @@ export class ParticleFX {
                             ? 0.6
                             : b.kind === 'fill'
                               ? 0.25
-                              : 1.1;
+                              : b.kind === 'gust'
+                                ? 2.6
+                                : 1.1;
             if (age < 0 || age > life) continue;
             live.push(b);
+            if (b.kind === 'gust') {
+                this.drawGust(b, age);
+                continue;
+            }
             if (b.kind === 'needles' || b.kind === 'sawdust') {
                 this.drawWood(b, age);
                 continue;
@@ -360,6 +398,25 @@ export class ParticleFX {
         }
     }
 
+    /** Leaves streaming with the gust: from 4 m upwind, through and past the target, fluttering. */
+    private drawGust(b: Burst, age: number): void {
+        const dx = b.dx ?? 1;
+        const dz = b.dz ?? 0;
+        for (let i = 0; i < b.n; i++) {
+            const start = u(b.seed, i, 4) * 0.8; // they come in over the first 0.8 s
+            const a = age - start;
+            if (a < 0) continue;
+            const speed = 4.5 + 3 * u(b.seed, i, 5);
+            const along = -4 + speed * a;
+            const side = (u(b.seed, i, 6) - 0.5) * 3 + 0.25 * Math.sin(a * 9 + i);
+            const x = b.x + dx * along - dz * side;
+            const z = b.z + dz * along + dx * side;
+            const y = b.y - 1.2 + 2.4 * u(b.seed, i, 7) + 0.3 * Math.sin(a * 6 + i * 1.7);
+            const mat = LEAF_MATS[Math.floor(u(b.seed, i, 8) * LEAF_MATS.length)];
+            this.push(x, y, z, voxel(mat, i & 3));
+        }
+    }
+
     /**
      * Needles: a cloud from a crown, drifting down slowly and spreading (about the crown's size).
      * Sawdust: a short low spray out of the blade.
@@ -381,3 +438,6 @@ export class ParticleFX {
         }
     }
 }
+
+/** Leaves in the gust's warning stream. */
+const GUST_LEAVES = 40;
