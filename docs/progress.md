@@ -53,7 +53,7 @@ to beat it, and a test that plays it out.
       software-rendered browser the simulation runs at about 4 ticks a second, so waiting for the
       weather to arrive would take minutes per shot.
     - The fog eases in with the frame time, which is capped. In those captures it went from
-      260 m to 93 m in 16 s; at normal frame rates it settles in a couple of seconds.
+      260 m to 93 m in 16 s; at normal frame rates it is most of the way in about 4 s.
 - **The handbrake prank** (merged in from Epic 8) and the weather wait for each other too
   (tested). The weather's net fields come after the prank's.
 
