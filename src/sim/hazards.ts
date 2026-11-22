@@ -157,8 +157,9 @@ export class HazardDirector {
     floodMoved = 0;
     private gustOver = 0;
 
-    constructor(level: LevelDef) {
-        this.spec = level.hazards;
+    /** `enabled` false: no hazards at all (tests of other mechanics in hazard levels). */
+    constructor(level: LevelDef, enabled = true) {
+        this.spec = enabled ? level.hazards : undefined;
         this.seed = level.hazards?.seed ?? 1;
         this.baseY = level.water.y;
         this.waterY = this.baseY;

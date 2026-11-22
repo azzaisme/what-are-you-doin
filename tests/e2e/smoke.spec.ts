@@ -32,6 +32,10 @@ type Lab = {
     ute(): { x: number; y: number; z: number; yaw: number; speed: number; driver: number; drivable: boolean };
     hazards(): { waterY: number; flood: number; gust: number; floods: number; planeY: number };
     audio(): { started: boolean; context: string; played: number; recent: string[]; loops: Record<string, number> };
+    wood(): {
+        trees: { phase: string; cut: number }[];
+        sawmill: { phase: string; stopped: string; mode: string; taken: number; planks: number } | null;
+    };
 };
 
 const IGNORED = [
@@ -427,8 +431,9 @@ test('level 1, the Timber Yard: starts in first person with the objective, and t
     expect(st.mode).toBe('firstPerson');
     await expect(page.locator('#hud-objective')).toContainText('bucket across the creek');
     const s = await lab(page, (l) => l.stats());
-    // beaver, ute, bucket, six planks, two beams, three logs, the crate, the windsock
-    expect(s.voxel.objects).toBe(16);
+    // beaver, ute, bucket, six planks, two beams, three logs, the crate, the windsock, and logging:
+    // the axe, the sawmill and the six stand markers (their cut band hidden until a tree is bitten)
+    expect(s.voxel.objects).toBe(24);
     expect(s.voxel.rejected).toBe(0);
     const g = await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid());
     expect(g.misaligned).toBe(0);
@@ -619,7 +624,7 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
         Math.abs(rowBrightness(Math.floor(shot.height * 0.3)) - rowBrightness(Math.floor(shot.height * 0.8)))
     ).toBeGreaterThan(1);
     const s = await lab(page, (l) => l.stats());
-    expect(s.voxel.objects).toBe(18); // the yard's 16 plus two voxel beaver bodies
+    expect(s.voxel.objects).toBe(26); // the yard's 24 plus two voxel beaver bodies
     // player 2 walks on their own commands
     const before = await page.evaluate(
         () =>
@@ -648,7 +653,7 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
     await lab(page, (l) => (l as unknown as { setPlayers(n: number): void }).setPlayers(1));
     // player 2's body leaves with the next applied voxel frame (wait on it: slow CI runners lag)
     await page.waitForFunction(
-        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 17,
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 25,
         null,
         { timeout: 60_000 }
     );
@@ -750,7 +755,7 @@ for (const transport of ['local', 'p2p'] as const)
         // the guest renders the host's world: both beaver bodies and every prop, all on the grid
         // (voxel frames lag the snapshots in software GL, so wait for the frame that has both beavers)
         await guest.waitForFunction(
-            () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 18,
+            () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 26,
             null,
             { timeout: 60_000 }
         );
@@ -1048,5 +1053,65 @@ test('the level designer opens on the starter level and places a box with a clic
     );
     expect(pieces).toBe(1);
     await expect(page.locator('.designer')).toContainText('not built yet');
+    expect(problems).toEqual([]);
+});
+
+test('logging in the Timber Yard: chew a pine down, the voxel tree becomes a stump and a log; the sawmill lever sets beams', async ({
+    page
+}) => {
+    test.setTimeout(300_000);
+    const problems = await boot(page, '?level=yard&t=0.01&quality=low#cell100');
+    await lab(page, (l) => l.action('pause'));
+    expect((await lab(page, (l) => l.wood())).trees.length).toBe(6);
+    // stand west of tree 2 (13.1, 7.3), looking at its trunk
+    await lab(page, (l) => {
+        l.teleport(12.1, 7.3, -Math.PI / 2);
+        l.look(-Math.PI / 2, -0.75);
+    });
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().target === 'tree-2',
+        null,
+        { timeout: 60_000 }
+    );
+    await page.screenshot({ path: 'test-results/logging-standing.png' });
+    // a bite at a time: a bite takes 0.3 s of game time and presses in between are swallowed (the
+    // software renderer runs the game slower than real time), so press again until it lands
+    const tree2 = () => lab(page, (l) => l.wood().trees[2]);
+    for (let n = 1; n <= 10 && (await tree2()).phase === 'standing'; n++) {
+        for (let tries = 0; tries < 30; tries++) {
+            await lab(page, (l) => l.input({ grab: true }));
+            await page.waitForTimeout(500);
+            const w = await tree2();
+            if (w.phase === 'down' || w.cut >= n / 10 - 1e-6) break;
+        }
+    }
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.wood().trees[2].phase === 'down',
+        null,
+        { timeout: 60_000 }
+    );
+    // the felled log lies east; the static tree has gone from the voxel world, a stump stays (the
+    // worker side is unit tested: tests/unit/forestry.test.ts; here, look at the screenshot)
+    await page.waitForTimeout(4000);
+    await lab(page, (l) => l.look(-Math.PI / 2 + 0.3, -0.45));
+    await page.waitForTimeout(1500);
+    await page.screenshot({ path: 'test-results/logging-felled.png' });
+    // the sawmill's lever: walk up to the near post and grab it to set the saw to beams
+    await lab(page, (l) => {
+        // the lever is on the near (north) post: stand north of it, facing south (+z)
+        l.teleport(4.8, 7.6, Math.PI);
+        l.look(Math.PI, -0.58);
+    });
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().target === 'sawmill',
+        null,
+        { timeout: 60_000 }
+    );
+    await page.screenshot({ path: 'test-results/logging-sawmill.png' });
+    for (let tries = 0; tries < 20 && (await lab(page, (l) => l.wood().sawmill?.mode)) !== 'beam'; tries++) {
+        await lab(page, (l) => l.input({ grab: true }));
+        await page.waitForTimeout(500);
+    }
+    expect((await lab(page, (l) => l.wood())).sawmill?.mode).toBe('beam');
     expect(problems).toEqual([]);
 });

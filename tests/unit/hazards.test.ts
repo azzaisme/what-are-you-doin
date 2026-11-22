@@ -561,7 +561,8 @@ describe('hazard director: the level stays winnable', () => {
             for (let i = 0; i < 120 && Math.abs(s.player.z - beam.pose.p.z) > 0.02; i++)
                 step({ moveX: Math.max(-0.4, Math.min(0.4, (s.player.z - beam.pose.p.z) * 4)) });
             step({}, 20);
-            pitch = -Math.atan2(s.player.y + EYE_HEIGHT - beam.pose.p.y, s.player.x - (beam.pose.p.x + 1.45));
+            // (aim at the top face near the end: the bank is uneven, the end may sit low)
+            pitch = -Math.atan2(s.player.y + EYE_HEIGHT - (beam.pose.p.y + 0.07), s.player.x - (beam.pose.p.x + 1.35));
             step({}, 5);
             step({ grab: true });
             expect(s.physics.heldId).toBe(beam.id);
