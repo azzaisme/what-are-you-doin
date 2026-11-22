@@ -30,7 +30,7 @@ type Lab = {
     interaction(): { holding: string | null; target: string | null; shared: boolean; driving: boolean; seat: number };
     teleport(x: number, z: number, yaw?: number): void;
     ute(): { x: number; y: number; z: number; yaw: number; speed: number; driver: number; drivable: boolean };
-    hazards(): { waterY: number; flood: number; gust: number; floods: number; planeY: number };
+    hazards(): { waterY: number; flood: number; gust: number; floods: number; planeY: number; tick: number };
     audio(): { started: boolean; context: string; played: number; recent: string[]; loops: Record<string, number> };
     wood(): {
         trees: { phase: string; cut: number }[];
@@ -938,15 +938,27 @@ test('online co-op: the host’s flood reaches the guest — its river rises, th
         l.placeProp('beam-0', -1.105, 0.62, -2, Math.PI / 2);
         l.placeProp('beam-1', -0.895, 0.62, -2, Math.PI / 2);
     });
-    // the guest hears of the flood from the host (software GL runs only a few ticks a second here)
+    // two game pages in software GL simulate only a couple of ticks a second: the host seeks ahead
+    // (deterministic) past the siren, then plays on, sending its state to the guest
+    const now = (await lab(page, (l) => l.hazards())).tick / 60;
+    await page.evaluate((t) => {
+        const l = (window as unknown as { __riverLab: Lab }).__riverLab;
+        l.seek(t + 7);
+        l.action('pause');
+    }, now);
     await guest.waitForFunction(
         () => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().flood >= 1,
         null,
-        {
-            timeout: 300_000
-        }
+        { timeout: 120_000 }
     );
     await expect(guest.locator('.toast')).toContainText('siren');
+    // and on into the rising water
+    const later = (await lab(page, (l) => l.hazards())).tick / 60;
+    await page.evaluate((t) => {
+        const l = (window as unknown as { __riverLab: Lab }).__riverLab;
+        l.seek(t + 10);
+        l.action('pause');
+    }, later);
     await guest.waitForFunction(
         (b) => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().planeY > b + 0.02,
         baseY,
