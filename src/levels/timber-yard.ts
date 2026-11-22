@@ -470,7 +470,8 @@ export const WINDSOCK = { x: 4.6, z: 1.6, height: 3.2 };
 /** Bucket stump in the yard. */
 export const BUCKET_STUMP = { x: 5.6, z: 4.4, top: YARD_Y + 0.44 };
 /** The water butt by the stump (Epic 7): its tap fills a bucket standing on the stump. */
-export const yardButt = () => waterButt('water butt', BUCKET_STUMP.x, BUCKET_STUMP.z, BUCKET_STUMP.top, YARD_Y, 0, 40);
+export const yardButt = () =>
+    waterButt('water butt', BUCKET_STUMP.x, BUCKET_STUMP.z, BUCKET_STUMP.top, YARD_Y, Math.PI, 40);
 /** Far-bank goal area for the bucket. */
 export const YARD_GOAL = { minX: BRIDGE_X - 3.5, maxX: BRIDGE_X + 3.5, minZ: -9.5, maxZ: -5.2 };
 

@@ -4,7 +4,7 @@
  */
 
 import type { P2PStatus } from '../net/p2p.ts';
-import type { GameAd } from '../net/session.ts';
+import type { GameAd, ListedGame } from '../net/session.ts';
 
 export interface OnlinePanelHost {
     available(): 'room' | 'local' | 'p2p' | 'none';
@@ -12,13 +12,33 @@ export interface OnlinePanelHost {
     opened?(): void;
     /** Peer to peer: relay and lobby status, or null while starting. */
     p2pStatus?(): P2PStatus | null;
-    games(): (GameAd & { full: boolean })[];
+    games(): ListedGame[];
     level: string;
-    status(): { mode: 'off' | 'host' | 'guest'; code?: string; players?: number; slot?: number; waiting?: boolean };
+    status(): OnlineStatus;
     host(): Promise<void>;
     join(ad: GameAd): Promise<void>;
     leave(): void;
 }
+
+export interface OnlineStatus {
+    mode: 'off' | 'host' | 'guest';
+    code?: string;
+    players?: number;
+    max?: number;
+    /** Host: the guests' players and their round trip (ms, null while unknown). */
+    guests?: { slot: number; lagMs: number | null }[];
+    /** Host: players kept for a guest who lost their connection. */
+    dropped?: number[];
+    /** Guest: their player slot (-1 while watching a full game). */
+    slot?: number;
+    waiting?: boolean;
+    /** Guest: round trip to the host, ms. */
+    lagMs?: number | null;
+    /** Guest: the host went quiet; waiting for it to come back. */
+    reconnecting?: boolean;
+}
+
+const lagText = (ms: number | null | undefined) => (ms === null || ms === undefined ? '…' : `${ms} ms`);
 
 export class OnlinePanel {
     readonly button: HTMLButtonElement;
@@ -57,7 +77,8 @@ export class OnlinePanel {
         }
         // the connection status changes without lobby events: refresh it while open
         clearInterval(this.ticker);
-        if (this.open && this.host.p2pStatus) this.ticker = setInterval(() => this.render(), 1000);
+        // (and the players' round trips)
+        if (this.open) this.ticker = setInterval(() => this.render(), 1000);
     }
 
     get visible(): boolean {
@@ -69,7 +90,7 @@ export class OnlinePanel {
         const st = this.host.status();
         this.button.textContent =
             st.mode === 'host'
-                ? `Hosting ${st.code} · ${st.players}/4`
+                ? `Hosting ${st.code} · ${st.players}/${st.max}`
                 : st.mode === 'guest'
                   ? `In game ${st.code}`
                   : 'Play online';
@@ -104,8 +125,12 @@ export class OnlinePanel {
         }
         if (st.mode === 'host') {
             note(
-                `Hosting game ${st.code}. Players: ${st.players}/4. Friends open this page and tap “Play online”, then join ${st.code}.`
+                `Hosting game ${st.code}. Players: ${st.players}/${st.max}. Friends open this page and tap “Play online”, then join ${st.code}.`
             );
+            for (const g of st.guests ?? [])
+                note(`Player ${g.slot + 1} · round trip ${lagText(g.lagMs)}`, 'online-sub');
+            for (const s of st.dropped ?? [])
+                note(`Player ${s + 1} lost their connection: their place is kept for a minute.`, 'online-warn');
             note('Your device runs the game for everyone: keep this page open and in front.', 'online-warn');
             button('Stop hosting', () => this.host.leave());
             button('Close', () => this.toggle(false));
@@ -116,9 +141,10 @@ export class OnlinePanel {
                 st.waiting
                     ? `Joined ${st.code}, waiting for the host…`
                     : st.slot !== undefined && st.slot < 0
-                      ? `Game ${st.code} is full: you are watching.`
-                      : `Playing in game ${st.code} as player ${(st.slot ?? 0) + 1}.`
+                      ? `Game ${st.code} is full: you are watching, and get the first place that frees up.`
+                      : `Playing in game ${st.code} as player ${(st.slot ?? 0) + 1} · round trip ${lagText(st.lagMs)}.`
             );
+            if (st.reconnecting) note('Lost the host: reconnecting…', 'online-warn');
             button('Leave game', () => this.host.leave());
             button('Close', () => this.toggle(false));
             return;
@@ -133,9 +159,13 @@ export class OnlinePanel {
         el.append(sub);
         for (const g of games) {
             const same = g.level === this.host.level;
-            const label = `Join ${g.code} · ${g.players}/${g.max}${same ? '' : ' (other level)'}${g.full ? ' · full' : ''}`;
+            // a full game can still be joined, to watch until a place frees up
+            // another version of the game can't be joined: say so (the older page needs a reload)
+            const label = g.compatible
+                ? `${g.full ? 'Watch' : 'Join'} ${g.code} · ${g.players}/${g.max}${same ? '' : ' (other level)'}${g.full ? ' · full' : ''}`
+                : `${g.code} · another version of the game: reload both pages to play together`;
             const b = button(label, () => void this.host.join(g).then(() => this.render()), 'online-game');
-            b.disabled = !same || g.full;
+            b.disabled = !same || !g.compatible;
         }
         if (avail === 'local') note('Local test mode: tabs of this browser only.', 'online-warn');
         if (avail === 'p2p') {

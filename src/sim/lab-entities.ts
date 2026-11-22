@@ -24,7 +24,7 @@ import { ANIM_MAX } from './snapshots.ts';
 
 export const MAX_STRESS = 25;
 /** Players per world: local split screen and networked guests share these slots. */
-export const MAX_PLAYERS = 4;
+export const MAX_PLAYERS = 8;
 export const DUMMY_ID0 = 200;
 /** Extra prop pools, sized for the Valley (its seven areas each have their own timber or crates). */
 export const EXTRA_PLANKS = 12;

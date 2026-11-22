@@ -39,6 +39,8 @@ export class BucketWaterState {
     /** The source filling the bucket (index), or -1. */
     filling = -1;
     private fillFrom = 0;
+    /** Ticks the filling bucket has been out of the stream. */
+    private fillAway = 0;
     /** Ticks since water last reached the flower (-1: none yet this pour). */
     pourQuiet = -1;
     /** Water mass currently added to the bucket's body (kg). */
@@ -186,18 +188,23 @@ export class BucketWaterState {
         }
         const flowing = !!src && src.litres > 0 && w.volume < WATER.capacity;
         if (flowing) {
+            // one refill until it is full or taken away for a while (a hand wobbling in and out of
+            // the stream is the same refill)
             if (this.filling !== at) {
+                if (this.filling < 0) this.fillFrom = w.volume;
                 this.filling = at;
-                this.fillFrom = w.volume;
             }
+            this.fillAway = 0;
             const take = w.add(Math.min(WATER.fillRate * SIM_DT, src.litres));
             src.litres = Math.max(0, src.litres - take);
-        }
-        if (this.filling >= 0 && !flowing) {
+        } else if (this.filling >= 0) this.fillAway++;
+        const done = w.volume >= WATER.capacity || this.fillAway > FILL_AWAY_TICKS || (!!src && src.litres <= 0);
+        if (this.filling >= 0 && !flowing && done) {
             // a refill ends: say so once
             const s = this.sources[this.filling];
             const got = w.volume - this.fillFrom;
             this.filling = -1;
+            this.fillAway = 0;
             if (got > 0.05) {
                 const left =
                     s.litres > 0.05 ? `${s.def.name} has ${s.litres.toFixed(0)} L left` : `${s.def.name} is empty now`;
@@ -206,6 +213,9 @@ export class BucketWaterState {
         }
     }
 }
+
+/** Out of the stream this long, a part-filled bucket's refill is over (ticks). */
+const FILL_AWAY_TICKS = 60;
 
 const _p = { x: 0, y: 0, z: 0 };
 const _in = { q: { x: 0, y: 0, z: 0, w: 1 }, v: { x: 0, y: 0, z: 0 }, w: { x: 0, y: 0, z: 0 } };

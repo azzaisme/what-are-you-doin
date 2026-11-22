@@ -36,6 +36,13 @@ function pickUp(s: LabSim): Player {
     return pl;
 }
 
+/** Walks round to the east of the stump (the butt stands west of it) and faces the tap. */
+function toTap(pl: Player): void {
+    pl.walkTo(BUCKET_STUMP.x + 2.2, BUCKET_STUMP.z + 1.5);
+    pl.walkTo(BUCKET_STUMP.x + 1.5, BUCKET_STUMP.z);
+    pl.lookAt(BUCKET_STUMP.x, pl.s.player.y + EYE_HEIGHT - 0.6, BUCKET_STUMP.z, 30);
+}
+
 /** Pours the held bucket out until (nearly) empty, then stops. */
 function pourOut(pl: Player): void {
     pl.togglePour();
@@ -60,12 +67,19 @@ describe('refilling, played (#63)', () => {
         pl.step({}, 120);
         expect(s.water.volume).toBeCloseTo(before, 6);
         // back to the stump: hold it under the tap
-        pl.walkTo(BUCKET_STUMP.x - 0.2, BUCKET_STUMP.z + 1.3);
-        pl.holdOver(BUCKET_STUMP.x, BUCKET_STUMP.z, BUCKET_STUMP.top + 0.5, 420);
+        toTap(pl);
+        pl.holdOver(
+            BUCKET_STUMP.x,
+            BUCKET_STUMP.z,
+            BUCKET_STUMP.top + 0.5,
+            1200,
+            () => s.water.volume >= WATER.capacity - 1e-9
+        );
         expect(s.physics.heldIdOf(0)).toBe(s.bucket.id);
         expect(s.water.volume).toBeCloseTo(WATER.capacity, 6);
         expect(butt.litres).toBeCloseTo(40 - (WATER.capacity - before), 6);
         // the fill was announced once, and holding it there full takes nothing more
+        pl.step({}, 2);
         expect(s.events.filter((e) => e.text.startsWith('Filled up'))).toHaveLength(1);
         const left = butt.litres;
         pl.holdOver(BUCKET_STUMP.x, BUCKET_STUMP.z, BUCKET_STUMP.top + 0.5, 120);
@@ -81,7 +95,7 @@ describe('refilling, played (#63)', () => {
         for (let k = 0; k < 5; k++) {
             pl.walkTo(BUCKET_STUMP.x - 3, BUCKET_STUMP.z + 2);
             pourOut(pl);
-            pl.walkTo(BUCKET_STUMP.x - 0.2, BUCKET_STUMP.z + 1.3);
+            toTap(pl);
             pl.holdOver(
                 BUCKET_STUMP.x,
                 BUCKET_STUMP.z,
