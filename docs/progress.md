@@ -30,6 +30,13 @@ Owner: "Can I have a proper settings menu please. Accessible to both keyboard, m
   tampered data falls back to defaults. URL parameters (`?quality=`, `?look=`, `?bob=`, `?view=`)
   still override for one visit, without being saved. The debug panel and the `C` / `L` hotkeys
   change the same settings.
+- **Voxel styling** (owner: "more like the voxel/grid theme … build up the corners"):
+    - a 16×16-voxel frame (stepped corners, a bevel lit top-left and shaded bottom-right);
+    - yellow L-blocks with bolts on each corner, one voxel proud of the frame;
+    - a faint voxel grid behind the rows, and dotted voxel rules;
+    - buttons, tabs, switches, choices and sliders are blocks with stepped corners that press
+      down. Focus shows as a voxel ring inside them.
+    - `scripts/voxel-frame.mjs` generates the frame and corner images (CSS data URIs).
 - **Accessibility:** a real dialog (`role=dialog`, `aria-modal`). Tabs are `role=tab`; switches
   are `role=switch`; choices are radio groups; sliders give their value as text.
 - **Tests:**

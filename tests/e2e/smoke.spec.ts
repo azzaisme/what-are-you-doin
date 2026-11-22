@@ -169,8 +169,8 @@ test('default voxel size is 5 cm with the slider range 5-10 cm', async ({ page }
     const s = await lab(page, (l) => l.stats());
     expect(s.cellCm).toBe(5);
     expect(s.staticCells).toBeGreaterThan(5_000_000);
-    // the voxel size is in Settings > Video
-    await page.locator('.settings-chip').click();
+    // the voxel size is in Settings > Video (this page hides the UI: Esc opens the menu)
+    await page.keyboard.press('Escape');
     await page.locator('.settings-tabs button', { hasText: 'Video' }).click();
     const range = page.locator('.settings-row', { hasText: 'Voxel size' }).locator('input[type=range]');
     await expect(range).toHaveAttribute('min', '5');
@@ -226,11 +226,17 @@ test('settings menu: mouse, keyboard and gamepad reach every setting, and it is 
     await page.keyboard.press('Escape');
     await expect(backdrop).toBeHidden();
     expect(await lab(page, (l) => (l as unknown as { paused(): boolean }).paused())).toBe(false);
-    // gamepad: Start opens; RB to Controls; down to "Invert gamepad Y"; A switches it on; B closes
+    // gamepad: Start opens (on the section used last); RB to Controls; down to "Invert gamepad Y";
+    // A switches it on; B closes
     await press(9);
     await expect(backdrop).toBeVisible();
+    const selected = page.locator('.settings-tabs [aria-selected=true]');
+    await expect(selected).toHaveText('Video');
     await press(5);
-    await expect(page.locator('.settings-tabs [aria-selected=true]')).toHaveText('Controls');
+    await expect(selected).toHaveText('Interface');
+    await press(5);
+    await press(5);
+    await expect(selected).toHaveText('Controls');
     const invert = page.locator('.settings-row', { hasText: 'Invert gamepad Y' });
     for (let n = 0; n < 6 && !(await invert.evaluate((e) => e.classList.contains('current'))); n++) await press(13);
     await press(0);

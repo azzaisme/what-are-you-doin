@@ -841,9 +841,45 @@ body.ui-hidden .designer {
 }
 
 /* ---- settings menu (keyboard, mouse, gamepad and touch) --------------------------------------- */
+/* Voxel styling: the dialog is framed by a 16x16-voxel 9-slice (stepped corners, built up in
+   hard-hat yellow, a bevel lit top-left and shaded bottom-right; scripts/voxel-frame.mjs prints it),
+   and controls are little blocks with stepped corners that press down. One voxel is 3 px. */
 
 :root {
     --ui-scale: 1;
+    --vx: 3px;
+    --menu-frame: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' shape-rendering='crispEdges'><rect x='3' y='0' width='3' height='1' fill='%23f2c14e'/><rect x='6' y='0' width='4' height='1' fill='%2305080b'/><rect x='10' y='0' width='3' height='1' fill='%23f2c14e'/><rect x='2' y='1' width='2' height='1' fill='%23f2c14e'/><rect x='4' y='1' width='2' height='1' fill='%23ffdc7a'/><rect x='6' y='1' width='4' height='1' fill='%233b4855'/><rect x='10' y='1' width='2' height='1' fill='%23ffdc7a'/><rect x='12' y='1' width='2' height='1' fill='%23f2c14e'/><rect x='1' y='2' width='2' height='1' fill='%23f2c14e'/><rect x='3' y='2' width='2' height='1' fill='%23ffdc7a'/><rect x='5' y='2' width='6' height='1' fill='%23141b22'/><rect x='11' y='2' width='2' height='1' fill='%23ffdc7a'/><rect x='13' y='2' width='2' height='1' fill='%23b8862a'/><rect x='0' y='3' width='2' height='1' fill='%23f2c14e'/><rect x='2' y='3' width='2' height='1' fill='%23ffdc7a'/><rect x='4' y='3' width='8' height='1' fill='%23141b22'/><rect x='12' y='3' width='4' height='1' fill='%23b8862a'/><rect x='0' y='4' width='1' height='1' fill='%23f2c14e'/><rect x='1' y='4' width='2' height='1' fill='%23ffdc7a'/><rect x='3' y='4' width='10' height='1' fill='%23141b22'/><rect x='13' y='4' width='3' height='1' fill='%23b8862a'/><rect x='0' y='5' width='1' height='1' fill='%23f2c14e'/><rect x='1' y='5' width='1' height='1' fill='%23ffdc7a'/><rect x='2' y='5' width='12' height='1' fill='%23141b22'/><rect x='14' y='5' width='2' height='1' fill='%23b8862a'/><rect x='0' y='6' width='1' height='1' fill='%2305080b'/><rect x='1' y='6' width='1' height='1' fill='%233b4855'/><rect x='2' y='6' width='12' height='1' fill='%23141b22'/><rect x='14' y='6' width='1' height='1' fill='%230a0f14'/><rect x='15' y='6' width='1' height='1' fill='%2305080b'/><rect x='0' y='7' width='1' height='1' fill='%2305080b'/><rect x='1' y='7' width='1' height='1' fill='%233b4855'/><rect x='2' y='7' width='12' height='1' fill='%23141b22'/><rect x='14' y='7' width='1' height='1' fill='%230a0f14'/><rect x='15' y='7' width='1' height='1' fill='%2305080b'/><rect x='0' y='8' width='1' height='1' fill='%2305080b'/><rect x='1' y='8' width='1' height='1' fill='%233b4855'/><rect x='2' y='8' width='12' height='1' fill='%23141b22'/><rect x='14' y='8' width='1' height='1' fill='%230a0f14'/><rect x='15' y='8' width='1' height='1' fill='%2305080b'/><rect x='0' y='9' width='1' height='1' fill='%2305080b'/><rect x='1' y='9' width='1' height='1' fill='%233b4855'/><rect x='2' y='9' width='12' height='1' fill='%23141b22'/><rect x='14' y='9' width='1' height='1' fill='%230a0f14'/><rect x='15' y='9' width='1' height='1' fill='%2305080b'/><rect x='0' y='10' width='1' height='1' fill='%23f2c14e'/><rect x='1' y='10' width='1' height='1' fill='%23ffdc7a'/><rect x='2' y='10' width='12' height='1' fill='%23141b22'/><rect x='14' y='10' width='2' height='1' fill='%23b8862a'/><rect x='0' y='11' width='1' height='1' fill='%23f2c14e'/><rect x='1' y='11' width='2' height='1' fill='%23ffdc7a'/><rect x='3' y='11' width='10' height='1' fill='%23141b22'/><rect x='13' y='11' width='3' height='1' fill='%23b8862a'/><rect x='0' y='12' width='2' height='1' fill='%23f2c14e'/><rect x='2' y='12' width='1' height='1' fill='%23ffdc7a'/><rect x='3' y='12' width='1' height='1' fill='%23b8862a'/><rect x='4' y='12' width='8' height='1' fill='%23141b22'/><rect x='12' y='12' width='4' height='1' fill='%23b8862a'/><rect x='1' y='13' width='1' height='1' fill='%23f2c14e'/><rect x='2' y='13' width='3' height='1' fill='%23b8862a'/><rect x='5' y='13' width='6' height='1' fill='%23141b22'/><rect x='11' y='13' width='4' height='1' fill='%23b8862a'/><rect x='2' y='14' width='4' height='1' fill='%23b8862a'/><rect x='6' y='14' width='4' height='1' fill='%230a0f14'/><rect x='10' y='14' width='4' height='1' fill='%23b8862a'/><rect x='3' y='15' width='3' height='1' fill='%23b8862a'/><rect x='6' y='15' width='4' height='1' fill='%2305080b'/><rect x='10' y='15' width='3' height='1' fill='%23b8862a'/></svg>");
+    --menu-corners:
+        url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='9' height='9' viewBox='0 0 9 9' shape-rendering='crispEdges'><rect x='2' y='0' width='1' height='1' fill='%2305080b'/><rect x='3' y='0' width='1' height='1' fill='%2305080b'/><rect x='4' y='0' width='1' height='1' fill='%2305080b'/><rect x='5' y='0' width='1' height='1' fill='%2305080b'/><rect x='6' y='0' width='1' height='1' fill='%2305080b'/><rect x='7' y='0' width='1' height='1' fill='%2305080b'/><rect x='8' y='0' width='1' height='1' fill='%2305080b'/><rect x='1' y='1' width='1' height='1' fill='%2305080b'/><rect x='2' y='1' width='1' height='1' fill='%23ffdc7a'/><rect x='3' y='1' width='1' height='1' fill='%23ffdc7a'/><rect x='4' y='1' width='1' height='1' fill='%23ffdc7a'/><rect x='5' y='1' width='1' height='1' fill='%23ffdc7a'/><rect x='6' y='1' width='1' height='1' fill='%23ffdc7a'/><rect x='7' y='1' width='1' height='1' fill='%23ffdc7a'/><rect x='8' y='1' width='1' height='1' fill='%2305080b'/><rect x='0' y='2' width='1' height='1' fill='%2305080b'/><rect x='1' y='2' width='1' height='1' fill='%23ffdc7a'/><rect x='2' y='2' width='1' height='1' fill='%236e4c12'/><rect x='3' y='2' width='1' height='1' fill='%23f2c14e'/><rect x='4' y='2' width='1' height='1' fill='%23b8862a'/><rect x='5' y='2' width='1' height='1' fill='%23b8862a'/><rect x='6' y='2' width='1' height='1' fill='%23b8862a'/><rect x='7' y='2' width='1' height='1' fill='%23b8862a'/><rect x='8' y='2' width='1' height='1' fill='%2305080b'/><rect x='0' y='3' width='1' height='1' fill='%2305080b'/><rect x='1' y='3' width='1' height='1' fill='%23ffdc7a'/><rect x='2' y='3' width='1' height='1' fill='%23f2c14e'/><rect x='3' y='3' width='1' height='1' fill='%23f2c14e'/><rect x='4' y='3' width='1' height='1' fill='%2305080b'/><rect x='5' y='3' width='1' height='1' fill='%2305080b'/><rect x='6' y='3' width='1' height='1' fill='%2305080b'/><rect x='7' y='3' width='1' height='1' fill='%2305080b'/><rect x='8' y='3' width='1' height='1' fill='%2305080b'/><rect x='0' y='4' width='1' height='1' fill='%2305080b'/><rect x='1' y='4' width='1' height='1' fill='%23ffdc7a'/><rect x='2' y='4' width='1' height='1' fill='%23b8862a'/><rect x='3' y='4' width='1' height='1' fill='%2305080b'/><rect x='0' y='5' width='1' height='1' fill='%2305080b'/><rect x='1' y='5' width='1' height='1' fill='%23ffdc7a'/><rect x='2' y='5' width='1' height='1' fill='%23b8862a'/><rect x='3' y='5' width='1' height='1' fill='%2305080b'/><rect x='0' y='6' width='1' height='1' fill='%2305080b'/><rect x='1' y='6' width='1' height='1' fill='%23ffdc7a'/><rect x='2' y='6' width='1' height='1' fill='%23b8862a'/><rect x='3' y='6' width='1' height='1' fill='%2305080b'/><rect x='0' y='7' width='1' height='1' fill='%2305080b'/><rect x='1' y='7' width='1' height='1' fill='%23ffdc7a'/><rect x='2' y='7' width='1' height='1' fill='%23b8862a'/><rect x='3' y='7' width='1' height='1' fill='%2305080b'/><rect x='0' y='8' width='1' height='1' fill='%2305080b'/><rect x='1' y='8' width='1' height='1' fill='%2305080b'/><rect x='2' y='8' width='1' height='1' fill='%2305080b'/><rect x='3' y='8' width='1' height='1' fill='%2305080b'/></svg>")
+            top left no-repeat,
+        url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='9' height='9' viewBox='0 0 9 9' shape-rendering='crispEdges'><rect x='0' y='0' width='1' height='1' fill='%2305080b'/><rect x='1' y='0' width='1' height='1' fill='%2305080b'/><rect x='2' y='0' width='1' height='1' fill='%2305080b'/><rect x='3' y='0' width='1' height='1' fill='%2305080b'/><rect x='4' y='0' width='1' height='1' fill='%2305080b'/><rect x='5' y='0' width='1' height='1' fill='%2305080b'/><rect x='6' y='0' width='1' height='1' fill='%2305080b'/><rect x='0' y='1' width='1' height='1' fill='%2305080b'/><rect x='1' y='1' width='1' height='1' fill='%23ffdc7a'/><rect x='2' y='1' width='1' height='1' fill='%23ffdc7a'/><rect x='3' y='1' width='1' height='1' fill='%23ffdc7a'/><rect x='4' y='1' width='1' height='1' fill='%23ffdc7a'/><rect x='5' y='1' width='1' height='1' fill='%23ffdc7a'/><rect x='6' y='1' width='1' height='1' fill='%23ffdc7a'/><rect x='7' y='1' width='1' height='1' fill='%2305080b'/><rect x='0' y='2' width='1' height='1' fill='%2305080b'/><rect x='1' y='2' width='1' height='1' fill='%23ffdc7a'/><rect x='2' y='2' width='1' height='1' fill='%23b8862a'/><rect x='3' y='2' width='1' height='1' fill='%23b8862a'/><rect x='4' y='2' width='1' height='1' fill='%23b8862a'/><rect x='5' y='2' width='1' height='1' fill='%23f2c14e'/><rect x='6' y='2' width='1' height='1' fill='%236e4c12'/><rect x='7' y='2' width='1' height='1' fill='%23ffdc7a'/><rect x='8' y='2' width='1' height='1' fill='%2305080b'/><rect x='0' y='3' width='1' height='1' fill='%2305080b'/><rect x='1' y='3' width='1' height='1' fill='%2305080b'/><rect x='2' y='3' width='1' height='1' fill='%2305080b'/><rect x='3' y='3' width='1' height='1' fill='%2305080b'/><rect x='4' y='3' width='1' height='1' fill='%2305080b'/><rect x='5' y='3' width='1' height='1' fill='%23f2c14e'/><rect x='6' y='3' width='1' height='1' fill='%23f2c14e'/><rect x='7' y='3' width='1' height='1' fill='%23b8862a'/><rect x='8' y='3' width='1' height='1' fill='%2305080b'/><rect x='5' y='4' width='1' height='1' fill='%2305080b'/><rect x='6' y='4' width='1' height='1' fill='%23ffdc7a'/><rect x='7' y='4' width='1' height='1' fill='%23b8862a'/><rect x='8' y='4' width='1' height='1' fill='%2305080b'/><rect x='5' y='5' width='1' height='1' fill='%2305080b'/><rect x='6' y='5' width='1' height='1' fill='%23ffdc7a'/><rect x='7' y='5' width='1' height='1' fill='%23b8862a'/><rect x='8' y='5' width='1' height='1' fill='%2305080b'/><rect x='5' y='6' width='1' height='1' fill='%2305080b'/><rect x='6' y='6' width='1' height='1' fill='%23ffdc7a'/><rect x='7' y='6' width='1' height='1' fill='%23b8862a'/><rect x='8' y='6' width='1' height='1' fill='%2305080b'/><rect x='5' y='7' width='1' height='1' fill='%2305080b'/><rect x='6' y='7' width='1' height='1' fill='%23ffdc7a'/><rect x='7' y='7' width='1' height='1' fill='%23b8862a'/><rect x='8' y='7' width='1' height='1' fill='%2305080b'/><rect x='5' y='8' width='1' height='1' fill='%2305080b'/><rect x='6' y='8' width='1' height='1' fill='%2305080b'/><rect x='7' y='8' width='1' height='1' fill='%2305080b'/><rect x='8' y='8' width='1' height='1' fill='%2305080b'/></svg>")
+            top right no-repeat,
+        url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='9' height='9' viewBox='0 0 9 9' shape-rendering='crispEdges'><rect x='0' y='0' width='1' height='1' fill='%2305080b'/><rect x='1' y='0' width='1' height='1' fill='%2305080b'/><rect x='2' y='0' width='1' height='1' fill='%2305080b'/><rect x='3' y='0' width='1' height='1' fill='%2305080b'/><rect x='0' y='1' width='1' height='1' fill='%2305080b'/><rect x='1' y='1' width='1' height='1' fill='%23ffdc7a'/><rect x='2' y='1' width='1' height='1' fill='%23ffdc7a'/><rect x='3' y='1' width='1' height='1' fill='%2305080b'/><rect x='0' y='2' width='1' height='1' fill='%2305080b'/><rect x='1' y='2' width='1' height='1' fill='%23ffdc7a'/><rect x='2' y='2' width='1' height='1' fill='%23b8862a'/><rect x='3' y='2' width='1' height='1' fill='%2305080b'/><rect x='0' y='3' width='1' height='1' fill='%2305080b'/><rect x='1' y='3' width='1' height='1' fill='%23ffdc7a'/><rect x='2' y='3' width='1' height='1' fill='%23b8862a'/><rect x='3' y='3' width='1' height='1' fill='%2305080b'/><rect x='0' y='4' width='1' height='1' fill='%2305080b'/><rect x='1' y='4' width='1' height='1' fill='%23ffdc7a'/><rect x='2' y='4' width='1' height='1' fill='%23b8862a'/><rect x='3' y='4' width='1' height='1' fill='%2305080b'/><rect x='0' y='5' width='1' height='1' fill='%2305080b'/><rect x='1' y='5' width='1' height='1' fill='%23ffdc7a'/><rect x='2' y='5' width='1' height='1' fill='%23f2c14e'/><rect x='3' y='5' width='1' height='1' fill='%23f2c14e'/><rect x='4' y='5' width='1' height='1' fill='%2305080b'/><rect x='5' y='5' width='1' height='1' fill='%2305080b'/><rect x='6' y='5' width='1' height='1' fill='%2305080b'/><rect x='7' y='5' width='1' height='1' fill='%2305080b'/><rect x='8' y='5' width='1' height='1' fill='%2305080b'/><rect x='0' y='6' width='1' height='1' fill='%2305080b'/><rect x='1' y='6' width='1' height='1' fill='%23ffdc7a'/><rect x='2' y='6' width='1' height='1' fill='%236e4c12'/><rect x='3' y='6' width='1' height='1' fill='%23f2c14e'/><rect x='4' y='6' width='1' height='1' fill='%23ffdc7a'/><rect x='5' y='6' width='1' height='1' fill='%23ffdc7a'/><rect x='6' y='6' width='1' height='1' fill='%23ffdc7a'/><rect x='7' y='6' width='1' height='1' fill='%23ffdc7a'/><rect x='8' y='6' width='1' height='1' fill='%2305080b'/><rect x='1' y='7' width='1' height='1' fill='%2305080b'/><rect x='2' y='7' width='1' height='1' fill='%23ffdc7a'/><rect x='3' y='7' width='1' height='1' fill='%23b8862a'/><rect x='4' y='7' width='1' height='1' fill='%23b8862a'/><rect x='5' y='7' width='1' height='1' fill='%23b8862a'/><rect x='6' y='7' width='1' height='1' fill='%23b8862a'/><rect x='7' y='7' width='1' height='1' fill='%23b8862a'/><rect x='8' y='7' width='1' height='1' fill='%2305080b'/><rect x='2' y='8' width='1' height='1' fill='%2305080b'/><rect x='3' y='8' width='1' height='1' fill='%2305080b'/><rect x='4' y='8' width='1' height='1' fill='%2305080b'/><rect x='5' y='8' width='1' height='1' fill='%2305080b'/><rect x='6' y='8' width='1' height='1' fill='%2305080b'/><rect x='7' y='8' width='1' height='1' fill='%2305080b'/><rect x='8' y='8' width='1' height='1' fill='%2305080b'/></svg>")
+            bottom left no-repeat,
+        url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='9' height='9' viewBox='0 0 9 9' shape-rendering='crispEdges'><rect x='5' y='0' width='1' height='1' fill='%2305080b'/><rect x='6' y='0' width='1' height='1' fill='%2305080b'/><rect x='7' y='0' width='1' height='1' fill='%2305080b'/><rect x='8' y='0' width='1' height='1' fill='%2305080b'/><rect x='5' y='1' width='1' height='1' fill='%2305080b'/><rect x='6' y='1' width='1' height='1' fill='%23ffdc7a'/><rect x='7' y='1' width='1' height='1' fill='%23ffdc7a'/><rect x='8' y='1' width='1' height='1' fill='%2305080b'/><rect x='5' y='2' width='1' height='1' fill='%2305080b'/><rect x='6' y='2' width='1' height='1' fill='%23ffdc7a'/><rect x='7' y='2' width='1' height='1' fill='%23b8862a'/><rect x='8' y='2' width='1' height='1' fill='%2305080b'/><rect x='5' y='3' width='1' height='1' fill='%2305080b'/><rect x='6' y='3' width='1' height='1' fill='%23ffdc7a'/><rect x='7' y='3' width='1' height='1' fill='%23b8862a'/><rect x='8' y='3' width='1' height='1' fill='%2305080b'/><rect x='5' y='4' width='1' height='1' fill='%2305080b'/><rect x='6' y='4' width='1' height='1' fill='%23ffdc7a'/><rect x='7' y='4' width='1' height='1' fill='%23b8862a'/><rect x='8' y='4' width='1' height='1' fill='%2305080b'/><rect x='0' y='5' width='1' height='1' fill='%2305080b'/><rect x='1' y='5' width='1' height='1' fill='%2305080b'/><rect x='2' y='5' width='1' height='1' fill='%2305080b'/><rect x='3' y='5' width='1' height='1' fill='%2305080b'/><rect x='4' y='5' width='1' height='1' fill='%2305080b'/><rect x='5' y='5' width='1' height='1' fill='%23f2c14e'/><rect x='6' y='5' width='1' height='1' fill='%23f2c14e'/><rect x='7' y='5' width='1' height='1' fill='%23b8862a'/><rect x='8' y='5' width='1' height='1' fill='%2305080b'/><rect x='0' y='6' width='1' height='1' fill='%2305080b'/><rect x='1' y='6' width='1' height='1' fill='%23ffdc7a'/><rect x='2' y='6' width='1' height='1' fill='%23ffdc7a'/><rect x='3' y='6' width='1' height='1' fill='%23ffdc7a'/><rect x='4' y='6' width='1' height='1' fill='%23ffdc7a'/><rect x='5' y='6' width='1' height='1' fill='%23f2c14e'/><rect x='6' y='6' width='1' height='1' fill='%236e4c12'/><rect x='7' y='6' width='1' height='1' fill='%23b8862a'/><rect x='8' y='6' width='1' height='1' fill='%2305080b'/><rect x='0' y='7' width='1' height='1' fill='%2305080b'/><rect x='1' y='7' width='1' height='1' fill='%23ffdc7a'/><rect x='2' y='7' width='1' height='1' fill='%23b8862a'/><rect x='3' y='7' width='1' height='1' fill='%23b8862a'/><rect x='4' y='7' width='1' height='1' fill='%23b8862a'/><rect x='5' y='7' width='1' height='1' fill='%23b8862a'/><rect x='6' y='7' width='1' height='1' fill='%23b8862a'/><rect x='7' y='7' width='1' height='1' fill='%2305080b'/><rect x='0' y='8' width='1' height='1' fill='%2305080b'/><rect x='1' y='8' width='1' height='1' fill='%2305080b'/><rect x='2' y='8' width='1' height='1' fill='%2305080b'/><rect x='3' y='8' width='1' height='1' fill='%2305080b'/><rect x='4' y='8' width='1' height='1' fill='%2305080b'/><rect x='5' y='8' width='1' height='1' fill='%2305080b'/><rect x='6' y='8' width='1' height='1' fill='%2305080b'/></svg>")
+            bottom right no-repeat;
+    --steps: polygon(
+        0 calc(var(--vx) * 2),
+        var(--vx) calc(var(--vx) * 2),
+        var(--vx) var(--vx),
+        calc(var(--vx) * 2) var(--vx),
+        calc(var(--vx) * 2) 0,
+        calc(100% - var(--vx) * 2) 0,
+        calc(100% - var(--vx) * 2) var(--vx),
+        calc(100% - var(--vx)) var(--vx),
+        calc(100% - var(--vx)) calc(var(--vx) * 2),
+        100% calc(var(--vx) * 2),
+        100% calc(100% - var(--vx) * 2),
+        calc(100% - var(--vx)) calc(100% - var(--vx) * 2),
+        calc(100% - var(--vx)) calc(100% - var(--vx)),
+        calc(100% - var(--vx) * 2) calc(100% - var(--vx)),
+        calc(100% - var(--vx) * 2) 100%,
+        calc(var(--vx) * 2) 100%,
+        calc(var(--vx) * 2) calc(100% - var(--vx)),
+        var(--vx) calc(100% - var(--vx)),
+        var(--vx) calc(100% - var(--vx) * 2),
+        0 calc(100% - var(--vx) * 2)
+    );
 }
 
 .hud,
@@ -883,28 +919,96 @@ body.settings-open .crosshair {
 .settings {
     display: flex;
     flex-direction: column;
-    width: min(560px, 100%);
+    width: min(580px, 100%);
     max-height: calc(100dvh / var(--ui-scale) - 32px);
     color: #f4f1ea;
-    background: #10161cf2;
-    border: 1px solid #ffffff30;
-    border-radius: 14px;
-    box-shadow: 0 18px 60px #000a;
-    overflow: hidden;
+    /* the frame's voxels are a little bigger than the controls' */
+    --fv: 4px;
+    border: calc(var(--fv) * 6) solid transparent;
+    border-image: var(--menu-frame) 6 fill / calc(var(--fv) * 6) stretch;
+    position: relative;
+}
+
+/* the corners are built up: yellow L-blocks bolted on, one voxel proud of the frame */
+.settings::after {
+    content: '';
+    position: absolute;
+    inset: calc(var(--fv) * -7);
+    background: var(--menu-corners);
+    background-size: calc(var(--fv) * 11) calc(var(--fv) * 11);
+    image-rendering: pixelated;
+    pointer-events: none;
+}
+
+/* a blocky shadow one block below the frame (a filter would shadow the text too) */
+.settings::before {
+    content: '';
+    position: absolute;
+    inset: calc(var(--fv) * -6);
+    top: calc(var(--fv) * -3);
+    bottom: calc(var(--fv) * -9);
+    z-index: -1;
+    background: #000a;
+    clip-path: polygon(
+        calc(var(--vx) * 3) 0,
+        calc(100% - var(--vx) * 3) 0,
+        calc(100% - var(--vx) * 3) var(--vx),
+        calc(100% - var(--vx) * 2) var(--vx),
+        calc(100% - var(--vx) * 2) calc(var(--vx) * 2),
+        calc(100% - var(--vx)) calc(var(--vx) * 2),
+        calc(100% - var(--vx)) calc(var(--vx) * 3),
+        100% calc(var(--vx) * 3),
+        100% calc(100% - var(--vx) * 3),
+        calc(100% - var(--vx)) calc(100% - var(--vx) * 3),
+        calc(100% - var(--vx)) calc(100% - var(--vx) * 2),
+        calc(100% - var(--vx) * 2) calc(100% - var(--vx) * 2),
+        calc(100% - var(--vx) * 2) calc(100% - var(--vx)),
+        calc(100% - var(--vx) * 3) calc(100% - var(--vx)),
+        calc(100% - var(--vx) * 3) 100%,
+        calc(var(--vx) * 3) 100%,
+        calc(var(--vx) * 3) calc(100% - var(--vx)),
+        calc(var(--vx) * 2) calc(100% - var(--vx)),
+        calc(var(--vx) * 2) calc(100% - var(--vx) * 2),
+        var(--vx) calc(100% - var(--vx) * 2),
+        var(--vx) calc(100% - var(--vx) * 3),
+        0 calc(100% - var(--vx) * 3),
+        0 calc(var(--vx) * 3),
+        var(--vx) calc(var(--vx) * 3),
+        var(--vx) calc(var(--vx) * 2),
+        calc(var(--vx) * 2) calc(var(--vx) * 2),
+        calc(var(--vx) * 2) var(--vx),
+        calc(var(--vx) * 3) var(--vx)
+    );
 }
 
 .settings-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 12px 4px 18px;
+    padding: 0 0 4px 8px;
 }
 
 .settings-head h2 {
     margin: 0;
     font-size: 20px;
-    font-weight: 700;
-    letter-spacing: 0.01em;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    text-shadow: var(--vx) var(--vx) 0 #000;
+}
+
+/* the little voxel stack before the title */
+.settings-head h2::before {
+    content: '';
+    display: inline-block;
+    width: calc(var(--vx) * 4);
+    height: calc(var(--vx) * 4);
+    margin-right: 10px;
+    vertical-align: -1px;
+    background: #f2c14e;
+    box-shadow:
+        inset calc(var(--vx) * -1) calc(var(--vx) * -1) 0 #b8862a,
+        calc(var(--vx) * 2) calc(var(--vx) * -2) 0 -1px #9fe39a;
 }
 
 .settings button {
@@ -913,49 +1017,90 @@ body.settings-open .crosshair {
     cursor: pointer;
 }
 
+/* ---- blocks: buttons, tabs, switches, steppers */
+.settings-close,
+.settings-tabs button,
+.settings-switch,
+.settings-step,
+.settings-choices,
+.settings-button .settings-control button {
+    border: 0;
+    border-radius: 0;
+    clip-path: var(--steps);
+    background: #26313b;
+    box-shadow:
+        inset 0 var(--vx) 0 #ffffff26,
+        inset 0 calc(var(--vx) * -1.5) 0 #0008;
+    transition:
+        transform 60ms,
+        background 80ms;
+}
+
+.settings-close:hover,
+.settings-tabs button:hover,
+.settings-switch:hover,
+.settings-step:hover,
+.settings-button .settings-control button:hover:not(:disabled) {
+    background: #33404c;
+}
+
+/* pressed: the block goes down into the frame */
+.settings-close:active,
+.settings-tabs button:active,
+.settings-switch:active,
+.settings-step:active,
+.settings-choices button:active,
+.settings-button .settings-control button:active:not(:disabled) {
+    transform: translateY(var(--vx));
+    box-shadow: inset 0 var(--vx) 0 #0007;
+}
+
 .settings-close {
     min-width: 44px;
     min-height: 44px;
-    font-size: 18px;
-    border: 0;
-    border-radius: 10px;
-    background: transparent;
-}
-
-.settings-close:hover {
-    background: #ffffff18;
+    font-size: 16px;
+    font-weight: 800;
 }
 
 .settings-tabs {
     display: flex;
-    gap: 4px;
-    padding: 6px 12px 10px;
+    gap: var(--vx);
+    padding: 4px 0 10px;
     overflow-x: auto;
-    border-bottom: 1px solid #ffffff1c;
+    /* a dotted voxel rule under the tabs */
+    background: linear-gradient(90deg, #ffffff30 50%, transparent 50%) bottom / calc(var(--vx) * 2) var(--vx) repeat-x;
 }
 
 .settings-tabs button {
     flex: 1 0 auto;
     min-height: 44px;
-    padding: 0 14px;
-    font-size: 14px;
-    font-weight: 600;
-    border: 1px solid transparent;
-    border-radius: 10px;
-    background: transparent;
+    padding: 0 14px 2px;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
     color: #f4f1eab0;
 }
 
 .settings-tabs button[aria-selected='true'] {
     color: #10161c;
     background: #f2c14e;
+    box-shadow:
+        inset 0 var(--vx) 0 #ffe6a0,
+        inset 0 calc(var(--vx) * -1.5) 0 #b8862a;
 }
 
 .settings-panel {
     flex: 1 1 auto;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: 8px 8px 10px;
+    margin-top: 6px;
+    padding: 6px 2px 8px;
+    /* the voxel grid */
+    background-image:
+        linear-gradient(#ffffff09 1px, transparent 1px), linear-gradient(90deg, #ffffff09 1px, transparent 1px);
+    background-size: calc(var(--vx) * 5) calc(var(--vx) * 5);
+    background-position: -1px -1px;
 }
 
 .settings-row {
@@ -964,15 +1109,14 @@ body.settings-open .crosshair {
     justify-content: space-between;
     gap: 12px;
     min-height: 52px;
-    padding: 4px 10px;
-    border: 2px solid transparent;
-    border-radius: 10px;
+    padding: 4px 12px;
+    clip-path: var(--steps);
 }
 
 /* the row you are on: always shown, so a gamepad player can see where they are */
 .settings-row.current {
-    border-color: #f2c14e;
-    background: #f2c14e14;
+    background: #f2c14e1c;
+    box-shadow: inset 0 0 0 var(--vx) #f2c14e;
 }
 
 .settings-label {
@@ -980,11 +1124,13 @@ body.settings-open .crosshair {
     flex-direction: column;
     gap: 2px;
     font-size: 15px;
+    font-weight: 600;
     cursor: default;
 }
 
 .settings-label small {
     font-size: 12px;
+    font-weight: 400;
     color: #f4f1ea90;
 }
 
@@ -1001,61 +1147,108 @@ body.settings-open .crosshair {
 }
 
 .settings-switch {
-    min-width: 72px;
-    padding: 0 14px;
-    font-weight: 700;
-    border: 1px solid #ffffff40;
-    border-radius: 22px;
-    background: #ffffff10;
+    min-width: 76px;
+    padding: 0 14px 2px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
 }
 
 .settings-switch[aria-checked='true'] {
     color: #10161c;
     background: #9fe39a;
-    border-color: #9fe39a;
+    box-shadow:
+        inset 0 var(--vx) 0 #d4f7d1,
+        inset 0 calc(var(--vx) * -1.5) 0 #5aa257;
 }
 
 .settings-choices {
     display: flex;
-    padding: 3px;
-    gap: 3px;
-    border: 1px solid #ffffff30;
-    border-radius: 12px;
+    padding: var(--vx);
+    gap: var(--vx);
+    background: #0a0f14;
+    box-shadow: inset 0 var(--vx) 0 #0008;
 }
 
 .settings-choices button {
     min-width: 64px;
     min-height: 38px;
-    padding: 0 12px;
+    padding: 0 12px 2px;
     border: 0;
-    border-radius: 9px;
+    clip-path: var(--steps);
     background: transparent;
     color: #f4f1eab0;
+    font-weight: 700;
 }
 
 .settings-choices button[aria-checked='true'] {
     color: #10161c;
     background: #f4f1ea;
-    font-weight: 700;
+    box-shadow:
+        inset 0 var(--vx) 0 #fff,
+        inset 0 calc(var(--vx) * -1.5) 0 #a9a39a;
 }
 
+/* sliders: a sunken voxel track, filled to the value, with a block thumb */
 .settings-range input {
+    --p: 50%;
     width: clamp(90px, 26vw, 170px);
-    accent-color: #f2c14e;
+    height: 44px;
+    margin: 0;
+    background: transparent;
+    appearance: none;
+    cursor: pointer;
+}
+
+.settings-range input::-webkit-slider-runnable-track {
+    height: calc(var(--vx) * 3);
+    background: linear-gradient(90deg, #f2c14e var(--p), #0a0f14 var(--p));
+    box-shadow: inset 0 var(--vx) 0 #0007;
+}
+
+.settings-range input::-moz-range-track {
+    height: calc(var(--vx) * 3);
+    background: linear-gradient(90deg, #f2c14e var(--p), #0a0f14 var(--p));
+    box-shadow: inset 0 var(--vx) 0 #0007;
+}
+
+.settings-range input::-webkit-slider-thumb {
+    width: calc(var(--vx) * 6);
+    height: calc(var(--vx) * 8);
+    margin-top: calc(var(--vx) * -2.5);
+    border: 0;
+    border-radius: 0;
+    background: #f4f1ea;
+    box-shadow:
+        inset 0 var(--vx) 0 #fff,
+        inset 0 calc(var(--vx) * -1.5) 0 #8d877e,
+        0 0 0 var(--vx) #05080b;
+    appearance: none;
+}
+
+.settings-range input::-moz-range-thumb {
+    width: calc(var(--vx) * 6);
+    height: calc(var(--vx) * 8);
+    border: 0;
+    border-radius: 0;
+    background: #f4f1ea;
+    box-shadow:
+        inset 0 var(--vx) 0 #fff,
+        inset 0 calc(var(--vx) * -1.5) 0 #8d877e,
+        0 0 0 var(--vx) #05080b;
 }
 
 .settings-range output {
-    min-width: 54px;
+    min-width: 58px;
     text-align: right;
+    font-weight: 700;
     font-variant-numeric: tabular-nums;
 }
 
 .settings-step {
-    min-width: 36px;
+    min-width: 38px;
     font-size: 18px;
-    border: 1px solid #ffffff30;
-    border-radius: 9px;
-    background: #ffffff10;
+    font-weight: 800;
 }
 
 .settings-button .settings-control {
@@ -1068,45 +1261,73 @@ body.settings-open .crosshair {
 }
 
 .settings-button .settings-control button {
-    padding: 0 16px;
-    border: 1px solid #ffffff40;
-    border-radius: 10px;
-    background: #ffffff12;
+    padding: 0 18px 2px;
+    font-weight: 700;
 }
 
 .settings-primary .settings-control button {
     color: #10161c;
     background: #f2c14e;
-    border-color: #f2c14e;
-    font-weight: 700;
+    box-shadow:
+        inset 0 var(--vx) 0 #ffe6a0,
+        inset 0 calc(var(--vx) * -1.5) 0 #b8862a;
+}
+
+.settings-primary .settings-control button:hover {
+    background: #ffd25f;
 }
 
 .settings-control button:disabled {
-    opacity: 0.4;
+    opacity: 0.35;
     cursor: default;
 }
 
+/* focus: outlines would be cut off by the stepped corners, so a voxel ring inside instead */
 .settings :focus-visible {
-    outline: 2px solid #f2c14e;
-    outline-offset: 2px;
+    outline: none;
+}
+
+.settings-close:focus-visible,
+.settings-tabs button:focus-visible,
+.settings-switch:focus-visible,
+.settings-choices button:focus-visible,
+.settings-button .settings-control button:focus-visible {
+    box-shadow: inset 0 0 0 var(--vx) #fff;
 }
 
 .settings-foot {
-    padding: 8px 18px 12px;
+    margin-top: 6px;
+    padding: 8px 6px 0;
     font-size: 12px;
     color: #f4f1ea90;
-    border-top: 1px solid #ffffff1c;
+    background: linear-gradient(90deg, #ffffff30 50%, transparent 50%) top / calc(var(--vx) * 2) var(--vx) repeat-x;
 }
 
 .settings-foot kbd {
     display: inline-block;
-    min-width: 1.4em;
+    min-width: 1.5em;
     padding: 0 4px;
     margin: 0 1px;
     text-align: center;
-    border: 1px solid #ffffff40;
-    border-radius: 4px;
     font: inherit;
+    font-weight: 700;
+    color: #f4f1ea;
+    background: #26313b;
+    box-shadow: inset 0 -2px 0 #0008;
+    clip-path: polygon(
+        0 2px,
+        2px 2px,
+        2px 0,
+        calc(100% - 2px) 0,
+        calc(100% - 2px) 2px,
+        100% 2px,
+        100% calc(100% - 2px),
+        calc(100% - 2px) calc(100% - 2px),
+        calc(100% - 2px) 100%,
+        2px 100%,
+        2px calc(100% - 2px),
+        0 calc(100% - 2px)
+    );
 }
 
 .settings-foot .foot-pad {
@@ -1138,7 +1359,7 @@ body.has-pad .settings-foot .foot-pad {
         flex-direction: column;
         align-items: stretch;
         gap: 6px;
-        padding: 8px 10px;
+        padding: 8px 12px;
     }
 
     .settings-row:not(.settings-button) .settings-control {
@@ -1148,5 +1369,14 @@ body.has-pad .settings-foot .foot-pad {
     .settings-range input {
         flex: 1 1 auto;
         width: auto;
+    }
+
+    /* all four tabs fit */
+    .settings-tabs button {
+        flex: 1 1 0;
+        min-width: 0;
+        padding: 0 4px 2px;
+        font-size: 11px;
+        letter-spacing: 0.03em;
     }
 }

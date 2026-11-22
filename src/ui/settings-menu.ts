@@ -377,6 +377,8 @@ export class SettingsMenu {
                 const sync = () => {
                     const v = Number(this.host.get(row.key));
                     input.value = String(v);
+                    // the track fills to the value
+                    input.style.setProperty('--p', `${((v - row.min) / (row.max - row.min)) * 100}%`);
                     out.textContent = row.format(v);
                     input.setAttribute('aria-valuetext', row.format(v));
                 };
