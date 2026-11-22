@@ -40,6 +40,9 @@ export const UTE = {
     /** Brake and rolling resistance (largest impulse per wheel per tick, N s). */
     brake: 22,
     rolling: 1.2,
+    /** Braked and slower than this (m/s, rad/s), the parking lock holds it (holdParked). */
+    parkSpeed: 0.1,
+    parkSpin: 0.2,
     /** Front wheel lock (rad) at a standstill and at top speed; how fast it turns (rad/s). */
     steerMax: 0.55,
     steerAtTop: 0.2,
@@ -98,6 +101,8 @@ export class UteVehicle {
     lastGroundImpulse = 0;
     /** Ids of the dynamic bodies the wheels stood on last tick (one per wheel, -1 for none). */
     readonly groundIds: number[] = [-1, -1, -1, -1];
+    /** The parking lock held it this tick (holdParked). */
+    parkLocked = false;
 
     constructor(pw: PhysicsWorld, id: number, spawn: Pose) {
         this.pw = pw;
@@ -241,11 +246,60 @@ export class UteVehicle {
         const body = this.pb.body;
         const v0 = body.linvel();
         c.updateVehicle(dt, undefined, WHEEL_FILTER);
+        // parked: braked with no throttle and nearly still, it holds where it stands (below)
+        if (input.brake && throttle === 0) this.holdParked(v0);
+        else this.releasePark();
         const v1 = body.linvel();
         const m = body.mass();
         this.spin = 0;
         for (let i = 0; i < 4; i++) this.spin += (c.wheelRotation(i) ?? 0) / 4;
         this.loadGround(m * (v1.x - v0.x), m * (v1.y - v0.y), m * (v1.z - v0.z), dt);
+    }
+
+    /**
+     * The parking brake's lock. Rapier's wheel brake is a friction impulse capped per tick, and on a
+     * slope gravity's pull along the ground gets back a little of what it takes each tick, so a
+     * braked ute crept (2.5 cm/s on the far bank's 10 degree road). Parked (braked, no throttle),
+     * nearly still and standing on three or more wheels on fixed ground (not a deck that can move),
+     * it is held where it stands, as locked wheels on gripping ground would: no motion, no spin, and
+     * no gravity while it holds (the ground takes the weight; an impulse can't cancel gravity here,
+     * as Rapier moves the body by it before gravity takes it back). Anything that moves it faster
+     * than UTE.parkSpeed (a knock, a push, the ground going) breaks the lock.
+     */
+    private holdParked(v0: { x: number; y: number; z: number }): void {
+        const body = this.pb.body;
+        const w = body.angvel();
+        const c = this.ctrl;
+        let contacts = 0;
+        let load = 0;
+        for (let i = 0; i < 4; i++) {
+            if (!c.wheelIsInContact(i)) continue;
+            contacts++;
+            load += c.wheelSuspensionForce(i) ?? 0;
+        }
+        const hold =
+            Math.hypot(v0.x, v0.y, v0.z) <= UTE.parkSpeed &&
+            Math.hypot(w.x, w.y, w.z) <= UTE.parkSpin &&
+            contacts >= 3 &&
+            // standing on its wheels, not just set down above the ground
+            load >= 0.5 * this.weight() &&
+            // on fixed ground only: on a deck or a beam that can move, it rides along as before
+            !this.groundIds.some((id) => id >= 0);
+        if (!hold) {
+            this.releasePark();
+            return;
+        }
+        body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        if (!this.parkLocked) body.setGravityScale(0, true);
+        this.parkLocked = true;
+    }
+
+    /** Lets go of the parking lock (gravity back on). */
+    private releasePark(): void {
+        if (!this.parkLocked) return;
+        this.pb.body.setGravityScale(1, true);
+        this.parkLocked = false;
     }
 
     /**

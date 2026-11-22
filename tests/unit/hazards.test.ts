@@ -509,8 +509,8 @@ describe('hazard director: the handbrake prank (#75)', () => {
         expect(s.tick - parkedAt).toBeGreaterThanOrEqual(S(H.parkedS));
         expect(s.tick).toBeGreaterThanOrEqual(S(HAZARD.graceS));
         expect(hazardTexts(s)[0]).toContain('handbrake');
-        // the handbrake held it until now (a parked ute creeps a few cm a second on this slope)
-        expect(Math.abs(s.ute.pose.p.z - z0)).toBeLessThan(0.5);
+        // the handbrake held it until now
+        expect(Math.abs(s.ute.pose.p.z - z0)).toBeLessThan(0.02);
         d.step({}, S(H.tellS) + S(3));
         expect(s.hazards.handbrakeOff).toBe(true);
         // rolled several metres down the road towards the creek (+z)
@@ -520,6 +520,18 @@ describe('hazard director: the handbrake prank (#75)', () => {
         expect(s.hazards.brakePhase).toBe(PHASE.idle);
         expect(hazardTexts(s).some((t) => t.includes('caught'))).toBe(true);
     }, 120_000);
+
+    it('parked with its handbrake on, on the prank slope, it holds: under 2 cm in 30 s', () => {
+        // no prank for this one: the director off, so only the brake holds it
+        const s = new LabSim({ level: timberYardLevel, hazards: false });
+        parkOnRoad(s);
+        s.runTo(120);
+        expect(upY(s)).toBeLessThan(Math.cos(timberYardLevel.hazards!.handbrake!.slope));
+        const p0 = { ...s.ute.pose.p };
+        s.runTo(s.tick + S(30));
+        const p1 = s.ute.pose.p;
+        expect(Math.hypot(p1.x - p0.x, p1.y - p0.y, p1.z - p0.z)).toBeLessThan(0.02);
+    }, 60_000);
 
     it('counterplay: parked on the flat yard, nothing happens', () => {
         const s = yard();
@@ -548,8 +560,7 @@ describe('hazard director: the handbrake prank (#75)', () => {
 
     /**
      * Parked on the slope with `chock` set against the downhill (front) wheels: how far it goes in the
-     * 5 s after the handbrake lets go. Held: no more than a braked ute creeps (a few cm a second);
-     * free: it rolls more than 3 m.
+     * 5 s after the handbrake lets go. Held: under 5 cm; free: it rolls more than 3 m.
      */
     function chocked(chock: (s: LabSim) => void): { moved: number; held: boolean; texts: string[] } {
         const s = yard();
@@ -570,7 +581,7 @@ describe('hazard director: the handbrake prank (#75)', () => {
         // 0.52 m: too tall to fit under the bumper (0.45 m up, 0.35 m past the tyre), it stands at it
         const r = chocked((s) => placeByUte(s, 'cube', 0.68, 0.28, 1.84 + 0.28));
         expect(r.held).toBe(true);
-        expect(Math.abs(r.moved)).toBeLessThan(0.5);
+        expect(Math.abs(r.moved)).toBeLessThan(0.05);
         expect(r.texts.some((t) => t.includes('chock holds'))).toBe(true);
     }, 60_000);
 
@@ -578,7 +589,7 @@ describe('hazard director: the handbrake prank (#75)', () => {
         // 0.2 m tall (on edge), 0.15 m deep, across both front wheels, just ahead of the tyres
         const r = chocked((s) => placeByUte(s, 'beam-0', 0, 0.12, TYRE + 0.1));
         expect(r.held).toBe(true);
-        expect(Math.abs(r.moved)).toBeLessThan(0.5);
+        expect(Math.abs(r.moved)).toBeLessThan(0.05);
     }, 60_000);
 
     it('a plank lying flat is no chock: the wheels roll over it', () => {

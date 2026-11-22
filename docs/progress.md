@@ -14,10 +14,17 @@
         - get in at the warning: look at the door and grab, as a player does (the ute stays within
           0.5 m);
         - chock a downhill wheel: the cube against the front wheel, or a beam on its edge across the
-          front tyres, holds it (under 0.5 m in 5 s, the creep of a braked ute on that slope, against
-          more than 3 m unchocked). A plank lying flat (0.1 m) is a step the wheel climbs: no chock.
-          The wheels are rays, so the game checks for a prop standing at least 0.13 m high from under
-          a tyre's centre to 0.4 m past its downhill face (out to the bumper).
+          front tyres, holds it (asserted under 5 cm in 5 s with the handbrake off; measured 0 mm),
+          against more than 3 m unchocked. A plank lying flat (0.1 m) is a step the wheel climbs: no
+          chock. The wheels are rays, so the game checks for a prop standing at least 0.13 m high
+          from under a tyre's centre to 0.4 m past its downhill face (out to the bumper).
+    - **Fixed on the way (an Epic 4 bug):** a parked ute with its handbrake on crept down a slope,
+      2.5 cm a second on the far bank's road, because the wheel brake is a capped friction impulse
+      that gravity wins back a little of every tick. Now a parked ute that is nearly still and
+      standing on its wheels on fixed ground is held where it stands, gravity off while it holds,
+      until something moves it faster than 0.1 m/s. Tested: parked on that slope for 30 s it moves
+      under 2 cm (measured 0 mm). The ute's driving, braking, deck and platform tests pass unchanged;
+      on a deck or beam that can move it rides along as before.
     - **Recovery:** if it ends up in the creek, the ute's usual recovery applies.
     - **Budget, tested:** one hazard at a time (no flood or gust during a prank, and no prank during
       a flood or a gust, each then waiting out the 15 s quiet), at most 2 pranks, 60 s apart.
@@ -34,10 +41,10 @@
       to copy.
 - **Playtest kit:** the log's summary also counts handbrake pranks (tested with a real prank fed in
   as the game feeds it), and the script says what to watch for and how the prank works.
-- **Tests:** 512 unit tests pass at both voxel sizes, on top of `epics-5-10` (4b99073, with
-  remapping). New:
-    - the prank: driven onto the slope and parked, the flat yard, getting in at the warning, the
-      cube and the beam chocks, the flat plank that isn't one, the budget, one hazard at a time
+- **Tests:** unit tests pass at both voxel sizes, on top of `epics-5-10` (67cdc30, with Epic 9
+  part 2). New:
+    - the prank: driven onto the slope and parked, a braked ute holding for 30 s, the flat yard,
+      getting in at the warning, the cube and the beam chocks, the flat plank that isn't one, the budget, one hazard at a time
       both ways round, and online;
     - `sfx.hold`'s fade, stop and removal;
     - the playtest log counting a real prank.
