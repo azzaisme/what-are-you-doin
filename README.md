@@ -73,7 +73,8 @@ Query parameters (handy for comparisons and screenshots):
 | ------------------------------------------ | ------------------------------------------------------------------------------------------ |
 | Drag / right-drag / wheel                  | orbit / pan / zoom (orbit view)                                                            |
 | `V`                                        | toggle orbit / first-person view                                                           |
-| Click, then mouse                          | look (first person; `Esc` releases the pointer)                                            |
+| **Settings** (bottom left), `Esc`, Start   | settings menu (pauses solo play): controls, video, voxel size, text size, levels           |
+| Click, then mouse                          | look (first person; `Esc` releases the pointer and opens Settings)                         |
 | `W A S D`, `Shift`, `Space`                | walk, run, jump (first person; steps up 0.3 m, slides on steep slopes)                     |
 | Left click or `E`                          | grab what the crosshair points at / release it (the prompt says what)                      |
 | Right click                                | throw what you hold                                                                        |
@@ -93,6 +94,14 @@ Query parameters (handy for comparisons and screenshots):
 | `C`                                        | first person: watch your beaver from over its shoulder                                     |
 | `L`                                        | pixel look on / off (prototype)                                                            |
 | `F3` or the corner chip                    | debug panel                                                                                |
+
+The settings menu works with every input: mouse and touch (tap), keyboard (arrow keys, `Q` / `E`
+for sections, `Enter`, `Esc`) and gamepad (D-pad or stick, **A**, **B**, **LB** / **RB**). It has
+Game (resume, restart, levels, play online, hide HUD, debug panel), Controls (mouse sensitivity,
+gamepad and touch look speed, invert Y for mouse and gamepad, over-the-shoulder camera), Video
+(quality, voxel size, look, field of view, camera bob, particles) and Interface (text and menu
+size, control hints, reset all). Settings are saved in the browser; URL parameters override them
+for one visit.
 
 The debug panel (design doc §7.3) has: pause, step voxel frame, reset, voxel rate, sampling policy
 (center / coverage50 / coverage25 / conservative), grid-line overlay, continuous source bounds,

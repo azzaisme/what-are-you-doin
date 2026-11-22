@@ -839,3 +839,314 @@ body.ui-hidden .designer {
 .cell-size button[hidden] {
     display: none;
 }
+
+/* ---- settings menu (keyboard, mouse, gamepad and touch) --------------------------------------- */
+
+:root {
+    --ui-scale: 1;
+}
+
+.hud,
+.ui-dock,
+.toast,
+.touch-ui,
+.settings-backdrop {
+    zoom: var(--ui-scale);
+}
+
+body.no-hints .hud-help {
+    display: none;
+}
+
+/* the game's own controls stay out of the way while the menu is open */
+body.settings-open .touch-ui,
+body.settings-open .crosshair {
+    display: none;
+}
+
+.settings-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: #05080bb0;
+    backdrop-filter: blur(3px);
+}
+
+.settings-backdrop[hidden] {
+    display: none;
+}
+
+.settings {
+    display: flex;
+    flex-direction: column;
+    width: min(560px, 100%);
+    max-height: calc(100dvh / var(--ui-scale) - 32px);
+    color: #f4f1ea;
+    background: #10161cf2;
+    border: 1px solid #ffffff30;
+    border-radius: 14px;
+    box-shadow: 0 18px 60px #000a;
+    overflow: hidden;
+}
+
+.settings-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 12px 4px 18px;
+}
+
+.settings-head h2 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+}
+
+.settings button {
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+}
+
+.settings-close {
+    min-width: 44px;
+    min-height: 44px;
+    font-size: 18px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+}
+
+.settings-close:hover {
+    background: #ffffff18;
+}
+
+.settings-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 6px 12px 10px;
+    overflow-x: auto;
+    border-bottom: 1px solid #ffffff1c;
+}
+
+.settings-tabs button {
+    flex: 1 0 auto;
+    min-height: 44px;
+    padding: 0 14px;
+    font-size: 14px;
+    font-weight: 600;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: transparent;
+    color: #f4f1eab0;
+}
+
+.settings-tabs button[aria-selected='true'] {
+    color: #10161c;
+    background: #f2c14e;
+}
+
+.settings-panel {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 8px 8px 10px;
+}
+
+.settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 52px;
+    padding: 4px 10px;
+    border: 2px solid transparent;
+    border-radius: 10px;
+}
+
+/* the row you are on: always shown, so a gamepad player can see where they are */
+.settings-row.current {
+    border-color: #f2c14e;
+    background: #f2c14e14;
+}
+
+.settings-label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 15px;
+    cursor: default;
+}
+
+.settings-label small {
+    font-size: 12px;
+    color: #f4f1ea90;
+}
+
+.settings-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.settings-control button,
+.settings-control input {
+    min-height: 44px;
+}
+
+.settings-switch {
+    min-width: 72px;
+    padding: 0 14px;
+    font-weight: 700;
+    border: 1px solid #ffffff40;
+    border-radius: 22px;
+    background: #ffffff10;
+}
+
+.settings-switch[aria-checked='true'] {
+    color: #10161c;
+    background: #9fe39a;
+    border-color: #9fe39a;
+}
+
+.settings-choices {
+    display: flex;
+    padding: 3px;
+    gap: 3px;
+    border: 1px solid #ffffff30;
+    border-radius: 12px;
+}
+
+.settings-choices button {
+    min-width: 64px;
+    min-height: 38px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: #f4f1eab0;
+}
+
+.settings-choices button[aria-checked='true'] {
+    color: #10161c;
+    background: #f4f1ea;
+    font-weight: 700;
+}
+
+.settings-range input {
+    width: clamp(90px, 26vw, 170px);
+    accent-color: #f2c14e;
+}
+
+.settings-range output {
+    min-width: 54px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.settings-step {
+    min-width: 36px;
+    font-size: 18px;
+    border: 1px solid #ffffff30;
+    border-radius: 9px;
+    background: #ffffff10;
+}
+
+.settings-button .settings-control {
+    flex: 1 1 auto;
+    justify-content: flex-start;
+}
+
+.settings-button .settings-label {
+    order: 2;
+}
+
+.settings-button .settings-control button {
+    padding: 0 16px;
+    border: 1px solid #ffffff40;
+    border-radius: 10px;
+    background: #ffffff12;
+}
+
+.settings-primary .settings-control button {
+    color: #10161c;
+    background: #f2c14e;
+    border-color: #f2c14e;
+    font-weight: 700;
+}
+
+.settings-control button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.settings :focus-visible {
+    outline: 2px solid #f2c14e;
+    outline-offset: 2px;
+}
+
+.settings-foot {
+    padding: 8px 18px 12px;
+    font-size: 12px;
+    color: #f4f1ea90;
+    border-top: 1px solid #ffffff1c;
+}
+
+.settings-foot kbd {
+    display: inline-block;
+    min-width: 1.4em;
+    padding: 0 4px;
+    margin: 0 1px;
+    text-align: center;
+    border: 1px solid #ffffff40;
+    border-radius: 4px;
+    font: inherit;
+}
+
+.settings-foot .foot-pad {
+    display: none;
+}
+
+body.has-pad .settings-foot .foot-keys {
+    display: none;
+}
+
+body.has-pad .settings-foot .foot-pad {
+    display: inline;
+}
+
+/* touch screens: no key hints */
+@media (pointer: coarse) {
+    .settings-foot {
+        display: none;
+    }
+}
+
+/* narrow screens: label above its control, full width */
+@media (max-width: 480px) {
+    .settings-backdrop {
+        padding: 8px;
+    }
+
+    .settings-row:not(.settings-button) {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+        padding: 8px 10px;
+    }
+
+    .settings-row:not(.settings-button) .settings-control {
+        justify-content: flex-end;
+    }
+
+    .settings-range input {
+        flex: 1 1 auto;
+        width: auto;
+    }
+}

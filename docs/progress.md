@@ -1,5 +1,43 @@
 # Progress log
 
+## Settings menu (2026-11-22, owner request)
+
+Owner: "Can I have a proper settings menu please. Accessible to both keyboard, mouse/gamepad/touch".
+
+- **Opening it:** the **Settings** button (bottom left), `Esc`, or Start on any gamepad. In first
+  person, `Esc` first releases the mouse (the browser takes that key press), and losing the mouse
+  opens the menu. Solo play pauses while it is open; an online game keeps running.
+- **Every input:**
+    - mouse and touch: tap a tab or control. Targets are at least 44 px, and the dialog scrolls on
+      short screens; on narrow screens each label sits above its control.
+    - keyboard: arrow keys (up / down rows, left / right change), `Q` / `E` or Page Up / Down for
+      sections, `Tab` cycles inside the dialog, `Enter` / `Space` press, `Esc` closes.
+    - gamepad: D-pad or left stick (held: repeats), **A** press, **B** or Start close,
+      **LB** / **RB** sections.
+    - the current row is always highlighted, not only after keyboard use, so a pad player can see
+      where they are.
+- **While it is open,** the game gets no input: keys, mouse buttons, pad sticks and buttons are
+  ignored, and the touch controls are hidden. The **A** that presses a menu button does not jump,
+  and doesn't join a second player.
+- **Sections:**
+    - Game: resume, restart level, levels, play online, hide HUD, debug panel.
+    - Controls: mouse sensitivity, invert mouse Y, gamepad look speed, invert gamepad Y, touch look
+      speed (touch devices), over-the-shoulder camera.
+    - Video: quality, voxel size (apply reloads; it moved here from the bottom-left box), look,
+      field of view, camera bob & kick, leaves & particles.
+    - Interface: text & menu size (80–160 %), control hints, reset all.
+- **Saved** in local storage (`uncivil.settings`), only what differs from the defaults; bad or
+  tampered data falls back to defaults. URL parameters (`?quality=`, `?look=`, `?bob=`, `?view=`)
+  still override for one visit, without being saved. The debug panel and the `C` / `L` hotkeys
+  change the same settings.
+- **Accessibility:** a real dialog (`role=dialog`, `aria-modal`). Tabs are `role=tab`; switches
+  are `role=switch`; choices are radio groups; sliders give their value as text.
+- **Tests:**
+    - `tests/unit/settings.test.ts`: storage, clamping, junk and prototype-polluted data, URL
+      overrides.
+    - e2e: opens the menu with the mouse, `Esc` and a simulated gamepad, changes the field of view
+      by keyboard and invert-Y by pad, and checks both survive a reload.
+
 ## Holding things in your hands (2026-11-21, owner request)
 
 Owner: "It really needs to look like I am holding things with my arms".

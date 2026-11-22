@@ -14,6 +14,8 @@ const LOOK_SENSITIVITY = 0.0065;
 export class TouchControls {
     readonly el: HTMLDivElement;
     enabled = false;
+    /** Look speed (times the default), from the settings. */
+    lookScale = 1;
     /** Look change since the last takeLook (radians), like mouse movement. */
     private dyaw = 0;
     private dpitch = 0;
@@ -108,8 +110,8 @@ export class TouchControls {
                 this.setKnob(dx, dy);
                 used = true;
             } else if (t.identifier === this.lookId) {
-                this.dyaw -= (t.clientX - this.lookLast.x) * LOOK_SENSITIVITY;
-                this.dpitch -= (t.clientY - this.lookLast.y) * LOOK_SENSITIVITY;
+                this.dyaw -= (t.clientX - this.lookLast.x) * LOOK_SENSITIVITY * this.lookScale;
+                this.dpitch -= (t.clientY - this.lookLast.y) * LOOK_SENSITIVITY * this.lookScale;
                 this.lookLast = { x: t.clientX, y: t.clientY };
                 used = true;
             }

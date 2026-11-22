@@ -169,9 +169,87 @@ test('default voxel size is 5 cm with the slider range 5-10 cm', async ({ page }
     const s = await lab(page, (l) => l.stats());
     expect(s.cellCm).toBe(5);
     expect(s.staticCells).toBeGreaterThan(5_000_000);
-    const range = page.locator('.cell-size input[type=range]');
+    // the voxel size is in Settings > Video
+    await page.locator('.settings-chip').click();
+    await page.locator('.settings-tabs button', { hasText: 'Video' }).click();
+    const range = page.locator('.settings-row', { hasText: 'Voxel size' }).locator('input[type=range]');
     await expect(range).toHaveAttribute('min', '5');
     await expect(range).toHaveAttribute('max', '10');
+});
+
+test('settings menu: mouse, keyboard and gamepad reach every setting, and it is saved', async ({ page }) => {
+    // a stand-in gamepad the page reads through navigator.getGamepads
+    await page.addInitScript(() => {
+        const buttons = Array.from({ length: 17 }, () => ({ pressed: false, touched: false, value: 0 }));
+        const pad = { index: 0, id: 'test pad', connected: true, mapping: 'standard', axes: [0, 0, 0, 0], buttons };
+        (window as unknown as { __pad: typeof pad }).__pad = pad;
+        navigator.getGamepads = () => [pad as unknown as Gamepad];
+    });
+    // live (no ?t= seek, which pauses): opening the menu pauses solo play, closing resumes it
+    const problems = await boot(page, '?level=yard&quality=low#cell100');
+    const backdrop = page.locator('.settings-backdrop');
+    const press = async (b: number) => {
+        await page.evaluate(
+            (i) =>
+                ((window as unknown as { __pad: { buttons: { pressed: boolean }[] } }).__pad.buttons[i].pressed = true),
+            b
+        );
+        await page.waitForTimeout(150);
+        await page.evaluate(
+            (i) =>
+                ((window as unknown as { __pad: { buttons: { pressed: boolean }[] } }).__pad.buttons[i].pressed =
+                    false),
+            b
+        );
+        await page.waitForTimeout(150);
+    };
+    // mouse: the Settings button opens it, Resume closes it; solo play pauses meanwhile
+    await page.locator('.settings-chip').click();
+    await expect(backdrop).toBeVisible();
+    await expect(page.locator('[role=dialog]')).toHaveAttribute('aria-modal', 'true');
+    expect(await lab(page, (l) => (l as unknown as { paused(): boolean }).paused())).toBe(true);
+    await page.locator('.settings-row button', { hasText: 'Resume' }).click();
+    await expect(backdrop).toBeHidden();
+    // keyboard: Esc opens; E to Video; down to the field of view, right to widen it; Esc closes
+    await page.keyboard.press('Escape');
+    await expect(backdrop).toBeVisible();
+    await expect(page.locator('.settings-row.current')).toContainText('Resume');
+    await page.keyboard.press('KeyE');
+    await page.keyboard.press('KeyE');
+    const fov = page.locator('.settings-row', { hasText: 'Field of view' });
+    while (!(await fov.evaluate((e) => e.classList.contains('current')))) await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    await expect(fov.locator('output')).toHaveText('54°');
+    await page.keyboard.press('Escape');
+    await expect(backdrop).toBeHidden();
+    expect(await lab(page, (l) => (l as unknown as { paused(): boolean }).paused())).toBe(false);
+    // gamepad: Start opens; RB to Controls; down to "Invert gamepad Y"; A switches it on; B closes
+    await press(9);
+    await expect(backdrop).toBeVisible();
+    await press(5);
+    await expect(page.locator('.settings-tabs [aria-selected=true]')).toHaveText('Controls');
+    const invert = page.locator('.settings-row', { hasText: 'Invert gamepad Y' });
+    for (let n = 0; n < 6 && !(await invert.evaluate((e) => e.classList.contains('current'))); n++) await press(13);
+    await press(0);
+    await expect(invert.locator('[role=switch]')).toHaveAttribute('aria-checked', 'true');
+    await press(1);
+    await expect(backdrop).toBeHidden();
+    // the A that pressed the switch did not make anyone join or jump
+    expect(await lab(page, (l) => l.stats().voxel.rejected)).toBe(0);
+    // saved: a reload keeps both
+    await page.reload();
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab?: { ready?: boolean } }).__riverLab?.ready === true,
+        null,
+        { timeout: 150_000 }
+    );
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('uncivil.settings') ?? '{}'));
+    expect(saved).toEqual({ fov: 54, invertPadY: true });
+    await page.locator('.settings-chip').click();
+    await page.locator('.settings-tabs button', { hasText: 'Video' }).click();
+    await expect(fov.locator('output')).toHaveText('54°');
+    expect(problems).toEqual([]);
 });
 
 test('UI boxes never overlap: portrait phone, portrait tablet, desktop and landscape phone', async ({ page }) => {
@@ -180,7 +258,7 @@ test('UI boxes never overlap: portrait phone, portrait tablet, desktop and lands
     const rects = () =>
         page.evaluate(() => {
             const out: Record<string, { l: number; t: number; r: number; b: number } | null> = {};
-            for (const s of ['.hud', '.debug-panel', '.cell-size', '.debug-chip']) {
+            for (const s of ['.hud', '.debug-panel', '.settings-chip', '.debug-chip']) {
                 const e = document.querySelector(s) as HTMLElement | null;
                 if (!e || getComputedStyle(e).display === 'none') {
                     out[s] = null;
@@ -233,7 +311,7 @@ test('UI boxes never overlap: portrait phone, portrait tablet, desktop and lands
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator('.debug-chip').click();
     await page.waitForTimeout(200);
-    for (const s of ['.debug-chip', '.cell-size button', '.debug-grid button']) {
+    for (const s of ['.debug-chip', '.settings-chip', '.debug-grid button']) {
         const box = await page.locator(s).first().boundingBox();
         expect(box!.height, `${s} touch height`).toBeGreaterThanOrEqual(40);
     }
@@ -242,10 +320,10 @@ test('UI boxes never overlap: portrait phone, portrait tablet, desktop and lands
     await page.locator('.debug-chip').click();
     expect(await page.locator('.debug-panel').isVisible()).toBe(false);
     await page.keyboard.press('KeyH');
-    expect(await page.locator('.cell-size').isVisible()).toBe(false);
+    expect(await page.locator('.settings-chip').isVisible()).toBe(false);
     expect(await page.locator('.hud').isVisible()).toBe(false);
     await page.keyboard.press('KeyH');
-    expect(await page.locator('.cell-size').isVisible()).toBe(true);
+    expect(await page.locator('.settings-chip').isVisible()).toBe(true);
     expect(problems).toEqual([]);
 });
 
