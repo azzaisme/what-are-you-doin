@@ -25,7 +25,7 @@ import type { PlayerCommand } from '../sim/commands.ts';
 import { packHazardNet, readHazardNet } from '../sim/hazards.ts';
 import type { HazardNet } from '../sim/hazards.ts';
 import type { JointGraph } from '../sim/joints/graph.ts';
-import { decodeNails, encodeNails, nailMarks } from '../sim/joints/wire.ts';
+import { applyStrain, decodeNails, encodeNails, encodeStrain, nailMarks } from '../sim/joints/wire.ts';
 import type { NailMark } from '../sim/joints/wire.ts';
 import { MAX_PLAYERS } from '../sim/lab-entities.ts';
 import type { LabSim } from '../sim/lab-sim.ts';
@@ -187,6 +187,7 @@ export class HostSession {
     private sentGraphVersion = -1;
     /** How long a dropped guest's player is kept (tests shorten it). */
     rejoinGraceTicks = REJOIN_GRACE_TICKS;
+    private sentStrain = '';
     /** Slots that got a new guest, slots freed, slots whose guest dropped (held for a rejoin), slots rejoined. */
     onGuestsChanged: (joined: number[], left: number[], dropped: number[], back: number[]) => void = () => undefined;
 
@@ -406,12 +407,25 @@ export class HostSession {
         // the nails ride in the same update, only when they changed (presence keeps the last value)
         const graph = sim.joints.graph;
         const extra: Record<string, unknown> = {};
-        if (graph !== this.sentGraph || graph.version !== this.sentGraphVersion) {
-            this.sentGraph = graph;
-            this.sentGraphVersion = graph.version;
+        const topology = graph !== this.sentGraph || graph.version !== this.sentGraphVersion;
+        if (topology || graph.size) {
             const index = new Map(sim.entities.map((e, i) => [e.id, i]));
-            const marks = nailMarks(graph, (id) => index.get(id) ?? -1);
-            extra.jg = toBase64Chunks(encodeNails(marks));
+            const marks = nailMarks(
+                graph,
+                (id) => index.get(id) ?? -1,
+                (c) => sim.joints.strainLevel(c)
+            );
+            if (topology) {
+                this.sentGraph = graph;
+                this.sentGraphVersion = graph.version;
+                extra.jg = toBase64Chunks(encodeNails(marks));
+            }
+            // how hard each nail works, only when that changes
+            const strain = encodeStrain(marks);
+            if (topology || strain !== this.sentStrain) {
+                this.sentStrain = strain;
+                extra.jl = strain;
+            }
         }
         this.ch.setState({
             ...extra,
@@ -614,6 +628,7 @@ export class GuestSession {
                 // malformed: keep the last good nails
             }
         }
+        applyStrain(this.nails, st.jl);
         if (Array.isArray(st.ev)) {
             this.events = (st.ev as unknown[])
                 .map((e) => e as Partial<NetEvent>)

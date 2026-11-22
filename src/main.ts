@@ -1463,6 +1463,8 @@ function guestInteraction(): {
 let hostNails: NailMark[] = [];
 let hostNailsKey: unknown = null;
 let hostNailsVersion = -1;
+/** The connection of each host nail mark (its strain). */
+let hostNailConn: number[] = [];
 function updateNails(time: number): void {
     let marks: NailMark[];
     if (guestSession) marks = guestSession.nails;
@@ -1473,7 +1475,10 @@ function updateNails(time: number): void {
             hostNailsVersion = g.version;
             const index = new Map(sim.entities.map((e, i) => [e.id, i]));
             hostNails = nailMarks(g, (id) => index.get(id) ?? -1);
+            hostNailConn = [];
+            for (const c of g.connections()) for (let k = 0; k < c.nails.length; k++) hostNailConn.push(c.id);
         }
+        hostNails.forEach((m, i) => (m.strain = sim.joints.strainLevel(hostNailConn[i])));
         marks = hostNails;
     }
     // every local player's hammer outline, each in its own view (split screen: player 2's below)

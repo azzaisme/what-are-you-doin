@@ -9,6 +9,7 @@
 import { Color, Entity, StandardMaterial } from 'playcanvas';
 import type { AppBase, Layer } from 'playcanvas';
 
+import { sfx } from '../audio/sfx.ts';
 import type { NailMark } from '../sim/joints/wire.ts';
 import type { SnapshotRing } from '../sim/snapshots.ts';
 import { ANIM_MAX } from '../sim/snapshots.ts';
@@ -18,9 +19,13 @@ const _pose = pose();
 const _anim = new Float64Array(ANIM_MAX);
 const _v = vec3();
 
-function iron(): StandardMaterial {
+function metal(r: number, g: number, b: number, glow = 0): StandardMaterial {
     const m = new StandardMaterial();
-    m.diffuse = new Color(0.16, 0.16, 0.18);
+    m.diffuse = new Color(r, g, b);
+    if (glow) {
+        m.emissive = new Color(r, g, b);
+        m.emissiveIntensity = glow;
+    }
     m.useMetalness = true;
     m.metalness = 0.6;
     m.gloss = 0.5;
@@ -40,7 +45,8 @@ export class NailMarkers {
     private readonly layer: Layer;
     private readonly views: readonly Layer[];
     private readonly app: AppBase;
-    private readonly iron = iron();
+    /** Nail heads by strain: calm iron, creaking (amber), groaning (red): a warning in colour too. */
+    private readonly heads3 = [metal(0.16, 0.16, 0.18), metal(0.95, 0.6, 0.1, 0.5), metal(0.95, 0.15, 0.1, 0.9)];
     /** Nail heads placed by the last update. */
     drawn = 0;
     /** Tests: false hides the hammer outlines (to tell their pixels from the rest of the frame). */
@@ -54,6 +60,40 @@ export class NailMarkers {
         this.layer = layer;
         this.views = views;
         app.root.addChild(this.root);
+    }
+
+    /** Each connection's strain and where it is, last frame (sounds: creak on rising strain, snap when it goes). */
+    private readonly heard = new Map<string, { level: number; x: number; y: number; z: number; next: number }>();
+
+    /**
+     * Joint sounds from what every device sees (the host's graph, or what it sent a guest): a creak
+     * as a connection's strain rises and every 1.5 s while it stays strained (louder and lower when
+     * groaning), a snap where a strained connection disappears (it broke). Epic 8's sfx plays them.
+     */
+    private sound(marks: readonly NailMark[], ring: SnapshotRing, time: number): void {
+        const now = new Map<string, { level: number; x: number; y: number; z: number }>();
+        for (const m of marks) {
+            // one connection: its piece pair and the site of its nails (anchor sites are 0.5 m apart)
+            const key = `${m.a}:${m.b}:${Math.round(m.x / 0.8)}:${Math.round(m.y / 0.8)}:${Math.round(m.z / 0.8)}`;
+            const was = now.get(key);
+            if (was && was.level >= m.strain) continue;
+            if (!ring.sample(m.a, time, _pose, _anim)) continue;
+            quatRotate(_pose.q, m.x, m.y, m.z, _v);
+            now.set(key, { level: m.strain, x: _pose.p.x + _v.x, y: _pose.p.y + _v.y, z: _pose.p.z + _v.z });
+        }
+        for (const [key, c] of now) {
+            const before = this.heard.get(key);
+            const strain = c.level >= 2 ? 0.9 : 0.5;
+            if (c.level >= 1 && (!before || c.level > before.level || time >= before.next)) {
+                sfx.creak(c, strain);
+                this.heard.set(key, { ...c, next: time + 1.5 });
+            } else this.heard.set(key, { ...c, next: before?.next ?? 0 });
+        }
+        for (const [key, c] of this.heard) {
+            if (now.has(key)) continue;
+            if (c.level >= 1) sfx.snap(c);
+            this.heard.delete(key);
+        }
     }
 
     private cube(m: StandardMaterial): Entity {
@@ -81,7 +121,9 @@ export class NailMarkers {
             if (!ring.sample(m.a, time, _pose, _anim)) continue;
             quatRotate(_pose.q, m.x, m.y, m.z, _v);
             let e = this.heads[n];
-            if (!e) this.heads.push((e = this.cube(this.iron)));
+            if (!e) this.heads.push((e = this.cube(this.heads3[0])));
+            const mat = this.heads3[Math.max(0, Math.min(2, m.strain))];
+            if (e.render!.material !== mat) e.render!.material = mat;
             e.enabled = true;
             // a hair larger than a cell, so it shows over the piece's own cell there
             e.setLocalScale(cell * 1.04, cell * 1.04, cell * 1.04);
@@ -90,6 +132,7 @@ export class NailMarkers {
         }
         for (let i = n; i < this.heads.length; i++) this.heads[i].enabled = false;
         this.drawn = n;
+        this.sound(marks, ring, time);
         this.outlineSlots = this.views.map((_, v) => previews.filter((p) => p.view === v).map((p) => p.slot));
         for (const preview of previews) {
             const view = this.views[preview.view];

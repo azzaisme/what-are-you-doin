@@ -1,5 +1,77 @@
 # Progress log
 
+## Epic 5, part 2: joints strain, creak and break (2026-11-22)
+
+Nailed joints now carry real loads and can fail. A joint that is working hard creaks, a joint
+close to its limit groans, and an overloaded one cracks and lets go.
+
+### How to play it
+
+- Build as before (F to nail). A bridge nailed at both ends with two nails per end carries the ute
+  quietly.
+- **Warnings:** listen and look. A joint under strain creaks, and its nail heads turn amber. Close
+  to breaking, it groans and the heads turn red. A message says so too ("⚠ Creak: a joint is
+  straining", "⚠ The bridge groans: a joint is close to breaking").
+- **Breaking:** an overloaded joint cracks ("Crack! A nailed joint gave way") and the pieces come
+  apart. The timber stays; only the nails let go.
+- **More nails, further apart, hold more.** One nail pins a piece but barely resists bending: a
+  beam cantilevered out on one nail tears loose under its own weight. Four nails spread 25 cm apart
+  hold the same beam easily.
+- **Holding a load at the limit wears a joint down.** Given time, it lets go.
+
+### What was built
+
+- **Measuring joint loads (#49, `src/sim/joints/stress.ts`):** Rapier reports neither joint forces
+  nor (in this version) contact friction. So after every step:
+    - the meter takes each nailed piece's change of momentum;
+    - it removes gravity, damping and every contact's push (contact pushes are exact: a piece at
+      rest balances to within 0.0001);
+    - what is left is what its nails and friction did together;
+    - a small solve shares that between the connections and the contact friction, with friction
+      taking what it can first and capped at what friction can give.
+    - Checked against hand statics on a cantilevered beam: force and moment within 0.1 %.
+- **Breaking (#49, `src/sim/joints/breaking.ts`):**
+    - each connection holds 4 kN per nail;
+    - its bending strength grows with the number of nails and how far apart they are;
+    - load against capacity is smoothed over 0.1 s;
+    - it breaks past capacity, or at once on a blow of 2.5× capacity that lasts two steps;
+    - time spent above half of capacity builds fatigue, which takes up to 60 % off its strength;
+    - a new joint gets 0.25 s to settle first: the snap of taking hold is not a load.
+- **Break events (#50):**
+    - creaks at 55 % of capacity, groans at 80 % (each joint at most every 1.5 s, messages at most
+      every 2 s);
+    - breaks are removed after the physics step, never inside it, and both pieces wake up;
+    - synthesized creak, groan and crack sounds (Web Audio, no asset files);
+    - nail heads coloured by strain.
+- **Online:** guests get the same messages and sounds. A broken joint's nails disappear for them
+  (the nail list is resent on change). Each nail's strain level travels as one digit, sent only when
+  it changes.
+- **Epic 4 bridge test fixed:** its driver steered the wrong way. Steering correctly, the ute
+  drives over the two loose beams to the far bank. Placed as that test places them, the beams stay
+  across.
+
+### Test results (actual, `tests/unit/breaking.test.ts`, both voxel sizes)
+
+| Test                                                      | Result                                                                  |
+| --------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Cantilevered beam, tip load 0 / 200 / 400 N               | Force 357.9 / 557.9 / 757.9 N, moment 537 / 1137 / 1737 N m (= statics) |
+| Beam cantilevered on one nail                             | Tears loose under its own weight (16 ticks, right after settling)       |
+| Same beam on four nails 25 cm apart                       | Holds; peak 20 % of capacity                                            |
+| A load held near the limit                                | Wears the joint out and breaks after 3.1 s                              |
+| A light load for 30 s                                     | No fatigue at all                                                       |
+| Yard bridge, both ends, two nails each, ute driven across | Crosses; peak **52 %** of capacity; no creak; no speed clamps           |
+| Yard bridge nailed at the near end only                   | Creak, then both joints break (ticks 289 and 291); the same every run   |
+| Online, host + 3 guests, the underbuilt bridge            | Guests see strain level 2, the creak and the break; their nails go      |
+
+- Unit tests: 374 pass. Browser: the yard, ute, hammer and online co-op tests pass.
+
+### Known limits
+
+- The share between several joints on one piece is a least-squares estimate, not a true elastic
+  solve. It is exact for a single joint and close for symmetric cases.
+- Joints are rigid until they break: pieces don't visibly bend. The warning is the creak, the
+  colour and the message.
+
 ## Epic 5, part 1: nails and the joint graph (2026-11-22)
 
 You can now nail timber together, or nail it down to stone and ground. In the Timber Yard you can
