@@ -63,22 +63,46 @@ build a real bridge, beams plus a nailed plank deck, and drive the ute over it.
 
 ### Test results (actual, `tests/unit/joints.test.ts` and `yard-bridge.test.ts`, both voxel sizes)
 
-| Test                                                                                                      | Result                                                                                                                        |
-| --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| **Gate, inputs only:** player lays beams, nails near ends, lays and nails a 12-plank deck, nails far ends | 4 anchors, 24 deck joints, 30 nails; the ute drives from bank to bank, never lower than 0.27 m above the yard                 |
-| Beams nailed to both abutments (placed), ute driven across                                                | Reaches the far bank; beams moved **2 mm**                                                                                    |
-| 400 N sideways for 1 s after a crossing                                                                   | Loose beams move **102 mm**, nailed ones **0.2 mm**                                                                           |
-| Joint stiffness: 300 N sideways at a beam's tip                                                           | One nail turns 4.18 mrad (load / stiffness predicts 4.27), four nails 1.05 (1.07); twice the load, about twice the turn       |
-| Square on                                                                                                 | 33° holds, 37° is refused                                                                                                     |
-| Refusals                                                                                                  | Gap, too thick, not timber, sliding, nothing behind, kinematic, ute, stone that isn't timber, tree, joint full, 64-nail limit |
-| Plank nailed to stone and shoved / plank nailed across another and lifted                                 | Holds / the bottom one comes up with it                                                                                       |
-| The nailed crossing, run twice                                                                            | Identical result                                                                                                              |
-| A guest nails online (host + 2 guests)                                                                    | Host fastens it; both guests get the nail                                                                                     |
+| Test                                                                                                                               | Result                                                                                                                                                                                                                                                        |
+| ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Gate, inputs only:** walk to each beam and stack, lay and nail beams and an 11-plank deck, drive the ute from where it is parked | 4 anchors, 22 deck joints, 28 nails; planks landed within 0.1 cm of the deck plane and 3.4 cm of their spots (pass: 2 cm, 5 cm); the ute crossed the start line 1.4 cm off the bridge's line and reached the far bank, never lower than 0.26 m above the yard |
+| The same deck, nails pulled just before the ute sets off                                                                           | Planks shoved up to **84 cm**, the ute does not reach the far bank; nailed, they moved **0.3 cm** (pass: under 3 cm vs over 10 cm)                                                                                                                            |
+| Timber to timber (0.8 stiffness): 300 N at a plank's tip                                                                           | One nail turns 5.06 mrad (load / stiffness predicts 5.16), four nails 1.23 (1.29)                                                                                                                                                                             |
+| Beams nailed to both abutments (placed), ute driven across                                                                         | Reaches the far bank; beams moved **2 mm**                                                                                                                                                                                                                    |
+| 400 N sideways for 1 s after a crossing                                                                                            | Loose beams move **102 mm**, nailed ones **0.2 mm**                                                                                                                                                                                                           |
+| Joint stiffness: 300 N sideways at a beam's tip                                                                                    | One nail turns 4.18 mrad (load / stiffness predicts 4.27), four nails 1.05 (1.07); twice the load, about twice the turn                                                                                                                                       |
+| Square on                                                                                                                          | 33° holds, 37° is refused                                                                                                                                                                                                                                     |
+| Refusals                                                                                                                           | Gap, too thick, not timber, sliding, nothing behind, kinematic, ute, stone that isn't timber, tree, joint full, 64-nail limit                                                                                                                                 |
+| Plank nailed to stone and shoved / plank nailed across another and lifted                                                          | Holds / the bottom one comes up with it                                                                                                                                                                                                                       |
+| The nailed crossing, run twice                                                                                                     | Identical result                                                                                                                                                                                                                                              |
+| A guest nails online (host + 2 guests)                                                                                             | Host fastens it; both guests get the nail                                                                                                                                                                                                                     |
 
 - Browser test: in the Timber Yard, look at a beam, F nails it and the nail head draws; a second F
   at the same spot is refused.
-- Unit tests: 370 pass. Browser: the yard, ute, hammer, split screen and all online co-op tests
+- Unit tests: 472 pass. Browser: the yard, ute, hammer, split screen and all online co-op tests
   pass.
+
+### Audit fixes (second review)
+
+- **Trees are never anchors:** standing trunks and felled stumps in the logging stand were nailable
+  stone. Now none of the 90 scenery tree colliders, 6 stand trunks or stumps take an anchor; a
+  plank against a stand tree is refused.
+- **The gate is inputs only:** no teleports. The player walks to every piece and to the ute, gets in
+  by pressing grab at the driver's door, and drives it from where it is parked. The yard is too
+  small to swing a ute round (it needs about 4.6 m), so the driver does a three-point turn, backs up
+  the bridge's line, then drives over. A plank that lands off its spot now fails the test.
+- **Split screen:** each player's nail outline shows in their own half only. Each camera draws its
+  own layer, and the browser test checks the pixels: the outline's green appears in player 2's
+  half and none in player 1's, with both looking at the same beam.
+    - Found on the way: drawn on a layer after the shared Immediate one, lines covered the whole
+      screen in split screen, so an outline showed in the wrong half. The per-view layers now sit
+      before it.
+- **A sawn plank from the sawmill nails down** onto the abutment (new test).
+- **Online 8-player steady test** is back at full walking speed, turning: worst guest pose 4.15 cm
+  (limit 5 cm).
+- **Beaver-sized players:** after Epic 9 the eye is 1.22 m up, not 1.86 m. The 35° square-on rule
+  stays, so you stand closer to nail; the input tests now step up to each spot. Epic 6's gate test
+  needed player 0 parked off player 1's path (they shove each other).
 
 ### Found on the way
 
@@ -90,6 +114,117 @@ build a real bridge, beams plus a nailed plank deck, and drive the ute over it.
 ### Next
 
 Stress and calibrated breaking (#49), creaks and safe joint removal (#50).
+
+## Route signs and distant landmarks in the Valley (2026-11-22, Epic 9, #16)
+
+### Route signs
+
+Each area from the Forest Road on starts with a route sign beside the road.
+
+- **What it shows:** the area's number in big pixel digits and an arrow for the way on, on a band
+  of the area's colour.
+    - The arrow bears left or right where the road bends ahead.
+    - The sign faces players coming up the road.
+    - They replace the plain coloured signposts.
+- **Readable at both voxel sizes:** one glyph pixel is 10 cm. The board stands square to the world
+  grid, snapped to 10 cm lines, so every pixel is whole cells at 5 cm and at 10 cm.
+- **The code:** `src/levels/route-signs.ts`. Other levels can use it.
+
+### Distant landmarks
+
+Each area now has a silhouette you can head for.
+
+- **New:**
+    - **Forest Road:** a fire lookout on the ridge. It is a timber cabin with a hi-vis band, on 11 m
+      braced legs, and it stands over the pines. You can see it from the Timber Yard.
+    - **Mountain Approach:** an 18 m radio mast, banded orange and white, with a dish and a hut.
+- **Already there:** the gorge's waterfall, the works' chimney and crane, and the summit flower.
+- **Far away:** every part is at least 42 cm thick, so it still shows in the coarse 40 cm far lattice.
+- **Trees** are kept off both landmarks.
+
+### Tests
+
+- `tests/unit/route-signs.test.ts`:
+    - voxelizes a sign facing each of the four ways, at 5 and 10 cm, and reads the digit and arrow
+      back cell by cell;
+    - checks the board's height and that the posts reach the ground;
+    - for each of the Valley's five signs, checks it reads its area's number, its arrow points
+      where the road bends, and it faces down the route and towards the road.
+- `tests/unit/landmarks.test.ts`:
+    - voxelizes every part of the lookout and the mast at the far lattice's 40 cm, and each writes
+      cells;
+    - checks no tree stands within 4.5 m of either;
+    - checks the sight line from the bucket stump to the lookout cabin clears the ground and every
+      tree's crown.
+- Unit tests: 342 pass.
+- The Valley's streaming tests pass with the new pieces, including "a tile builds the same whether
+  its neighbours are built or not".
+
+## The beavers are back (2026-11-22, Epic 9, #90)
+
+The tall people that stood in for the beavers are gone. Players, online avatars and the River
+Lab's walking co-worker are beaver engineers again.
+
+### What changed
+
+- **The switch:** `PLAYER_BODY` in `src/assets/player-body.ts` is `'beaver'` again. The person body
+  is still in the code and still passes every test, should you want it back.
+- **Things sit in the beaver's paws, out in front, where a person carried them.** When the people
+  came in they learned to carry things at arm's length, with both hands on the grip. The beaver now
+  does the same.
+    - Its arms are longer: 50 cm instead of 34. They hang to its knees.
+    - To reach out, it leans in: its shoulders come forward up to 45 cm.
+    - A held thing is carried 0.76 m from the eye looking ahead, 0.90 m looking a little down and
+      1.08 m looking well down. A person held things 0.9–1.05 m away.
+    - The arms aim from where the leaning shoulders are, so the paws land on the grip.
+    - In first person, the "ready" pose (paws up in the corners) is only for empty paws. While you
+      hold something, your paws are where everyone else sees them: on it.
+- **A sustained yank tears things out of its paws.** The beaver's reach is shorter (0.95 m with
+  the lean, a person's is 1.04 m). The grab lets go when what you hold stays more than 1.25 m from
+  your paws for 0.4 s (0.75 s for a person), or at once beyond 2.2 m, as before.
+    - A violent flick stretches it past 1.25 m for about 0.5 s, so it drops the plank again (the
+      original test, unchanged).
+    - A sudden turn stretches it for under 0.1 s, and carrying while walking stays under 0.45 m:
+      both keep hold.
+- **Your first-person limbs** still have their own 1 cm lane that follows the camera every frame.
+
+### Measured (`tests/unit/hands.test.ts`, now run for the beaver)
+
+- Plank looking straight, a little down and well down, the crate and the bucket: both paw tips
+  are within 4 cm of the grip's height and 3 cm of its depth, one either side of it. That holds in
+  your own view and as others see you. The test's limits are 10 cm and 8 cm.
+
+### What playing feels like now
+
+- **The Timber Yard bridge** plays as before: stop 0.35–0.6 m back from the bank, look down, let
+  go. The playthrough test is unchanged, with one exception.
+    - Getting onto the laid beams can take about 5 s, with either body. Their near ends rest 10 cm
+      past the edge of the abutment's stone cap. That leaves a 10 cm ledge, narrower than the
+      character controller's 12 cm minimum step width, so the cap (10 cm up) and the beams (20 cm
+      up) can't be stepped one after the other, and you crawl up.
+    - Measured: laid 10 cm further out, the slow part drops from 5.4 s to 0.9 s. Epic 5's approach
+      ramps can remove it.
+    - The test's walk allows for it (1,800 ticks instead of 900).
+- **Throwing the bucket over the creek** works from the near abutment, as before.
+- **Planks gripped off centre** tip about your paws, more the further out you grip them, while they
+  hang free.
+    - A 2.4 m plank held by its end hangs 2.2 m below your paws, further than a 1.4 m beaver can
+      lift it. So its far end comes to rest on the ground (at 35°; held 0.45 m out it hangs free
+      at 41°).
+    - The test checks it rests on the ground and never sinks in. A person holds it clear, as before.
+- **The ute:** look less far down at the door to get in (your eye is 1.22 m up, not 1.86 m). The
+  seats were already set for a sitting beaver.
+
+### Tests
+
+- Unit tests pass with the beaver, and with the person.
+- The flick, the G-plank distance (0.6 m), the bucket throw and the beam-laying stand-off are
+  back to their original numbers.
+- Two animation checks now compute what the arms should do from the body's reach, instead of the
+  old fixed 0.26 m and "exactly level".
+- The balance test lifts the plank as each body carries it. Its end case allows resting on the
+  ground, and checks nothing sinks into it.
+- Browser tests: see the PR.
 
 ## Epic 6: logging and the sawmill (2026-11-22)
 

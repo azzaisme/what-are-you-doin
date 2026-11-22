@@ -452,7 +452,8 @@ describe('nails on the wire and from player input (#48, #53)', () => {
         for (let k = 0; k < 2; k++)
             guests.push(await GuestSession.join(hub.transport(`g${k}`), new LabSim({ level: timberYardLevel }), ad));
         expect(guests[0].slot).toBe(1);
-        host.placePlayer(x, BRIDGE.nearEdge + 0.05, 0, 1);
+        // where the solo test stands: close enough to look at the spot square on (eye 1.22 m up)
+        host.placePlayer(x + 0.1, BRIDGE.nearEdge + 0.05, 0, 1);
         let n = host.tick;
         const tick = (guestCmd: ReturnType<typeof neutralCommand>) => {
             guests[0].sendInput(guestCmd);
@@ -533,8 +534,13 @@ describe('building the yard bridge with inputs only (Epic 5 gate)', () => {
             step({}, 120);
             expect(s.physics.heldId).toBe(-1);
             expect(Math.abs(beam.pose.p.z - BRIDGE.zc)).toBeLessThan(0.3);
-            // look at the beam where it lies on the near abutment and swing the hammer
+            // step up to the beam where it lies on the near abutment (close enough to look at the
+            // spot within 30 degrees of straight down, whatever your eye height), look, swing
             const at = { x: beam.pose.p.x, y: beam.pose.p.y + 0.1, z: BRIDGE.nearFace + 0.22 };
+            const near = () => s.player.y + EYE_HEIGHT - at.y;
+            for (let i = 0; i < 300 && Math.hypot(at.x - s.player.x, at.z - s.player.z) > 0.55 * near(); i++)
+                step({ moveZ: 0.3 });
+            step({}, 20);
             const eye = { x: s.player.x, y: s.player.y + EYE_HEIGHT, z: s.player.z };
             ({ yaw, pitch } = aim(eye, at));
             step({}, 3);

@@ -80,9 +80,19 @@ function buildAndCross(pullPlankNails = false) {
         yaw = Math.atan2(-dx, -dz);
         pitch = Math.atan2(dy, Math.hypot(dx, dz));
     };
-    /** Looks at a spot and swings the hammer; returns whether a nail went in. */
-    const nail = (at: { x: number; y: number; z: number }, what: string) => {
+    /**
+     * Steps up to a spot (not past `stopZ`: the end of the deck laid so far) until it is within 30
+     * degrees of straight down from the eye, whatever its height, looks at it and swings the hammer;
+     * returns whether a nail went in.
+     */
+    const nail = (at: { x: number; y: number; z: number }, what: string, stopZ = -Infinity) => {
         const before = s.joints.graph.nailCount;
+        const flat = () => Math.hypot(at.x - s.player.x, at.z - s.player.z);
+        const near = () => 0.55 * (s.player.y + EYE_HEIGHT - at.y);
+        if (flat() > near()) {
+            const k = Math.max(0, 1 - (0.9 * near()) / flat());
+            walkTo(s.player.x + (at.x - s.player.x) * k, Math.max(stopZ, s.player.z + (at.z - s.player.z) * k));
+        }
         look(at);
         step({}, 4);
         for (let t = 0; t < 30 && s.interactionIds(0).nail !== 1; t++) step();
@@ -230,7 +240,7 @@ function buildAndCross(pullPlankNails = false) {
     phase('far ends');
     // ---- 3. out on the deck: nail both beams' far ends into the far capstone
     walkTo(BRIDGE_X, deck[deck.length - 2] + 0.5);
-    for (let b = 0; b < 2; b++) nail(onBeam(beams[b], farNailZ), `beam ${b} far end`);
+    for (let b = 0; b < 2; b++) nail(onBeam(beams[b], farNailZ), `beam ${b} far end`, deck[deck.length - 2]);
     walkTo(BRIDGE_X, deck[deck.length - 2] + 1.2);
     layPlank(deck[deck.length - 1]);
     phase('to the ute');
