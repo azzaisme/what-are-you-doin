@@ -238,6 +238,21 @@ describe('hammer and nails (#48)', () => {
     });
 });
 
+const neutralCommandFor = (s: { tick: number; player: { yaw: number } }) => ({
+    seq: s.tick + 1,
+    moveX: 0,
+    moveZ: 0,
+    sprint: false,
+    jump: false,
+    yaw: s.player.yaw,
+    pitch: 0,
+    carry: false,
+    grab: false,
+    throw: false,
+    reach: 0,
+    action: 0
+});
+
 /** Lays both yard beams across the creek under the ute's wheel tracks, nails them (or not), drives. */
 async function beamCrossing(nailed: boolean) {
     const { LabSim } = await import('../../src/sim/lab-sim.ts');
@@ -303,7 +318,7 @@ async function beamCrossing(nailed: boolean) {
         'beam drift',
         beamDrift.map((d) => d.toFixed(3)).join(' ')
     );
-    return { s, u, target, minY, maxLoad, weight: v.weight(), beamDrift, refusals, joints, YARD_Y };
+    return { s, u, target, minY, maxLoad, weight: v.weight(), beamDrift, refusals, joints, YARD_Y, beams };
 }
 
 describe('a nailed beam bridge carries the ute across (Epic 5 gate)', () => {
@@ -330,9 +345,23 @@ describe('a nailed beam bridge carries the ute across (Epic 5 gate)', () => {
         expect(b.beamDrift).toEqual(a.beamDrift);
     }, 60_000);
 
-    it('the same beams left loose: the crossing walks a beam off its line', async () => {
-        const r = await beamCrossing(false);
-        expect(Math.max(...r.beamDrift)).toBeGreaterThan(0.3);
+    it('the same beams left loose are not held: a sideways shove after the crossing moves them, nailed ones not', async () => {
+        const shove = (r: Awaited<ReturnType<typeof beamCrossing>>) => {
+            const before = r.beams.map((b) => ({ ...b.pose.p }));
+            for (let k = 0; k < 60; k++) {
+                for (const b of r.beams)
+                    r.s.physics.bodies.get(b.id)!.body.applyImpulse({ x: 400 / 60, y: 0, z: 0 }, true);
+                r.s.step(neutralCommandFor(r.s));
+            }
+            return Math.max(...r.beams.map((b, i) => Math.hypot(b.pose.p.x - before[i].x, b.pose.p.z - before[i].z)));
+        };
+        const loose = shove(await beamCrossing(false));
+        const nailed = shove(await beamCrossing(true));
+        console.log(
+            `400 N sideways for 1 s after the crossing: loose beams move ${(loose * 1000).toFixed(0)} mm, nailed ${(nailed * 1000).toFixed(1)} mm`
+        );
+        expect(loose).toBeGreaterThan(0.05);
+        expect(nailed).toBeLessThan(0.01);
     }, 60_000);
 });
 
@@ -384,7 +413,7 @@ describe('nails on the wire and from player input (#48, #53)', () => {
         const { ACTION_NAIL } = await import('../../src/sim/commands.ts');
         const { s, beam, x, BRIDGE, look, neutralCommand } = await yard();
         s.fpActive = true;
-        s.placePlayer(x + 0.3, BRIDGE.nearEdge + 0.5, 0, 0);
+        s.placePlayer(x + 0.1, BRIDGE.nearEdge + 0.05, 0, 0);
         let n = 100;
         for (let k = 0; k < 30; k++) s.step(neutralCommand(n++));
         const { yaw, pitch } = look(0);
@@ -423,7 +452,7 @@ describe('nails on the wire and from player input (#48, #53)', () => {
         for (let k = 0; k < 2; k++)
             guests.push(await GuestSession.join(hub.transport(`g${k}`), new LabSim({ level: timberYardLevel }), ad));
         expect(guests[0].slot).toBe(1);
-        host.placePlayer(x, BRIDGE.nearEdge + 0.5, 0, 1);
+        host.placePlayer(x, BRIDGE.nearEdge + 0.05, 0, 1);
         let n = host.tick;
         const tick = (guestCmd: ReturnType<typeof neutralCommand>) => {
             guests[0].sendInput(guestCmd);
@@ -534,4 +563,172 @@ describe('building the yard bridge with inputs only (Epic 5 gate)', () => {
             expect(d).toBeLessThan(0.01);
         });
     }, 120_000);
+});
+
+describe('hammer refusals and limits (#48 audit)', () => {
+    /** A 2.4 m plank resting on a 2 m stone block, still, with the query pipeline up to date. */
+    function plankOnBlock(under?: (pw: PhysicsWorld) => void) {
+        const pw = world();
+        if (under) under(pw);
+        else pw.addStatic(RAPIER.ColliderDesc.cuboid(1, 0.25, 1).setTranslation(0, 0.25, 0));
+        const pb = pw.addDynamic(1, { type: 'box', hx: 1.2, hy: 0.05, hz: 0.1 }, pose(0, 0.551, 0), TIMBER);
+        pb.body.setGravityScale(0, true);
+        run(pw, 1);
+        return { pw, js: new JointSystem(pw) };
+    }
+    /** Looks at a point from 1 m away, `deg` degrees off straight down (towards +z). */
+    function previewAtAngle(js: JointSystem, at: { x: number; y: number; z: number }, deg: number) {
+        const r = (deg * Math.PI) / 180;
+        const eye = { x: at.x, y: at.y + Math.cos(r), z: at.z + Math.sin(r) };
+        const { yaw, pitch } = aim(eye, at);
+        return js.preview(eye, yaw, pitch, 0);
+    }
+
+    it('square on means within about 35 degrees of the face normal', () => {
+        const { js } = plankOnBlock();
+        const at = { x: 0.3, y: 0.6, z: 0 };
+        expect(previewAtAngle(js, at, 0).refusal).toBe('none');
+        expect(previewAtAngle(js, at, 33).refusal).toBe('none');
+        expect(previewAtAngle(js, at, 37).refusal).toBe('glancing');
+        expect(previewAtAngle(js, at, 60).refusal).toBe('glancing');
+    });
+
+    it('refuses nothing behind: the end of a plank sticking out over thin air', () => {
+        const { js } = plankOnBlock((pw) =>
+            pw.addStatic(RAPIER.ColliderDesc.cuboid(0.5, 0.25, 1).setTranslation(-0.6, 0.25, 0))
+        );
+        const pv = previewAtAngle(js, { x: 0.9, y: 0.6, z: 0 }, 0);
+        expect(pv.a).toBe(1);
+        expect(pv.refusal).toBe('nothing-behind');
+    });
+
+    it("can't fasten to a kinematic body, the ute, non-timber, or a tree", () => {
+        // kinematic (a moving scripted body)
+        let r = plankOnBlock((pw) =>
+            pw.addKinematic(9, [{ shape: { type: 'box', hx: 1, hy: 0.25, hz: 1 }, x: 0, y: 0, z: 0 }], pose(0, 0.25, 0))
+        );
+        expect(previewAtAngle(r.js, { x: 0.3, y: 0.6, z: 0 }, 0).refusal).toBe('cannot-fasten');
+        // a dynamic body that is not timber (a stone, the bucket)
+        r = plankOnBlock((pw) => {
+            const b = pw.addDynamic(8, { type: 'box', hx: 1, hy: 0.25, hz: 1 }, pose(0, 0.25, 0), { density: 900 });
+            b.body.setGravityScale(0, true);
+        });
+        expect(previewAtAngle(r.js, { x: 0.3, y: 0.6, z: 0 }, 0).refusal).toBe('cannot-fasten');
+        // the ute (a dynamic compound, not grabbable or nailable)
+        r = plankOnBlock((pw) => {
+            const u = pw.addDynamicCompound(
+                7,
+                [{ shape: { type: 'box', hx: 1, hy: 0.25, hz: 1 }, x: 0, y: 0, z: 0, density: 300 }],
+                pose(0, 0.25, 0),
+                {}
+            );
+            u.body.setGravityScale(0, true);
+        });
+        expect(previewAtAngle(r.js, { x: 0.3, y: 0.6, z: 0 }, 0).refusal).toBe('cannot-fasten');
+        // a tree (static, but not an anchor: it can be felled)
+        r = plankOnBlock((pw) =>
+            pw.addStatic(RAPIER.ColliderDesc.cuboid(1, 0.25, 1).setTranslation(0, 0.25, 0), false)
+        );
+        expect(previewAtAngle(r.js, { x: 0.3, y: 0.6, z: 0 }, 0).refusal).toBe('cannot-fasten');
+        expect(r.js.graph.size).toBe(0);
+    });
+
+    it('the level: tree trunks are not anchors, stone abutments are', async () => {
+        const { LabSim } = await import('../../src/sim/lab-sim.ts');
+        const { timberYardLevel } = await import('../../src/levels/timber-yard.ts');
+        const s = new LabSim({ level: timberYardLevel });
+        const pw = s.physics;
+        let trees = 0;
+        let anchors = 0;
+        pw.world.forEachCollider((c) => {
+            if (pw.bodyOfCollider(c.handle) || c.parent()) return;
+            if (c.shape.type === RAPIER.ShapeType.Cone) expect(pw.isAnchor(c.handle)).toBe(false);
+            if (!pw.isAnchor(c.handle)) trees++;
+            else anchors++;
+        });
+        // trunks, crowns and cones of the yard's trees, plus the four invisible walls
+        expect(trees).toBeGreaterThan(4);
+        expect(anchors).toBeGreaterThan(1);
+    });
+
+    it('a full joint (four nails) refuses a fifth through the hammer; the world stops at 64 nails', () => {
+        const { pw, js } = plankOnBlock();
+        for (const x of [-0.3, -0.2, -0.1, 0]) expect(hammerAt(js, { x, y: 0.6, z: 0 }).refusal).toBe('none');
+        expect(js.graph.size).toBe(1);
+        expect(js.graph.nailCount).toBe(NAIL.maxPerJoint);
+        expect(previewAt(js, { x: 0.1, y: 0.6, z: 0 }).refusal).toBe('full');
+        // fill the world's nail budget with other pieces' joints
+        const ident = { x: 0, y: 0, z: 0, w: 1 };
+        for (let k = 0; js.graph.nailCount < NAIL.maxTotal; k++)
+            js.graph.add({
+                a: 100 + k,
+                b: GROUND,
+                type: 'anchor',
+                anchorA: { x: 0, y: 0, z: 0 },
+                anchorB: { x: 50 + k, y: 0, z: 0 },
+                rel: ident,
+                nails: Array.from(
+                    { length: Math.min(NAIL.maxPerJoint, NAIL.maxTotal - js.graph.nailCount) },
+                    (_, i) => ({ x: i * 0.1, y: 0, z: 0 })
+                ),
+                stiffness: 1,
+                tick: 0
+            });
+        // a second plank, unfastened: a good spot, but no nails left
+        pw.addDynamic(2, { type: 'box', hx: 1.2, hy: 0.05, hz: 0.1 }, pose(0, 0.551, 0.5), TIMBER).body.setGravityScale(
+            0,
+            true
+        );
+        run(pw, 1);
+        expect(previewAt(js, { x: 0, y: 0.6, z: 0.5 }).refusal).toBe('limit');
+    });
+});
+
+describe('joint stiffness (#47 audit)', () => {
+    /**
+     * A 3.2 m beam on a frictionless stone post, nailed down near its back end, pushed sideways at
+     * its tip: only the joint's spring resists the turn. Returns the turn (rad), the moment and k.
+     */
+    function sideways(nails: number, load: number) {
+        const pw = world();
+        pw.addStatic(RAPIER.ColliderDesc.cuboid(0.3, 0.25, 0.3).setTranslation(-1.2, 0.25, 0).setFriction(0));
+        const pb = pw.addDynamic(1, { type: 'box', hx: 1.6, hy: 0.075, hz: 0.1 }, pose(0, 0.576, 0), {
+            ...TIMBER,
+            friction: 0
+        });
+        pb.body.setGravityScale(0, true);
+        run(pw, 1);
+        const js = new JointSystem(pw);
+        for (let k = 0; k < nails; k++) hammerAt(js, { x: -1.35 + k * 0.08, y: 0.65, z: 0 });
+        pb.body.setGravityScale(1, true);
+        const c = [...js.graph.connections()][0];
+        let yaw = 0;
+        for (let i = 0; i < 240; i++) {
+            const t = pb.body.translation();
+            pb.body.applyImpulseAtPoint({ x: 0, y: 0, z: load / 60 }, { x: t.x + 1.5, y: t.y, z: t.z }, true);
+            pw.step();
+            const q = pb.body.rotation();
+            yaw = Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.x * q.x));
+        }
+        const arm = pb.body.translation().x + 1.5 - c.anchorB.x;
+        return { turn: Math.abs(yaw), M: load * arm, k: js.angularStiffness(c), nails: c.nails.length };
+    }
+
+    it('a joint flexes in proportion to its load over its stiffness: one nail four times as much as four', () => {
+        const one = sideways(1, 300);
+        const four = sideways(4, 300);
+        expect(one.nails).toBe(1);
+        expect(four.nails).toBe(4);
+        expect(four.k).toBe(4 * one.k);
+        console.log(
+            `sideways 300 N at the tip: one nail turns ${(one.turn * 1000).toFixed(2)} mrad (M/k ${((one.M / one.k) * 1000).toFixed(2)}), four nails ${(four.turn * 1000).toFixed(2)} mrad (M/k ${((four.M / four.k) * 1000).toFixed(2)})`
+        );
+        expect(one.turn).toBeGreaterThan(0.7 * (one.M / one.k));
+        expect(one.turn).toBeLessThan(1.4 * (one.M / one.k));
+        expect(one.turn / four.turn).toBeGreaterThan(2.8);
+        // twice the load, about twice the turn
+        const one2 = sideways(1, 600);
+        expect(one2.turn / one.turn).toBeGreaterThan(1.7);
+        expect(one2.turn / one.turn).toBeLessThan(2.3);
+    });
 });

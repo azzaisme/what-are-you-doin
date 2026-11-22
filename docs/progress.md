@@ -2,74 +2,90 @@
 
 ## Epic 5, part 1: nails and the joint graph (2026-11-22)
 
-You can now nail timber together, or nail it down to stone and ground. A nailed bridge stays put
-under the ute.
+You can now nail timber together, or nail it down to stone and ground. In the Timber Yard you can
+build a real bridge, beams plus a nailed plank deck, and drive the ute over it.
 
 ### How to play it
 
 - **Nail:** look at a plank, beam, log or crate and press **F** (**LB** on a pad, **Nail** on touch).
     - The nail goes in along your view. It must pass through the piece and bite into what is behind
-      it: more timber, or stone / ground (an anchor).
+      it: more timber, or stone / ground (an anchor). Trees are not anchors (they can be felled).
+    - Look at it square on: within about 35° of straight into the face. Stand close and look down.
     - The prompt says what a blow would do: "F to nail", or why not ("gap too wide: close them up
       first", "hold it still", "nail it square on", "too thick to nail through here", "already
-      nailed here").
-    - A green outline marks where the nail would go (red when it would not hold).
+      nailed here", "can't nail into that", "nothing behind it to nail into").
+    - A green outline marks where the nail would go (red when it would not hold). In split screen,
+      each player sees their own.
     - A nail head shows as one dark cell on the piece.
 - **Solo:** you can nail a piece you are holding. You let go once it is nailed.
-- **Lay the yard bridge:** shoulder each beam over the creek (as before), then look at the beam
-  where it lies on the stone abutment and press F. Two nails per end is plenty.
+- **Build the yard bridge:**
+    1. Shoulder both beams onto the stone seats, about 1.1 m apart.
+    2. Nail each beam's near end down.
+    3. Carry planks from the two stacks (a new one stands by the bridge) and lay them across both
+       beams, a plank's width apart. Nail each plank to both beams.
+    4. Walk out on your deck and nail the beams' far ends.
+    5. Finish the deck and drive the ute over. A stone lip and an earth ramp at each bank bring the
+       road up to the bridge.
 
 ### What was built
 
 - **Joint graph (#47, `src/sim/joints/graph.ts`):** each connection stores the two bodies, the
   anchor point on each, the type (nail or ground anchor), stiffness, strength, fatigue, and its
   nail heads.
-    - One connection per pair of pieces. Another nail at a new spot reinforces it (strength grows
-      with nails, up to 4); a nail at the same spot is refused.
+    - One connection per pair of pieces. Another nail at a new spot reinforces it (strength and
+      stiffness grow with nails, up to 4); a nail at the same spot is refused.
     - Ground is not one place: nails into stone more than 0.5 m apart make separate anchors, so a
       beam can be anchored at both ends.
-    - The graph knows which pieces hang together and whether that group is anchored (for the stress
-      work next).
+    - The graph knows which pieces hang together and whether that group is anchored.
+- **Joints flex by their stiffness:**
+    - each joint holds its anchor points together rigidly;
+    - its bending springs back with 200 kN m/rad per nail (× 0.8 timber to timber, × 1 into
+      stone), so one nail flexes four times as much as four.
 - **Hammer (#48, `src/sim/joints/joints.ts`):** the prompt and the blow run the same test:
     - a 30 cm nail from where you look;
     - it must pass through the piece and bite at least 4 cm into the next;
     - the gap between them may be at most 5 cm (no fastening across thin air);
-    - no glancing blows, and the two pieces must not be sliding against each other.
-- **Physics:** one Rapier fixed joint per connection. Nailed timber-to-timber pairs stop colliding
-  with each other (they were touching already).
-    - A nailed piece that is put somewhere by hand (reset props, recovery, falling out of the world)
-      comes loose first.
+    - within 35° of square on;
+    - the pieces must not be sliding against each other;
+    - no kinematic bodies, no ute, no non-timber, no trees.
+    - A nailed timber-to-timber pair stops colliding (they were touching already). A piece put
+      somewhere by hand (reset props, recovery, falling out of the world) comes loose first.
+- **Timber Yard (level tweak):**
+    - the stone seats under the beams run up to a stone lip, flush with the top of beams laid on
+      them;
+    - a packed-earth ramp leads up to each lip;
+    - seven more planks are stacked by the bridge for a deck.
+    - The bucket-throw and beam playthroughs still pass. The Valley's copy of the yard has the lips
+      and ramps but not the extra planks: the Valley crossings come in #54.
 - **Online:** guests can nail (the host checks it like any other command). The host sends the
   nails to guests whenever they change (10 bytes a nail, at most 64), and each player's hammer
   prompt rides with the HUD.
 
-### Test results (actual, `tests/unit/joints.test.ts`, both voxel sizes)
+### Test results (actual, `tests/unit/joints.test.ts` and `yard-bridge.test.ts`, both voxel sizes)
 
-| Test                                                               | Result                                                                    |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------- |
-| Plank nailed to a stone block, shoved sideways with 200 N for 1 s  | Moves less than 2 cm                                                      |
-| Plank nailed across another, lifted by the top one                 | The bottom one comes up with it, 10 cm below                              |
-| Gap, glancing, too thick, not timber, sliding                      | Each refused with its reason; nothing fastened                            |
-| Gate: both yard beams nailed to both abutments, ute driven across  | Reaches the far bank; beams moved **2 mm**; never dipped into the creek   |
-| The same beams loose                                               | The ute gets over, but walks one beam **1.1 m** off its line              |
-| The nailed crossing, run twice                                     | Identical result                                                          |
-| Inputs only: shoulder both beams onto the wheel lines, nail with F | 2 anchors, 4 nails; a 400 N shove for 1 s then moves each beam **0.0 mm** |
-| A guest nails online (host + 2 guests)                             | Host fastens it; both guests get the nail                                 |
+| Test                                                                                                      | Result                                                                                                                        |
+| --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **Gate, inputs only:** player lays beams, nails near ends, lays and nails a 12-plank deck, nails far ends | 4 anchors, 24 deck joints, 30 nails; the ute drives from bank to bank, never lower than 0.27 m above the yard                 |
+| Beams nailed to both abutments (placed), ute driven across                                                | Reaches the far bank; beams moved **2 mm**                                                                                    |
+| 400 N sideways for 1 s after a crossing                                                                   | Loose beams move **102 mm**, nailed ones **0.2 mm**                                                                           |
+| Joint stiffness: 300 N sideways at a beam's tip                                                           | One nail turns 4.18 mrad (load / stiffness predicts 4.27), four nails 1.05 (1.07); twice the load, about twice the turn       |
+| Square on                                                                                                 | 33° holds, 37° is refused                                                                                                     |
+| Refusals                                                                                                  | Gap, too thick, not timber, sliding, nothing behind, kinematic, ute, stone that isn't timber, tree, joint full, 64-nail limit |
+| Plank nailed to stone and shoved / plank nailed across another and lifted                                 | Holds / the bottom one comes up with it                                                                                       |
+| The nailed crossing, run twice                                                                            | Identical result                                                                                                              |
+| A guest nails online (host + 2 guests)                                                                    | Host fastens it; both guests get the nail                                                                                     |
 
 - Browser test: in the Timber Yard, look at a beam, F nails it and the nail head draws; a second F
   at the same spot is refused.
-- Unit tests: 356 pass. Browser: the yard, ute, hammer, split screen and all online co-op tests
+- Unit tests: 370 pass. Browser: the yard, ute, hammer, split screen and all online co-op tests
   pass.
 
 ### Found on the way
 
-- **The Epic 4 bridge test's driver steered the wrong way** (its position correction had the
-  wrong sign). Steering correctly, the ute does cross two loose beams, but wrecks the bridge doing
-  it (above). The new tests steer correctly; the Epic 4 test is left as it was.
-- **Two bare 20 cm beams are a marginal road for 24 cm tyres.** Laid by hand, a few centimetres
-  off the wheel line or towards one bank decides whether the ute gets over, nails or not; slowly,
-  it can't climb onto the beam ends at all. A proper deck and ramps are for the Valley rework
-  (#54).
+- **The Epic 4 bridge test's driver steered the wrong way:** its position correction had the
+  wrong sign. Fixed. Steering correctly, the ute drives over the two loose beams to the far bank.
+- **Two bare 20 cm beams were a marginal road for 24 cm tyres:** a few centimetres decided whether
+  the ute got over. That is why the yard bridge is now a plank deck with lips and ramps.
 
 ### Next
 

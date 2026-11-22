@@ -201,7 +201,7 @@ describe('level 1: the timber yard', () => {
         expect(s.progress.falls).toBe(0);
         step({}, 30);
         for (let i = 0; i < 20; i++) {
-            pitch += (0.5 - pitch) / 6;
+            pitch += (0.55 - pitch) / 6;
             step();
         }
         step({}, 20);

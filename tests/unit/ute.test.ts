@@ -403,7 +403,7 @@ describe('ute recovery (#46)', () => {
 });
 
 describe('the ute crosses a beam bridge (Epic 4 gate)', () => {
-    it('two loose beams laid under its wheel tracks take its weight over the creek', async () => {
+    it('two loose beams laid under its wheel tracks carry it over the creek', async () => {
         const { LabSim } = await import('../../src/sim/lab-sim.ts');
         const { timberYardLevel, BRIDGE, BRIDGE_X, YARD_Y } = await import('../../src/levels/timber-yard.ts');
         const { neutralCommand } = await import('../../src/sim/commands.ts');
@@ -434,29 +434,34 @@ describe('the ute crosses a beam bridge (Epic 4 gate)', () => {
         expect(s.takeDriverSeat(0)).toBe(true);
         const seen = new Set<number>();
         let maxLoad = 0;
-        // out to the middle of the gap (unfastened 20 cm beams under 24 cm tyres: past here the
-        // tyres' sideways push walks a beam out from under a wheel; fastening is Epic 5)
-        for (let k = 0; k < 60 * 12 && s.ute.pose.p.z > BRIDGE.zc; k++, n++) {
+        // all the way to the far bank
+        const farBank = BRIDGE.farEdge - 2.5;
+        const start = beams.map((b) => ({ ...b.pose.p }));
+        for (let k = 0; k < 60 * 20 && s.ute.pose.p.z > farBank; k++, n++) {
             // a careful driver keeps the wheels on the beams: steer back onto the line and heading
             const q = s.ute.pose.q;
             const yaw = Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.x * q.x));
             let dy = yaw - Math.PI;
             dy -= Math.round(dy / (2 * Math.PI)) * 2 * Math.PI;
-            const steer = Math.max(-1, Math.min(1, 4 * (s.ute.pose.p.x - BRIDGE_X) + 3 * dy));
+            // (moveX > 0 steers right, which for a ute facing -z is towards -x)
+            const steer = Math.max(-1, Math.min(1, 4 * (BRIDGE_X - s.ute.pose.p.x) + 3 * dy));
             s.step({ ...neutralCommand(n, Math.PI), moveZ: 0.35, moveX: steer });
             for (const id of v.groundIds) if (id >= 0) seen.add(id);
             if (v.groundIds.some((id) => id === beams[0].id || id === beams[1].id))
                 maxLoad = Math.max(maxLoad, v.lastGroundImpulse * 60);
         }
         const u = s.ute.pose.p;
-        // over the middle of the creek, up on the beams (not down in the water)
-        expect(u.z).toBeLessThan(BRIDGE.zc + 0.1);
+        // over the creek and up the far bank
+        expect(u.z).toBeLessThan(farBank);
         expect(u.y).toBeGreaterThan(YARD_Y);
         // its wheels stood on both beams and pressed on them with a good share of its weight
         expect(seen.has(beams[0].id)).toBe(true);
         expect(seen.has(beams[1].id)).toBe(true);
         expect(maxLoad).toBeGreaterThan(0.3 * v.weight());
-        // the beams are still across the gap afterwards
+        // placed this low the beams sit wedged against the far capstone, so here they stay across
+        // (dropped onto the capstones instead, the tyres walk one off its line: joints.test.ts)
+        const drift = beams.map((b, i) => Math.hypot(b.pose.p.x - start[i].x, b.pose.p.z - start[i].z));
+        console.log('loose beams after the crossing: moved', drift.map((d) => d.toFixed(2)).join(' m, '), 'm');
         for (const b of beams) expect(Math.abs(b.pose.p.z - BRIDGE.zc)).toBeLessThan(0.4);
     }, 60_000);
 });

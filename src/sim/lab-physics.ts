@@ -141,13 +141,15 @@ export function buildLabPhysics(level: LevelDef): PhysicsWorld {
             pw.addStatic(
                 RAPIER.ColliderDesc.cylinder(th / 2, OAK.trunkRadius * s + 0.02)
                     .setTranslation(t.x, base + th / 2 - 0.05, t.z)
-                    .setFriction(0.8)
+                    .setFriction(0.8),
+                false
             );
             for (const b of oakCrown(t, base))
                 pw.addStatic(
                     RAPIER.ColliderDesc.ball(b.r * 0.85)
                         .setTranslation(b.x, b.y, b.z)
-                        .setFriction(0.5)
+                        .setFriction(0.5),
+                    false
                 );
             continue;
         }
@@ -155,14 +157,16 @@ export function buildLabPhysics(level: LevelDef): PhysicsWorld {
         pw.addStatic(
             RAPIER.ColliderDesc.cylinder(trunkH / 2, pineTrunkRadius(s))
                 .setTranslation(t.x, base + trunkH / 2 - 0.05, t.z)
-                .setFriction(0.8)
+                .setFriction(0.8),
+            false
         );
         for (const tier of PINE_TIERS) {
             const h = tier.h * s;
             pw.addStatic(
                 RAPIER.ColliderDesc.cone(h / 2, tier.r * s)
                     .setTranslation(t.x, base + tier.y * s + h / 2, t.z)
-                    .setFriction(0.6)
+                    .setFriction(0.6),
+                false
             );
         }
     }
@@ -226,10 +230,10 @@ export function buildLabPhysics(level: LevelDef): PhysicsWorld {
     const cz = (A.minZ + A.maxZ) / 2;
     const hx = (A.maxX - A.minX) / 2;
     const hz = (A.maxZ - A.minZ) / 2;
-    pw.addStatic(RAPIER.ColliderDesc.cuboid(hx + 0.5, H, 0.5).setTranslation(cx, 2, A.minZ - 0.5));
-    pw.addStatic(RAPIER.ColliderDesc.cuboid(hx + 0.5, H, 0.5).setTranslation(cx, 2, A.maxZ + 0.5));
-    pw.addStatic(RAPIER.ColliderDesc.cuboid(0.5, H, hz + 0.5).setTranslation(A.minX - 0.5, 2, cz));
-    pw.addStatic(RAPIER.ColliderDesc.cuboid(0.5, H, hz + 0.5).setTranslation(A.maxX + 0.5, 2, cz));
+    pw.addStatic(RAPIER.ColliderDesc.cuboid(hx + 0.5, H, 0.5).setTranslation(cx, 2, A.minZ - 0.5), false);
+    pw.addStatic(RAPIER.ColliderDesc.cuboid(hx + 0.5, H, 0.5).setTranslation(cx, 2, A.maxZ + 0.5), false);
+    pw.addStatic(RAPIER.ColliderDesc.cuboid(0.5, H, hz + 0.5).setTranslation(A.minX - 0.5, 2, cz), false);
+    pw.addStatic(RAPIER.ColliderDesc.cuboid(0.5, H, hz + 0.5).setTranslation(A.maxX + 0.5, 2, cz), false);
     return pw;
 }
 

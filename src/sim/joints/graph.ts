@@ -25,8 +25,8 @@ export const NAIL = {
     maxGap: 0.05,
     /** Reach of the hammer from the eye (m): as far as a grab reaches (GRAB.reach). */
     reach: 2.6,
-    /** Steepest angle off the face normal a nail is driven at (cosine): no glancing blows. */
-    minCos: 0.45,
+    /** Steepest angle off the face normal a nail is driven at (cosine; 0.82: about 35 degrees). */
+    minCos: 0.82,
     /** The two pieces may not move against each other faster than this (m/s) while nailing. */
     maxSlip: 0.35,
     /** Nails in one connection closer together than this (m) are the same nail. */
@@ -39,7 +39,10 @@ export const NAIL = {
     maxTotal: 64,
     /** Strength of one nail (N): shear capacity before a calibrated break (#49). */
     strength: 4000,
-    /** Relative stiffness of a nailed joint (1 = rigid weld); anchors to ground are stiffer. */
+    /** Angular stiffness of one nail at stiffness 1 (N m/rad), and the damping time of its spring (s). */
+    angularStiffness: 200000,
+    angularDamping: 0.005,
+    /** Relative stiffness of a joint: timber to timber flexes more than a spike into stone. */
     stiffness: 0.8,
     anchorStiffness: 1
 } as const;

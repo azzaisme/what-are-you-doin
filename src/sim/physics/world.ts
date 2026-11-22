@@ -259,6 +259,7 @@ export class PhysicsWorld {
     readonly world: RAPIER.World;
     readonly bodies = new Map<number, PhysBody>();
     private readonly byCollider = new Map<number, PhysBody>();
+    private readonly notAnchors = new Set<number>();
     readonly stats: PhysicsStats = {
         stepMs: 0,
         tickMs: 0,
@@ -341,8 +342,19 @@ export class PhysicsWorld {
         this.terrainHandle = this.world.createCollider(desc).handle;
     }
 
-    addStatic(desc: RAPIER.ColliderDesc): RAPIER.Collider {
-        return this.world.createCollider(desc.setCollisionGroups(groups(LAYER.static, ALL)));
+    /**
+     * Static geometry. `anchor` false: nothing can be nailed to it (trees, which can be felled; the
+     * invisible walls). Terrain, rock and built pieces are anchors.
+     */
+    addStatic(desc: RAPIER.ColliderDesc, anchor = true): RAPIER.Collider {
+        const c = this.world.createCollider(desc.setCollisionGroups(groups(LAYER.static, ALL)));
+        if (!anchor) this.notAnchors.add(c.handle);
+        return c;
+    }
+
+    /** Whether a static collider takes nails (see addStatic). */
+    isAnchor(handle: number): boolean {
+        return !this.notAnchors.has(handle);
     }
 
     // ------------------------------------------------------------------------------- bodies

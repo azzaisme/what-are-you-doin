@@ -176,6 +176,18 @@ function piece(
 
 const boxS = (hx: number, hy: number, hz: number) => ({ type: 'box' as const, hx, hy, hz });
 
+/** Beams sit on the capstones within this far of the face (m); the deck lip starts there. */
+export const BRIDGE_SEAT = 0.6;
+/** The lip runs this far past the bank edge, where the ramp begins (m). */
+const protrudeLip = 0.3;
+/**
+ * The lips' top above the capstones: a 15 cm beam's top, so beams laid on the seats are flush with
+ * the road (a plank deck on them is one 10 cm step up) (m).
+ */
+export const LIP_RISE = 0.15;
+/** Length of the approach ramps (m). */
+export const RAMP_LENGTH = 2.5;
+
 /** Bridge geometry, shared by the pieces, the tests and the level rules. */
 export const BRIDGE = (() => {
     const zc = creekCenterZ(BRIDGE_X);
@@ -225,17 +237,72 @@ export function yardPieces(): StaticPiece[] {
             { priority: 3 }
         )
     );
-    // capstones, slightly proud
+    // capstones, slightly proud: the beams' seats, up to the deck lip
     P.push(
-        piece('cap-near', boxS(B.halfWidth + 0.05, 0.05, 0.25), BRIDGE_X, nearTop + 0.05, B.nearFace + 0.25, stone(7), {
-            priority: 3
-        })
+        piece(
+            'cap-near',
+            boxS(B.halfWidth + 0.05, 0.05, BRIDGE_SEAT / 2),
+            BRIDGE_X,
+            nearTop + 0.05,
+            B.nearFace + BRIDGE_SEAT / 2,
+            stone(7),
+            {
+                priority: 3
+            }
+        )
     );
     P.push(
-        piece('cap-far', boxS(B.halfWidth + 0.05, 0.05, 0.25), BRIDGE_X, farTop + 0.05, B.farFace - 0.25, stone(9), {
-            priority: 3
-        })
+        piece(
+            'cap-far',
+            boxS(B.halfWidth + 0.05, 0.05, BRIDGE_SEAT / 2),
+            BRIDGE_X,
+            farTop + 0.05,
+            B.farFace - BRIDGE_SEAT / 2,
+            stone(9),
+            {
+                priority: 3
+            }
+        )
     );
+    // Epic 5: a stone lip behind each beam seat, flush with the top of beams laid on it, and a
+    // packed-earth ramp up to it, so the ute can drive onto a built bridge
+    const lipStart = BRIDGE_SEAT; // behind the face: the beams' seat, then the lip
+    const lipEnd = protrudeLip;
+    for (const [side, top, face, edge, dir] of [
+        ['near', nearTop, B.nearFace, B.nearEdge, 1],
+        ['far', farTop, B.farFace, B.farEdge, -1]
+    ] as const) {
+        const deck = top + 0.1 + LIP_RISE;
+        const z0 = face + dir * lipStart;
+        const z1 = edge + dir * lipEnd;
+        P.push(
+            piece(
+                `lip-${side}`,
+                boxS(B.halfWidth, (deck - (top - 0.2)) / 2, Math.abs(z1 - z0) / 2),
+                BRIDGE_X,
+                (deck + top - 0.2) / 2,
+                (z0 + z1) / 2,
+                stone(side === 'near' ? 11 : 13),
+                { priority: 3 }
+            )
+        );
+        const zEnd = z1 + dir * RAMP_LENGTH;
+        const bottom = yardHeight(BRIDGE_X, zEnd);
+        const ang = Math.atan2(deck - bottom, RAMP_LENGTH);
+        const len = Math.hypot(deck - bottom, RAMP_LENGTH);
+        const th = 0.3;
+        P.push(
+            piece(
+                `ramp-${side}`,
+                boxS(B.halfWidth, th / 2, len / 2),
+                BRIDGE_X,
+                (deck + bottom) / 2 - (Math.cos(ang) * th) / 2,
+                (z1 + zEnd) / 2 - (dir * Math.sin(ang) * th) / 2,
+                (x, y, z) => voxel(M.Path, latticeShade(x, y, z, 0.2, 15)),
+                { pitch: dir * ang, priority: 2 }
+            )
+        );
+    }
     // the snapped stringer hanging off the near abutment into the water
     P.push(
         piece('stringer-snapped', boxS(0.09, 0.09, 0.8), BRIDGE_X - 0.8, nearTop - 0.45, B.nearFace - 0.6, darkTimber, {
@@ -620,6 +687,20 @@ export function yardProps(): PropPlacement[] {
     return P;
 }
 
+/**
+ * Seven more planks for a bridge deck, stacked by the near ramp (the yard level only: the Valley
+ * places its own extra planks).
+ */
+export function yardDeckPlanks(): PropPlacement[] {
+    const P: PropPlacement[] = [];
+    for (let n = 0; n < 7; n++)
+        P.push({
+            name: `extra-plank-${5 + n}`,
+            pose: at(3.2, YARD_Y + 0.055 + n * 0.105, 2.9 + (n % 2) * 0.04, 0, FLAT)
+        });
+    return P;
+}
+
 export const timberYardLevel: LevelDef = {
     id: 'yard',
     name: 'Timber Yard',
@@ -640,7 +721,7 @@ export const timberYardLevel: LevelDef = {
         beaver: { mode: 'idle', pose: at(-6.3, YARD_Y, 7.4, 2.4) },
         ute: { mode: 'drivable', pose: at(-10.5, YARD_Y + 0.002, 4.6, Math.PI / 2 + 0.15) }
     },
-    props: yardProps(),
+    props: [...yardProps(), ...yardDeckPlanks()],
     rules: {
         objective: 'Get the bucket across the creek to the flag',
         goal: YARD_GOAL,

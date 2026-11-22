@@ -60,7 +60,7 @@ export class NailMarkers {
     }
 
     /**
-     * Places the nail heads on their pieces at this render time, and the preview (null: none).
+     * Places the nail heads on their pieces at this render time, and each local player's preview.
      * `cell` is the base lattice's cell size (m).
      */
     update(
@@ -68,7 +68,7 @@ export class NailMarkers {
         ring: SnapshotRing,
         time: number,
         cell: number,
-        preview: { x: number; y: number; z: number; ok: boolean } | null
+        previews: readonly { x: number; y: number; z: number; ok: boolean }[]
     ): void {
         const snap = (v: number) => (Math.floor(v / cell) + 0.5) * cell;
         let n = 0;
@@ -85,7 +85,7 @@ export class NailMarkers {
         }
         for (let i = n; i < this.heads.length; i++) this.heads[i].enabled = false;
         this.drawn = n;
-        if (preview) {
+        for (const preview of previews) {
             const h = cell * 0.56;
             const x = snap(preview.x);
             const y = snap(preview.y);

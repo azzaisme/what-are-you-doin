@@ -1260,12 +1260,16 @@ function updateNails(time: number): void {
         }
         marks = hostNails;
     }
-    let preview: { x: number; y: number; z: number; ok: boolean } | null = null;
+    // every local player's hammer outline (split screen: player 2's too)
+    const previews: { x: number; y: number; z: number; ok: boolean }[] = [];
     if (state.mode === 'firstPerson') {
-        const h = guestSession ? guestSession.hud[guestSession.slot] : sim.interactionIds(0);
-        if (h?.nailAt && h.nail > 0) preview = { ...h.nailAt, ok: h.nail === 1 };
+        const slots = guestSession ? [guestSession.slot] : state.players > 1 && localSlot2 > 0 ? [0, localSlot2] : [0];
+        for (const slot of slots) {
+            const h = guestSession ? guestSession.hud[slot] : sim.interactionIds(slot);
+            if (h?.nailAt && h.nail > 0) previews.push({ ...h.nailAt, ok: h.nail === 1 });
+        }
     }
-    nailMarkers.update(marks, sim.ring, time, tierCellCm('base', cellCm) / 100, preview);
+    nailMarkers.update(marks, sim.ring, time, tierCellCm('base', cellCm) / 100, previews);
 }
 
 /** The ute's yaw last render frame, per local view (NaN when that view's player isn't in it). */

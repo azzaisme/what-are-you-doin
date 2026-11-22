@@ -172,7 +172,10 @@ export class JointSystem {
             out.refusal = 'gap';
             return out;
         }
-        if (B && (B.kind !== 'dynamic' || !B.nailable || !B.enabled)) {
+        if (
+            (B && (B.kind !== 'dynamic' || !B.nailable || !B.enabled)) ||
+            (!B && !pw.isAnchor(behind.collider.handle))
+        ) {
             out.refusal = 'cannot-fasten';
             return out;
         }
@@ -230,6 +233,7 @@ export class JointSystem {
         if (pv.reinforces) {
             const c = this.graph.get(pv.reinforces)!;
             this.graph.addNail(c.id, this.nailLocal(c, pv.head));
+            this.stiffen(c);
         } else {
             const A = this.pw.bodies.get(pv.a)!;
             const B = pv.b === GROUND ? null : this.pw.bodies.get(pv.b)!;
@@ -251,12 +255,39 @@ export class JointSystem {
         return pv;
     }
 
+    /**
+     * The physics joint: the anchor points are held together rigidly, and the pieces' relative
+     * turn springs back to where it was when nailed, with an angular stiffness (N m/rad) of
+     * stiffness x nails x NAIL.angularStiffness. So one nail flexes more than four, and a heavy
+     * load visibly bends a joint before it breaks.
+     */
     private makeJoint(c: Connection, A: PhysBody, B: PhysBody | null): void {
-        const data = RAPIER.JointData.fixed(c.anchorA, { x: 0, y: 0, z: 0, w: 1 }, c.anchorB, c.rel);
+        const data = RAPIER.JointData.spherical(c.anchorA, c.anchorB);
         const j = this.pw.world.createImpulseJoint(data, A.body, B ? B.body : this.groundBody(), true);
+        // spherical joint data takes no frames: set them on the joint (the turn at nailing is the rest)
+        j.setLocalFrame1(c.anchorA, { x: 0, y: 0, z: 0, w: 1 });
+        j.setLocalFrame2(c.anchorB, c.rel);
         // the pieces were touching when nailed: their contact would only fight the joint
         if (B) j.setContactsEnabled(false);
         this.rapier.set(c.id, j);
+        this.stiffen(c);
+    }
+
+    /** Angular stiffness of a connection's joint (N m/rad). */
+    angularStiffness(c: Connection): number {
+        return c.stiffness * Math.max(1, c.nails.length) * NAIL.angularStiffness;
+    }
+
+    /** Sets a connection's joint springs from its stiffness and nails. */
+    private stiffen(c: Connection): void {
+        const j = this.rapier.get(c.id);
+        if (!j) return;
+        const k = this.angularStiffness(c);
+        const proto = RAPIER.SphericalImpulseJoint.prototype;
+        for (const axis of [RAPIER.JointAxis.AngX, RAPIER.JointAxis.AngY, RAPIER.JointAxis.AngZ]) {
+            proto.configureMotorModel.call(j, axis, RAPIER.MotorModel.ForceBased);
+            proto.configureMotorPosition.call(j, axis, 0, k, k * NAIL.angularDamping);
+        }
     }
 
     /** Removes one connection and its joint, waking both pieces (call between physics steps). */
