@@ -6,16 +6,26 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { timberYardLevel } from '../../src/levels/timber-yard.ts';
+import { valleyLevel } from '../../src/levels/valley.ts';
 import { VirtualClock, degradedTransport, parseConditions } from '../../src/net/netsim.ts';
 import type { NetConditions } from '../../src/net/netsim.ts';
-import { GuestSession, HOST_GRACE_MS, HostSession, NET_PROTOCOL, listGames } from '../../src/net/session.ts';
+import {
+    GuestSession,
+    HOST_GRACE_MS,
+    HostSession,
+    NET_PROTOCOL,
+    layoutHash,
+    listGames
+} from '../../src/net/session.ts';
 import type { GameAd } from '../../src/net/session.ts';
 import { MemoryHub } from '../../src/net/transport.ts';
 import type { NetTransport } from '../../src/net/transport.ts';
 import { ACTION_DROP_TEST, ACTION_RESET_PROPS, neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
+import type { SimEntity } from '../../src/sim/lab-entities.ts';
 import { EYE_HEIGHT, LabSim, MAX_PLAYERS } from '../../src/sim/lab-sim.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
+import { pose } from '../../src/voxels/math.ts';
 
 beforeAll(() => initPhysics());
 
@@ -392,6 +402,21 @@ describe('reconnect', { timeout: 30_000 }, () => {
         g.run(60);
         expect(gs.reconnecting).toBe(true);
         expect(gs.hostGone).toBe(false);
+        // it comes back (same peer, its state republished): the guest is reconnected and plays on
+        const probe = g.hub.channel('room-ue-abcd', 'probe-back');
+        expect(probe.peers().some((p) => p.id === 'host')).toBe(false);
+        const back = g.hub.channel('room-ue-abcd', 'host');
+        back.setState({ role: 'host', v: NET_PROTOCOL, layout: layoutHash(g.sim.entities), level: 'yard' });
+        (g.hs as unknown as { ch: unknown }).ch = back;
+        const before = gs.received;
+        g.run(60);
+        expect(gs.reconnecting).toBe(false);
+        expect(gs.hostGone).toBe(false);
+        expect(gs.received).toBeGreaterThan(before + 10);
+        // gone for good this time: after the grace period the guest gives up
+        back.leave();
+        g.run(10);
+        expect(gs.reconnecting).toBe(true);
         g.clock.advance(HOST_GRACE_MS + 100);
         expect(gs.hostGone).toBe(true);
 
@@ -400,6 +425,31 @@ describe('reconnect', { timeout: 30_000 }, () => {
         g2.until(() => gs2.received > 0);
         g2.hs.stop();
         expect(gs2.hostGone).toBe(true);
+    });
+});
+
+describe('host state size', () => {
+    it('stays inside the room’s 4 KiB in the Valley at 8 players with every entity visible and long events', async () => {
+        const hub = new MemoryHub();
+        const sim = new LabSim({ level: valleyLevel });
+        sim.step(cmd(0));
+        sim.fpActive = true;
+        const hs = await HostSession.start(hub.transport('host'), sim, 'valley', 'size');
+        for (let i = 1; i < MAX_PLAYERS; i++) sim.setSlotActive(i, true);
+        let bytes = 0;
+        for (let k = 0; k < 30; k++) {
+            sim.step(cmd(k));
+            for (const e of sim.entities) e.visible = true; // worst case: everything drawn
+            sim.events.push({ tick: sim.tick, kind: 'info', text: 'x'.repeat(200) });
+            hs.afterStep((s) => ({ ...sim.interactionIds(s), held: 999, target: 999, shared: true, seat: 1 }));
+            const st = hub
+                .channel('room-ue-size', 'probe')
+                .peers()
+                .find((p) => p.id === 'host')!.state;
+            bytes = Math.max(bytes, JSON.stringify(st).length);
+        }
+        console.info(`worst-case host state, Valley, 8 players, all ${sim.entities.length} entities: ${bytes} bytes`);
+        expect(bytes).toBeLessThan(4096);
     });
 });
 
@@ -416,6 +466,22 @@ describe('version compatibility', () => {
         g.run(10);
         expect(g.hs.slots.has('old-guest')).toBe(false);
         expect(g.sim.playerCount).toBe(1);
+    });
+
+    it('a guest whose build lists other entities (same protocol) refuses the host’s snapshots', async () => {
+        const g = await new Game(null).start();
+        const sim = new LabSim({ level: timberYardLevel });
+        const extra: SimEntity = { ...sim.entities[sim.entities.length - 1], id: 999, slot: sim.entities.length };
+        (sim.entities as SimEntity[]).push(extra);
+        expect(layoutHash(sim.entities)).not.toBe(layoutHash(g.sim.entities));
+        const gs = await GuestSession.join(g.net('other-build'), sim, g.ad, { now: () => g.clock.now() });
+        g.run(60);
+        expect(gs.incompatible).toBe(true);
+        expect(gs.received).toBe(0);
+        // the same build is fine
+        const ok = await g.join('same-build');
+        g.until(() => ok.received > 0);
+        expect(ok.incompatible).toBe(false);
     });
 });
 
@@ -442,6 +508,50 @@ describe('eight players', { timeout: 30_000 }, () => {
             .find((p) => p.id === 'host')!.state;
         const bytes = JSON.stringify(hostState).length;
         expect(bytes).toBeLessThan(4096);
+        // what each guest draws matches the host: every player and the bucket, at the guest's render time
+        const track = [...g.sim.eyes.map((e) => e.slot), g.sim.bucket.slot];
+        const history = new Map<number, number[]>();
+        const record = () =>
+            history.set(
+                g.sim.tick,
+                track.flatMap((i) => {
+                    const p = g.sim.entities[i].pose.p;
+                    return [p.x, p.y, p.z];
+                })
+            );
+        let worst = 0;
+        let checks = 0;
+        const out = pose();
+        const anim = new Float64Array(64);
+        g.run(240, (k) => {
+            // turn and jump now and then, so the poses don't just run in straight lines
+            const yaw2 = yaw + Math.sin(k / 40);
+            for (const x of guests) g.inputs.set(x, cmd(0, { moveZ: 1, yaw: yaw2, jump: k % 90 === 30 }));
+            record();
+            if (k < 60 || k % 20 !== 0) return;
+            for (const x of guests) {
+                const sims = (x as unknown as { sim: LabSim }).sim;
+                const t = x.renderTime() * 60;
+                const a = history.get(Math.floor(t));
+                const b = history.get(Math.ceil(t));
+                if (!a || !b) continue;
+                const f = t - Math.floor(t);
+                track.forEach((slot, j) => {
+                    if (!sims.ring.sample(slot, t / 60, out, anim)) return;
+                    const want = [0, 1, 2].map((c) => a[j * 3 + c] * (1 - f) + b[j * 3 + c] * f);
+                    worst = Math.max(worst, Math.hypot(out.p.x - want[0], out.p.y - want[1], out.p.z - want[2]));
+                    checks++;
+                });
+            }
+        });
+        console.info(
+            `guest poses vs host at 8 players on a bad network: ${checks} checks, worst ${worst.toFixed(4)} m`
+        );
+        expect(checks).toBeGreaterThan(7 * 9 * 5);
+        // the codec is good to 4 mm; the rest is the straight line drawn between 20 Hz snapshots across a
+        // jump's take-off or landing (a kink in the path: about 5 m/s x 0.05 s / 4 at worst, 6 cm)
+        expect(worst).toBeLessThan(0.05);
+
         // one more is told the game is full and watches
         const late = await g.join('late', 'tokenlatexxx');
         g.run(60);

@@ -50,6 +50,22 @@ export const LAG_WINDOW_MS = 30_000;
 /** A guest waits this long for a host that went quiet before leaving the game. */
 export const HOST_GRACE_MS = 20_000;
 
+/**
+ * The world's entity layout (ids in snapshot order) as a short hash. Snapshots index entities by
+ * position, so a host and guest whose builds list different entities would garble each other even
+ * on the same protocol: the guest compares the host's layout with its own and refuses a mismatch.
+ */
+export function layoutHash(entities: readonly { id: number }[]): string {
+    let h = 0x811c9dc5;
+    for (const e of entities) {
+        h ^= e.id & 0xffff;
+        h = Math.imul(h, 0x01000193) >>> 0;
+        h ^= e.id >>> 16;
+        h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return `${entities.length}-${h.toString(36)}`;
+}
+
 /** A rejoin token: a short random string, unique per browser tab. */
 export function makeToken(): string {
     let s = '';
@@ -188,7 +204,7 @@ export class HostSession {
         now: () => number = () => performance.now()
     ): Promise<HostSession> {
         const ch = await transport.join(`ue-${code}`);
-        ch.setState({ role: 'host', v: NET_PROTOCOL, level: levelId, slots: {} });
+        ch.setState({ role: 'host', v: NET_PROTOCOL, layout: layoutHash(sim.entities), level: levelId, slots: {} });
         return new HostSession(sim, ch, transport.lobby, code, levelId, now);
     }
 
@@ -454,6 +470,9 @@ export class GuestSession {
     private lostAt: number | null = null;
     /** The host ended the game. */
     private ended = false;
+    /** The host runs a build with another entity layout (see layoutHash): the game can't be played. */
+    incompatible = false;
+    private readonly layout: string;
     private readonly now: () => number;
 
     private constructor(sim: LabSim, ch: NetChannel, code: string, hostId: string, opts: GuestOptions) {
@@ -463,6 +482,7 @@ export class GuestSession {
         this.hostId = hostId;
         this.now = opts.now ?? (() => performance.now());
         this.decoder = new SnapshotDecoder(sim.entities.length);
+        this.layout = layoutHash(sim.entities);
         sim.ring.clear();
         this.unsub = ch.onChange(() => this.receive());
         const token = opts.token && readToken(opts.token);
@@ -504,6 +524,11 @@ export class GuestSession {
         this.lostAt = null;
         const st = h.state;
         if (st.end === true) this.ended = true;
+        // another build's world: its snapshots would land on the wrong entities, so apply none
+        if (st.layout !== this.layout) {
+            this.incompatible = true;
+            return;
+        }
         const slots = st.slots && typeof st.slots === 'object' ? (st.slots as Record<string, unknown>) : {};
         const mine = slots[this.ch.me];
         this.slot = typeof mine === 'number' && mine >= 1 && mine < this.sim.players.length ? mine : -1;

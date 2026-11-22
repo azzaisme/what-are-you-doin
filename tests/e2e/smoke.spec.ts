@@ -778,13 +778,44 @@ test('online co-op over a bad network: the guest reloads and rejoins as the same
     expect((await status(page)).lag[0]).toBeGreaterThanOrEqual(250);
     await until(guest, 'st.guest?.lagMs !== null');
 
-    // the guest reloads: the host holds player 2 for them, then they are back as player 2
+    // player 2 walks well away from where a newcomer would appear (beside the host)
+    const avatar2 = () =>
+        page.evaluate(
+            () =>
+                (
+                    window as unknown as {
+                        __riverLab: { entities(): Record<string, { x: number; z: number }> };
+                    }
+                ).__riverLab.entities()['avatar-1']
+        );
+    const start = await avatar2();
+    await guest.evaluate(() =>
+        (window as unknown as { __riverLab: { look(y: number, p: number): void } }).__riverLab.look(3.14, -0.1)
+    );
+    await guest.keyboard.down('KeyW');
+    let away = 0;
+    for (let i = 0; i < 200 && away <= 2.5; i++) {
+        await guest.waitForTimeout(300);
+        const p = await avatar2();
+        away = Math.hypot(p.x - start.x, p.z - start.z);
+    }
+    await guest.keyboard.up('KeyW');
+    expect(away).toBeGreaterThan(2.5);
+    await page.waitForTimeout(1500); // the last of the walk arrives and the player stops
+    const left = await avatar2();
+
+    // the guest reloads: the host holds player 2 where they stood...
     await guest.reload();
-    await until(page, 'st.dropped.length === 1 || st.guests === 0', 30_000);
+    await until(page, 'st.dropped.length === 1', 30_000);
+    expect((await status(page)).dropped).toEqual([1]);
+    expect((await status(page)).guests).toBe(0);
+    // ...and the reloaded page gets that player back, still there (a fresh join would appear beside the host)
     await ready(guest);
     await until(guest, '(st.guest?.received ?? 0) > 5');
     expect((await status(guest)).guest!.slot).toBe(1);
     await until(page, 'st.guests === 1 && st.dropped.length === 0', 30_000);
+    const back = await avatar2();
+    expect(Math.hypot(back.x - left.x, back.z - left.z)).toBeLessThan(0.5);
     expect(problems).toEqual([]);
     expect(guestProblems).toEqual([]);
 });

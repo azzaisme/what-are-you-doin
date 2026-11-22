@@ -462,7 +462,9 @@ class LabDirector extends Script {
         if (guestSession) {
             guestSession.sendInput(playerOneCommand());
             renderTime = guestSession.renderTime();
-            if (guestSession.hostGone) leaveOnline('The host left the game.');
+            if (guestSession.incompatible)
+                leaveOnline('That game runs another version: reload both pages to play together');
+            else if (guestSession.hostGone) leaveOnline('The host left the game.');
             else noteReconnect(guestSession);
         } else if (!state.paused) {
             const steps = clock.advance(dt);

@@ -26,7 +26,9 @@ purpose.
   guest.
 - **Another version:** a game hosted by another version of the game (protocol 2 is this one) is
   listed as "another version of the game: reload both pages to play together", and can't be joined.
-  The host never seats a guest of another version.
+  The host never seats a guest of another version. The host also sends its world's entity layout
+  (a short hash of the entity list): a guest whose build lists other entities applies none of the
+  host's snapshots and leaves with the same message, so two builds can't garble each other's world.
 
 ### Testing on a bad network
 
@@ -38,26 +40,35 @@ purpose.
 
 Unit tests, 100–300 ms one way with 10 % loss (`tests/unit/net-robust.test.ts`, both voxel sizes):
 
-| Test                                                | Result                                                                                  |
-| --------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Join and walk; three one-frame jump presses         | Exactly 3 jumps on the host                                                             |
-| Host and guest lift the 113 kg log together         | Both hold it, it rises over 0.4 m; the guest's one release press lets go                |
-| Garbage input (NaN, 1e300, strings, reset requests) | Every position stays finite, no reset or drop test runs, lag reads "unknown"            |
-| A guest drops, reloads, comes back                  | Same player, within 0.3 m of where it stood; a newcomer meanwhile got a different place |
-| A guest drops while carrying the bucket             | The bucket is let go at once; the place frees after the grace period                    |
-| 8 players walking at once                           | All 8 move; the host's published state peaks at 1,875 bytes (the room allows 4,096)     |
+| Test                                                                       | Result                                                                                                       |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Join and walk; three one-frame jump presses                                | Exactly 3 jumps on the host                                                                                  |
+| Host and guest lift the 113 kg log together                                | Both hold it, it rises over 0.4 m; the guest's one release press lets go                                     |
+| Garbage input (NaN, 1e300, strings, reset requests)                        | Every position stays finite, no reset or drop test runs, lag reads "unknown"                                 |
+| A guest drops, reloads, comes back                                         | Same player, within 0.3 m of where it stood; a newcomer meanwhile got a different place                      |
+| A guest drops while carrying the bucket                                    | The bucket is let go at once; the place frees after the grace period                                         |
+| 8 players walking, turning and jumping                                     | All 8 move; what each guest draws (every player, the bucket) matches the host to 2.8 cm, worst of 567 checks |
+| A host that goes quiet, then comes back                                    | "Reconnecting", then reconnected and receiving again; gone for good, the guest gives up after 20 s           |
+| A guest of a build with other entities                                     | Applies no snapshot and says it's another version                                                            |
+| Largest host state: the Valley, 8 players, every entity drawn, long events | 2,841 bytes (the room allows 4,096)                                                                          |
 
-Host cost per tick with everyone walking (Node, this container's CPU; the budget is 16.7 ms):
+The 2.8 cm is the straight line drawn between 20 Hz snapshots across a jump's take-off or landing;
+the codec itself is good to 4 mm.
+
+Host cost per tick with everyone walking (`node scripts/bench-net-host.ts`, Node on this container's
+CPU; the budget is 16.7 ms). The host's published state peaked at 1,875 bytes in the Valley at 8.
 
 | Level       | 1 player           | 4 players          | 8 players          | Snapshot at 8 |
 | ----------- | ------------------ | ------------------ | ------------------ | ------------- |
 | Timber Yard | 0.47 ms (p95 0.86) | 1.16 ms (p95 1.51) | 1.69 ms (p95 2.56) | 695 bytes     |
 | The Valley  | 1.28 ms (p95 1.67) | 1.83 ms (p95 2.59) | 2.67 ms (p95 3.40) | 1,040 bytes   |
 
-- Browser test: host and guest on `?netsim=150,100,0.1`. The round trip reads at least 250 ms, the
-  guest reloads and comes back as player 2. The four online browser tests, split screen, the Timber
+- Browser test: host and guest on `?netsim=150,100,0.1`. The round trip reads at least 250 ms.
+  Player 2 walks 2.5 m off, the guest reloads, the host holds player 2 (`dropped` is `[1]`), and the
+  reloaded page gets player 2 back within 0.5 m of where it stood (a fresh join appears beside the
+  host). The four online browser tests, split screen, the Timber
   Yard and the ute tests pass.
-- Unit tests: 350 pass.
+- Unit tests: 354 pass.
 
 ### Known limits
 
