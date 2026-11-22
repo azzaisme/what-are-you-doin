@@ -475,7 +475,7 @@ describe('the sawmill', () => {
         expect(s.physics.bodies.get(log.id)!.enabled).toBe(false);
         const sawn = () => s.entities.filter((e) => e.name.startsWith('extra-plank-') && e.visible).length;
         const before = sawn();
-        expect(before).toBe(5); // the yard's own stack
+        expect(before).toBe(12); // the yard's own stack and the seven deck planks by the creek (Epic 5)
         for (let n = 0; n < SAW.cutTicks + 30; n++) s.step(cmd(k++));
         expect(s.sawmill!.phase).toBe('ready');
         expect(sawn() - before).toBe(3);
@@ -612,7 +612,7 @@ describe('the sawmill', () => {
 });
 
 describe('resources come back', () => {
-    it('a stump does not regrow while its log still lies by it (regrowth after sawing: the gate test)', () => {
+    it('a stump does not regrow while its log still lies by it (regrowth after sawing is played through in forestry-gate.test.ts)', () => {
         const s = yard();
         const from = { k: 100 };
         standBy(s, 5, Math.PI);

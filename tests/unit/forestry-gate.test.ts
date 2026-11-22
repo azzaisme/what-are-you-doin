@@ -380,6 +380,9 @@ describe('the gate, by player input only', () => {
             g.walkTo(0, x + 1.5, BRIDGE.nearEdge + 2.5);
         }
         expect(s.progress.falls).toBe(0);
+        // player 0 waits west of the ramp, off player 1's path between the rack and the bridge
+        // (walkers shove each other: in the way, player 0 got pushed along in front of player 1)
+        g.walkTo(0, BRIDGE_X - 2.5, BRIDGE.nearEdge + 2.6);
 
         // ---- player 1 carries each sawn plank off the rack, walks out along the beams with it and
         // lays it across them (the far one first, so it never steps over one it has laid)
