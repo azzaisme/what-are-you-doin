@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { soundBodies } from '../../src/audio/game-audio.ts';
+import { HOLD_FADE, HeldLoops } from '../../src/audio/held-loops.ts';
 import { sfx } from '../../src/audio/sfx.ts';
 import type { SfxName } from '../../src/audio/sfx.ts';
 import { LOOPS, SOUND_NAMES, SYNTH_RATE, synthesize } from '../../src/audio/synth.ts';
@@ -81,6 +82,60 @@ describe('sound: every sound is synthesized (original, nothing to license)', () 
         expect(got[0][1]!).toBeGreaterThan(got[1][1]!);
         expect(got[0][2]!).toBeLessThan(got[1][2]!);
         expect(got[2][0]).toBe('snap');
+    });
+
+    it('sfx.hold: a loop sounds while held, fades once not held for 250 ms, then stops and is removed', () => {
+        const made: string[] = [];
+        const destroyed: string[] = [];
+        const loops = new HeldLoops<{ key: string; name: string }>(
+            (key, name) => {
+                made.push(`${key}:${name}`);
+                return { key, name };
+            },
+            (e) => destroyed.push(`${e.key}:${e.name}`)
+        );
+        const FRAME = 1000 / 60;
+        const K = 3 * (1 - Math.exp(-3 / 60)); // the per-frame ease GameAudio gives held loops at 60 fps
+        let now = 0;
+        // held every frame for 1 s: one emitter, rising to the held gain
+        for (let i = 0; i < 60; i++, now += FRAME) {
+            loops.hold('mill', 'saw', true, 0.8, 0.9, now);
+            loops.update(now, K);
+        }
+        expect(made).toEqual(['mill:saw']);
+        expect(loops.gainOf('mill')).toBeCloseTo(0.8, 2);
+        const live = loops.update(now, K);
+        expect(live.map((l) => [l.name, l.pitch])).toEqual([['saw', 0.9]]);
+        // the calls stop: for 250 ms it still sounds at full gain
+        const lastHold = now - FRAME;
+        while (now - lastHold <= HOLD_FADE.letGoMs) {
+            loops.update(now, K);
+            now += FRAME;
+        }
+        expect(loops.gainOf('mill')).toBeCloseTo(0.8, 2);
+        expect(destroyed).toEqual([]);
+        // then it fades: lower each frame, still there
+        const g0 = loops.gainOf('mill');
+        loops.update(now, K);
+        now += FRAME;
+        expect(loops.gainOf('mill')).toBeLessThan(g0);
+        expect(loops.has('mill')).toBe(true);
+        // and once silent it is stopped: the emitter destroyed, the entry gone
+        let frames = 0;
+        while (loops.has('mill') && frames++ < 200) {
+            loops.update(now, K);
+            now += FRAME;
+        }
+        expect(frames).toBeLessThan(60); // under a second
+        expect(destroyed).toEqual(['mill:saw']);
+        expect(loops.size).toBe(0);
+        expect(loops.update(now, K)).toEqual([]);
+        // holding the key with another sound swaps the emitter
+        loops.hold('pump', 'pour', false, 1, 1, now);
+        loops.hold('pump', 'slosh', false, 1, 1, now);
+        expect(made.slice(1)).toEqual(['pump:pour', 'pump:slosh']);
+        expect(destroyed.slice(1)).toEqual(['pump:pour']);
+        expect(loops.size).toBe(1);
     });
 
     it('props sound like what they are made of', () => {

@@ -22,6 +22,7 @@ import { ANIM_MAX } from '../sim/snapshots.ts';
 import type { SnapshotRing } from '../sim/snapshots.ts';
 import { pose } from '../voxels/math.ts';
 
+import { HeldLoops } from './held-loops.ts';
 import { sfx } from './sfx.ts';
 import type { SfxName, SfxOptions, SfxSink, Vec3Like } from './sfx.ts';
 import { HELD_LOOPS, LOOPS, SOUND_NAMES, SYNTH_RATE, synthesize } from './synth.ts';
@@ -95,11 +96,17 @@ export class GameAudio implements SfxSink {
     private nextEmitter = 0;
     private flat: Entity | null = null;
     private readonly loops = new Map<SoundName, { e: Entity; gain: number; target: number; pitch: number }>();
-    /** Loops held on by other features (`sfx.hold`), by their key. */
-    private readonly holds = new Map<
-        string,
-        { e: Entity; name: SoundName; gain: number; target: number; pitch: number; last: number }
-    >();
+    /** Loops held on by other features (`sfx.hold`), by their key (src/audio/held-loops.ts). */
+    private readonly holds = new HeldLoops<Entity>(
+        (key, name, positional) => {
+            const e = this.emitter(`SfxHold-${key}`, positional);
+            const asset = this.assets.get(name as SoundName)!;
+            e.sound!.addSlot(name, { asset: asset.id, loop: true, volume: 0, autoPlay: false });
+            e.sound!.play(name);
+            return e;
+        },
+        (e) => e.destroy()
+    );
     private prevBrake = 0;
     private readonly tracks = new Map<number, Track>();
     private readonly eyeTracks: Track[] = [];
@@ -227,19 +234,8 @@ export class GameAudio implements SfxSink {
         const sound = name as SoundName;
         const asset = this.build(sound);
         if (!asset) return;
-        let h = this.holds.get(key);
-        if (!h || h.name !== sound) {
-            if (h) h.e.destroy();
-            const e = this.emitter(`SfxHold-${key}`, !!at);
-            e.sound!.addSlot(sound, { asset: asset.id, loop: true, volume: 0, autoPlay: false });
-            e.sound!.play(sound);
-            h = { e, name: sound, gain: 0, target: 0, pitch: 1, last: 0 };
-            this.holds.set(key, h);
-        }
-        if (at) h.e.setPosition(at.x, at.y, at.z);
-        h.target = Math.max(0, Math.min(1.5, opts.gain ?? 1));
-        h.pitch = Math.max(0.3, Math.min(3, opts.pitch ?? 1));
-        h.last = performance.now();
+        const e = this.holds.hold(key, sound, !!at, opts.gain ?? 1, opts.pitch ?? 1, performance.now());
+        if (at) e.setPosition(at.x, at.y, at.z);
     }
 
     /** A level event (a step done, the goal). */
@@ -484,18 +480,10 @@ export class GameAudio implements SfxSink {
             slot.pitch = l.pitch;
         }
         // held loops: let go (not held for a moment) they fade out, then stop
-        const now = performance.now();
-        for (const [key, h] of this.holds) {
-            const target = now - h.last > 250 ? 0 : h.target;
-            h.gain += (target - h.gain) * Math.min(1, k * 3);
-            if (target === 0 && h.gain < 0.005) {
-                h.e.destroy();
-                this.holds.delete(key);
-                continue;
-            }
+        for (const h of this.holds.update(performance.now(), k * 3)) {
             const slot = h.e.sound!.slot(h.name);
             if (!slot) continue;
-            slot.volume = h.gain * this.volumes.effects;
+            slot.volume = h.volume * this.volumes.effects;
             slot.pitch = h.pitch;
         }
     }

@@ -4,28 +4,43 @@
 
 - **The handbrake prank (#75):**
     - **When:** the ute is left parked on a slope (3.5° or more) with nobody in it for 6 s.
-    - **The tell:** a ratchet clicks, and a toast says "Get in and hold the brake".
+    - **The tell:** a ratchet clicks, and a toast says "Get in and hold the brake, or chock a
+      downhill wheel".
     - **What happens:** 2.5 s later the handbrake lets go and the ute rolls, for up to 20 s or until
-      someone takes the driver's seat. Tested on the far bank's road (about 10°): it rolls more than
-      3 m down towards the creek.
-    - **Counterplay, tested:** park on the flat (the yard: nothing happens), or get in at the
-      warning (the ute stays within 0.5 m).
+      someone takes the driver's seat. Tested by driving the ute up the far bank's road (about 10°),
+      braking, getting out: it rolls more than 3 m back down towards the creek.
+    - **Counterplay, each tested:**
+        - park on the flat (the yard: nothing happens);
+        - get in at the warning: look at the door and grab, as a player does (the ute stays within
+          0.5 m);
+        - chock a downhill wheel: the cube against the front wheel, or a beam on its edge across the
+          front tyres, holds it (under 0.5 m in 5 s, the creep of a braked ute on that slope, against
+          more than 3 m unchocked). A plank lying flat (0.1 m) is a step the wheel climbs: no chock.
+          The wheels are rays, so the game checks for a prop standing at least 0.13 m high from under
+          a tyre's centre to 0.4 m past its downhill face (out to the bumper).
     - **Recovery:** if it ends up in the creek, the ute's usual recovery applies.
-    - **Tried and dropped:** a log as a chock does not stop the ute: its wheels roll over it. The
-      game doesn't suggest chocks.
-    - It shares the hazard budget: one hazard at a time, at most 2 pranks, 60 s apart.
+    - **Budget, tested:** one hazard at a time (no flood or gust during a prank, and no prank during
+      a flood or a gust, each then waiting out the 15 s quiet), at most 2 pranks, 60 s apart.
+    - **Online, tested:** the guest gets the toast and the brake phase, and sees the ute roll in the
+      host's snapshots (within 5 cm of the host's).
+    - #75 can close except for tying it off (there are no ropes yet).
 - **Sound for the other epics (`docs/sound.md`):**
     - **New sounds:** a sawmill motor (`saw`, a loop), `chop`, `slosh`, pouring water (`pour`, a loop)
       and the handbrake's `ratchet`.
     - **New call:** `sfx.hold(key, name, position)` keeps a loop playing for as long as a feature
-      calls it each frame, such as a sawmill running or water pouring, and fades it out when the
-      calls stop.
+      calls it each frame, such as a sawmill running or water pouring. A quarter of a second after
+      the calls stop it fades out (under a second), then it is stopped and removed (tested).
     - Epic 5 (creaks, breaks), Epic 6 (sawmill, chopping) and Epic 7 (slosh, pour) each have a line
       to copy.
-- **Playtest kit:** the log's summary also counts handbrake pranks, and the script says what to
-  watch for and how the prank works.
-- **Tests:** 478 unit tests pass at both voxel sizes, on top of `epics-5-10` with Epics 6, 9, 10
-  and part 1 merged. New: three handbrake tests, and `sfx.hold` in the sound API test.
+- **Playtest kit:** the log's summary also counts handbrake pranks (tested with a real prank fed in
+  as the game feeds it), and the script says what to watch for and how the prank works.
+- **Tests:** 512 unit tests pass at both voxel sizes, on top of `epics-5-10` (4b99073, with
+  remapping). New:
+    - the prank: driven onto the slope and parked, the flat yard, getting in at the warning, the
+      cube and the beam chocks, the flat plank that isn't one, the budget, one hazard at a time
+      both ways round, and online;
+    - `sfx.hold`'s fade, stop and removal;
+    - the playtest log counting a real prank.
 
 ## Remappable controls (2026-11-22, Epic 10)
 

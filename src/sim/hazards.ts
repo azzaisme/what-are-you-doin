@@ -126,7 +126,7 @@ export interface HazardHost {
     readonly entities: readonly { id: number; name: string }[];
     isSlotActive(i: number): boolean;
     /** The drivable ute (its body) and who drives it (-1: nobody). */
-    readonly vehicle: { pb: { body: { rotation(): Quat4; linvel(): Vec3 } } } | null;
+    readonly vehicle: { pb: { body: { rotation(): Quat4; linvel(): Vec3 } }; chocked(): boolean } | null;
     readonly driver: number;
 }
 
@@ -189,9 +189,12 @@ export class HazardDirector {
     private brakeEnded = -1e9;
     private parkedTicks = 0;
 
-    /** The ute's handbrake has been let off: the simulation drives it with no brake. */
+    /** A prop stands against a downhill tyre (#75): the ute stays put with its handbrake off. */
+    chocked = false;
+
+    /** The ute's handbrake has been let off and nothing chocks it: it is driven with no brake. */
     get handbrakeOff(): boolean {
-        return this.brakePhase === PHASE.active;
+        return this.brakePhase === PHASE.active && !this.chocked;
     }
 
     /** `enabled` false: no hazards at all (tests of other mechanics in hazard levels). */
@@ -220,6 +223,7 @@ export class HazardDirector {
         this.gustOver = 0;
         this.brakePhase = PHASE.idle;
         this.brakeT = this.brakeCount = this.parkedTicks = 0;
+        this.chocked = false;
         this.brakeEnded = -1e9;
     }
 
@@ -502,8 +506,8 @@ export class HazardDirector {
 
     /**
      * Left parked on a slope, the ute's handbrake clicks off (after a ratchet warning) and it rolls.
-     * Park on the flat, or get in (a driver ends it). It catches again after a while. (A log as a
-     * chock does not hold it: the wheels roll over it, measured.)
+     * Park on the flat, chock a downhill wheel (a cube, a beam on edge, a log: not a flat plank), or
+     * get in (a driver ends it). It catches again after a while.
      */
     private stepHandbrake(h: HazardHost, b: HandbrakeSpec, tick: number): void {
         const H = HAZARD.handbrake;
@@ -526,19 +530,32 @@ export class HazardDirector {
                 this.brakeT = 0;
                 this.brakeCount++;
                 this.parkedTicks = 0;
-                this.say(h, '🔧 Click… click… click… The ute’s handbrake is creeping off! Get in and hold the brake.');
+                this.say(
+                    h,
+                    '🔧 Click… click… click… The ute’s handbrake is creeping off! Get in and hold the brake, or chock a downhill wheel.'
+                );
             }
             return;
         }
         this.brakeT++;
+        const wasChocked = this.chocked;
+        this.chocked = v.chocked();
         if (this.brakePhase === PHASE.tell && this.brakeT >= S(H.tellS)) {
             this.brakePhase = PHASE.active;
             this.brakeT = 0;
-            this.say(h, 'The handbrake is off! The ute is rolling.');
+            this.say(
+                h,
+                this.chocked
+                    ? 'The handbrake is off, but the chock holds the ute.'
+                    : 'The handbrake is off! The ute is rolling.'
+            );
+        } else if (this.brakePhase === PHASE.active && this.chocked && !wasChocked) {
+            this.say(h, 'Chocked: the ute stops.');
         }
         // someone at the wheel pulls it back on; or after a while it catches by itself
         if (h.driver >= 0 || (this.brakePhase === PHASE.active && this.brakeT >= S(H.offS))) {
             this.brakePhase = PHASE.idle;
+            this.chocked = false;
             this.brakeEnded = tick;
             this.say(h, h.driver >= 0 ? 'Handbrake back on.' : 'The handbrake caught again.');
         }

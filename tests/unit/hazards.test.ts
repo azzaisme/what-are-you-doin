@@ -22,7 +22,14 @@ import { HAZARD, PHASE, gustExposure, packHazardNet, readHazardNet } from '../..
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
 import { applyFlood, shapeSamples, shapeVolume } from '../../src/sim/physics/water.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
-import { pose, quatFromYawPitchRoll, quatMul } from '../../src/voxels/math.ts';
+import {
+    composePose,
+    pose,
+    quatFromAxisAngle,
+    quatFromYawPitchRoll,
+    quatIdentity,
+    quatMul
+} from '../../src/voxels/math.ts';
 
 beforeAll(() => initPhysics());
 
@@ -428,31 +435,91 @@ describe('hazard director: the gust aimed at the carried plank (#73)', () => {
 
 describe('hazard director: the handbrake prank (#75)', () => {
     const H = HAZARD.handbrake;
-    /** The ute parked on the far bank's road where it climbs (about 10 degrees), nose uphill-away. */
+    /** The ute set on the far bank's road where it climbs (about 10 degrees), nose downhill (+z). */
     function parkOnRoad(s: LabSim, z = -13.5): void {
         const x = roadCenterX(z);
         s.physics.place(s.vehicle!.id, pose(x, yardHeight(x, z) + 0.3, z, quatFromYawPitchRoll(0, 0, 0)));
     }
     const settle = () => S(HAZARD.graceS) - 60;
+    /** Lays a prop in the ute's own frame (x left, y up from the ground under it, z forward). */
+    function placeByUte(s: LabSim, name: string, lx: number, ly: number, lz: number, q = quatIdentity()): void {
+        const at = composePose(s.ute.pose, pose(lx, ly, lz, q), pose());
+        s.physics.place(byName(s, name).id, at);
+    }
+    /** Player inputs (look, move, grab, brake) against a running clock. */
+    function driver(s: LabSim) {
+        const v = { yaw: 0, pitch: 0 };
+        const step = (c: Partial<PlayerCommand> = {}, k = 1) => {
+            for (let i = 0; i < k; i++) s.step(cmd(s.tick, { yaw: v.yaw, pitch: v.pitch, ...c }));
+        };
+        /** Stands at the driver's door (the ute's right, local -x) looking at it. */
+        const toDoor = () => {
+            const u = s.ute.pose;
+            const q = u.q;
+            const uy = Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.x * q.x));
+            const sideX = -Math.cos(uy);
+            const sideZ = Math.sin(uy);
+            s.placePlayer(u.p.x + sideX * 2.2, u.p.z + sideZ * 2.2, 0);
+            step({}, 20);
+            v.yaw = Math.atan2(sideX, sideZ);
+            v.pitch = -Math.atan2(s.player.y + EYE_HEIGHT - (s.ute.pose.p.y + 0.6), 2.2 - 0.8);
+            step({}, 5);
+        };
+        return { v, step, toDoor };
+    }
+    const upY = (s: LabSim) => 1 - 2 * (s.ute.pose.q.x ** 2 + s.ute.pose.q.z ** 2);
+    const busy = (s: LabSim) =>
+        [s.hazards.floodPhase, s.hazards.gustPhase, s.hazards.brakePhase].filter((p) => p !== PHASE.idle).length;
+    /** A plank carried at chest height by the creek (as the gust tests do). */
+    function carryByCreek(s: LabSim): void {
+        const plank = byName(s, 'plank');
+        const z = creekCenterZ(4) + creekHalfWidth(4) + 2.2;
+        s.placePlayer(4, z, 0, 0);
+        const y = s.players[0].y + EYE_HEIGHT - 0.45;
+        s.physics.place(plank.id, pose(4.3, y, z - 1.1, quatFromYawPitchRoll(0, Math.PI / 2, 0)));
+        s.physics.grabById(plank.id, { x: 4.3, y, z: z - 1.1 }, 1.2, 0);
+    }
 
-    it('left parked on a slope: a ratchet warning, then the handbrake lets go and it rolls downhill', () => {
+    it('driven onto the slope and parked: a ratchet warning, then the handbrake lets go and it rolls downhill', () => {
         const s = yard();
-        parkOnRoad(s);
-        s.runTo(settle());
+        // the ute set at the gentle foot of the far bank's road, facing up it (-z)
+        const zFoot = -9;
+        const x = roadCenterX(zFoot);
+        s.physics.place(s.vehicle!.id, pose(x, yardHeight(x, zFoot) + 0.3, zFoot, quatFromYawPitchRoll(Math.PI, 0, 0)));
+        s.runTo(90);
+        s.fpActive = true;
+        const d = driver(s);
+        // get in (look at the door, grab), drive slowly up onto the slope, brake to a stop, get out
+        d.toDoor();
+        d.step({ grab: true });
+        expect(s.driver).toBe(0);
+        for (let i = 0; i < 900 && s.ute.pose.p.z > -13.5; i++) d.step({ moveZ: 0.5 });
+        expect(s.ute.pose.p.z).toBeLessThanOrEqual(-13.5);
+        for (let i = 0; i < 300 && Math.abs(s.vehicle!.speed()) > 0.03; i++) d.step({ jump: true });
+        d.step({ jump: true }, 30);
+        d.step({ grab: true });
+        expect(s.driver).toBe(-1);
+        // parked on the slope (steeper than the prank's 3.5 degrees), with the handbrake on
+        expect(upY(s)).toBeLessThan(Math.cos(timberYardLevel.hazards!.handbrake!.slope));
+        const parkedAt = s.tick;
         const z0 = s.ute.pose.p.z;
-        // parked long enough already: it goes as soon as the quiet start is over
-        s.runTo(S(Math.max(HAZARD.graceS, H.parkedS)) + 5);
+        for (let i = 0; i < S(HAZARD.graceS + H.parkedS + 5) && s.hazards.brakePhase === PHASE.idle; i++) d.step();
         expect(s.hazards.brakePhase).toBe(PHASE.tell);
+        // not before it stood parked for its time (and the quiet start was over)
+        expect(s.tick - parkedAt).toBeGreaterThanOrEqual(S(H.parkedS));
+        expect(s.tick).toBeGreaterThanOrEqual(S(HAZARD.graceS));
         expect(hazardTexts(s)[0]).toContain('handbrake');
-        s.runTo(s.tick + S(H.tellS) + S(3));
+        // the handbrake held it until now (a parked ute creeps a few cm a second on this slope)
+        expect(Math.abs(s.ute.pose.p.z - z0)).toBeLessThan(0.5);
+        d.step({}, S(H.tellS) + S(3));
         expect(s.hazards.handbrakeOff).toBe(true);
         // rolled several metres down the road towards the creek (+z)
         expect(s.ute.pose.p.z - z0).toBeGreaterThan(3);
         // after a while it catches again by itself
-        s.runTo(s.tick + S(H.offS));
+        d.step({}, S(H.offS));
         expect(s.hazards.brakePhase).toBe(PHASE.idle);
         expect(hazardTexts(s).some((t) => t.includes('caught'))).toBe(true);
-    }, 60_000);
+    }, 120_000);
 
     it('counterplay: parked on the flat yard, nothing happens', () => {
         const s = yard();
@@ -460,21 +527,159 @@ describe('hazard director: the handbrake prank (#75)', () => {
         expect(s.hazards.brakeCount).toBe(0);
     }, 60_000);
 
-    it('counterplay: get in at the warning, and the driver’s brake holds it', () => {
+    it('counterplay: get in at the warning (look at the door, grab), and the driver’s brake holds it', () => {
         const s = yard();
         parkOnRoad(s);
-        s.runTo(S(Math.max(HAZARD.graceS, H.parkedS)) + 5);
-        expect(s.hazards.brakePhase).toBe(PHASE.tell);
+        s.runTo(settle());
         s.fpActive = true;
-        s.runTo(s.tick + 2);
+        const d = driver(s);
+        d.toDoor();
+        for (let i = 0; i < S(30) && s.hazards.brakePhase === PHASE.idle; i++) d.step();
+        expect(s.hazards.brakePhase).toBe(PHASE.tell);
         const z0 = s.ute.pose.p.z;
-        expect(s.takeDriverSeat(0)).toBe(true);
-        let n = s.tick;
-        for (let i = 0; i < S(H.tellS + 4); i++) s.step(cmd(n++, { jump: true }));
+        d.step({ grab: true });
+        expect(s.driver).toBe(0);
+        d.step({ jump: true }, S(H.tellS + 4));
         expect(s.hazards.brakePhase).toBe(PHASE.idle);
+        expect(s.hazards.handbrakeOff).toBe(false);
         expect(Math.abs(s.ute.pose.p.z - z0)).toBeLessThan(0.5);
         expect(hazardTexts(s).some((t) => t.includes('back on'))).toBe(true);
     }, 60_000);
+
+    /**
+     * Parked on the slope with `chock` set against the downhill (front) wheels: how far it goes in the
+     * 5 s after the handbrake lets go. Held: no more than a braked ute creeps (a few cm a second);
+     * free: it rolls more than 3 m.
+     */
+    function chocked(chock: (s: LabSim) => void): { moved: number; held: boolean; texts: string[] } {
+        const s = yard();
+        parkOnRoad(s);
+        s.runTo(settle() - 60);
+        chock(s);
+        s.runTo(settle());
+        const z0 = s.ute.pose.p.z;
+        runUntil(s, () => s.hazards.brakePhase === PHASE.active, S(30));
+        expect(s.hazards.brakePhase).toBe(PHASE.active);
+        s.runTo(s.tick + S(5));
+        return { moved: s.ute.pose.p.z - z0, held: s.hazards.chocked, texts: hazardTexts(s) };
+    }
+    // the front tyres' downhill faces are 1.49 m ahead of the ute's centre (wheelbase 1.15 + 0.34)
+    const TYRE = 1.15 + 0.34;
+
+    it('counterplay: a cube against a downhill front wheel chocks it; the handbrake lets go, the ute stays', () => {
+        // 0.52 m: too tall to fit under the bumper (0.45 m up, 0.35 m past the tyre), it stands at it
+        const r = chocked((s) => placeByUte(s, 'cube', 0.68, 0.28, 1.84 + 0.28));
+        expect(r.held).toBe(true);
+        expect(Math.abs(r.moved)).toBeLessThan(0.5);
+        expect(r.texts.some((t) => t.includes('chock holds'))).toBe(true);
+    }, 60_000);
+
+    it('counterplay: a beam on edge across the front tyres chocks it', () => {
+        // 0.2 m tall (on edge), 0.15 m deep, across both front wheels, just ahead of the tyres
+        const r = chocked((s) => placeByUte(s, 'beam-0', 0, 0.12, TYRE + 0.1));
+        expect(r.held).toBe(true);
+        expect(Math.abs(r.moved)).toBeLessThan(0.5);
+    }, 60_000);
+
+    it('a plank lying flat is no chock: the wheels roll over it', () => {
+        // 0.1 m tall: a step a wheel climbs
+        const flat = quatFromAxisAngle(1, 0, 0, Math.PI / 2);
+        const r = chocked((s) => placeByUte(s, 'plank', 0, 0.07, TYRE + 0.12, flat));
+        expect(r.held).toBe(false);
+        expect(r.moved).toBeGreaterThan(3);
+    }, 60_000);
+
+    it('the budget: at most two pranks, the second at least 60 s after the first ends', () => {
+        const s = yard();
+        parkOnRoad(s);
+        s.runTo(settle());
+        s.fpActive = true;
+        const d = driver(s);
+        const ends: number[] = [];
+        const starts: number[] = [];
+        for (let k = 0; k < 2; k++) {
+            for (let i = 0; i < S(H.cooldownS + 30) && s.hazards.brakePhase === PHASE.idle; i++) d.step();
+            expect(s.hazards.brakePhase).toBe(PHASE.tell);
+            starts.push(s.tick);
+            // get in at the warning, hold the brake, get out again: it stays parked on the slope
+            d.toDoor();
+            d.step({ grab: true });
+            expect(s.driver).toBe(0);
+            ends.push(s.tick);
+            d.step({ jump: true }, 60);
+            d.step({ grab: true });
+            expect(s.driver).toBe(-1);
+        }
+        expect(starts[1] - ends[0]).toBeGreaterThanOrEqual(S(H.cooldownS));
+        expect(s.hazards.brakeCount).toBe(2);
+        // parked on the slope for another three minutes: no third
+        d.step({}, S(180));
+        expect(s.hazards.brakeCount).toBe(2);
+        expect(s.hazards.brakePhase).toBe(PHASE.idle);
+    }, 180_000);
+
+    it('one hazard at a time: no flood or gust during a prank, and no prank during a flood or a gust', () => {
+        // the prank first: the bridge is finished and a plank carried by the creek during it
+        const a = yard();
+        parkOnRoad(a);
+        runUntil(a, () => a.hazards.brakePhase === PHASE.tell, S(HAZARD.graceS + H.parkedS + 5));
+        expect(a.hazards.brakePhase).toBe(PHASE.tell);
+        bridgeBeams(a);
+        a.fpActive = true;
+        carryByCreek(a);
+        let prankOver = -1;
+        const next = () => a.hazards.gustPhase !== PHASE.idle || a.hazards.floodPhase !== PHASE.idle;
+        for (let i = 0; i < S(H.tellS + H.offS + HAZARD.safeS + 30) && !next(); i++) {
+            a.step(cmd(a.tick));
+            expect(busy(a)).toBeLessThanOrEqual(1);
+            if (a.hazards.brakePhase !== PHASE.idle) {
+                expect(a.hazards.floodPhase).toBe(PHASE.idle);
+                expect(a.hazards.gustPhase).toBe(PHASE.idle);
+            } else if (prankOver < 0) prankOver = a.tick;
+        }
+        // the next hazard (the finished bridge's flood, or the carried plank's gust) only after the
+        // prank and its quiet spell
+        expect(prankOver).toBeGreaterThan(0);
+        expect(next()).toBe(true);
+        expect(a.tick - prankOver).toBeGreaterThanOrEqual(S(HAZARD.safeS) - 1);
+
+        // a flood first: the ute parked on the slope at the siren waits for the flood and its quiet
+        const b = yard();
+        b.runTo(S(HAZARD.graceS) + 10);
+        bridgeBeams(b);
+        runUntil(b, () => b.hazards.floodPhase === PHASE.tell, TO_SIREN);
+        parkOnRoad(b);
+        let floodOver = -1;
+        for (
+            let i = 0;
+            i < FLOOD_TICKS + S(HAZARD.safeS + H.parkedS + 10) && b.hazards.brakePhase === PHASE.idle;
+            i++
+        ) {
+            b.step(cmd(b.tick));
+            expect(busy(b)).toBeLessThanOrEqual(1);
+            if (floodOver < 0 && b.hazards.floodPhase === PHASE.idle) floodOver = b.tick;
+        }
+        expect(b.hazards.brakePhase).toBe(PHASE.tell);
+        expect(b.tick - floodOver).toBeGreaterThanOrEqual(S(HAZARD.safeS) - 1);
+
+        // a gust first: parked during the gust's warning, the prank waits for it and its quiet
+        const c = yard();
+        c.runTo(S(HAZARD.graceS) + 10);
+        c.fpActive = true;
+        c.runTo(c.tick + 2);
+        carryByCreek(c);
+        runUntil(c, () => c.hazards.gustPhase === PHASE.tell, S(5));
+        expect(c.hazards.gustPhase).toBe(PHASE.tell);
+        parkOnRoad(c);
+        let gustOver = -1;
+        for (let i = 0; i < S(HAZARD.safeS + H.parkedS + 20) && c.hazards.brakePhase === PHASE.idle; i++) {
+            c.step(cmd(c.tick));
+            expect(busy(c)).toBeLessThanOrEqual(1);
+            if (gustOver < 0 && c.hazards.gustPhase === PHASE.idle) gustOver = c.tick;
+        }
+        expect(c.hazards.brakePhase).toBe(PHASE.tell);
+        expect(c.tick - gustOver).toBeGreaterThanOrEqual(S(HAZARD.safeS) - 1);
+    }, 240_000);
 });
 
 describe('hazard director: determinism and the network', () => {
@@ -598,6 +803,33 @@ describe('hazard director: online, through real host and guest sessions', () => 
         // the sock's +X points downwind: along the gust (a rotation of -a about Y)
         const d = yawOf(host.windsock.pose.q) + gs.hazard.gustDir;
         expect(Math.abs(Math.atan2(Math.sin(d), Math.cos(d)))).toBeLessThan(0.3);
+        gs.leave();
+        hs.stop();
+    }, 60_000);
+
+    it('the handbrake prank reaches the guest: the toast, the brake phase, and the ute rolling in the snapshots', async () => {
+        const { host, hs, gs, guestSim, run } = await online(9);
+        const z = -13.5;
+        const x = roadCenterX(z);
+        host.physics.place(host.vehicle!.id, pose(x, yardHeight(x, z) + 0.3, z, quatFromYawPitchRoll(0, 0, 0)));
+        for (let i = 0; i < S(HAZARD.handbrake.parkedS + 5) && gs.hazard.brake !== PHASE.tell; i++) run(1);
+        expect(gs.hazard.brake).toBe(PHASE.tell);
+        expect(gs.events.some((e) => e.kind === 'hazard' && e.text.includes('handbrake'))).toBe(true);
+        for (let i = 0; i < S(HAZARD.handbrake.tellS + 1) && gs.hazard.brake !== PHASE.active; i++) run(1);
+        expect(gs.hazard.brake).toBe(PHASE.active);
+        expect(gs.events.some((e) => e.kind === 'hazard' && e.text.includes('rolling'))).toBe(true);
+        // where the guest draws the ute (from the host's snapshots), at the let-go and 3 s later
+        const uteAt = () => {
+            while (host.tick % 3 !== 0) run(1);
+            const out = pose();
+            expect(guestSim.ring.sample(guestSim.ute.slot, host.tick / 60, out, new Float64Array(6))).toBe(true);
+            return { guest: out.p.z, host: host.ute.pose.p.z };
+        };
+        const a = uteAt();
+        run(S(3));
+        const b = uteAt();
+        expect(b.guest - a.guest).toBeGreaterThan(2);
+        expect(Math.abs(b.guest - b.host)).toBeLessThan(0.05);
         gs.leave();
         hs.stop();
     }, 60_000);

@@ -10,7 +10,7 @@
  * the asset's wheel centres when the suspension carries its share of the weight.
  */
 
-import type RAPIER from '@dimforge/rapier3d-compat';
+import RAPIER from '@dimforge/rapier3d-compat';
 
 import { UTE_TRACK_HALF, UTE_WHEEL_RADIUS, UTE_WHEELBASE_HALF } from '../../assets/ute.ts';
 import type { Pose } from '../../voxels/math.ts';
@@ -63,6 +63,25 @@ const WHEEL_XZ: readonly [number, number][] = [
     [UTE_TRACK_HALF, -UTE_WHEELBASE_HALF],
     [-UTE_TRACK_HALF, -UTE_WHEELBASE_HALF]
 ];
+
+/**
+ * A chock (#75): the zone on each tyre's downhill side, from under the wheel's centre to past its
+ * face, that a prop must reach into to hold the wheel. Above a flat plank (0.1 m, a step the wheel climbs), below the wheel centre (0.34 m); out to
+ * the bumper (0.35 m past the front tyres, 0.45 m up), so a block too tall to fit under it counts.
+ */
+export const CHOCK = { minY: 0.13, maxY: 0.25, reach: 0.4, halfX: 0.14 } as const;
+
+function rotate(q: { x: number; y: number; z: number; w: number }, v: { x: number; y: number; z: number }) {
+    // v + 2 q.xyz x (q.xyz x v + w v)
+    const cx = q.y * v.z - q.z * v.y + q.w * v.x;
+    const cy = q.z * v.x - q.x * v.z + q.w * v.y;
+    const cz = q.x * v.y - q.y * v.x + q.w * v.z;
+    return {
+        x: v.x + 2 * (q.y * cz - q.z * cy),
+        y: v.y + 2 * (q.z * cx - q.x * cz),
+        z: v.z + 2 * (q.x * cy - q.y * cx)
+    };
+}
 
 /** What the wheels hit: the ground, props, scripted bodies; never players or held things. */
 const WHEEL_FILTER = groups(0xffff, LAYER.static | LAYER.prop | LAYER.kinematic);
@@ -147,6 +166,45 @@ export class UteVehicle {
 
     wheelInContact(i: number): boolean {
         return this.ctrl.wheelIsInContact(i);
+    }
+
+    /**
+     * Is a wheel chocked against rolling downhill? True when a prop (not held, not the ute) stands
+     * against the downhill face of any tyre and rises at least CHOCK.minY above the ground there: a
+     * cube, a beam or plank on edge, a log. The wheels are rays, so a chock is never felt as a
+     * contact; this is the tyre meeting it. A plank lying flat (0.1 m) is a step a wheel climbs.
+     */
+    chocked(): boolean {
+        const body = this.pb.body;
+        const q = body.rotation();
+        const t = body.translation();
+        // the ute's forward axis (+z): if it points up the slope, downhill is behind the wheels
+        const fy = 2 * (q.y * q.z - q.w * q.x);
+        const dir = fy > 0 ? -1 : 1;
+        // from under the wheel's centre (a chock the tyre has crept onto still holds it) to past its face
+        const depth = UTE_WHEEL_RADIUS + CHOCK.reach;
+        const shape = new RAPIER.Cuboid(CHOCK.halfX, (CHOCK.maxY - CHOCK.minY) / 2, depth / 2);
+        const y = (CHOCK.minY + CHOCK.maxY) / 2;
+        for (const [x, z] of WHEEL_XZ) {
+            const local = { x, y, z: z + (dir * depth) / 2 };
+            const p = rotate(q, local);
+            let hit = false;
+            this.pw.world.intersectionsWithShape(
+                { x: t.x + p.x, y: t.y + p.y, z: t.z + p.z },
+                q,
+                shape,
+                (col) => {
+                    const pb = this.pw.bodyOfCollider(col.handle);
+                    if (!pb || pb === this.pb || pb.kind !== 'dynamic') return true;
+                    hit = true;
+                    return false;
+                },
+                undefined,
+                groups(0xffff, LAYER.prop)
+            );
+            if (hit) return true;
+        }
+        return false;
     }
 
     /**

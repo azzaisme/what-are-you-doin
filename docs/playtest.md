@@ -50,7 +50,7 @@ Then start a timer and stay quiet.
     - **The gust** (when carrying a plank near the creek): do they notice the windsock swing round and
       the warning? Do they lower the plank, call their teammate over, put it down, or get it blown in?
     - **The ute** (if they park it on a slope): do they hear the ratchet and read the warning? Do
-      they run to get in?
+      they run to get in, or wedge something against a wheel?
     - **Every fall into the creek:** what were they trying to do?
     - **Stuck:** a minute or more with no progress. Note what they are trying.
 
@@ -103,7 +103,9 @@ slice may be too short.
     - It doesn't take the plank if it is held low (look down), carried by two players, or put down.
 - **The handbrake prank:** leave the ute parked on a slope (3.5° or more) with nobody in it for
   6 s, and a ratchet clicks for 2.5 s. Then the handbrake lets go and the ute rolls, for up to
-  20 s or until someone gets in the driver's seat. On the flat yard nothing happens. If it ends up
+  20 s or until someone gets in the driver's seat. On the flat yard nothing happens. Something
+  wedged against a downhill wheel holds it: the cube, a beam or plank on its edge, a log (a plank
+  lying flat is too low: the wheel rolls over it). If it ends up
   in the creek, the ute's usual recovery applies: it rights itself, and the driver can drop it back
   on firm ground.
 - There is only one hazard at a time, and 15 s of quiet after each one.
