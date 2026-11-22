@@ -107,6 +107,8 @@ export interface PhysBody {
  * without this, Rapier's penetration recovery could fling it (measured: a plank at 21 m/s).
  */
 export const RELEASE_GUARD_TICKS = 30;
+/** Setting down a hanging body: hand speed (m/s), grip slack that means it rests (m), farthest reach (m). */
+export const SET_DOWN = { speed: 1.2, slack: 0.12, reach: 2.2 } as const;
 /** How far a poured bucket tips from hanging (rad): past horizontal, mouth down towards the view. */
 export const POUR_ANGLE = (115 * Math.PI) / 180;
 export const RELEASE_MIN_CAP = 8;
@@ -197,6 +199,8 @@ export class Rig {
     wristAngle = 0;
     /** Tipping what hangs from its grab point forward (pouring the bucket, Epic 7). */
     pour = false;
+    /** Setting down what hangs from the hand: how far the hand has lowered it (m), or -1. */
+    lowering = -1;
     stretchTime = 0;
     prevTarget = { x: 0, y: 0, z: 0 };
     hasPrevTarget = false;
@@ -717,6 +721,7 @@ export class PhysicsWorld {
         r.wristLoad = 0;
         r.wristAngle = 0;
         r.pour = false;
+        r.lowering = -1;
         r.stretchTime = 0;
         r.hasPrevTarget = false;
         const n = (this.holdCount.get(pb.id) ?? 0) + 1;
@@ -761,6 +766,7 @@ export class PhysicsWorld {
         if (!r || !pb) return;
         r.held = null;
         r.pour = false;
+        r.lowering = -1;
         const n = (this.holdCount.get(pb.id) ?? 1) - 1;
         if (n <= 0) {
             this.holdCount.delete(pb.id);
@@ -799,6 +805,26 @@ export class PhysicsWorld {
         // the throw itself is allowed: raise the post-release bound by the throw speed
         const g = this.releasedGuards.find((x) => x.pb === pb);
         if (g) g.cap += j / Math.max(pb.body.mass(), 1e-3);
+    }
+
+    /**
+     * Lets go the way a hand would: something hanging from its grab point (the bucket) is lowered
+     * until it rests on what is below (or the hand has gone SET_DOWN.reach down), then released, so
+     * setting it down does not drop it; anything else is released at once. Letting go again while
+     * it is being lowered drops it.
+     */
+    letGo(p = 0): void {
+        const r = this.rigs[p];
+        if (!r?.held) return;
+        if (r.held.grabPoint && r.lowering < 0) {
+            r.lowering = 0;
+            r.pour = false;
+        } else this.release(p);
+    }
+
+    /** True while a player is setting down what they hold. */
+    settingDown(p = 0): boolean {
+        return (this.rigs[p]?.lowering ?? -1) >= 0;
     }
 
     /**
@@ -866,6 +892,16 @@ export class PhysicsWorld {
         const q = b.rotation();
         rotate(q, r.heldLocal.x, r.heldLocal.y, r.heldLocal.z, _v);
         const anchor = { x: t.x + _v.x, y: t.y + _v.y, z: t.z + _v.z };
+        if (r.lowering >= 0) {
+            // setting it down: the hand goes down at a steady pace; once the grip is well below the
+            // handle (what is underneath holds it up) or the arm is at full stretch, let go
+            r.lowering += SET_DOWN.speed * SIM_DT;
+            _target.y -= r.lowering;
+            if (anchor.y - _target.y > SET_DOWN.slack || r.lowering > SET_DOWN.reach) {
+                this.release(p);
+                return;
+            }
+        }
         const av = b.velocityAtPoint(anchor);
         // the hold point's own velocity: walking plus swinging round with the view
         if (r.hasPrevTarget) {

@@ -453,6 +453,7 @@ export class LabSim {
                 for (const e of this.propEntities) pw.respawn(e.id);
                 if (this.vehicle) pw.respawn(this.vehicle.id);
                 this.water.teleported();
+                this.water.refillSources();
             }
             this.updateStress();
         }
@@ -548,7 +549,8 @@ export class LabSim {
             if (pw.heldIdOf(i) >= 0) ev.thrown = true;
             pw.throwHeld(cmd.yaw, cmd.pitch, i);
         } else if (cmd.grab) {
-            if (pw.heldIdOf(i) >= 0) pw.release(i);
+            // a hanging bucket is set down rather than dropped (letGo); again while lowering drops it
+            if (pw.heldIdOf(i) >= 0) pw.letGo(i);
             else if (!pw.tryGrab(eye, cmd.yaw, cmd.pitch, i) && !this.enterUte(i, eye, cmd)) ev.missed = true;
         }
         pw.applyGrab(eye, cmd.yaw, cmd.pitch, i);
@@ -607,6 +609,7 @@ export class LabSim {
             this.progress.recoveries++;
             this.water.bucketLost();
             this.water.teleported();
+            this.water.refillSources();
             const st = this.stage;
             if (st) {
                 // journeys: the bucket comes back at the last checkpoint reached
@@ -741,7 +744,9 @@ export class LabSim {
         const pb = this.physics.bodies.get(bk.id);
         if (!pb) return;
         const st = this.stage;
-        const flower = st && this.progress.step < (this.level.rules?.stages?.length ?? 0) ? (st.flower ?? null) : null;
+        // the flower stage, and after the win too (more water is welcome)
+        const flower = st?.flower ?? null;
+        this.water.goalMet = this.progress.goalReached;
         for (const text of this.water.step(pb, bk.pose, bk.anim, flower))
             this.events.push({ tick: this.tick, kind: 'water', text });
     }

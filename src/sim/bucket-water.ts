@@ -8,7 +8,11 @@
  * spilling and pouring all follow from where the bucket is and how it moves, so every device that
  * runs the same ticks agrees, and a guest cannot ask for water it has not earned. All water is
  * accounted for: in the bucket + left in the sources + spilled + lost with a bucket + poured into
- * the flower = what there was at the start (`total`).
+ * the flower = what there was at the start (`total`) + what was topped up (`toppedUp`).
+ *
+ * The run never becomes unwinnable: while the level's goal is open a source always keeps at least
+ * what the bucket needs (the difference is recorded as a top-up), and replacing a lost bucket or
+ * resetting the props refills every source (recorded too).
  */
 
 import { BUCKET_LITRES, BUCKET_SLOPE_X, BUCKET_SLOPE_Z } from '../assets/props.ts';
@@ -28,6 +32,10 @@ export class BucketWaterState {
     spilled = 0;
     lost = 0;
     poured = 0;
+    /** Water added to the sources so the run stays winnable (litres). */
+    toppedUp = 0;
+    /** Set by the simulation: once the level's goal is met, sources may run dry. */
+    goalMet = false;
     /** The source filling the bucket (index), or -1. */
     filling = -1;
     private fillFrom = 0;
@@ -54,7 +62,8 @@ export class BucketWaterState {
     reset(): void {
         this.water.reset(WATER.capacity);
         for (const s of this.sources) s.litres = s.def.litres;
-        this.spilled = this.lost = this.poured = 0;
+        this.spilled = this.lost = this.poured = this.toppedUp = 0;
+        this.goalMet = false;
         this.filling = -1;
         this.pourQuiet = -1;
         this.massApplied = -1;
@@ -65,6 +74,21 @@ export class BucketWaterState {
         this.lost += this.water.volume;
         this.water.reset(0);
         this.filling = -1;
+    }
+
+    /** Fills every source back to what it held at the start (a new spare bucket, a props reset). */
+    refillSources(): void {
+        for (const s of this.sources) {
+            this.toppedUp += s.def.litres - s.litres;
+            s.litres = s.def.litres;
+        }
+    }
+
+    /** What the ledger is off by (litres): always zero, to rounding. */
+    get imbalance(): number {
+        let inSources = 0;
+        for (const s of this.sources) inSources += s.litres;
+        return this.volume + inSources + this.spilled + this.lost + this.poured - this.total - this.toppedUp;
     }
 
     /** The bucket was moved without travelling (recovery, reset): no acceleration from the jump. */
@@ -152,6 +176,14 @@ export class BucketWaterState {
             }
         }
         const src = at >= 0 ? this.sources[at] : null;
+        if (src && !this.goalMet) {
+            // never run dry before the goal: keep what this bucket still needs in reserve
+            const need = WATER.capacity - w.volume;
+            if (src.litres < need) {
+                this.toppedUp += need - src.litres;
+                src.litres = need;
+            }
+        }
         const flowing = !!src && src.litres > 0 && w.volume < WATER.capacity;
         if (flowing) {
             if (this.filling !== at) {

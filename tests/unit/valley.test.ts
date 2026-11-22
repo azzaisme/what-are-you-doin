@@ -223,6 +223,7 @@ describe('the Valley: one map, seven areas', () => {
             expect(s.progress.step).toBe(k + 1);
         }
         // the flower (Epic 7): setting the bucket down by it is not enough, the water has to go in
+        // (a rules check with teleports; tests/unit/water-play.test.ts plays it with commands)
         put(VALLEY_STAGES[last].goal);
         for (let i = 0; i < 120; i++) s.step(cmd(n++));
         expect(s.progress.step).toBe(last);
@@ -268,9 +269,8 @@ describe('the Valley: one map, seven areas', () => {
         // its water went with it; the spare is empty (refills are only at the water butts)
         expect(s.water.volume).toBe(0);
         const w = s.water;
-        const left = w.sources.reduce((a, x) => a + x.litres, 0);
         expect(w.spilled + w.lost).toBeCloseTo(10, 6);
-        expect(left + w.spilled + w.lost + w.poured + w.volume).toBeCloseTo(w.total, 9);
+        expect(Math.abs(w.imbalance)).toBeLessThan(1e-9);
     }, 120_000);
 
     it('every prop has a body and is at rest on the ground after two seconds', () => {

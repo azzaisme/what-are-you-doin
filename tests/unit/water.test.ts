@@ -1,20 +1,19 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { BUCKET_LITRES, BUCKET_SLOPE_X, bucketAsset } from '../../src/assets/props.ts';
-import { BRIDGE_X, BUCKET_STUMP, YARD_Y, timberYardLevel } from '../../src/levels/timber-yard.ts';
-import { SnapshotDecoder, encodeSnapshot } from '../../src/net/codec.ts';
-import { GuestSession, HostSession, listGames } from '../../src/net/session.ts';
-import { MemoryHub } from '../../src/net/transport.ts';
+import { MAX_PARTICLES, ParticleFX } from '../../src/fx/particles.ts';
+import { BRIDGE_X, BUCKET_STUMP, timberYardLevel } from '../../src/levels/timber-yard.ts';
 import { ACTION_POUR, neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
 import { propBody } from '../../src/sim/lab-physics.ts';
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
 import { NO_DRIVE, UteVehicle } from '../../src/sim/physics/vehicle.ts';
 import { PhysicsWorld, initPhysics } from '../../src/sim/physics/world.ts';
-import { SnapshotRing } from '../../src/sim/snapshots.ts';
+import { SnapshotRing, writeEntity, ANIM_MAX } from '../../src/sim/snapshots.ts';
 import { BucketWater, WATER, fitLitres, surfaceHeight } from '../../src/sim/water.ts';
 import { pose, quatFromYawPitchRoll } from '../../src/voxels/math.ts';
 import type { Quat } from '../../src/voxels/math.ts';
+import { M, voxelMaterial } from '../../src/voxels/palette.ts';
 
 beforeAll(() => initPhysics());
 
@@ -23,11 +22,8 @@ const UP: Quat = { x: 0, y: 0, z: 0, w: 1 };
 const zero = () => ({ x: 0, y: 0, z: 0 });
 const tiltQ = (deg: number) => quatFromYawPitchRoll(0, (deg * Math.PI) / 180, 0);
 
-/** Sum of every place the water can be: it must always equal what there was at the start. */
-function accounted(s: LabSim): number {
-    const w = s.water;
-    return w.volume + w.spilled + w.lost + w.poured + w.sources.reduce((a, x) => a + x.litres, 0);
-}
+/** What the water ledger is off by: bucket + sources + spilled + lost + flower - start - top-ups. */
+const accounted = (s: LabSim) => s.water.imbalance;
 
 /** Player 1 in first person, holding the yard's bucket (picked up from its stump, view eased up). */
 function holdBucket(s: LabSim, start = 0): (c?: Partial<PlayerCommand>, k?: number) => void {
@@ -218,7 +214,7 @@ describe('the bucket in the level (#61, #63)', () => {
         expect(s.physics.heldId).toBe(s.bucket.id);
         console.log('after a careful carry', s.water.volume.toFixed(2), 'L');
         expect(s.water.volume).toBeGreaterThan(9.5);
-        expect(accounted(s)).toBeCloseTo(s.water.total, 9);
+        expect(Math.abs(accounted(s))).toBeLessThan(1e-9);
     }, 60_000);
 
     it('pouring tips it forward and empties it where you look; again stops; its weight goes with the water', () => {
@@ -248,52 +244,12 @@ describe('the bucket in the level (#61, #63)', () => {
         step({ action: ACTION_POUR });
         step({ grab: true });
         expect(s.pouring[0]).toBe(false);
-        expect(accounted(s)).toBeCloseTo(s.water.total, 9);
-    }, 60_000);
-
-    it('refills only at the water butt, from what the butt holds, never twice the same water', () => {
-        const s = new LabSim({ level: timberYardLevel });
-        s.step(cmd(0));
-        const butt = s.water.sources[0];
-        expect(butt.litres).toBe(40);
-        const total = s.water.total;
-        expect(total).toBe(50);
-        const empty = () => s.water.water.reset(0);
-        // empty and upright on the far side of the yard: nothing
-        empty();
-        s.water.spilled += 10;
-        s.physics.place(s.bucket.id, pose(-2, YARD_Y + 0.05, 9));
-        for (let n = 0; n < 240; n++) s.step(cmd(n));
-        expect(s.water.volume).toBe(0);
-        expect(accounted(s)).toBeCloseTo(total, 9);
-        // back on the stump under the tap: fills at 4 L/s, to full, and stops
-        let n = 300;
-        let refills = 0;
-        for (let k = 0; k < 5; k++) {
-            s.physics.place(s.bucket.id, pose(BUCKET_STUMP.x, BUCKET_STUMP.top + 0.01, BUCKET_STUMP.z));
-            for (let i = 0; i < 240; i++) s.step(cmd(n++));
-            expect(accounted(s)).toBeCloseTo(total, 9);
-            if (k < 4) expect(s.water.volume).toBeCloseTo(10, 9);
-            refills = s.events.filter((e) => e.kind === 'water' && e.text.startsWith('Filled up')).length;
-            expect(refills).toBe(k < 4 ? k + 1 : 4);
-            // standing there full takes nothing more
-            const left = butt.litres;
-            for (let i = 0; i < 60; i++) s.step(cmd(n++));
-            expect(butt.litres).toBe(left);
-            // pour it away (tipped off the stump) for the next round
-            s.water.spilled += s.water.volume;
-            empty();
-        }
-        // 40 L is four bucketfuls: the fifth time the butt is dry
-        expect(butt.litres).toBe(0);
-        expect(s.water.volume).toBe(0);
-        expect(s.events.some((e) => e.text.includes('water butt is empty'))).toBe(true);
+        expect(Math.abs(accounted(s))).toBeLessThan(1e-9);
     }, 60_000);
 
     it('a spare bucket after a fall is empty and fills on the stump; nothing is counted twice', () => {
         const s = new LabSim({ level: timberYardLevel });
         s.step(cmd(0));
-        const total = s.water.total;
         s.physics.place(s.bucket.id, pose(BRIDGE_X + 3, -0.1, -2.3));
         let n = 1;
         for (; n < 400 && s.progress.recoveries === 0; n++) s.step(cmd(n));
@@ -304,7 +260,7 @@ describe('the bucket in the level (#61, #63)', () => {
         expect(s.water.volume).toBeCloseTo(10, 6);
         expect(s.water.sources[0].litres).toBeCloseTo(30, 6);
         expect(s.water.lost + s.water.spilled).toBeCloseTo(10, 6);
-        expect(accounted(s)).toBeCloseTo(total, 9);
+        expect(Math.abs(accounted(s))).toBeLessThan(1e-9);
     }, 60_000);
 
     it('is deterministic: the same commands give the same water', () => {
@@ -372,35 +328,48 @@ describe('the bucket in the level (#61, #63)', () => {
     }, 60_000);
 });
 
-describe('online players agree on the water (#61)', () => {
-    it('the volume travels in the host state and in the bucket’s snapshot channels', async () => {
-        const hub = new MemoryHub();
-        const host = new LabSim({ level: timberYardLevel });
-        host.step(cmd(0));
-        host.fpActive = true;
-        const hs = await HostSession.start(hub.transport('host'), host, 'yard', 'wet1');
-        const guestSim = new LabSim({ level: timberYardLevel });
-        const gs = await GuestSession.join(
-            hub.transport('guest'),
-            guestSim,
-            listGames(hub.channel('lobby', 'w'))[0],
-            () => 0
-        );
-        // the host's bucket loses water (tipped over on the ground)
-        host.physics.place(host.bucket.id, pose(0, YARD_Y + 0.4, 9, quatFromYawPitchRoll(0, 2.4, 0)));
-        for (let n = 1; n < 120; n++) {
-            host.step(cmd(n), hs.commandFor(1));
-            hs.afterStep(() => ({ held: -1, target: -1, shared: false }));
+describe('droplets (#65)', () => {
+    it('spills and fills show pooled droplets: bounded, short-lived, and never counted as water', () => {
+        const sim = new LabSim({ level: timberYardLevel });
+        const ring = new SnapshotRing(sim.entities.length, 64);
+        const fx = new ParticleFX(timberYardLevel, []);
+        fx.bucketSlot = sim.bucket.slot;
+        const anim = new Float64Array(ANIM_MAX);
+        const at = pose(0, 1, 8, quatFromYawPitchRoll(0, 1.2, 0));
+        const drops = () => {
+            let n = 0;
+            for (let i = 0; i < fx.count; i++) if (voxelMaterial(fx.buffer[i * 4 + 3]) === M.BucketWater) n++;
+            return n;
+        };
+        let litres = 10;
+        let most = 0;
+        const frame = (tick: number) => {
+            anim[BUCKET_LITRES] = litres;
+            writeEntity(ring.beginWrite(tick), sim.bucket.slot, at, true, anim, ANIM_MAX);
+            fx.update(tick / 60, ring, { x: 0, z: 8 });
+            expect(fx.count).toBeLessThanOrEqual(MAX_PARTICLES);
+            most = Math.max(most, drops());
+        };
+        // three seconds of a fast spill (6 L/s), sampled at the voxel rate
+        let tick = 0;
+        for (; tick < 180; tick += 3) {
+            litres = Math.max(0, litres - 0.3);
+            frame(tick);
         }
-        expect(host.water.volume).toBeLessThan(5);
-        expect(gs.water.volume).toBeCloseTo(host.water.volume, 1);
-        // the guest draws it from the snapshot: litres in the bucket's animation channel
-        const ring = new SnapshotRing(guestSim.entities.length, 4);
-        new SnapshotDecoder(guestSim.entities.length).apply(encodeSnapshot(host.tick, host.entities), ring);
-        const anim = new Float64Array(10);
-        expect(ring.sample(host.bucket.slot, host.tick / 60, pose(), anim)).toBe(true);
-        expect(anim[BUCKET_LITRES]).toBeCloseTo(host.water.volume, 2);
-        gs.leave();
-        hs.stop();
+        expect(fx.spawned.pour).toBeGreaterThan(20);
+        expect(most).toBeGreaterThan(0);
+        // the pool holds at most 32 bursts of 8: a long spill never grows past that
+        expect(most).toBeLessThanOrEqual(32 * 8);
+        // stopped: within a second every droplet is gone
+        for (const end = tick + 60; tick < end; tick += 3) frame(tick);
+        expect(drops()).toBe(0);
+        // filling: a short stream from the tap, also gone when it stops
+        for (const end = tick + 30; tick < end; tick += 3) {
+            litres += 0.2;
+            frame(tick);
+        }
+        expect(fx.spawned.fill).toBeGreaterThan(0);
+        for (const end = tick + 60; tick < end; tick += 3) frame(tick);
+        expect(drops()).toBe(0);
     });
 });

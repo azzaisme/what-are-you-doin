@@ -289,10 +289,11 @@ describe('level 1: the timber yard', () => {
         expect(s.progress.falls).toBe(0);
         expect(s.player.z).toBeLessThan(BRIDGE.farEdge);
         step({ grab: true });
-        step({}, 90);
+        // letting go sets it down (lowered to the ground) before it is released
+        step({}, 240);
         expect(s.progress.goalReached).toBe(true);
-        // let go from the hands, it drops to the ground and splashes some out (measured 8.4 L left)
-        expect(s.water.volume).toBeGreaterThan(7.5);
+        // set down by the flag, it keeps (nearly) all its water
+        expect(s.water.volume).toBeGreaterThan(9.8);
         expect(s.events.find((e) => e.kind === 'goal')!.text).toMatch(/with \d+\.\d L of water/);
     }, 120_000);
 });
