@@ -638,7 +638,7 @@ export const timberYardLevel: LevelDef = {
     startFirstPerson: true,
     actors: {
         beaver: { mode: 'idle', pose: at(-6.3, YARD_Y, 7.4, 2.4) },
-        ute: { mode: 'parked', pose: at(-10.5, YARD_Y + 0.002, 4.6, Math.PI / 2 + 0.15) }
+        ute: { mode: 'drivable', pose: at(-10.5, YARD_Y + 0.002, 4.6, Math.PI / 2 + 0.15) }
     },
     props: yardProps(),
     rules: {

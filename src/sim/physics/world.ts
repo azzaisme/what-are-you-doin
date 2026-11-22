@@ -97,6 +97,8 @@ export interface PhysBody {
     grabPoint?: { x: number; y: number; z: number };
     /** See BodyOptions.wristTorque. */
     wristTorque?: number;
+    /** Never sleeps (the ute): left out of the active-body count, which tracks things settling. */
+    alwaysAwake?: boolean;
 }
 
 /**
@@ -387,6 +389,58 @@ export class PhysicsWorld {
         return pb;
     }
 
+    /**
+     * A dynamic body built from several shapes, each with its own density (a vehicle: a heavy
+     * chassis, a light cab). Not grabbable; the wind leaves it alone.
+     */
+    addDynamicCompound(
+        id: number,
+        shapes: { shape: ShapeSpec; x: number; y: number; z: number; density: number }[],
+        spawn: Pose,
+        o: { friction?: number; linearDamping?: number; angularDamping?: number; canSleep?: boolean }
+    ): PhysBody {
+        const body = this.world.createRigidBody(
+            RAPIER.RigidBodyDesc.dynamic()
+                .setTranslation(spawn.p.x, spawn.p.y, spawn.p.z)
+                .setRotation({ ...spawn.q })
+                .setLinearDamping(o.linearDamping ?? 0.05)
+                .setAngularDamping(o.angularDamping ?? 0.3)
+                .setCcdEnabled(true)
+                .setCanSleep(o.canSleep ?? true)
+        );
+        const colliders: RAPIER.Collider[] = [];
+        for (const s of shapes) {
+            const d = this.colliderDesc(s.shape);
+            const t = d.translation;
+            d.setTranslation(t.x + s.x, t.y + s.y, t.z + s.z)
+                .setDensity(s.density)
+                .setFriction(o.friction ?? 0.6)
+                .setRestitution(0.05)
+                .setCollisionGroups(groups(LAYER.prop, ALL));
+            colliders.push(this.world.createCollider(d, body));
+        }
+        const pb: PhysBody = {
+            id,
+            body,
+            colliders,
+            kind: 'dynamic',
+            grabbable: false,
+            spawn: { p: { ...spawn.p }, q: { ...spawn.q } },
+            baseAngularDamping: o.angularDamping ?? 0.3,
+            enabled: true,
+            windArea: 0,
+            alwaysAwake: o.canSleep === false
+        };
+        this.bodies.set(id, pb);
+        for (const c of colliders) this.byCollider.set(c.handle, pb);
+        return pb;
+    }
+
+    /** The body a collider belongs to, if it is one of ours. */
+    bodyOfCollider(handle: number): PhysBody | undefined {
+        return this.byCollider.get(handle);
+    }
+
     /** A kinematic body that follows scripted poses (beaver, ute). Pushes props, is not pushed. */
     addKinematic(id: number, shapes: { shape: ShapeSpec; x: number; y: number; z: number }[], spawn: Pose): PhysBody {
         const body = this.world.createRigidBody(
@@ -598,6 +652,21 @@ export class PhysicsWorld {
         const pb = this.byCollider.get(hit.collider.handle);
         if (!pb || pb.kind !== 'dynamic' || !pb.grabbable || !pb.enabled) return null;
         return { pb, toi: hit.timeOfImpact };
+    }
+
+    /** Read-only: id of any body (grabbable or not: the ute) the view ray hits within reach, or -1. */
+    probeAny(eye: Vec3Like, yaw: number, pitch: number, p = 0): number {
+        const d = viewDir(yaw, pitch, _dir);
+        const ray = new RAPIER.Ray({ x: eye.x, y: eye.y, z: eye.z }, { x: d.x, y: d.y, z: d.z });
+        const hit = this.world.castRay(
+            ray,
+            GRAB.reach,
+            true,
+            RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+            groups(ALL, ALL & ~LAYER.player),
+            this.rigs[p]?.collider
+        );
+        return hit ? (this.byCollider.get(hit.collider.handle)?.id ?? -1) : -1;
     }
 
     /** Raycasts from the eye along the view; grabs the first grabbable dynamic body within reach. */
@@ -906,7 +975,7 @@ export class PhysicsWorld {
             enabled++;
             const b = pb.body;
             if (b.isSleeping()) continue;
-            active++;
+            if (!pb.alwaysAwake) active++;
             const lv = b.linvel();
             const ls = Math.hypot(lv.x, lv.y, lv.z);
             if (ls > LIMITS.maxLinvel) {

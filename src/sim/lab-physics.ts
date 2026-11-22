@@ -246,6 +246,8 @@ export function addLabKinematics(
         ],
         beaverPose
     );
+    // a drivable ute is a vehicle (UteVehicle), not a scripted body
+    if (uteId < 0) return;
     pw.addKinematic(
         uteId,
         [

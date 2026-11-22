@@ -125,7 +125,8 @@ export interface LevelDef {
     /** Scripted actors: the beaver walks its loop or stands idle, the ute laps or is parked. */
     actors: {
         beaver: { mode: 'loop' } | { mode: 'idle'; pose: Pose } | { mode: 'none' };
-        ute: { mode: 'track' } | { mode: 'parked'; pose: Pose } | { mode: 'none' };
+        /** drivable: a physics vehicle players get into (Epic 4); parked: scenery that never moves. */
+        ute: { mode: 'track' } | { mode: 'parked'; pose: Pose } | { mode: 'drivable'; pose: Pose } | { mode: 'none' };
     };
     /** Dynamic props present in this level and where they start (physics props mode). */
     props: PropPlacement[];

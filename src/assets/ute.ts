@@ -19,7 +19,9 @@ export const UTE_STEER = 1;
 export const UTE_SUSPENSION = 2;
 export const UTE_PITCH = 3;
 export const UTE_ROLL = 4;
-export const UTE_ANIM_CHANNELS = 5;
+/** How far each wheel hangs below its loaded rest position (m), front left, front right, rear left, rear right. */
+export const UTE_DROP_0 = 5;
+export const UTE_ANIM_CHANNELS = 9;
 
 export const UTE_WHEEL_RADIUS = 0.34;
 export const UTE_WHEELBASE_HALF = 1.15;
@@ -155,6 +157,7 @@ export const uteAsset: VoxelAsset = {
         quatFromYawPitchRoll(0, pitch, roll, rig.rot[CH]);
         for (let w = 0; w < 4; w++) {
             quatFromYawPitchRoll(w < 2 ? steer : 0, spin, 0, rig.rot[WHEELS[w]]);
+            rig.setShift(WHEELS[w], 0, -(anim[UTE_DROP_0 + w] ?? 0), 0);
         }
         rig.evaluate(root);
         evaluateAttachments(rig, attachments, out);

@@ -477,6 +477,10 @@ class LabDirector extends Script {
             renderTime = state.pausedTime;
         }
 
+        // ---- in the driver's seat the view turns with the ute (the look stays relative to it)
+        followUte(0, guestSession ? guestSession.slot : 0, renderTime);
+        if (state.players > 1 && localSlot2 > 0) followUte(1, localSlot2, renderTime);
+
         // ---- first-person camera: interpolated position, look applied at display rate
         if (state.mode === 'firstPerson') {
             const myEye = guestSession ? sim.eyes[Math.max(0, guestSession.slot)] : sim.playerEntity;
@@ -1187,6 +1191,12 @@ let promptText = '';
 function interactionText(i: number, pad: boolean): string {
     const it = guestInteraction() ?? sim.interaction(i);
     const both = it.shared ? ' together' : '';
+    if (it.driving)
+        return pad
+            ? 'Driving · left stick drive and steer · A brake · B recover · RT get out'
+            : 'Driving · W/S throttle · A/D steer · Space brake · Q recover · click or E to get out';
+    if (it.seat >= 0) return pad ? 'Riding along · RT get out' : 'Riding along · click or E to get out';
+    if (it.target === 'ute') return pad ? 'RT to drive the ute' : 'Click to drive the ute';
     if (it.holding)
         return pad
             ? `Holding ${propLabel(it.holding)}${both} · RT release · RB throw · B drop`
@@ -1196,12 +1206,44 @@ function interactionText(i: number, pad: boolean): string {
 }
 
 /** A guest's prompt comes from the host (guests run no physics). */
-function guestInteraction(): { holding: string | null; target: string | null; shared: boolean } | null {
+function guestInteraction(): {
+    holding: string | null;
+    target: string | null;
+    shared: boolean;
+    driving: boolean;
+    seat: number;
+} | null {
     if (!guestSession) return null;
     const h = guestSession.hud[guestSession.slot];
-    if (!h) return { holding: null, target: null, shared: false };
+    if (!h) return { holding: null, target: null, shared: false, driving: false, seat: -1 };
     const name = (id: number) => (id < 0 ? null : (sim.entities.find((e) => e.id === id)?.name ?? null));
-    return { holding: name(h.held), target: name(h.target), shared: h.shared };
+    return { holding: name(h.held), target: name(h.target), shared: h.shared, driving: h.driving, seat: h.seat };
+}
+
+/** The ute's yaw last render frame, per local view (NaN when that view's player isn't in it). */
+const lastUteYaw = [NaN, NaN];
+const utePose = pose();
+const uteAnim = new Float64Array(ANIM_MAX);
+function followUte(view: number, slot: number, time: number): void {
+    const seated = slot >= 0 && (guestSession ? (guestSession.hud[slot]?.seat ?? -1) : sim.seatOf(slot)) >= 0;
+    if (!seated || !sim.ring.sample(sim.ute.slot, time, utePose, uteAnim)) {
+        lastUteYaw[view] = NaN;
+        return;
+    }
+    const q = utePose.q;
+    const yaw = Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.x * q.x));
+    const prev = lastUteYaw[view];
+    lastUteYaw[view] = yaw;
+    if (Number.isNaN(prev)) return;
+    let d = yaw - prev;
+    if (d > Math.PI) d -= 2 * Math.PI;
+    else if (d < -Math.PI) d += 2 * Math.PI;
+    // player 1's pad takes its look from fpInput each frame
+    if (view === 0) fpInput.yaw += d;
+    else {
+        const pad = pads.players[1];
+        if (pad) pad.yaw += d;
+    }
 }
 
 function updatePrompt(): void {
@@ -1210,11 +1252,17 @@ function updatePrompt(): void {
         if (touch.enabled) {
             const it = guestInteraction() ?? sim.interaction(0);
             touch.setHolding(!!it.holding);
-            t = it.holding
-                ? `Holding ${propLabel(it.holding)}${it.shared ? ' together' : ''}`
-                : it.target
-                  ? `Grab ${propLabel(it.target)}`
-                  : '';
+            t = it.driving
+                ? 'Driving · stick to drive · jump to brake · drop to recover · grab to get out'
+                : it.seat >= 0
+                  ? 'Riding along · grab to get out'
+                  : it.holding
+                    ? `Holding ${propLabel(it.holding)}${it.shared ? ' together' : ''}`
+                    : it.target === 'ute'
+                      ? 'Grab to drive the ute'
+                      : it.target
+                        ? `Grab ${propLabel(it.target)}`
+                        : '';
         } else if (!fpInput.locked && !pads.players[0]) t = 'Click to look around';
         else t = interactionText(0, !fpInput.locked);
     }
@@ -1222,7 +1270,10 @@ function updatePrompt(): void {
     if (t !== promptText) {
         promptText = t;
         document.getElementById('hud-prompt')!.textContent = t;
-        crosshair.classList.toggle('crosshair-active', t.startsWith('Click to grab') || t.startsWith('Holding'));
+        crosshair.classList.toggle(
+            'crosshair-active',
+            t.startsWith('Click to grab') || t.startsWith('Holding') || t.startsWith('Click to drive')
+        );
     }
 }
 document.addEventListener('pointerlockchange', updatePrompt);
@@ -2065,6 +2116,20 @@ window.__riverLab = {
         return true;
     },
     interaction: () => sim.interaction(),
+    /** The ute: where it is, which way it faces (yaw 0 = +z), its speed and who drives it (-1: nobody). */
+    ute() {
+        const p = sim.ute.pose;
+        const q = p.q;
+        return {
+            x: p.p.x,
+            y: p.p.y,
+            z: p.p.z,
+            yaw: Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.x * q.x)),
+            speed: sim.vehicle?.speed() ?? 0,
+            driver: sim.driver,
+            drivable: !!sim.vehicle
+        };
+    },
     /** Sets the first-person look angles (as mouse look would). */
     look(yaw: number, pitch: number) {
         fpInput.yaw = yaw;

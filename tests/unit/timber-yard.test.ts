@@ -72,6 +72,11 @@ describe('level 1: the timber yard', () => {
         expect(Math.hypot(b.x - BUCKET_STUMP.x, b.z - BUCKET_STUMP.z)).toBeLessThan(0.1);
         expect(b.y).toBeGreaterThan(BUCKET_STUMP.top - 0.03);
         expect(s.sphere.visible).toBe(false); // not part of this level
+        // the ute (a vehicle, never asleep) stays parked where the level put it
+        const spot = timberYardLevel.actors.ute;
+        if (spot.mode !== 'drivable') throw new Error('the yard ute is drivable');
+        expect(Math.hypot(s.ute.pose.p.x - spot.pose.p.x, s.ute.pose.p.z - spot.pose.p.z)).toBeLessThan(0.05);
+        expect(Math.abs(s.ute.pose.p.y - spot.pose.p.y)).toBeLessThan(0.08);
     });
 
     it('falling into the creek puts you back on the bank; you cannot climb out on your own', () => {
