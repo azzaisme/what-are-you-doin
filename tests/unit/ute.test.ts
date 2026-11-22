@@ -266,6 +266,15 @@ describe('the passenger seat (#43)', () => {
         // the passenger's throttle does nothing: the handbrake holds it
         step({ moveZ: 1 }, 90);
         expect(Math.hypot(ute.pose.p.x - u0.x, ute.pose.p.z - u0.z)).toBeLessThan(0.1);
+        // a second player takes the wheel; when they disconnect, the driver's seat is free again
+        s.setSlotActive(1, true);
+        step();
+        expect(s.takeDriverSeat(1)).toBe(true);
+        expect(s.interactionIds(1).driving).toBe(true);
+        s.setSlotActive(1, false);
+        step();
+        expect(s.driver).toBe(-1);
+        expect(s.seatOf(0)).toBe(1);
         // out on the left, beside the passenger door
         step({ grab: true });
         expect(s.seatOf(0)).toBe(-1);

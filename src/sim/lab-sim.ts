@@ -445,6 +445,13 @@ export class LabSim {
             windAt(this.tick * SIM_DT, this.level.wind, this.wind);
             this.windForce = pw.applyWind(this.wind.x, this.wind.z, SIM_DT);
         }
+        // a player who left (disconnected, or back out of first person) frees their seat
+        for (let k = 0; k < this.seats.length; k++) {
+            if (this.seats[k] >= 0 && !this.playerActive(this.seats[k])) {
+                this.seats[k] = -1;
+                if (k === 0) this.driveInput = { ...NO_DRIVE };
+            }
+        }
         // nobody driving: the handbrake is on
         this.vehicle?.drive(this.driver >= 0 ? this.driveInput : PARKED);
         pw.step();
