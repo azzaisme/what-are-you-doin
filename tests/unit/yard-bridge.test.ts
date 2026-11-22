@@ -250,3 +250,60 @@ describe('the yard crossing, built by a player and driven over (Epic 5 gate)', (
         expect(r.s.progress.falls).toBe(0);
     }, 300_000);
 });
+
+describe('walking onto beams laid anywhere on the seats', () => {
+    /**
+     * Before the deck lips, a beam whose end stopped a few centimetres short of the capstone's back
+     * edge left a ledge narrower than the character's step width between two rises (10 cm cap, then
+     * 15 cm of beam): the walker crawled there for seconds (Epic 9 measured 322 ticks under 0.3 m/s).
+     * The lip now runs at beam-top height right behind the seat, so whatever the offset there is one
+     * level surface (or a small dip) to walk across.
+     */
+    it('beams 0, 5, 10 and 15 cm off the seat edge (and where a playthrough laid them): under 60 slow ticks at a walk', async () => {
+        const { BRIDGE_SEAT } = await import('../../src/levels/timber-yard.ts');
+        const { quatMul } = await import('../../src/voxels/math.ts');
+        const flat = quatMul(quatFromYawPitchRoll(Math.PI / 2, 0, 0), quatFromYawPitchRoll(0, Math.PI / 2, 0));
+        const lipFront = BRIDGE.nearFace + BRIDGE_SEAT;
+        const layouts: { name: string; beams: [number, number][] }[] = [0, 0.05, 0.1, 0.15].map((off) => ({
+            name: `${off * 100} cm off the lip`,
+            beams: [
+                [BRIDGE_X - 0.17, lipFront - off - 1.6],
+                [BRIDGE_X + 0.17, lipFront - off - 1.6]
+            ]
+        }));
+        // where the yard's building playthrough laid them when Epic 9 found the crawl
+        layouts.push({
+            name: 'playthrough',
+            beams: [
+                [-1.088, -1.904],
+                [-0.751, -1.921]
+            ]
+        });
+        for (const { name, beams } of layouts) {
+            const s = new LabSim({ level: timberYardLevel });
+            ['beam-0', 'beam-1'].forEach((nm, i) =>
+                s.physics.place(
+                    s.entities.find((e) => e.name === nm)!.id,
+                    pose(beams[i][0], YARD_Y + 0.3, beams[i][1], flat)
+                )
+            );
+            let n = 0;
+            for (; n < 90; n++) s.step(neutralCommand(n));
+            s.fpActive = true;
+            s.placePlayer((beams[0][0] + beams[1][0]) / 2, BRIDGE.nearEdge + 2.5, 0);
+            for (let k = 0; k < 20; k++) s.step(neutralCommand(n++));
+            let slow = 0;
+            let t = 0;
+            for (; t < 60 * 15 && s.player.z > BRIDGE.zc; t++) {
+                const z = s.player.z;
+                // the playthrough's walk: half stick
+                s.step({ ...neutralCommand(n++, 0), moveZ: 0.5 });
+                if (t > 10 && (z - s.player.z) * 60 < 0.3) slow++;
+            }
+            console.log(`walking onto beams ${name}: mid-gap after ${t} ticks, ${slow} under 0.3 m/s`);
+            expect(s.player.z, name).toBeLessThanOrEqual(BRIDGE.zc);
+            expect(slow, name).toBeLessThan(60);
+            expect(s.progress.falls, name).toBe(0);
+        }
+    }, 120_000);
+});
