@@ -24,8 +24,8 @@
       to copy.
 - **Playtest kit:** the log's summary also counts handbrake pranks, and the script says what to
   watch for and how the prank works.
-- **Tests:** 388 unit tests pass at both voxel sizes (with the audit fixes merged in). New: three handbrake tests, and `sfx.hold` in
-  the sound API test.
+- **Tests:** 478 unit tests pass at both voxel sizes, on top of `epics-5-10` with Epics 6, 9, 10
+  and part 1 merged. New: three handbrake tests, and `sfx.hold` in the sound API test.
 
 ## Epic 8: the world fights back, sound, and a playtest kit (2026-11-22)
 
