@@ -11,13 +11,22 @@
 
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import { SAW_CUTTING, SAW_PROGRESS, SAW_STATE } from '../../src/assets/forestry.ts';
 import { SAWMILL, sawmillToWorld } from '../../src/levels/forestry.ts';
 import { BRIDGE, BRIDGE_X, YARD_FORESTRY, YARD_Y, timberYardLevel } from '../../src/levels/timber-yard.ts';
+import { GuestSession, HostSession, listGames } from '../../src/net/session.ts';
+import { MemoryHub } from '../../src/net/transport.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
 import { SAW } from '../../src/sim/sawmill.ts';
+import { ANIM_MAX } from '../../src/sim/snapshots.ts';
+import { GRID_SIZE, cellIndexX, cellIndexZ } from '../../src/voxels/grid.ts';
+import { pose } from '../../src/voxels/math.ts';
+import { M, voxelMaterial } from '../../src/voxels/palette.ts';
+import { STATE_STRIDE } from '../../src/workers/protocol.ts';
+import { VoxelService, trackedEntityOrder } from '../../src/workers/voxel-service.ts';
 
 beforeAll(() => initPhysics());
 
@@ -61,6 +70,11 @@ class Play {
     readonly yaw: number[];
     readonly pitch: number[];
 
+    /** Online: player 1 is a guest on another device, its input going through the sessions. */
+    hs: HostSession | null = null;
+    gs: GuestSession | null = null;
+    guestSim: LabSim | null = null;
+
     constructor(players: number) {
         this.s = new LabSim({ level: timberYardLevel });
         this.s.step(neutralCommand(0));
@@ -71,6 +85,28 @@ class Play {
         this.step({}, {}, 30);
     }
 
+    /** A host with one guest joined over an in-memory transport (the guest is player 1). */
+    static async online(): Promise<Play> {
+        const g = new Play(1);
+        const hub = new MemoryHub();
+        g.hs = await HostSession.start(hub.transport('host'), g.s, 'yard', 'saw1');
+        g.guestSim = new LabSim({ level: timberYardLevel });
+        let clock = 0;
+        g.clock = () => (clock += 1000 / 60);
+        g.gs = await GuestSession.join(
+            hub.transport('guest'),
+            g.guestSim,
+            listGames(hub.channel('lobby', 'w'))[0],
+            () => clock
+        );
+        expect(g.gs.slot).toBe(1);
+        g.yaw[1] = g.s.players[1].yaw;
+        g.step({}, {}, 30);
+        return g;
+    }
+
+    private clock: () => number = () => 0;
+
     /** Steps with player 0's and player 1's commands (each gets its kept look unless given). */
     step(a: Cmd = {}, b: Cmd = {}, k = 1): void {
         for (let i = 0; i < k; i++) {
@@ -80,7 +116,13 @@ class Play {
             this.pitch[0] = c0.pitch;
             this.yaw[1] = c1.yaw;
             this.pitch[1] = c1.pitch;
-            this.s.step(c0, c1);
+            if (this.gs && this.hs) {
+                // the guest's device sends its input; the host steps with what arrived
+                this.gs.sendInput(c1);
+                this.s.step(c0, this.hs.commandFor(1), [this.hs.commandFor(2), this.hs.commandFor(3)]);
+                this.hs.afterStep((slot) => this.s.interactionIds(slot));
+                this.clock();
+            } else this.s.step(c0, c1);
             this.n++;
         }
     }
@@ -158,6 +200,99 @@ class Play {
     }
 }
 
+/**
+ * Two players (0 and 1) carry a lying log into the sawmill's guide together, by input only: round
+ * to its north side, take it either side of its middle, lift, forward to the guide's line, sideways
+ * into the guide, square it up, lower, let go, step back. Returns the lowest height it was carried
+ * at above where it lay.
+ */
+function carryIntoGuide(
+    g: Play,
+    log: {
+        id: number;
+        pose: { p: { x: number; y: number; z: number }; q: { x: number; y: number; z: number; w: number } };
+    }
+): number {
+    const s = g.s;
+    const lp = log.pose.p;
+    // ---- both come round to its north side (away from the mill) and take it either side of
+    // its middle, facing it
+    const side = sideOf(log.pose);
+    for (const [i, d] of [
+        [0, -0.65],
+        [1, 0.65]
+    ] as const) {
+        const f = side.at(d, -2.0);
+        g.walkTo(i, f.x, f.z);
+        const n = side.at(d, -1.05);
+        g.walkTo(i, n.x, n.z);
+    }
+    g.turn(0, side.faceYaw);
+    g.turn(1, side.faceYaw);
+    const grip0 = sideOf(log.pose).at(-0.65, 0);
+    expect(g.grabAt(0, grip0.x, lp.y, grip0.z)).toBe(log.id);
+    const grip1 = sideOf(log.pose).at(0.65, 0);
+    expect(g.grabAt(1, grip1.x, lp.y, grip1.z)).toBe(log.id);
+    expect(s.physics.holders(log.id)).toBe(2);
+    // lift: each hold point about 0.7 m above where it lay
+    const y0 = lp.y;
+    const up = (i: number) =>
+        Math.asin(Math.max(-1, Math.min(1, (y0 + 0.7 - (s.players[i].y + EYE_HEIGHT)) / s.physics.rig(i)!.holdDist)));
+    g.yaw[0] = g.yaw[1] = side.faceYaw;
+    g.pitch[0] = up(0);
+    g.pitch[1] = up(1);
+    g.step({}, {}, 60);
+    // forward (south) to the guide's line, let it settle, then sideways (west: their right)
+    // into the guide from its open east end
+    let minY = Infinity;
+    for (let k = 0; k < 900 && lp.z < GUIDE.z - 0.04; k++) {
+        g.step({ moveZ: 0.35 }, { moveZ: 0.35 });
+        minY = Math.min(minY, lp.y);
+    }
+    g.step({}, {}, 60);
+    // (gently keeping it on the line: forward is south)
+    const keep = () => Math.max(-0.12, Math.min(0.12, (GUIDE.z - lp.z) * 0.6));
+    for (let k = 0; k < 900 && lp.x > GUIDE.x + 0.04; k++) {
+        g.step({ moveX: 0.35, moveZ: keep() }, { moveX: 0.35, moveZ: keep() });
+        minY = Math.min(minY, lp.y);
+    }
+    for (let k = 0; k < 120 && Math.abs(lp.z - GUIDE.z) > 0.08; k++) g.step({ moveZ: keep() }, { moveZ: keep() });
+    expect(s.physics.holders(log.id)).toBe(2);
+    // carried at a sensible height all the way
+    expect(minY).toBeGreaterThan(y0 + 0.3);
+    expect(Math.abs(lp.x - GUIDE.x)).toBeLessThan(0.5);
+    expect(Math.abs(lp.z - GUIDE.z)).toBeLessThan(0.3);
+    // square it up along the guide: the beaver at the end that has swung south steps back
+    const swing = () => {
+        const q = log.pose.q;
+        const ax = 1 - 2 * (q.y * q.y + q.z * q.z);
+        const az = 2 * (q.x * q.z - q.w * q.y);
+        // the east-pointing end's angle from east (positive: swung south)
+        return ax < 0 ? Math.atan2(-az, -ax) : Math.atan2(az, ax);
+    };
+    const squared = () => Math.max(-0.2, Math.min(0.2, swing() * 1.5));
+    for (let k = 0; k < 180 && Math.abs(swing()) > 0.03; k++) {
+        const c = squared();
+        // player 0 holds the west end, player 1 the east end; forward is south
+        g.step({ moveZ: keep() + c }, { moveZ: keep() - c });
+    }
+    // lower it into the guide (lowering the look draws it in: step after it), let go, step
+    // out of the blade guard
+    const p0 = g.pitch[0];
+    const p1 = g.pitch[1];
+    for (let k = 1; k <= 60; k++) {
+        g.pitch[0] = p0 + ((-0.75 - p0) * k) / 60;
+        g.pitch[1] = p1 + ((-0.75 - p1) * k) / 60;
+        g.step({ moveZ: keep() }, { moveZ: keep() });
+    }
+    for (let k = 0; k < 120 && Math.abs(lp.z - GUIDE.z) > 0.06; k++) g.step({ moveZ: keep() }, { moveZ: keep() });
+    expect(Math.abs(lp.z - GUIDE.z)).toBeLessThan(0.15);
+    g.step({ grab: true }, { grab: true });
+    expect(s.physics.holders(log.id)).toBe(0);
+    g.step({ moveZ: -0.6 }, { moveZ: -0.6 }, 90);
+    return minY - y0;
+}
+
 describe('the gate, by player input only', () => {
     it('two beavers fell a tree, carry its log into the sawmill, the sawn planks deck the bridge, a player walks over', () => {
         const g = new Play(2);
@@ -176,86 +311,10 @@ describe('the gate, by player input only', () => {
         expect(s.forestry.fallDirection(tree).x).toBeLessThan(-0.95);
         g.step({}, {}, 300);
         const log = s.forestry.logOf(tree)!;
-        const lp = log.pose.p;
         expect(log.visible).toBe(true);
 
-        // ---- both come round to its north side (away from the mill) and take it either side of
-        // its middle, facing it
-        const side = sideOf(log.pose);
-        for (const [i, d] of [
-            [0, -0.65],
-            [1, 0.65]
-        ] as const) {
-            const f = side.at(d, -2.0);
-            g.walkTo(i, f.x, f.z);
-            const n = side.at(d, -1.05);
-            g.walkTo(i, n.x, n.z);
-        }
-        g.turn(0, side.faceYaw);
-        g.turn(1, side.faceYaw);
-        const grip0 = sideOf(log.pose).at(-0.65, 0);
-        expect(g.grabAt(0, grip0.x, lp.y, grip0.z)).toBe(log.id);
-        const grip1 = sideOf(log.pose).at(0.65, 0);
-        expect(g.grabAt(1, grip1.x, lp.y, grip1.z)).toBe(log.id);
-        expect(s.physics.holders(log.id)).toBe(2);
-        // lift: each hold point about 0.7 m above where it lay
-        const y0 = lp.y;
-        const up = (i: number) =>
-            Math.asin(
-                Math.max(-1, Math.min(1, (y0 + 0.7 - (s.players[i].y + EYE_HEIGHT)) / s.physics.rig(i)!.holdDist))
-            );
-        g.yaw[0] = g.yaw[1] = side.faceYaw;
-        g.pitch[0] = up(0);
-        g.pitch[1] = up(1);
-        g.step({}, {}, 60);
-        // forward (south) to the guide's line, let it settle, then sideways (west: their right)
-        // into the guide from its open east end
-        let minY = Infinity;
-        for (let k = 0; k < 900 && lp.z < GUIDE.z - 0.04; k++) {
-            g.step({ moveZ: 0.35 }, { moveZ: 0.35 });
-            minY = Math.min(minY, lp.y);
-        }
-        g.step({}, {}, 60);
-        // (gently keeping it on the line: forward is south)
-        const keep = () => Math.max(-0.12, Math.min(0.12, (GUIDE.z - lp.z) * 0.6));
-        for (let k = 0; k < 900 && lp.x > GUIDE.x + 0.04; k++) {
-            g.step({ moveX: 0.35, moveZ: keep() }, { moveX: 0.35, moveZ: keep() });
-            minY = Math.min(minY, lp.y);
-        }
-        for (let k = 0; k < 120 && Math.abs(lp.z - GUIDE.z) > 0.08; k++) g.step({ moveZ: keep() }, { moveZ: keep() });
-        expect(s.physics.holders(log.id)).toBe(2);
-        // carried at a sensible height all the way
-        expect(minY).toBeGreaterThan(y0 + 0.3);
-        expect(Math.abs(lp.x - GUIDE.x)).toBeLessThan(0.5);
-        expect(Math.abs(lp.z - GUIDE.z)).toBeLessThan(0.3);
-        // square it up along the guide: the beaver at the end that has swung south steps back
-        const swing = () => {
-            const q = log.pose.q;
-            const ax = 1 - 2 * (q.y * q.y + q.z * q.z);
-            const az = 2 * (q.x * q.z - q.w * q.y);
-            // the east-pointing end's angle from east (positive: swung south)
-            return ax < 0 ? Math.atan2(-az, -ax) : Math.atan2(az, ax);
-        };
-        const squared = () => Math.max(-0.2, Math.min(0.2, swing() * 1.5));
-        for (let k = 0; k < 180 && Math.abs(swing()) > 0.03; k++) {
-            const c = squared();
-            // player 0 holds the west end, player 1 the east end; forward is south
-            g.step({ moveZ: keep() + c }, { moveZ: keep() - c });
-        }
-        // lower it into the guide (lowering the look draws it in: step after it), let go, step
-        // out of the blade guard
-        const p0 = g.pitch[0];
-        const p1 = g.pitch[1];
-        for (let k = 1; k <= 60; k++) {
-            g.pitch[0] = p0 + ((-0.75 - p0) * k) / 60;
-            g.pitch[1] = p1 + ((-0.75 - p1) * k) / 60;
-            g.step({ moveZ: keep() }, { moveZ: keep() });
-        }
-        for (let k = 0; k < 120 && Math.abs(lp.z - GUIDE.z) > 0.06; k++) g.step({ moveZ: keep() }, { moveZ: keep() });
-        expect(Math.abs(lp.z - GUIDE.z)).toBeLessThan(0.15);
-        g.step({ grab: true }, { grab: true });
-        expect(s.physics.holders(log.id)).toBe(0);
-        g.step({ moveZ: -0.6 }, { moveZ: -0.6 }, 90);
+        const lift = carryIntoGuide(g, log);
+        expect(lift).toBeGreaterThan(0.3);
         for (let k = 0; k < 240 && s.sawmill!.phase === 'ready'; k++) g.step();
         expect(s.sawmill!.stats.takenIds).toEqual([log.id]);
         // the stump has not regrown yet (too soon)
@@ -444,4 +503,104 @@ describe('the gate, by player input only', () => {
         };
         expect(run()).toEqual(run());
     }, 60_000);
+});
+
+describe('online: a guest logs and saws with the host', () => {
+    it('the guest takes the axe, chops a tree, carries its log with the host, the saw runs, then bucks a log; its own voxel world shows the stump', async () => {
+        const g = await Play.online();
+        const s = g.s;
+        const gsim = g.guestSim!;
+        // ---- the guest (player 1) picks up the axe and chops tree 2 down from its east side
+        const axe = g.entity('axe');
+        const a = axe.pose.p;
+        g.walkTo(1, a.x + 1.1, a.z);
+        expect(g.grabAt(1, a.x, a.y, a.z)).toBe(axe.id);
+        const tree = 2;
+        const t = YARD_FORESTRY.trees[tree];
+        g.walkTo(1, t.x + 2.2, t.z - 0.6);
+        g.walkTo(1, t.x + 1.1, t.z);
+        expect(s.physics.heldIdOf(1)).toBe(axe.id);
+        const chop = g.lookAt(1, t.x + (t.lean?.x ?? 0) * 0.6, YARD_Y + 0.6, t.z);
+        for (let k = 0; k < 600 && s.forestry.treeState(tree).phase === 'standing'; k++)
+            g.one(1, { ...chop, grab: k % 30 === 0 });
+        expect(s.forestry.treeState(tree).phase).toBe('down');
+        expect(s.forestry.stats.blows).toBe(4);
+        // put the axe down (drop: a guest may)
+        g.one(1, { action: 4 });
+        expect(s.physics.heldIdOf(1)).toBe(-1);
+        g.step({}, {}, 300);
+        // the guest's device heard "Timber!" (the host's events travel in its state)
+        expect(g.gs!.events.some((e) => e.text.startsWith('Timber!'))).toBe(true);
+        const log = s.forestry.logOf(tree)!;
+
+        // ---- host and guest carry it into the sawmill together
+        expect(carryIntoGuide(g, log)).toBeGreaterThan(0.3);
+        let sawSeen = false;
+        let progressSeen = 0;
+        const sp = pose();
+        const sa = new Float64Array(ANIM_MAX);
+        const mill = gsim.forestry.ents.sawmill;
+        for (let k = 0; k < SAW.settleTicks + SAW.cutTicks + 120 && s.sawmill!.stats.planks < 3; k++) {
+            g.step();
+            // what the guest's device sees of the machine (its snapshots)
+            if (gsim.ring.sample(mill.slot, gsim.ring.newestTick / 60, sp, sa)) {
+                if (Math.round(sa[SAW_STATE]) === SAW_CUTTING) sawSeen = true;
+                progressSeen = Math.max(progressSeen, sa[SAW_PROGRESS]);
+            }
+        }
+        expect(s.sawmill!.stats.takenIds).toEqual([log.id]);
+        expect(s.sawmill!.stats.planks).toBe(3);
+        expect(sawSeen).toBe(true);
+        expect(progressSeen).toBeGreaterThan(0.9);
+        g.step({}, {}, 12);
+        const visible = (name: string) => {
+            const e = gsim.entities.find((x) => x.name === name)!;
+            return gsim.ring.sample(e.slot, gsim.ring.newestTick / 60, sp, sa);
+        };
+        expect(['extra-plank-12', 'extra-plank-13', 'extra-plank-14'].every(visible)).toBe(true);
+
+        // ---- the guest's own voxel world, fed from its snapshots: tree 2 is a stump there
+        expect(s.forestry.treeState(tree).phase).toBe('down');
+        const svc = new VoxelService();
+        svc.build(1, 'yard');
+        const slots = trackedEntityOrder(gsim);
+        const states = new Float64Array(slots.length * STATE_STRIDE);
+        slots.forEach((slot, n) => {
+            const o = n * STATE_STRIDE;
+            const vis = gsim.ring.sample(slot, gsim.ring.newestTick / 60, sp, sa);
+            states.set([vis ? 1 : 0, sp.p.x, sp.p.y, sp.p.z, sp.q.x, sp.q.y, sp.q.z, sp.q.w], o);
+            for (let c = 0; c < ANIM_MAX; c++) states[o + 8 + c] = sa[c];
+        });
+        svc.frame(1, gsim.ring.newestTick / 60, 'coverage50', false, states);
+        const gy = YARD_FORESTRY.ground(t.x, t.z);
+        const at = (y: number) =>
+            voxelMaterial(svc.world.staticAt(cellIndexX(t.x), Math.floor(y / GRID_SIZE), cellIndexZ(t.z)));
+        expect(at(gy + 0.7)).toBe(0);
+        expect([M.LogBark, M.LogEnd]).toContain(at(gy + 0.2));
+        // and a tree still standing is still there
+        const t1 = YARD_FORESTRY.trees[1];
+        expect(
+            voxelMaterial(
+                svc.world.staticAt(
+                    cellIndexX(t1.x),
+                    Math.floor((YARD_FORESTRY.ground(t1.x, t1.z) + 0.7) / GRID_SIZE),
+                    cellIndexZ(t1.z)
+                )
+            )
+        ).toBe(M.Bark);
+        // ---- the guest takes the axe again and bucks a log on the pile
+        const a2 = axe.pose.p;
+        g.walkTo(1, a2.x + 1.1, a2.z + 0.3);
+        expect(g.grabAt(1, a2.x, a2.y, a2.z)).toBe(axe.id);
+        const pile = s.log.pose.p;
+        g.walkTo(1, pile.x - 1.1, pile.z + 0.5);
+        for (let k = 0; k < 200 && s.forestry.stats.bucked === 0; k++)
+            g.one(1, { ...g.lookAt(1, pile.x, pile.y, pile.z), grab: k % 30 === 0 });
+        expect(s.forestry.stats.bucked).toBe(1);
+        g.step({}, {}, 12);
+        expect(visible('short-log-0') && visible('short-log-1')).toBe(true);
+
+        g.gs!.leave();
+        g.hs!.stop();
+    }, 240_000);
 });

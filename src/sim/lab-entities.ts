@@ -182,7 +182,12 @@ export function createLabEntities(): LabEntities {
         beams.push(add(396 + n, name, beamAsset(name), 1));
     }
     const axe = add(440, 'axe', axeAsset(), 2);
-    const sawmill = add(441, 'sawmill', sawmillAsset(SAWMILL.blade.y, SAWMILL.blade.r, SAWMILL.housing.top, SAWMILL.lever), 4);
+    const sawmill = add(
+        441,
+        'sawmill',
+        sawmillAsset(SAWMILL.blade.y, SAWMILL.blade.r, SAWMILL.housing.top, SAWMILL.lever),
+        4
+    );
     const chips = add(442, 'chips-fx', counterAsset('chips-fx'), 0);
     const needles = add(443, 'needles-fx', counterAsset('needles-fx'), 0);
     const forestry: ForestryEntities = { markers, crowns, felled, short, sawn, beams, axe, sawmill, chips, needles };

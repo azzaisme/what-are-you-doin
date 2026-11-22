@@ -32,7 +32,7 @@ type Lab = {
     ute(): { x: number; y: number; z: number; yaw: number; speed: number; driver: number; drivable: boolean };
     wood(): {
         trees: { phase: string; cut: number }[];
-        sawmill: { phase: string; stopped: string; taken: number; planks: number } | null;
+        sawmill: { phase: string; stopped: string; mode: string; taken: number; planks: number } | null;
     };
 };
 
@@ -822,7 +822,7 @@ test('the level designer opens on the starter level and places a box with a clic
     expect(problems).toEqual([]);
 });
 
-test('logging in the Timber Yard: chew a pine down, the voxel tree becomes a stump and a log; the sawmill makes planks', async ({
+test('logging in the Timber Yard: chew a pine down, the voxel tree becomes a stump and a log; the sawmill lever sets beams', async ({
     page
 }) => {
     test.setTimeout(300_000);
@@ -862,26 +862,22 @@ test('logging in the Timber Yard: chew a pine down, the voxel tree becomes a stu
     await lab(page, (l) => l.look(-Math.PI / 2 + 0.3, -0.45));
     await page.waitForTimeout(1500);
     await page.screenshot({ path: 'test-results/logging-felled.png' });
-    // the sawmill: a log laid in its guide comes out as three planks
+    // the sawmill's lever: walk up to the near post and grab it to set the saw to beams
     await lab(page, (l) => {
-        l.teleport(6.5, 12.3, 0.5);
-        l.look(Math.PI - 0.9, -0.35);
-        l.placeProp('log', 6.8, 0.68, 9.6);
+        // the lever is on the near (north) post: stand north of it, facing south (+z)
+        l.teleport(4.8, 7.6, Math.PI);
+        l.look(Math.PI, -0.58);
     });
     await page.waitForFunction(
-        () => (window as unknown as { __riverLab: Lab }).__riverLab.wood().sawmill?.phase === 'cutting',
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().target === 'sawmill',
         null,
         { timeout: 60_000 }
     );
-    await page.waitForTimeout(1500);
-    await page.screenshot({ path: 'test-results/logging-sawing.png' });
-    await page.waitForFunction(
-        () => (window as unknown as { __riverLab: Lab }).__riverLab.wood().sawmill?.planks === 3,
-        null,
-        { timeout: 120_000 }
-    );
-    await page.waitForTimeout(1500);
-    await page.screenshot({ path: 'test-results/logging-planks.png' });
-    expect((await lab(page, (l) => l.wood())).sawmill?.taken).toBe(1);
+    await page.screenshot({ path: 'test-results/logging-sawmill.png' });
+    for (let tries = 0; tries < 20 && (await lab(page, (l) => l.wood().sawmill?.mode)) !== 'beam'; tries++) {
+        await lab(page, (l) => l.input({ grab: true }));
+        await page.waitForTimeout(500);
+    }
+    expect((await lab(page, (l) => l.wood())).sawmill?.mode).toBe('beam');
     expect(problems).toEqual([]);
 });

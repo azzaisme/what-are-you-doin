@@ -29,9 +29,11 @@ from snapshots, and a moving object is re-rasterized every voxel frame.
   draws the tree again. A streamed tile redraws its stand trees standing when built, then the
   marker state is applied again. The far lattice keeps showing stand trees standing.
 - **Felling switches to physics once.** The trunk above the 0.3 m cut is exactly the props' log
-  (r 0.2 m, 2 m), so the felled trunk is a pooled log body placed where the trunk stood, tipped 4°
-  away from the side it was cut from and given a slow start: it falls predictably (measured: within
-  5° of the predicted direction from eight sides). The crown is a separate non-colliding entity that
+  (r 0.2 m, 2 m), so the felled trunk is a pooled log body placed where the trunk stood and given a
+  slow start. Its starting tilt is the tree's lean (its weight: `StandTree.lean`, drawn leaning,
+  up to about 6°) plus a 4° push away from the side it was cut from, so the fall is predictable and
+  the toast can say where (measured: within 1.4° of the prediction from eight sides). A tree leaning
+  more than the push falls its own way. The crown is a separate non-colliding entity that
   rides the log and breaks off (a needle burst) once the trunk has tipped 62°. It is drawn on the
   coarse lattice (ADR 0011) because of its size, so it costs little for the second it exists.
 - **Pools, not spawning.** Felled logs (6, each with a crown), short logs (6) and sawn planks (15)
@@ -43,7 +45,8 @@ from snapshots, and a moving object is re-rasterized every voxel frame.
   the guide for 0.5 s is taken: its body is disabled at once, so nothing can grab, push or feed it
   again, and the sim moves its entity through the blade. Safety: the blade stops while a player is
   in its guard zone; planks only come out where a box query finds the rack clear (one per tick, so
-  each query sees the last). A log makes 3 planks, a short log 1.
+  each query sees the last). A log makes 3 planks, a short log 1. A lever on the machine switches
+  it to beams: one 3.2 m beam (`beam-12` on) from a whole log.
 - **Resources come back.** A stump regrows after 45 s once its log is 3 m away (or sawn) and nobody
   stands there; the level's own logs come back to their pile 20 s after being sawn; pooled pieces
   lost in the creek return to their pool.
@@ -58,6 +61,7 @@ from snapshots, and a moving object is re-rasterized every voxel frame.
   pooled piece out), well inside the 4 KiB presence budget.
 - Pools can run out: with 15 sawn planks lying about the sawmill waits ("use some first"), and with
   six felled logs lying about no tree can be felled until one is sawn. Players are told why.
-- A 2 m log is sawn into 2.4 m planks, and the yard's 2.6 m creek gap needs the beams (planks deck
-  them); the Valley's gorge spans (2.2 m) take sawn planks directly. Beams from the sawmill were
-  left out.
+- A 2 m log is sawn into 2.4 m planks or a 3.2 m beam (the game's sizes, not a sawyer's). The
+  yard's 2.6 m creek gap needs beams, which the planks deck.
+- The gate is tested by player input only (`tests/unit/forestry-gate.test.ts`), including online
+  through the real host and guest sessions.

@@ -2152,7 +2152,9 @@ window.__riverLab = {
     /** Logging: each stand tree's phase and cut, and the sawmill's state and totals. */
     wood: () => ({
         trees: Array.from({ length: sim.forestry.treeCount }, (_, n) => sim.forestry.treeState(n)),
-        sawmill: sim.sawmill ? { phase: sim.sawmill.phase, stopped: sim.sawmill.stopped, ...sim.sawmill.stats } : null
+        sawmill: sim.sawmill
+            ? { phase: sim.sawmill.phase, stopped: sim.sawmill.stopped, mode: sim.sawmill.mode, ...sim.sawmill.stats }
+            : null
     }),
     /** The ute: where it is, which way it faces (yaw 0 = +z), its speed and who drives it (-1: nobody). */
     ute() {

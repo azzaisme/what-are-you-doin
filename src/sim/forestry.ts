@@ -516,8 +516,7 @@ export class Forestry {
     /** Free sawn pieces of a kind (planks or beams) in their pool. */
     freeSawn(kind: 'plank' | 'beam' = 'plank'): number {
         let n = 0;
-        for (const e of kind === 'beam' ? this.ents.beams : this.ents.sawn)
-            if (!this.pw.bodies.get(e.id)!.enabled) n++;
+        for (const e of kind === 'beam' ? this.ents.beams : this.ents.sawn) if (!this.pw.bodies.get(e.id)!.enabled) n++;
         return n;
     }
 
@@ -567,7 +566,8 @@ export class Forestry {
     /** Every pooled piece back in its pool, trees and the axe as they were (Reset props). */
     resetProps(): void {
         const pw = this.pw;
-        for (const e of [...this.ents.felled, ...this.ents.short, ...this.ents.sawn, ...this.ents.beams]) this.take(e.id);
+        for (const e of [...this.ents.felled, ...this.ents.short, ...this.ents.sawn, ...this.ents.beams])
+            this.take(e.id);
         for (const e of this.levelLogs) {
             this.respawnAt.delete(e.id);
             if (pw.bodies.has(e.id)) pw.setEnabled(e.id, true);
