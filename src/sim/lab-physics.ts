@@ -33,7 +33,7 @@ export interface PropDef {
 
 const PLANK: { shape: ShapeSpec; opts: BodyOptions } = {
     shape: { type: 'box', hx: 1.2, hy: 0.1, hz: 0.05 },
-    opts: { density: 500, friction: 0.7, restitution: 0.1, ccd: true }
+    opts: { density: 500, friction: 0.7, restitution: 0.1, ccd: true, nailable: true }
 };
 
 /**
@@ -46,17 +46,24 @@ export function propBody(name: string): { shape: ShapeSpec; opts: BodyOptions } 
     if (name.startsWith('beam'))
         return {
             shape: { type: 'box', hx: BEAM_HALF.x, hy: BEAM_HALF.y, hz: BEAM_HALF.z },
-            opts: { density: 380, friction: 0.75, restitution: 0.05, ccd: true, wristTorque: GRAB.braceTorque }
+            opts: {
+                density: 380,
+                friction: 0.75,
+                restitution: 0.05,
+                ccd: true,
+                wristTorque: GRAB.braceTorque,
+                nailable: true
+            }
         };
     if (name === 'log' || name.startsWith('extra-log'))
         return {
             shape: { type: 'cylinder', axis: 'x', r: LOG_RADIUS, half: 1.0 },
-            opts: { density: 450, friction: 0.8, restitution: 0.05, angularDamping: 0.4 }
+            opts: { density: 450, friction: 0.8, restitution: 0.05, angularDamping: 0.4, nailable: true }
         };
     if (name === 'cube' || name.startsWith('crate-'))
         return {
             shape: { type: 'box', hx: 0.25, hy: 0.25, hz: 0.25 },
-            opts: { density: 200, friction: 0.7, restitution: 0.1 }
+            opts: { density: 200, friction: 0.7, restitution: 0.1, nailable: true }
         };
     if (name === 'sphere')
         return {

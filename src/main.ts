@@ -28,6 +28,7 @@ import { GuestSession, HostSession, listGames } from './net/session.ts';
 import type { GameAd } from './net/session.ts';
 import { localTransport, roomTransport } from './net/transport.ts';
 import type { NetTransport } from './net/transport.ts';
+import { NailMarkers } from './render/nail-markers.ts';
 import { ReferenceRenderer } from './render/reference.ts';
 import { QUALITY, createLabScene } from './render/scene.ts';
 import type { Quality } from './render/scene.ts';
@@ -38,11 +39,14 @@ import { FixedStepClock, SIM_DT, VOXEL_RATES, VoxelClock } from './sim/clock.ts'
 import type { VoxelRate } from './sim/clock.ts';
 import { ACTION_DROP_TEST, ACTION_RAGDOLL, ACTION_RESET_PROPS, neutralCommand } from './sim/commands.ts';
 import type { PlayerCommand } from './sim/commands.ts';
+import { nailMarks } from './sim/joints/wire.ts';
+import type { NailMark } from './sim/joints/wire.ts';
 import { EYE_HEIGHT, LabSim } from './sim/lab-sim.ts';
 import type { PropsMode } from './sim/lab-sim.ts';
 import { initPhysics } from './sim/physics/world.ts';
 import { ANIM_MAX } from './sim/snapshots.ts';
 import type { CameraControlsApi } from './types/engine-scripts.ts';
+import { withHammer } from './ui/hammer-hud.ts';
 import { OnlinePanel } from './ui/online-panel.ts';
 import { SettingsMenu } from './ui/settings-menu.ts';
 import type { SettingValue } from './ui/settings-menu.ts';
@@ -191,6 +195,7 @@ const tUpload = performance.now();
 pipeline.applyStatic();
 const staticUploadMs = performance.now() - tUpload;
 const reference = new ReferenceRenderer(app, sim, scene.worldLayer, scene.immediateLayer);
+const nailMarkers = new NailMarkers(app, scene.worldLayer, scene.immediateLayer);
 const fpInput = new FirstPersonInput(canvas);
 
 // ---- particles (voxel cells): falling leaves, landing dust and chips, splashes
@@ -558,6 +563,7 @@ class LabDirector extends Script {
             bodyNow = { x: bodyPose.p.x, y: bodyPose.p.y, z: bodyPose.p.z, yaw: fpInput.yaw + Math.PI };
         pipeline.lockBody(sim.fpBody.id, bodyNow);
         reference.update(renderTime);
+        updateNails(renderTime);
         if (state.colliders) drawColliders();
         // gusts stir the water
         windAt(renderTime, level.wind ?? CALM, windNow);
@@ -1075,7 +1081,7 @@ function updateHud(): void {
         state.mode === 'orbit'
             ? 'Drag to orbit · right-drag to pan · wheel to zoom · <kbd>V</kbd> first person · <kbd>H</kbd> hide UI'
             : sim.physicsProps
-              ? 'Click to look · <kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>LMB</kbd>/<kbd>E</kbd> grab / release · <kbd>RMB</kbd> throw · wheel reach · <kbd>Q</kbd> drop · <kbd>G</kbd> plank · <kbd>T</kbd> ragdoll · <kbd>Esc</kbd> release mouse · <kbd>V</kbd> orbit'
+              ? 'Click to look · <kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>LMB</kbd>/<kbd>E</kbd> grab / release · <kbd>RMB</kbd> throw · wheel reach · <kbd>Q</kbd> drop · <kbd>F</kbd> nail · <kbd>G</kbd> plank · <kbd>T</kbd> ragdoll · <kbd>Esc</kbd> release mouse · <kbd>V</kbd> orbit'
               : 'Click to look · <kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>G</kbd> carry plank · <kbd>Esc</kbd> release mouse · <kbd>V</kbd> orbit';
     const short =
         state.mode === 'orbit'
@@ -1198,11 +1204,20 @@ function interactionText(i: number, pad: boolean): string {
     if (it.seat >= 0) return pad ? 'Riding along · RT get out' : 'Riding along · click or E to get out';
     if (it.target === 'ute') return pad ? 'RT to drive the ute' : 'Click to drive the ute';
     if (it.holding)
-        return pad
-            ? `Holding ${propLabel(it.holding)}${both} · RT release · RB throw · B drop`
-            : `Holding ${propLabel(it.holding)}${both} · click to release · right-click to throw · wheel to adjust reach`;
-    if (it.target) return pad ? `RT to grab ${propLabel(it.target)}` : `Click to grab ${propLabel(it.target)}`;
-    return '';
+        return withHammer(
+            pad
+                ? `Holding ${propLabel(it.holding)}${both} · RT release · RB throw · B drop`
+                : `Holding ${propLabel(it.holding)}${both} · click to release · right-click to throw · wheel to adjust reach`,
+            it.nail,
+            pad ? 'pad' : 'mouse'
+        );
+    if (it.target)
+        return withHammer(
+            pad ? `RT to grab ${propLabel(it.target)}` : `Click to grab ${propLabel(it.target)}`,
+            it.nail,
+            pad ? 'pad' : 'mouse'
+        );
+    return withHammer('', it.nail, pad ? 'pad' : 'mouse');
 }
 
 /** A guest's prompt comes from the host (guests run no physics). */
@@ -1212,12 +1227,45 @@ function guestInteraction(): {
     shared: boolean;
     driving: boolean;
     seat: number;
+    nail: number;
 } | null {
     if (!guestSession) return null;
     const h = guestSession.hud[guestSession.slot];
-    if (!h) return { holding: null, target: null, shared: false, driving: false, seat: -1 };
+    if (!h) return { holding: null, target: null, shared: false, driving: false, seat: -1, nail: 0 };
     const name = (id: number) => (id < 0 ? null : (sim.entities.find((e) => e.id === id)?.name ?? null));
-    return { holding: name(h.held), target: name(h.target), shared: h.shared, driving: h.driving, seat: h.seat };
+    return {
+        holding: name(h.held),
+        target: name(h.target),
+        shared: h.shared,
+        driving: h.driving,
+        seat: h.seat,
+        nail: h.nail
+    };
+}
+
+/** Nail heads (the host's graph, or what it sent a guest) and this view's hammer preview. */
+let hostNails: NailMark[] = [];
+let hostNailsKey: unknown = null;
+let hostNailsVersion = -1;
+function updateNails(time: number): void {
+    let marks: NailMark[];
+    if (guestSession) marks = guestSession.nails;
+    else {
+        const g = sim.joints.graph;
+        if (g !== hostNailsKey || g.version !== hostNailsVersion) {
+            hostNailsKey = g;
+            hostNailsVersion = g.version;
+            const index = new Map(sim.entities.map((e, i) => [e.id, i]));
+            hostNails = nailMarks(g, (id) => index.get(id) ?? -1);
+        }
+        marks = hostNails;
+    }
+    let preview: { x: number; y: number; z: number; ok: boolean } | null = null;
+    if (state.mode === 'firstPerson') {
+        const h = guestSession ? guestSession.hud[guestSession.slot] : sim.interactionIds(0);
+        if (h?.nailAt && h.nail > 0) preview = { ...h.nailAt, ok: h.nail === 1 };
+    }
+    nailMarkers.update(marks, sim.ring, time, tierCellCm('base', cellCm) / 100, preview);
 }
 
 /** The ute's yaw last render frame, per local view (NaN when that view's player isn't in it). */
@@ -1257,12 +1305,10 @@ function updatePrompt(): void {
                 : it.seat >= 0
                   ? 'Riding along · grab to get out'
                   : it.holding
-                    ? `Holding ${propLabel(it.holding)}${it.shared ? ' together' : ''}`
+                    ? withHammer(`Holding ${propLabel(it.holding)}${it.shared ? ' together' : ''}`, it.nail, 'touch')
                     : it.target === 'ute'
                       ? 'Grab to drive the ute'
-                      : it.target
-                        ? `Grab ${propLabel(it.target)}`
-                        : '';
+                      : withHammer(it.target ? `Grab ${propLabel(it.target)}` : '', it.nail, 'touch');
         } else if (!fpInput.locked && !pads.players[0]) t = 'Click to look around';
         else t = interactionText(0, !fpInput.locked);
     }
@@ -2116,6 +2162,13 @@ window.__riverLab = {
         return true;
     },
     interaction: () => sim.interaction(),
+    /** The joint graph: connections, nails, and nail heads drawn this frame. */
+    joints: () => ({
+        connections: sim.joints.graph.size,
+        nails: sim.joints.graph.nailCount,
+        drawn: nailMarkers.drawn,
+        preview: sim.nailPreview(0)
+    }),
     /** The ute: where it is, which way it faces (yaw 0 = +z), its speed and who drives it (-1: nobody). */
     ute() {
         const p = sim.ute.pose;

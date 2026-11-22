@@ -27,7 +27,15 @@ type Lab = {
     level: string;
     progress(): { goalReached: boolean; falls: number; recoveries: number; events: string[] };
     placeProp(name: string, x: number, y: number, z: number, yaw?: number): boolean;
-    interaction(): { holding: string | null; target: string | null; shared: boolean; driving: boolean; seat: number };
+    interaction(): {
+        holding: string | null;
+        target: string | null;
+        shared: boolean;
+        driving: boolean;
+        seat: number;
+        nail: number;
+    };
+    joints(): { connections: number; nails: number; drawn: number; preview: unknown };
     teleport(x: number, z: number, yaw?: number): void;
     ute(): { x: number; y: number; z: number; yaw: number; speed: number; driver: number; drivable: boolean };
 };
@@ -497,6 +505,44 @@ test('the Timber Yard ute: get in, drive it with the keyboard, get out', async (
     const p = await lab(page, (l) => l.player());
     const u1 = await lab(page, (l) => l.ute());
     expect(Math.hypot(p.x - u1.x, p.z - u1.z)).toBeGreaterThan(1);
+    expect(problems).toEqual([]);
+});
+
+test('the Timber Yard hammer: look at a beam, F nails it down and the nail head shows', async ({ page }) => {
+    test.setTimeout(300_000);
+    const problems = await boot(page, '?level=yard&t=0.01&quality=low#cell100');
+    await lab(page, (l) => l.action('pause'));
+    const p0 = await lab(page, (l) => l.player());
+    // a beam on its edge on the ground 0.6 m in front of you (yaw 0 looks along -z), across your
+    // view; look steeply down at the near side of its top, so the nail comes out of its bottom
+    await page.evaluate(
+        ([x, y, z, eye]) => {
+            const l = (window as unknown as { __riverLab: Lab }).__riverLab;
+            l.teleport(x, z, 0);
+            l.placeProp('beam-0', x, y + 0.3, z - 0.6, 0);
+            l.look(0, -Math.atan2(eye - 0.2, 0.55));
+        },
+        [p0.x, p0.y, p0.z, p0.eyeHeight]
+    );
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().nail === 1,
+        null,
+        { timeout: 60_000 }
+    );
+    expect(await lab(page, (l) => l.joints().nails)).toBe(0);
+    await page.keyboard.press('KeyF');
+    await page.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.joints().nails === 1, null, {
+        timeout: 30_000
+    });
+    await page.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.joints().drawn === 1, null, {
+        timeout: 30_000
+    });
+    // the same spot again is refused: still one nail
+    await page.keyboard.press('KeyF');
+    await page.waitForTimeout(500);
+    expect(await lab(page, (l) => l.joints())).toMatchObject({ connections: 1, nails: 1 });
+    expect(await lab(page, (l) => l.interaction().nail)).toBeGreaterThan(1);
+    await page.screenshot({ path: 'test-results/hammer-nail.png' });
     expect(problems).toEqual([]);
 });
 

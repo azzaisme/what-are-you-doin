@@ -13,7 +13,9 @@ export const ACTION_DROP_TEST = 2;
 export const ACTION_RESET_PROPS = 3;
 /** Let go of whatever is held (Q). */
 export const ACTION_DROP = 4;
-export const ACTION_MAX = 4;
+/** Swing the hammer: nail what the crosshair is on to what lies behind it (F). */
+export const ACTION_NAIL = 5;
+export const ACTION_MAX = 5;
 
 export interface PlayerCommand {
     seq: number;

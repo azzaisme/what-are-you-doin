@@ -1,0 +1,537 @@
+import RAPIER from '@dimforge/rapier3d-compat';
+import { beforeAll, describe, expect, it } from 'vitest';
+
+import { GROUND, JointGraph, NAIL } from '../../src/sim/joints/graph.ts';
+import { JointSystem } from '../../src/sim/joints/joints.ts';
+import { PhysicsWorld, initPhysics } from '../../src/sim/physics/world.ts';
+import type { BodyOptions } from '../../src/sim/physics/world.ts';
+import { pose, quatFromYawPitchRoll } from '../../src/voxels/math.ts';
+
+beforeAll(() => initPhysics());
+
+const ident = { x: 0, y: 0, z: 0, w: 1 };
+const zero = { x: 0, y: 0, z: 0 };
+const TIMBER: BodyOptions = { density: 500, friction: 0.7, nailable: true };
+
+/** Yaw and pitch that look from `eye` at `at`. */
+function aim(eye: { x: number; y: number; z: number }, at: { x: number; y: number; z: number }) {
+    const dx = at.x - eye.x;
+    const dy = at.y - eye.y;
+    const dz = at.z - eye.z;
+    return { yaw: Math.atan2(-dx, -dz), pitch: Math.atan2(dy, Math.hypot(dx, dz)) };
+}
+
+/** Swings a hammer from 0.9 m above and 0.3 m to the +z side of a point, at it. */
+function hammerAt(js: JointSystem, at: { x: number; y: number; z: number }, tick = 0) {
+    const eye = { x: at.x, y: at.y + 0.9, z: at.z + 0.3 };
+    const { yaw, pitch } = aim(eye, at);
+    return js.nail(eye, yaw, pitch, 0, tick);
+}
+function previewAt(js: JointSystem, at: { x: number; y: number; z: number }) {
+    const eye = { x: at.x, y: at.y + 0.9, z: at.z + 0.3 };
+    const { yaw, pitch } = aim(eye, at);
+    return js.preview(eye, yaw, pitch, 0);
+}
+
+function world(): PhysicsWorld {
+    const pw = new PhysicsWorld();
+    pw.addTerrain(() => 0, -20, 20, -20, 20, 40);
+    pw.createCharacter(0, 0, 8, 0);
+    return pw;
+}
+const run = (pw: PhysicsWorld, n: number) => {
+    for (let i = 0; i < n; i++) pw.step();
+};
+
+describe('joint graph (#47)', () => {
+    const base = { type: 'nail' as const, anchorA: zero, anchorB: zero, rel: ident, stiffness: 1, tick: 0 };
+
+    it('keeps one connection per pair and refuses self links and ground-to-ground', () => {
+        const g = new JointGraph();
+        const c = g.add({ ...base, a: 1, b: 2, nails: [zero] });
+        expect(c).not.toBeNull();
+        expect(g.add({ ...base, a: 2, b: 1, nails: [zero] })).toBeNull();
+        expect(g.add({ ...base, a: 1, b: 1, nails: [zero] })).toBeNull();
+        expect(g.add({ ...base, a: GROUND, b: GROUND, nails: [zero] })).toBeNull();
+        expect(g.size).toBe(1);
+        expect(g.find(2, 1)).toBe(c);
+        expect(c!.strength).toBe(NAIL.strength);
+        expect(c!.fatigue).toBe(0);
+    });
+
+    it('takes more nails at new spots as strength, refuses the same spot and past the limit', () => {
+        const g = new JointGraph();
+        const c = g.add({ ...base, a: 1, b: 2, nails: [zero] })!;
+        const v0 = g.version;
+        expect(g.addNail(c.id, { x: 0.01, y: 0, z: 0 })).toBe('same-spot');
+        expect(g.version).toBe(v0);
+        expect(g.addNail(c.id, { x: 0.1, y: 0, z: 0 })).toBe('none');
+        expect(c.strength).toBe(2 * NAIL.strength);
+        for (let k = 2; k < NAIL.maxPerJoint; k++)
+            expect(g.addNail(c.id, { x: 0.1 * (k + 1), y: 0, z: 0 })).toBe('none');
+        expect(g.addNail(c.id, { x: 2, y: 0, z: 0 })).toBe('full');
+        expect(g.nailCount).toBe(NAIL.maxPerJoint);
+        expect(g.version).toBeGreaterThan(v0);
+    });
+
+    it('knows which pieces hang together and whether they are anchored', () => {
+        const g = new JointGraph();
+        g.add({ ...base, a: 1, b: 2, nails: [zero] });
+        g.add({ ...base, a: 3, b: 2, nails: [zero] });
+        g.add({ ...base, a: 5, b: 6, nails: [zero] });
+        expect([...g.group(1).bodies].sort()).toEqual([1, 2, 3]);
+        expect(g.group(1).anchored).toBe(false);
+        g.add({ ...base, type: 'anchor', a: 3, b: GROUND, nails: [zero] });
+        expect(g.group(2).anchored).toBe(true);
+        expect(g.group(5).anchored).toBe(false);
+        g.remove(g.find(3, GROUND)!.id);
+        expect(g.group(1).anchored).toBe(false);
+    });
+
+    it('treats ground as separate anchor sites: one beam can be anchored at both ends', () => {
+        const g = new JointGraph();
+        const near = g.add({
+            ...base,
+            type: 'anchor',
+            a: 1,
+            b: GROUND,
+            anchorB: { x: 0, y: 0, z: 1.5 },
+            nails: [zero]
+        });
+        expect(
+            g.add({ ...base, type: 'anchor', a: 1, b: GROUND, anchorB: { x: 0, y: 0, z: 1.3 }, nails: [zero] })
+        ).toBeNull();
+        const far = g.add({
+            ...base,
+            type: 'anchor',
+            a: 1,
+            b: GROUND,
+            anchorB: { x: 0, y: 0, z: -1.5 },
+            nails: [zero]
+        });
+        expect(far).not.toBeNull();
+        expect(g.find(1, GROUND, { x: 0, y: 0, z: 1.4 })).toBe(near);
+        expect(g.find(1, GROUND, { x: 0, y: 0, z: -1.4 })).toBe(far);
+        expect(g.find(1, GROUND, { x: 0, y: 0, z: 0 })).toBeUndefined();
+    });
+});
+
+describe('hammer and nails (#48)', () => {
+    it('nails a plank lying on a stone block to it: an anchor that holds against a pull', () => {
+        const pw = world();
+        pw.addStatic(RAPIER.ColliderDesc.cuboid(1, 0.25, 1).setTranslation(0, 0.25, 0));
+        pw.addDynamic(1, { type: 'box', hx: 1.2, hy: 0.05, hz: 0.1 }, pose(0, 0.56, 0), TIMBER);
+        run(pw, 60);
+        const js = new JointSystem(pw);
+        const pv = previewAt(js, { x: 0.5, y: 0.55, z: 0 });
+        expect(pv.a).toBe(1);
+        expect(pv.b).toBe(GROUND);
+        expect(pv.refusal).toBe('none');
+        hammerAt(js, { x: 0.5, y: 0.55, z: 0 });
+        expect(js.graph.size).toBe(1);
+        const c = js.graph.find(1, GROUND)!;
+        expect(c.type).toBe('anchor');
+        // a hard sideways shove for a second: an unfastened plank would slide right off
+        const b = pw.bodies.get(1)!.body;
+        const p0 = { ...b.translation() };
+        for (let i = 0; i < 60; i++) {
+            b.applyImpulse({ x: 0, y: 0, z: 200 / 60 }, true);
+            pw.step();
+        }
+        const p1 = b.translation();
+        expect(Math.hypot(p1.x - p0.x, p1.y - p0.y, p1.z - p0.z)).toBeLessThan(0.02);
+        // the same spot again is refused; a new spot reinforces the same connection
+        expect(previewAt(js, { x: 0.5, y: 0.55, z: 0 }).refusal).toBe('same-spot');
+        hammerAt(js, { x: 0.3, y: 0.55, z: 0 });
+        expect(js.graph.size).toBe(1);
+        expect(c.nails.length).toBe(2);
+        // a metre along is another anchor site
+        hammerAt(js, { x: -0.5, y: 0.55, z: 0 });
+        expect(js.graph.size).toBe(2);
+    });
+
+    it('nails a plank across another: they move as one piece', () => {
+        const pw = world();
+        pw.addDynamic(1, { type: 'box', hx: 1.2, hy: 0.05, hz: 0.1 }, pose(0, 0.05, 0), TIMBER);
+        pw.addDynamic(
+            2,
+            { type: 'box', hx: 1.2, hy: 0.05, hz: 0.1 },
+            pose(0, 0.15, 0, quatFromYawPitchRoll(Math.PI / 2, 0, 0)),
+            TIMBER
+        );
+        run(pw, 60);
+        const js = new JointSystem(pw);
+        const pv = hammerAt(js, { x: 0, y: 0.2, z: 0 });
+        expect(pv.refusal).toBe('none');
+        expect(pv.a).toBe(2);
+        expect(pv.b).toBe(1);
+        // lift the top plank by one end: the bottom one comes along
+        const top = pw.bodies.get(2)!.body;
+        const bottom = pw.bodies.get(1)!.body;
+        for (let i = 0; i < 90; i++) {
+            top.applyImpulseAtPoint(
+                { x: 0, y: ((top.mass() + bottom.mass()) * 9.81 * 1.3) / 60, z: 0 },
+                top.translation(),
+                true
+            );
+            pw.step();
+        }
+        expect(bottom.translation().y).toBeGreaterThan(0.3);
+        const dy = top.translation().y - bottom.translation().y;
+        expect(dy).toBeGreaterThan(0.08);
+        expect(dy).toBeLessThan(0.12);
+    });
+
+    it('refuses a gap, a glancing blow, something too thick, non-timber, and a body sliding past', () => {
+        const pw = world();
+        pw.addStatic(RAPIER.ColliderDesc.cuboid(1, 0.25, 1).setTranslation(0, 0.25, 0));
+        // a plank held 10 cm above the block: a gap (kinematic-like: no gravity)
+        const hover = pw.addDynamic(1, { type: 'box', hx: 1.2, hy: 0.05, hz: 0.1 }, pose(0, 0.65, 0), TIMBER);
+        hover.body.setGravityScale(0, true);
+        run(pw, 1);
+        const js = new JointSystem(pw);
+        expect(previewAt(js, { x: 0, y: 0.7, z: 0 }).refusal).toBe('gap');
+        // a log on the block is too thick to nail down through
+        pw.place(1, pose(0, -5, 5));
+        pw.addDynamic(2, { type: 'cylinder', axis: 'x', r: 0.2, half: 1 }, pose(0, 0.71, 0), {
+            ...TIMBER,
+            friction: 1
+        });
+        pw.bodies.get(2)!.body.setGravityScale(0, true);
+        run(pw, 1);
+        expect(previewAt(js, { x: 0, y: 0.91, z: 0 }).refusal).toBe('too-thick');
+        pw.place(2, pose(5, -5, 5));
+        // a crate that is not timber
+        pw.addDynamic(3, { type: 'box', hx: 0.2, hy: 0.05, hz: 0.2 }, pose(0, 0.55, 0), { density: 300 });
+        pw.bodies.get(3)!.body.setGravityScale(0, true);
+        run(pw, 1);
+        const pv = previewAt(js, { x: 0, y: 0.6, z: 0 });
+        expect(pv.a).toBe(3);
+        expect(pv.refusal).toBe('not-timber');
+        pw.place(3, pose(-5, -5, 5));
+        // a plank sliding across the block
+        pw.addDynamic(4, { type: 'box', hx: 1.2, hy: 0.05, hz: 0.1 }, pose(0, 0.55, 0), TIMBER);
+        pw.bodies.get(4)!.body.setGravityScale(0, true);
+        pw.bodies.get(4)!.body.setLinvel({ x: 1, y: 0, z: 0 }, true);
+        run(pw, 1);
+        expect(previewAt(js, { x: 0, y: 0.6, z: 0 }).refusal).toBe('moving');
+        // a glancing look along the top face
+        pw.bodies.get(4)!.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        const eye = { x: 0, y: 0.62, z: 2 };
+        const { yaw, pitch } = aim(eye, { x: 0, y: 0.6, z: 0 });
+        expect(js.preview(eye, yaw, pitch, 0).refusal).toBe('glancing');
+        // nothing at all was fastened
+        expect(js.graph.size).toBe(0);
+    });
+
+    it('a nailed piece put elsewhere (respawn, recovery) comes loose', () => {
+        const pw = world();
+        pw.addStatic(RAPIER.ColliderDesc.cuboid(1, 0.25, 1).setTranslation(0, 0.25, 0));
+        pw.addDynamic(1, { type: 'box', hx: 1.2, hy: 0.05, hz: 0.1 }, pose(0, 0.56, 0), TIMBER);
+        run(pw, 30);
+        const js = new JointSystem(pw);
+        hammerAt(js, { x: 0.5, y: 0.55, z: 0 });
+        expect(js.graph.size).toBe(1);
+        pw.respawn(1);
+        expect(js.graph.size).toBe(0);
+        expect(pw.world.impulseJoints.len()).toBe(0);
+    });
+});
+
+/** Lays both yard beams across the creek under the ute's wheel tracks, nails them (or not), drives. */
+async function beamCrossing(nailed: boolean) {
+    const { LabSim } = await import('../../src/sim/lab-sim.ts');
+    const { timberYardLevel, BRIDGE, BRIDGE_X, YARD_Y } = await import('../../src/levels/timber-yard.ts');
+    const { neutralCommand } = await import('../../src/sim/commands.ts');
+    const { quatMul } = await import('../../src/voxels/math.ts');
+    const { UTE_TRACK_HALF } = await import('../../src/assets/ute.ts');
+    const s = new LabSim({ level: timberYardLevel });
+    const byName = (n: string) => s.entities.find((e) => e.name === n)!;
+    const flatAlongZ = quatMul(quatFromYawPitchRoll(Math.PI / 2, 0, 0), quatFromYawPitchRoll(0, Math.PI / 2, 0));
+    const beams = [byName('beam-0'), byName('beam-1')];
+    const xs = [BRIDGE_X - UTE_TRACK_HALF, BRIDGE_X + UTE_TRACK_HALF];
+    // dropped from just above both capstones (the far one is 10 cm higher)
+    beams.forEach((b, i) => s.physics.place(b.id, pose(xs[i], YARD_Y + 0.3, BRIDGE.zc, flatAlongZ)));
+    let n = 0;
+    for (; n < 60; n++) s.step(neutralCommand(n));
+    const refusals: string[] = [];
+    if (nailed) {
+        // a nail through each beam end into its abutment's capstone
+        for (let i = 0; i < 2; i++) {
+            for (const end of [-1, 1]) {
+                const z = BRIDGE.zc + end * (BRIDGE.gap / 2 + 0.13);
+                const pv = hammerAt(s.joints, { x: xs[i], y: beams[i].pose.p.y + 0.12, z }, n);
+                refusals.push(pv.b === GROUND ? pv.refusal : `b=${pv.b}`);
+            }
+        }
+    }
+    const joints = s.joints.graph.size;
+    const v = s.vehicle!;
+    s.physics.place(v.id, pose(BRIDGE_X, YARD_Y + 0.25, BRIDGE.nearEdge + 3.2, quatFromYawPitchRoll(Math.PI, 0, 0)));
+    for (; n < 120; n++) s.step(neutralCommand(n));
+    s.fpActive = true;
+    s.step(neutralCommand(n++));
+    expect(s.takeDriverSeat(0)).toBe(true);
+    let maxLoad = 0;
+    let minY = Infinity;
+    const target = BRIDGE.farEdge - 2.5;
+    for (let k = 0; k < 60 * 20 && s.ute.pose.p.z > target; k++, n++) {
+        // a careful driver keeps the wheels on the beams: steer back onto the line and heading
+        const q = s.ute.pose.q;
+        const yaw = Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.x * q.x));
+        let dy = yaw - Math.PI;
+        dy -= Math.round(dy / (2 * Math.PI)) * 2 * Math.PI;
+        const steer = Math.max(-1, Math.min(1, 4 * (BRIDGE_X - s.ute.pose.p.x) + 3 * dy));
+        s.step({ ...neutralCommand(n, Math.PI), moveZ: 0.35, moveX: steer });
+        if (v.groundIds.some((id) => id === beams[0].id || id === beams[1].id))
+            maxLoad = Math.max(maxLoad, v.lastGroundImpulse * 60);
+        const u = s.ute.pose.p;
+        if (u.z < BRIDGE.nearFace && u.z > BRIDGE.farFace) minY = Math.min(minY, u.y);
+    }
+    const u = s.ute.pose.p;
+    const beamDrift = beams.map((b, i) => Math.hypot(b.pose.p.x - xs[i], b.pose.p.z - BRIDGE.zc));
+    console.log(
+        nailed ? 'nailed' : 'loose',
+        'ute reached z',
+        u.z.toFixed(2),
+        'far bank target',
+        target.toFixed(2),
+        'min y over gap',
+        (minY - YARD_Y).toFixed(3),
+        'max beam load / weight',
+        (maxLoad / v.weight()).toFixed(2),
+        'beam drift',
+        beamDrift.map((d) => d.toFixed(3)).join(' ')
+    );
+    return { s, u, target, minY, maxLoad, weight: v.weight(), beamDrift, refusals, joints, YARD_Y };
+}
+
+describe('a nailed beam bridge carries the ute across (Epic 5 gate)', () => {
+    it('two beams nailed to both abutments: the ute drives from bank to bank', async () => {
+        const r = await beamCrossing(true);
+        expect(r.refusals).toEqual(['none', 'none', 'none', 'none']);
+        // one anchor at each end of each beam
+        expect(r.joints).toBe(4);
+        // on the far bank, and it never dropped into the creek on the way
+        expect(r.u.z).toBeLessThan(r.target);
+        expect(r.minY).toBeGreaterThan(r.YARD_Y - 0.1);
+        expect(r.maxLoad).toBeGreaterThan(0.3 * r.weight);
+        // the bridge is still there, both beams still fastened at both ends
+        for (const d of r.beamDrift) expect(d).toBeLessThan(0.05);
+        expect(r.s.joints.graph.size).toBe(4);
+    }, 60_000);
+
+    it('is deterministic: the same nails and drive end in the same place', async () => {
+        const a = await beamCrossing(true);
+        const b = await beamCrossing(true);
+        expect(b.u.x).toBe(a.u.x);
+        expect(b.u.y).toBe(a.u.y);
+        expect(b.u.z).toBe(a.u.z);
+        expect(b.beamDrift).toEqual(a.beamDrift);
+    }, 60_000);
+
+    it('the same beams left loose: the crossing walks a beam off its line', async () => {
+        const r = await beamCrossing(false);
+        expect(Math.max(...r.beamDrift)).toBeGreaterThan(0.3);
+    }, 60_000);
+});
+
+describe('nails on the wire and from player input (#48, #53)', () => {
+    it('nail marks survive the wire; malformed bytes are rejected', async () => {
+        const { decodeNails, encodeNails } = await import('../../src/sim/joints/wire.ts');
+        const marks = [
+            { a: 3, b: -1, x: 0.123, y: -0.05, z: 1.5 },
+            { a: 7, b: 3, x: -1.6, y: 0.1, z: 0 }
+        ];
+        const back = decodeNails(encodeNails(marks), 10)!;
+        expect(back.length).toBe(2);
+        expect(back[0].b).toBe(-1);
+        expect(back[1].b).toBe(3);
+        for (let i = 0; i < 2; i++) {
+            expect(back[i].a).toBe(marks[i].a);
+            expect(Math.abs(back[i].x - marks[i].x)).toBeLessThan(0.001);
+            expect(Math.abs(back[i].z - marks[i].z)).toBeLessThan(0.001);
+        }
+        // an entity index this build doesn't have is dropped; garbage is refused
+        expect(decodeNails(encodeNails(marks), 5)!.length).toBe(1);
+        expect(decodeNails(new Uint8Array([9, 1, 0]), 10)).toBeNull();
+        expect(decodeNails(new Uint8Array([1, 200, 0]), 10)).toBeNull();
+    });
+
+    /** The yard with both beams laid across the creek; a player on the near bank looking at beam-0's end. */
+    async function yard() {
+        const { LabSim, EYE_HEIGHT } = await import('../../src/sim/lab-sim.ts');
+        const { timberYardLevel, BRIDGE, BRIDGE_X, YARD_Y } = await import('../../src/levels/timber-yard.ts');
+        const { neutralCommand } = await import('../../src/sim/commands.ts');
+        const { quatMul } = await import('../../src/voxels/math.ts');
+        const { UTE_TRACK_HALF } = await import('../../src/assets/ute.ts');
+        const s = new LabSim({ level: timberYardLevel });
+        const flatAlongZ = quatMul(quatFromYawPitchRoll(Math.PI / 2, 0, 0), quatFromYawPitchRoll(0, Math.PI / 2, 0));
+        const beam = s.entities.find((e) => e.name === 'beam-0')!;
+        const x = BRIDGE_X - UTE_TRACK_HALF;
+        s.physics.place(beam.id, pose(x, YARD_Y + 0.3, BRIDGE.zc, flatAlongZ));
+        for (let n = 0; n < 60; n++) s.step(neutralCommand(n));
+        // well back from the face: a nail slanting towards the creek must still come out in stone
+        const at = { x, y: beam.pose.p.y + 0.1, z: BRIDGE.nearFace + 0.22 };
+        const look = (i: number) => {
+            const p = s.players[i];
+            return aim({ x: p.x, y: p.y + EYE_HEIGHT, z: p.z }, at);
+        };
+        return { s, beam, x, BRIDGE, look, neutralCommand };
+    }
+
+    it('F on the beam end lying on the abutment nails it down (sanitized command path)', async () => {
+        const { ACTION_NAIL } = await import('../../src/sim/commands.ts');
+        const { s, beam, x, BRIDGE, look, neutralCommand } = await yard();
+        s.fpActive = true;
+        s.placePlayer(x + 0.3, BRIDGE.nearEdge + 0.5, 0, 0);
+        let n = 100;
+        for (let k = 0; k < 30; k++) s.step(neutralCommand(n++));
+        const { yaw, pitch } = look(0);
+        s.step({ ...neutralCommand(n++, yaw, pitch) });
+        // the prompt says it would hold, and where
+        const ids = s.interactionIds(0);
+        expect(ids.nail).toBe(1);
+        expect(ids.nailAt).not.toBeNull();
+        s.step({ ...neutralCommand(n++, yaw, pitch), action: ACTION_NAIL });
+        expect(s.joints.graph.size).toBe(1);
+        const c = [...s.joints.graph.connections()][0];
+        expect(c.a).toBe(beam.id);
+        expect(c.b).toBe(GROUND);
+        // a second blow at the same spot is refused (no duplicate)
+        s.step({ ...neutralCommand(n++, yaw, pitch), action: ACTION_NAIL });
+        expect(s.joints.graph.nailCount).toBe(1);
+        expect(s.interactionIds(0).nail).toBeGreaterThan(1);
+        // reset props puts the beam back where it started, loose
+        const { ACTION_RESET_PROPS } = await import('../../src/sim/commands.ts');
+        s.step({ ...neutralCommand(n++, yaw, pitch), action: ACTION_RESET_PROPS });
+        expect(s.joints.graph.size).toBe(0);
+    });
+
+    it('a guest swings the hammer online: the host fastens it and every guest gets the nail', async () => {
+        const { ACTION_NAIL } = await import('../../src/sim/commands.ts');
+        const { GuestSession, HostSession, listGames } = await import('../../src/net/session.ts');
+        const { MemoryHub } = await import('../../src/net/transport.ts');
+        const { LabSim } = await import('../../src/sim/lab-sim.ts');
+        const { timberYardLevel } = await import('../../src/levels/timber-yard.ts');
+        const { s: host, beam, x, BRIDGE, look, neutralCommand } = await yard();
+        const hub = new MemoryHub();
+        host.fpActive = true;
+        const hs = await HostSession.start(hub.transport('host'), host, 'yard', 'nail');
+        const ad = listGames(hub.channel('lobby', 'watcher'))[0];
+        const guests = [];
+        for (let k = 0; k < 2; k++)
+            guests.push(await GuestSession.join(hub.transport(`g${k}`), new LabSim({ level: timberYardLevel }), ad));
+        expect(guests[0].slot).toBe(1);
+        host.placePlayer(x, BRIDGE.nearEdge + 0.5, 0, 1);
+        let n = host.tick;
+        const tick = (guestCmd: ReturnType<typeof neutralCommand>) => {
+            guests[0].sendInput(guestCmd);
+            host.step(neutralCommand(n), hs.commandFor(1), [hs.commandFor(2), hs.commandFor(3)]);
+            hs.afterStep((slot) => host.interactionIds(slot));
+            n++;
+        };
+        for (let k = 0; k < 30; k++) tick(neutralCommand(n));
+        const { yaw, pitch } = look(1);
+        for (let k = 0; k < 6; k++) tick(neutralCommand(n, yaw, pitch));
+        // the guest's prompt comes from the host: a nail would hold here
+        expect(guests[0].hud[1].nail).toBe(1);
+        tick({ ...neutralCommand(n, yaw, pitch), action: ACTION_NAIL });
+        for (let k = 0; k < 6; k++) tick(neutralCommand(n, yaw, pitch));
+        expect(host.joints.graph.size).toBe(1);
+        expect([...host.joints.graph.connections()][0].a).toBe(beam.id);
+        const beamIndex = host.entities.indexOf(beam);
+        for (const g of guests) {
+            expect(g.nails.length).toBe(1);
+            expect(g.nails[0].a).toBe(beamIndex);
+            expect(g.nails[0].b).toBe(-1);
+        }
+        hs.stop();
+    });
+});
+
+describe('building the yard bridge with inputs only (Epic 5 gate)', () => {
+    it('shoulder both beams onto the wheel lines and nail them down with F: they hold', async () => {
+        const { LabSim, EYE_HEIGHT } = await import('../../src/sim/lab-sim.ts');
+        const { timberYardLevel, BRIDGE, BRIDGE_X } = await import('../../src/levels/timber-yard.ts');
+        const { ACTION_NAIL, neutralCommand } = await import('../../src/sim/commands.ts');
+        const { UTE_TRACK_HALF } = await import('../../src/assets/ute.ts');
+        type Cmd = ReturnType<typeof neutralCommand>;
+        const s = new LabSim({ level: timberYardLevel });
+        const byName = (name: string) => s.entities.find((e) => e.name === name)!;
+        let n = 0;
+        let yaw = 0;
+        let pitch = 0;
+        const step = (c: Partial<Cmd> = {}, k = 1) => {
+            for (let i = 0; i < k; i++) s.step({ ...neutralCommand(n++), yaw, pitch, ...c });
+        };
+        const ease = (to: number, k: number, set: (v: number) => void, from: number) => {
+            for (let i = 1; i <= k; i++) {
+                set(from + ((to - from) * i) / k);
+                step();
+            }
+        };
+        const goTo = (x: number, zStop: number) => {
+            // line up carefully (within 1.5 cm): the beam goes down where you stand
+            for (let i = 0; i < 900 && Math.abs(s.player.x - x) > 0.015; i++) {
+                const d = x - s.player.x;
+                step({ moveX: Math.max(-0.4, Math.min(0.4, d * 4)) });
+            }
+            for (let i = 0; i < 900 && s.player.z > zStop; i++) step({ moveZ: 0.5 });
+            step({}, 30);
+        };
+        step({}, 60);
+        s.fpActive = true;
+        const lines = [BRIDGE_X - UTE_TRACK_HALF, BRIDGE_X + UTE_TRACK_HALF];
+        const beams = [byName('beam-0'), byName('beam-1')];
+        for (let b = 0; b < 2; b++) {
+            const beam = beams[b];
+            // the yard playthrough's carry: take it by its +x end on the shoulder, turn to the creek
+            yaw = Math.PI / 2;
+            s.placePlayer(beam.pose.p.x + 2.4, beam.pose.p.z, yaw);
+            step({}, 20);
+            pitch = -Math.atan2(s.player.y + EYE_HEIGHT - beam.pose.p.y, s.player.x - (beam.pose.p.x + 1.45));
+            step({}, 5);
+            step({ grab: true });
+            expect(s.physics.heldId).toBe(beam.id);
+            ease(-0.25, 40, (v) => (pitch = v), pitch);
+            step({}, 30);
+            ease(0, 120, (v) => (yaw = v), yaw);
+            goTo(lines[b], BRIDGE.nearEdge + 0.4);
+            ease(-0.7, 40, (v) => (pitch = v), pitch);
+            step({}, 30);
+            step({ grab: true });
+            step({}, 120);
+            expect(s.physics.heldId).toBe(-1);
+            expect(Math.abs(beam.pose.p.z - BRIDGE.zc)).toBeLessThan(0.3);
+            // look at the beam where it lies on the near abutment and swing the hammer
+            const at = { x: beam.pose.p.x, y: beam.pose.p.y + 0.1, z: BRIDGE.nearFace + 0.22 };
+            const eye = { x: s.player.x, y: s.player.y + EYE_HEIGHT, z: s.player.z };
+            ({ yaw, pitch } = aim(eye, at));
+            step({}, 3);
+            expect(s.interactionIds(0).nail, `beam ${b}: ${JSON.stringify(s.nailPreview(0))}`).toBe(1);
+            step({ action: ACTION_NAIL });
+            // and a second nail beside it
+            ({ yaw, pitch } = aim(eye, { ...at, z: at.z + 0.08 }));
+            step({}, 3);
+            step({ action: ACTION_NAIL });
+            yaw = pitch = 0;
+            step({}, 10);
+        }
+        expect(s.joints.graph.size).toBe(2);
+        expect(s.joints.graph.nailCount).toBe(4);
+        expect(s.progress.falls).toBe(0);
+        for (const c of s.joints.graph.connections()) expect(c.b).toBe(GROUND);
+        // nailed down: a hard sideways shove (a tyre walking it) for a second moves neither beam
+        const before = beams.map((b) => ({ ...b.pose.p }));
+        for (let k = 0; k < 60; k++) {
+            for (const b of beams) s.physics.bodies.get(b.id)!.body.applyImpulse({ x: 400 / 60, y: 0, z: 0 }, true);
+            step();
+        }
+        beams.forEach((b, i) => {
+            const d = Math.hypot(b.pose.p.x - before[i].x, b.pose.p.y - before[i].y, b.pose.p.z - before[i].z);
+            console.log(`inputs-only bridge: beam ${i} moved ${(d * 1000).toFixed(1)} mm under a 400 N shove`);
+            expect(d).toBeLessThan(0.01);
+        });
+    }, 120_000);
+});

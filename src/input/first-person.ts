@@ -7,7 +7,7 @@
  * Edge-triggered requests (jump, grab, throw, actions) are queued and sent on exactly one command.
  */
 
-import { ACTION_DROP, ACTION_NONE, ACTION_RAGDOLL, PITCH_LIMIT } from '../sim/commands.ts';
+import { ACTION_DROP, ACTION_NAIL, ACTION_NONE, ACTION_RAGDOLL, PITCH_LIMIT } from '../sim/commands.ts';
 import type { PlayerCommand } from '../sim/commands.ts';
 
 export class FirstPersonInput {
@@ -38,6 +38,7 @@ export class FirstPersonInput {
             if (this.active && !e.repeat) {
                 if (e.code === 'KeyQ') this.actionQueued = ACTION_DROP;
                 if (e.code === 'KeyT') this.actionQueued = ACTION_RAGDOLL;
+                if (e.code === 'KeyF') this.actionQueued = ACTION_NAIL;
                 if (e.code === 'KeyE') this.grabQueued = true;
             }
             if (this.active && ['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();

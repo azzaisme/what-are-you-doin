@@ -79,6 +79,8 @@ export interface BodyOptions {
     grabPoint?: { x: number; y: number; z: number };
     /** Wrist strength for this body (N m), instead of GRAB.maxTorque (long timber is braced). */
     wristTorque?: number;
+    /** Timber: takes nails (src/sim/joints). */
+    nailable?: boolean;
 }
 
 export interface PhysBody {
@@ -99,6 +101,8 @@ export interface PhysBody {
     wristTorque?: number;
     /** Never sleeps (the ute): left out of the active-body count, which tracks things settling. */
     alwaysAwake?: boolean;
+    /** See BodyOptions.nailable. */
+    nailable?: boolean;
 }
 
 /**
@@ -247,6 +251,11 @@ export class PhysicsWorld {
     holdReach = Infinity;
     /** How far the shoulders are below the eye (m). */
     shoulderDrop = 0.2;
+    /**
+     * Called before a body is put somewhere by hand (place, respawn, recovery) or switched off: the
+     * joint system unfastens it, so no joint yanks it back.
+     */
+    onRelocate: ((id: number) => void) | null = null;
     readonly world: RAPIER.World;
     readonly bodies = new Map<number, PhysBody>();
     private readonly byCollider = new Map<number, PhysBody>();
@@ -379,6 +388,7 @@ export class PhysicsWorld {
             grabbable: o.grabbable ?? true,
             grabPoint: o.grabPoint,
             wristTorque: o.wristTorque,
+            nailable: o.nailable,
             spawn: { p: { ...spawn.p }, q: { ...spawn.q } },
             baseAngularDamping: o.angularDamping ?? 0.3,
             enabled: true,
@@ -483,7 +493,10 @@ export class PhysicsWorld {
     setEnabled(id: number, enabled: boolean): void {
         const b = this.bodies.get(id);
         if (!b || b.enabled === enabled) return;
-        if (!enabled) this.releaseBody(b);
+        if (!enabled) {
+            this.onRelocate?.(id);
+            this.releaseBody(b);
+        }
         b.enabled = enabled;
         b.body.setEnabled(enabled);
     }
@@ -492,6 +505,7 @@ export class PhysicsWorld {
     place(id: number, p: Pose, lin: Vec3Like = { x: 0, y: 0, z: 0 }, ang: Vec3Like = { x: 0, y: 0, z: 0 }): void {
         const b = this.bodies.get(id);
         if (!b) return;
+        this.onRelocate?.(id);
         this.releaseBody(b);
         b.body.setTranslation(p.p, true);
         b.body.setRotation(p.q, true);
@@ -628,6 +642,13 @@ export class PhysicsWorld {
     heldIdOf(p: number): number {
         const r = this.rigs[p];
         return r?.held ? r.held.id : -1;
+    }
+
+    /** Every player holding this body lets go. */
+    releaseAll(id: number): void {
+        this.rigs.forEach((r, p) => {
+            if (r.held?.id === id) this.release(p);
+        });
     }
 
     /** Number of players holding a body. */
