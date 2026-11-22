@@ -37,8 +37,22 @@ export const NAIL = {
     maxPerJoint: 4,
     /** Nails in the whole world (bounded network state). */
     maxTotal: 64,
-    /** Strength of one nail (N): shear capacity before a calibrated break (#49). */
+    /**
+     * Shear capacity of one nail (N), and its withdrawal capacity (N), for a calibrated break
+     * (#49): an 8 mm x 300 mm spike in C24 softwood (rho_k 350 kg/m3), characteristic values of
+     * EN 1995-1-1. Shear 8.2.2 (8.6 f): f_h,k = 0.082 rho_k d^-0.3 = 15.4 MPa, M_y,Rk = 0.3 f_u
+     * d^2.6 = 40.1 N m (f_u 600 MPa), 1.15 sqrt(2 M_y f_h d) = 3.6 kN, plus the rope effect (up to
+     * 15 %): 4.2 kN. Withdrawal 8.3.2: f_ax,k = 20e-6 rho_k^2 = 2.45 MPa x d x 100 mm penetration
+     * = 2.0 kN. The game breaks at the characteristic value itself (no partial factor: a design
+     * would allow kmod / gamma_M = 0.9 / 1.3 = 0.69 of it).
+     */
     strength: 4000,
+    withdrawal: 2000,
+    /**
+     * Slip modulus of one nail (N/m): how far it gives under load, from EN 1995-1-1 7.1,
+     * K_ser = rho_m^1.5 d^0.8 / 30 per shear plane (rho_m 420 kg/m3 softwood, d 8 mm): 1.5 kN/mm.
+     */
+    slipModulus: 1.5e6,
     /** Angular stiffness of one nail at stiffness 1 (N m/rad), and the damping time of its spring (s). */
     angularStiffness: 200000,
     angularDamping: 0.005,
@@ -46,6 +60,17 @@ export const NAIL = {
     stiffness: 0.8,
     anchorStiffness: 1
 } as const;
+
+/** Angular stiffness of a connection's joint (N m/rad); 0 for an anchor (a pin). */
+export function angularStiffness(c: { b: number; stiffness: number; nails: unknown[] }): number {
+    if (c.b === GROUND) return 0;
+    return c.stiffness * Math.max(1, c.nails.length) * NAIL.angularStiffness;
+}
+
+/** Linear stiffness of a connection's joint (N/m): its nails' slip modulus. */
+export function linearStiffness(c: { nails: unknown[] }): number {
+    return Math.max(1, c.nails.length) * NAIL.slipModulus;
+}
 
 export interface Connection {
     id: number;
@@ -60,6 +85,11 @@ export interface Connection {
     rel: { x: number; y: number; z: number; w: number };
     /** Nail heads, in a's local frame (the visual markers and the nail count). */
     nails: Vec3[];
+    /**
+     * Into b, in a's local frame (unit): against the face of b the first nail entered. Pressing a
+     * against b along it is bearing (the pieces carry it, not the nails); see stress.ts.
+     */
+    axis?: Vec3;
     stiffness: number;
     /** Load the connection takes before it breaks (N); grows with nails. */
     strength: number;
@@ -182,6 +212,7 @@ export class JointGraph {
             anchorB: { ...c.anchorB },
             rel: { ...c.rel },
             nails: c.nails.map((n) => ({ ...n })),
+            axis: c.axis ? { ...c.axis } : undefined,
             strength: c.strength ?? NAIL.strength * Math.max(1, c.nails.length),
             fatigue: 0
         };

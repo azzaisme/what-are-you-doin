@@ -63,8 +63,12 @@ export interface JointHealthState {
     hit: boolean;
 }
 
-/** What a connection holds: force (N) and bending moment (N m), before fatigue. */
-export function capacity(c: Connection): { force: number; moment: number } {
+/**
+ * What a connection holds before fatigue: shear and withdrawal (N) of its nails, and bending
+ * moment (N m): the nails' shear at a lever of BREAK.momentArm plus half their spread. An anchor
+ * is a pin (no moment).
+ */
+export function capacity(c: Connection): { shear: number; pull: number; moment: number } {
     let spread = 0;
     for (let i = 0; i < c.nails.length; i++)
         for (let j = i + 1; j < c.nails.length; j++) {
@@ -73,13 +77,22 @@ export function capacity(c: Connection): { force: number; moment: number } {
             spread = Math.max(spread, Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z));
         }
     const n = Math.max(1, c.nails.length);
-    return { force: NAIL.strength * n, moment: NAIL.strength * n * (BREAK.momentArm + spread / 2) };
+    return {
+        shear: NAIL.strength * n,
+        pull: NAIL.withdrawal * n,
+        moment: NAIL.strength * n * (BREAK.momentArm + spread / 2)
+    };
 }
 
+/**
+ * How much of its capacity a connection is using (1: at the limit): EN 1995-1-1 8.3.3 (8.28),
+ * the combined shear and withdrawal of nails, (F_ax / F_ax,R)^2 + (F_v / F_v,R)^2, with the
+ * bending moment as a third term; worn down by fatigue.
+ */
 export function utilization(c: Connection, load: JointLoad): number {
     const cap = capacity(c);
     const wear = 1 - BREAK.fatigueLoss * c.fatigue;
-    return Math.hypot(load.force / cap.force, load.moment / cap.moment) / wear;
+    return Math.hypot(load.shear / cap.shear, load.pull / cap.pull, load.moment / cap.moment) / wear;
 }
 
 export class JointHealth {

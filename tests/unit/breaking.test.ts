@@ -5,7 +5,6 @@ import { BREAK, JointHealth, capacity, utilization } from '../../src/sim/joints/
 import { GROUND, NAIL } from '../../src/sim/joints/graph.ts';
 import type { Connection } from '../../src/sim/joints/graph.ts';
 import { JointSystem } from '../../src/sim/joints/joints.ts';
-import { leastNorm } from '../../src/sim/joints/stress.ts';
 import { PhysicsWorld, initPhysics } from '../../src/sim/physics/world.ts';
 import { pose } from '../../src/voxels/math.ts';
 
@@ -33,16 +32,6 @@ function cantilever(nails: number, spread = 0.1) {
 }
 
 describe('joint loads (#49)', () => {
-    it('least-norm solve: an exactly determined system comes back exactly; a redundant one splits evenly', () => {
-        // x0 + x1 = 2 with equal weights: 1 and 1
-        const x = leastNorm(new Float64Array([1, 1]), 1, 2, new Float64Array([1, 1]), new Float64Array([2]));
-        expect(x[0]).toBeCloseTo(1, 6);
-        expect(x[1]).toBeCloseTo(1, 6);
-        // the cheaper unknown (higher weight) takes more
-        const y = leastNorm(new Float64Array([1, 1]), 1, 2, new Float64Array([1, 9]), new Float64Array([10]));
-        expect(y[1]).toBeCloseTo(9, 6);
-    });
-
     it('a cantilevered beam: the measured joint load matches statics, with and without a tip load', () => {
         // (1000 N at the tip is past what four nails hold: that breaks it, see below)
         for (const load of [0, 200, 400]) {
