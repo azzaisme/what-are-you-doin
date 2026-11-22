@@ -797,6 +797,26 @@ describe('wood effects', () => {
         run({}, 60, from);
         expect(held.length).toBe(after);
         expect(after).toBeGreaterThanOrEqual(n);
+        // no sawdust (nor motor) once a cut is done, even while the pieces wait to come out: the
+        // sawmill takes a second log, then every sawn plank is used up mid-cut (lying about), so
+        // the output waits
+        s.physics.place(byName(s, 'extra-log-0').id, inGuide());
+        for (let i = 0; i < 120 && s.sawmill!.phase !== 'cutting'; i++) run({}, 1, from);
+        expect(s.sawmill!.phase).toBe('cutting');
+        for (
+            let i = 0;
+            s.forestry.spawnPlank(pose(-20 + (i % 5) * 0.5, YARD_Y + 0.1 + Math.floor(i / 5) * 0.12, 9), 'plank');
+            i++
+        );
+        for (let i = 0; i < SAW.cutTicks + 10 && s.sawmill!.phase === 'cutting'; i++) run({}, 1, from);
+        run({}, 5, from);
+        expect(s.sawmill!.phase).toBe('output');
+        const dust = fx.spawned.sawdust;
+        const hum = held.length;
+        run({}, 120, from);
+        expect(s.sawmill!.phase).toBe('output');
+        expect(fx.spawned.sawdust).toBe(dust);
+        expect(held.length).toBe(hum);
         sfx.setSink(null);
     });
 });

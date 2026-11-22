@@ -163,6 +163,10 @@ The bucket now carries water the game keeps track of. Carry it steadily and it s
 
 ### What changed in the game
 
+- **Sawdust only while the blade is in the wood.** The sawmill kept puffing sawdust after a cut
+  while it waited to put the pieces out (when every sawn plank already lies about, it waits until
+  some are used). Now the sawdust stops when the cut is done; a test fills the plank pool and checks
+  that no sawdust comes while the sawmill waits.
 - **A felled log stops where it lands, and still moves when pushed.** A round log on flat
   ground has nothing in the physics to stop it rolling, so a felled log could roll on sideways for
   many seconds after it landed. Now, while it settles from its fall and whenever it lies slow
