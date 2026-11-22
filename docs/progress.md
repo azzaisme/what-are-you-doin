@@ -2,35 +2,47 @@
 
 ## Epic 8: a tree falls towards the ute (2026-11-22, #74)
 
-The logging stand can now fight back. Cut a stand tree with the ute parked close by, and the pine
-leans towards the ute.
+The logging stand can now fight back. Take a bite out of a stand tree with the ute parked close
+by, and the pine leans towards the ute.
 
-- **When:** a player starts cutting (chewing or the axe) a stand tree while the ute stands within
-  5.5 m of it (trunk to the ute's nearer end).
-- **The tell:** a crack (a snap and a low creak) and a toast the moment the cut starts: "The pine
-  is leaning towards the ute! Move the ute, or cut from its side so it falls away."
-- **Time to react:** the tree can't fall for 4 s after the crack, however fast it is chewed. It
-  hangs on its last fibres, and the next bite after that fells it. Tested: chewed as fast as it
-  goes, it falls no sooner.
-- **What happens:** when it falls with the ute still in reach, a lean towards the ute (0.06 rad,
-  less than a cut's push of 0.07) joins the fall. Chewed from the north, where it would fall
-  south, square to the ute, it comes down pulled round towards the ute instead (tested: within
-  55° of it).
-- **Counterplay, each tested by player input:**
-    - **Cut from the ute's side:** the cut's push away from the cutter beats the lean, so it falls
-      away from the ute (tested: more than 120° from it).
-    - **Move the ute:** at the crack, get in, drive it out of reach, get out, then finish the tree.
-      It falls exactly as the same cut does with no hazard (tested: within 5°).
+- **When:** a player bites or chops a stand tree while the ute stands within 5.5 m of it (trunk to
+  the ute's nearer end). Only a fresh bite or blow sets it off: a tree cut a little during the quiet
+  start, or left half cut, says nothing until someone cuts it again.
+- **The tell:** at that bite, a crack (a snap and a low creak) and a toast: "The pine is leaning
+  towards the ute! Move the ute, or cut from its side so it falls away." Then the crown sways
+  towards the ute, shedding needles on that side every half second, further out as it goes, with a
+  creak each time. The sway is on the tree's marker in the snapshots, so a guest sees it too.
+- **Time to react: 7 s.** The tree can't fall sooner, however fast it is chewed: it hangs on its
+  last fibres, and the next bite after the tell fells it. Measured by input: from the crack, a
+  player at the tree walks to the ute, gets in and drives it out of reach in 5.0 s. The other 2 s
+  are for reading the toast.
+- **What happens:** while the ute is in reach, the tree's weight shifts towards the ute: its own
+  lean is replaced by a lean of 0.035 rad towards the ute.
+    - Cut from the far side, it comes down on the ute (tested: within 10°).
+    - Cut square to the ute, it is pulled round towards it (tested: about 63° from the ute, at
+      least 20° nearer than the same cut with no hazard).
+- **Counterplay, true of every tree in the stand, each tested by player input:**
+    - **Cut from the ute's side:** the cut's push (0.07) beats the lean, whatever the tree's own
+      lean, so it falls straight away from the ute. Tested on all six trees, the leaning ones too:
+      more than 160° from the ute.
+    - **Move the ute:** at the crack, walk to the ute, drive it out of reach, walk back and finish
+      the tree. It falls as the same cut does with no hazard (tested: within 5°).
     - **A rope** waits for ropes.
-- **Budget, tested:**
+- **Budget, tested so that removing each check fails a test:**
     - not in the first 20 s;
-    - at most two, the second at least 60 s after the first ends;
+    - not within 60 s of the last one ending, even once the 15 s quiet spell is over (a cut 20 s
+      after gives nothing; the second cracks on the first bite after the 60 s);
+    - at most two (a third tree cut after another 60 s gives nothing);
     - none while another hazard runs (a tree cut during the flood's warning brings nothing).
-- **Online, tested:** the guest gets the toast (and so the crack, which plays from it) and sees
-  the trunk come down towards the ute in the host's snapshots.
+- **Online, tested:** the guest gets the toast (and so the crack, which plays from it), sees the
+  crown sway towards the ute and the trunk come down on it, all in the host's snapshots. A guest
+  who joins mid-tell sees the sway but missed the toast.
+- **The creak at 70% cut** names no direction while the hazard pulls the tree, because the ute
+  could still move ("The pine creaks: stand clear!").
 - **Playtest log:** the summary counts falling trees, and the script says what to watch for.
-- **Code:** `src/sim/hazard-tree.ts`, with two small hooks in the forestry (an extra lean on a
-  fall, a hold on it) and a few lines in the director.
+- **Code:** `src/sim/hazard-tree.ts`, with three small hooks in the forestry (an extra lean on a
+  fall, a hold on it, a sway on the marker), two more marker channels, the crown's needles in
+  `src/fx/wood-fx.ts`, and a few lines in the director.
 
 ## Epic 8: the logging sounds and the Valley's waterfall (2026-11-22, #82, #80)
 

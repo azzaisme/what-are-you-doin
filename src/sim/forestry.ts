@@ -25,7 +25,15 @@
 
 import RAPIER from '@dimforge/rapier3d-compat';
 
-import { LOG_CENTRE_HEIGHT, TREE_CUT, TREE_DOWN, TREE_STANDING, TREE_STATE } from '../assets/forestry.ts';
+import {
+    LOG_CENTRE_HEIGHT,
+    TREE_CUT,
+    TREE_DOWN,
+    TREE_STANDING,
+    TREE_STATE,
+    TREE_SWAY,
+    TREE_SWAY_YAW
+} from '../assets/forestry.ts';
 import { LOG_RADIUS } from '../assets/props.ts';
 import { CROWN_TRUNK_TOP, LOG_LENGTH, STUMP_HEIGHT, standPose, standTilt } from '../levels/forestry.ts';
 import type { ForestryDef } from '../levels/forestry.ts';
@@ -90,6 +98,8 @@ interface TreeState {
     dirX: number;
     dirZ: number;
     warned: boolean;
+    /** Bites and blows it has taken (a hazard tells a fresh cut from an old one by this). */
+    cuts: number;
     /** Tick the tree was felled, and the felled-log slot its log took (-1 once that slot moved on). */
     downTick: number;
     slot: number;
@@ -146,10 +156,13 @@ export class Forestry {
     readonly stats = { bites: 0, blows: 0, felled: 0, bucked: 0, regrown: 0, returned: 0 };
     /**
      * Hazard hooks (Epic 8, src/sim/hazard-tree.ts): an extra lean (a tilt, rad, towards x/z) on a
-     * tree's fall, and whether a cut-through tree must hang on a moment before it falls.
+     * tree's fall, whether a cut-through tree must hang on a moment before it falls, and how far
+     * (0-1) and which way (yaw, rad, as atan2(x, z)) a standing tree sways (published on its marker,
+     * so every device shakes its crown).
      */
     fallBias: ((n: number) => { x: number; z: number } | null) | null = null;
     holdFall: ((n: number) => boolean) | null = null;
+    sway: ((n: number) => { amount: number; yaw: number } | null) | null = null;
     private tick = 0;
     private fxChips = 0;
     private fxNeedles = 0;
@@ -172,9 +185,9 @@ export class Forestry {
     }
 
     /** Phase and cut of a stand tree (tests, UI). */
-    treeState(n: number): { phase: TreePhase; cut: number } {
+    treeState(n: number): { phase: TreePhase; cut: number; cuts: number } {
         const t = this.trees[n];
-        return { phase: t.phase, cut: t.cut };
+        return { phase: t.phase, cut: t.cut, cuts: t.cuts };
     }
 
     /** The felled-log slot a tree's log took (-1 if none), for tests. */
@@ -217,6 +230,7 @@ export class Forestry {
                 dirX: 0,
                 dirZ: 0,
                 warned: false,
+                cuts: 0,
                 downTick: -1,
                 slot: -1,
                 blocked: false,
@@ -409,11 +423,17 @@ export class Forestry {
             st.dirX += dx / len;
             st.dirZ += dz / len;
         }
+        st.cuts++;
         // (ten bites of 0.1 add up to 0.999...: round to the bite)
         st.cut = Math.min(1, Math.round((st.cut + amount) * 1e6) / 1e6);
         if (st.cut >= WOOD.warnAt && !st.warned && st.cut < 1) {
             st.warned = true;
-            this.say(`The pine creaks. It will fall ${compass(this.fallDirection(n))}: stand clear!`);
+            // a hazard pulling it (towards the ute) can still change: no direction then
+            this.say(
+                this.fallBias?.(n)
+                    ? 'The pine creaks: stand clear!'
+                    : `The pine creaks. It will fall ${compass(this.fallDirection(n))}: stand clear!`
+            );
         }
         if (st.cut >= 1) {
             // a hazard holds it: it hangs on its last fibres (the next bite or blow fells it)
@@ -729,6 +749,9 @@ export class Forestry {
             quatFromYawPitchRoll(yaw, 0, 0, m.pose.q);
             m.anim[TREE_CUT] = st.phase === 'standing' ? st.cut : 0;
             m.anim[TREE_STATE] = st.phase === 'standing' ? TREE_STANDING : TREE_DOWN;
+            const sway = st.phase === 'standing' ? this.sway?.(n) : null;
+            m.anim[TREE_SWAY] = sway ? sway.amount : 0;
+            m.anim[TREE_SWAY_YAW] = sway ? sway.yaw : 0;
         }
         for (let k = 0; k < e.crowns.length; k++) {
             const c = e.crowns[k];

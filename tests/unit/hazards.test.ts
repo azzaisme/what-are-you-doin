@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import { TREE_SWAY, TREE_SWAY_YAW } from '../../src/assets/forestry.ts';
 import {
     BRIDGE,
     BRIDGE_X,
@@ -24,6 +25,7 @@ import { HAZARD, PHASE, gustExposure, packHazardNet, readHazardNet } from '../..
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
 import { applyFlood, shapeSamples, shapeVolume } from '../../src/sim/physics/water.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
+import { ANIM_MAX } from '../../src/sim/snapshots.ts';
 import {
     composePose,
     pose,
@@ -756,84 +758,123 @@ describe('hazard director: the handbrake prank (#75)', () => {
 
 describe('hazard director: a tree falls towards the ute (#74)', () => {
     const def = timberYardLevel.forestry!;
-    /** Tree 1 (no lean of its own) and the ute parked 2.7 m east of it, lengthwise north-south. */
-    const T = 1;
-    const tree = def.trees[T];
-    const UTE = { x: 20.5, z: 4.5 };
-    function setUp(hazards = true): LabSim {
+    /**
+     * Where the ute is parked for each stand tree, on level ground (it stays put, no handbrake
+     * prank): 3.5 m west of the west column (facing west), or east of the east column (lengthwise
+     * north-south; tree 5's south-east, the ground east of it slopes). All within reach.
+     */
+    const uteFor = (n: number) => {
+        const t = def.trees[n];
+        if (t.x < 14.5) return { x: t.x - 3.5, z: t.z, yaw: -Math.PI / 2 };
+        return { x: t.x + 4.5, z: Math.min(t.z, 7.5), yaw: 0 };
+    };
+    function setUp(n: number, hazards = true, at = uteFor(n)): LabSim {
         const s = new LabSim({ level: timberYardLevel, hazards });
         s.physics.place(
             s.vehicle!.id,
-            pose(UTE.x, yardHeight(UTE.x, UTE.z) + 0.3, UTE.z, quatFromYawPitchRoll(0, 0, 0))
+            pose(at.x, yardHeight(at.x, at.z) + 0.3, at.z, quatFromYawPitchRoll(at.yaw, 0, 0))
         );
         s.runTo(S(HAZARD.graceS) + 10);
         s.fpActive = true;
         s.runTo(s.tick + 2);
         return s;
     }
-    /** Inputs for player 0: look, move, grab, brake. */
-    function inputs(s: LabSim) {
+    /** Inputs for player 0 on tree n: look, move, walk, chew. */
+    function inputs(s: LabSim, n: number) {
+        const tree = def.trees[n];
         const v = { yaw: 0, pitch: 0 };
         const step = (c: Partial<PlayerCommand> = {}, k = 1) => {
             for (let i = 0; i < k; i++) s.step(cmd(s.tick, { yaw: v.yaw, pitch: v.pitch, ...c }));
         };
-        /** Stands `d` m from the trunk on the side (dx, dz) and looks at it. */
-        const standAt = (dx: number, dz: number, d = 1.1) => {
-            s.placePlayer(tree.x + dx * d, tree.z + dz * d, 0);
-            step({}, 20);
-            // forward is (-sin yaw, -cos yaw): face the trunk
+        /** Walks there (full stick), facing the way it goes. */
+        const walkTo = (x: number, z: number) => {
+            for (let i = 0; i < 1800; i++) {
+                const dx = x - s.player.x;
+                const dz = z - s.player.z;
+                if (Math.hypot(dx, dz) < 0.25) return;
+                // forward is (-sin yaw, -cos yaw)
+                v.yaw = Math.atan2(-dx, -dz);
+                v.pitch = 0;
+                step({ moveZ: Math.min(1, Math.hypot(dx, dz) * 2 + 0.2) });
+            }
+            throw new Error(`could not walk to ${x}, ${z}`);
+        };
+        /** Looks at the trunk from where the player stands. */
+        const faceTrunk = () => {
+            const dx = s.player.x - tree.x;
+            const dz = s.player.z - tree.z;
+            const d = Math.hypot(dx, dz);
             v.yaw = Math.atan2(dx, dz);
-            const g = def.ground(tree.x, tree.z) + 0.6;
-            v.pitch = -Math.atan2(s.player.y + EYE_HEIGHT - g, d);
+            v.pitch = -Math.atan2(s.player.y + EYE_HEIGHT - (def.ground(tree.x, tree.z) + 0.6), d);
             step({}, 3);
         };
-        /** Chews (grab, a bite every 20 ticks) until the tree is down, or `max` ticks. */
-        const chew = (max = S(30)) => {
-            for (let i = 0; i < max && s.forestry.treeState(T).phase === 'standing'; i++) step({ grab: i % 20 === 0 });
+        /** Stands `d` m from the trunk on the side (dx, dz) and looks at it (setting up a test). */
+        const standAt = (dx: number, dz: number, d = 1.1) => {
+            const l = Math.hypot(dx, dz);
+            s.placePlayer(tree.x + (dx / l) * d, tree.z + (dz / l) * d, 0);
+            step({}, 20);
+            faceTrunk();
         };
-        return { v, step, standAt, chew };
+        /** One bite (grab), then the bite's 20 ticks. */
+        const bite = () => {
+            step({ grab: true });
+            step({}, 19);
+        };
+        /** Chews (a bite every 20 ticks) until the tree is down, or `max` ticks. */
+        const chew = (max = S(30)) => {
+            for (let i = 0; i < max && s.forestry.treeState(n).phase === 'standing'; i++) step({ grab: i % 20 === 0 });
+        };
+        return { v, step, walkTo, faceTrunk, standAt, bite, chew };
     }
     /** Which way the felled trunk went, as a direction from the stump (unit), mid-fall. */
-    function fallen(s: LabSim): { x: number; z: number } {
+    function fallen(s: LabSim, n: number): { x: number; z: number } {
         s.runTo(s.tick + S(1.2));
-        const log = s.forestry.logOf(T)!;
-        const dx = log.pose.p.x - tree.x;
-        const dz = log.pose.p.z - tree.z;
+        const t = def.trees[n];
+        const log = s.forestry.logOf(n)!;
+        const dx = log.pose.p.x - t.x;
+        const dz = log.pose.p.z - t.z;
         const l = Math.hypot(dx, dz);
         return { x: dx / l, z: dz / l };
     }
-    const toUte = (() => {
-        const dx = UTE.x - tree.x;
-        const dz = UTE.z - tree.z;
-        const l = Math.hypot(dx, dz);
-        return { x: dx / l, z: dz / l };
-    })();
+    const unit = (x: number, z: number) => ({ x: x / Math.hypot(x, z), z: z / Math.hypot(x, z) });
+    const toUteOf = (s: LabSim, n: number) => unit(s.ute.pose.p.x - def.trees[n].x, s.ute.pose.p.z - def.trees[n].z);
     const angleTo = (a: { x: number; z: number }, b: { x: number; z: number }) =>
         (Math.acos(Math.max(-1, Math.min(1, a.x * b.x + a.z * b.z))) * 180) / Math.PI;
+    const uteReach = (s: LabSim, n: number) =>
+        Math.hypot(s.ute.pose.p.x - def.trees[n].x, s.ute.pose.p.z - def.trees[n].z) - 1.84;
 
-    it('cut with the ute in reach: a crack at the first bite, no fall for 4 s, then it comes down towards the ute', () => {
-        // chewed from the north: it would fall south, square to the ute
-        const plain = setUp(false);
-        const p = inputs(plain);
-        p.standAt(0, -1);
-        p.chew();
-        const plainFall = fallen(plain);
-        expect(angleTo(plainFall, toUte)).toBeGreaterThan(75);
-
-        const s = setUp();
-        const d = inputs(s);
-        d.standAt(0, -1);
+    it('cut with the ute in reach: a crack at the first bite, the crown sways towards the ute, no fall for the whole tell, then it comes down on the ute', () => {
+        // tree 1 (no lean of its own), the ute east of it, chewed from the west (the far side)
+        const T = 1;
+        const s = setUp(T);
+        const d = inputs(s, T);
+        const toUte = toUteOf(s, T);
+        d.standAt(-1, 0);
+        expect(uteReach(s, T)).toBeLessThan(TREE.reach);
         d.step({ grab: true });
+        d.step();
         expect(s.hazards.tree.phase).toBe(1);
         const crack = s.tick;
         expect(hazardTexts(s).some((t) => t.includes('leaning towards the ute'))).toBe(true);
+        // the tell you can see: the marker's sway grows, aimed at the ute (what every device draws)
+        const marker = s.forestry.ents.markers[T];
+        const sway0 = marker.anim[TREE_SWAY];
+        d.step({}, S(3));
+        const sway1 = marker.anim[TREE_SWAY];
+        expect(sway0).toBeGreaterThan(0);
+        expect(sway1).toBeGreaterThan(sway0 + 0.3);
+        const yaw = marker.anim[TREE_SWAY_YAW];
+        expect(angleTo({ x: Math.sin(yaw), z: Math.cos(yaw) }, toUte)).toBeLessThan(5);
         // chewed as fast as it goes: still standing until the tell is over
         d.chew();
         const down = s.tick;
         expect(down - crack).toBeGreaterThanOrEqual(S(TREE.tellS));
-        const f = fallen(s);
-        // pulled round towards the ute (the plain cut fell square to it)
-        expect(angleTo(f, toUte)).toBeLessThan(55);
+        // no sway once it falls
+        expect(marker.anim[TREE_SWAY]).toBe(0);
+        // the forestry's creak names no direction while the hazard pulls it (the ute could move)
+        const creak = s.events.filter((e) => e.text.startsWith('The pine creaks'));
+        expect(creak.map((e) => e.text)).toEqual(['The pine creaks: stand clear!']);
+        expect(angleTo(fallen(s, T), toUte)).toBeLessThan(10);
         expect(s.hazards.tree.phase).toBe(0);
         expect(s.hazards.tree.count).toBe(1);
         // the playtest log, fed the events as the game feeds it, counts it
@@ -842,127 +883,194 @@ describe('hazard director: a tree falls towards the ute (#74)', () => {
         expect(log.summary((s.tick / 60) * 1000)).toContain('falling trees: 1');
     }, 120_000);
 
-    it('counterplay: cut from the ute’s side and it falls away from the ute', () => {
-        const s = setUp();
-        const d = inputs(s);
-        d.standAt(toUte.x, toUte.z);
+    it('cut square to the ute, it is pulled round towards it (the plain cut falls square)', () => {
+        const T = 1;
+        const plain = setUp(T, false);
+        const p = inputs(plain, T);
+        p.standAt(0, -1);
+        p.chew();
+        const plainFall = fallen(plain, T);
+        const s = setUp(T);
+        const d = inputs(s, T);
+        d.standAt(0, -1);
         d.chew();
+        const toUte = toUteOf(s, T);
         expect(s.hazards.tree.count).toBe(1);
-        expect(angleTo(fallen(s), toUte)).toBeGreaterThan(120);
+        const pulled = angleTo(fallen(s, T), toUte);
+        expect(angleTo(plainFall, toUte)).toBeGreaterThan(75);
+        // atan(0.07 / 0.035): about 63 degrees from the ute, 25 or more nearer it than the plain cut
+        expect(pulled).toBeLessThan(70);
+        expect(angleTo(plainFall, toUte) - pulled).toBeGreaterThan(20);
     }, 120_000);
 
-    it('counterplay: at the crack, get in, drive the ute out of reach, then finish the tree: no pull towards it', () => {
-        // tree 0, with the ute parked west of it facing the yard (room to drive away)
-        const t0 = def.trees[0];
-        const at = { x: 9.5, z: 4.5 };
+    it('counterplay on every stand tree, the leaning ones too: cut from the ute’s side and it falls away from the ute', () => {
+        for (let n = 0; n < def.trees.length; n++) {
+            const s = setUp(n);
+            const d = inputs(s, n);
+            const toUte = toUteOf(s, n);
+            expect(uteReach(s, n), `tree ${n}`).toBeLessThan(TREE.reach);
+            d.standAt(toUte.x, toUte.z);
+            d.chew();
+            expect(s.hazards.tree.count, `tree ${n}`).toBe(1);
+            // straight away from the ute: the push beats the pull by 0.035, whatever the tree's lean
+            expect(angleTo(fallen(s, n), toUte), `tree ${n}`).toBeGreaterThan(160);
+        }
+    }, 240_000);
+
+    it('counterplay: at the crack, walk to the ute, drive it out of reach within the tell, walk back and finish the tree: no pull towards it', () => {
+        // tree 0, with the ute west of it facing west (room to drive away); chewed from the south
+        const T = 0;
         const cut = (hazards: boolean, driveAway: boolean) => {
-            const s = new LabSim({ level: timberYardLevel, hazards });
-            s.physics.place(
-                s.vehicle!.id,
-                pose(at.x, yardHeight(at.x, at.z) + 0.3, at.z, quatFromYawPitchRoll(-Math.PI / 2, 0, 0))
-            );
-            s.runTo(S(HAZARD.graceS) + 10);
-            s.fpActive = true;
-            s.runTo(s.tick + 2);
-            const v = { yaw: 0, pitch: 0 };
-            const step = (c: Partial<PlayerCommand> = {}, k = 1) => {
-                for (let i = 0; i < k; i++) s.step(cmd(s.tick, { yaw: v.yaw, pitch: v.pitch, ...c }));
-            };
-            // chew from the south side
-            const stand = () => {
-                s.placePlayer(t0.x, t0.z + 1.1, 0);
-                step({}, 20);
-                v.yaw = Math.atan2(0, 1);
-                v.pitch = -Math.atan2(s.player.y + EYE_HEIGHT - (def.ground(t0.x, t0.z) + 0.6), 1.1);
-                step({}, 3);
-            };
-            stand();
-            step({ grab: true });
+            const s = setUp(T, hazards);
+            const d = inputs(s, T);
+            d.standAt(0, 1);
+            const spot = { x: s.player.x, z: s.player.z };
+            d.step({ grab: true });
+            let outOfReach = -1;
             if (driveAway) {
+                d.step();
                 expect(s.hazards.tree.phase).toBe(1);
-                expect(s.hazards.tree.tree).toBe(0);
-                // to the driver's door (the ute's right: -z of a ute facing -x) and in
+                expect(s.hazards.tree.tree).toBe(T);
+                const crack = s.hazards.tree.since;
+                // walk round the trunk to the driver's door (the ute's right: -z of a ute facing -x)
                 const u = s.ute.pose.p;
-                s.placePlayer(u.x, u.z - 2.2, 0);
-                step({}, 20);
-                v.yaw = Math.atan2(0, -1);
-                v.pitch = -Math.atan2(s.player.y + EYE_HEIGHT - (u.y + 0.6), 2.2 - 0.8);
-                step({}, 3);
-                step({ grab: true });
+                d.walkTo(spot.x - 1.5, spot.z);
+                d.walkTo(u.x, u.z - 2.2);
+                // look at the ute and get in
+                d.v.yaw = Math.atan2(0, -1);
+                d.v.pitch = -Math.atan2(s.player.y + EYE_HEIGHT - (u.y + 0.6), 2.2 - 0.8);
+                d.step({}, 2);
+                d.step({ grab: true });
                 expect(s.driver).toBe(0);
-                // forward (west) until well out of reach, brake, get out
-                for (let i = 0; i < 600 && s.ute.pose.p.x > 2; i++) step({ moveZ: 1 });
-                for (let i = 0; i < 300 && Math.abs(s.vehicle!.speed()) > 0.05; i++) step({ jump: true });
-                step({ grab: true });
+                // forward (west): when it is out of reach, against the tell
+                for (let i = 0; i < 600 && uteReach(s, T) <= TREE.reach; i++) d.step({ moveZ: 1 });
+                outOfReach = s.tick - crack;
+                for (let i = 0; i < 300 && s.ute.pose.p.x > 2; i++) d.step({ moveZ: 1 });
+                for (let i = 0; i < 300 && Math.abs(s.vehicle!.speed()) > 0.05; i++) d.step({ jump: true });
+                d.step({ grab: true });
                 expect(s.driver).toBe(-1);
-                expect(Math.hypot(s.ute.pose.p.x - t0.x, s.ute.pose.p.z - t0.z) - 1.84).toBeGreaterThan(TREE.reach);
-                stand();
+                expect(uteReach(s, T)).toBeGreaterThan(TREE.reach);
+                // and walk back to the cutting spot
+                d.walkTo(spot.x - 1.5, spot.z);
+                d.walkTo(spot.x, spot.z);
+                d.faceTrunk();
             }
-            for (let i = 0; i < S(30) && s.forestry.treeState(0).phase === 'standing'; i++) {
-                step({ grab: i % 20 === 0 });
-            }
-            // mid-fall, before it lands and rolls
-            s.runTo(s.tick + S(1.2));
-            const log = s.forestry.logOf(0)!.pose.p;
-            const dx = log.x - t0.x;
-            const dz = log.z - t0.z;
-            return { dir: { x: dx / Math.hypot(dx, dz), z: dz / Math.hypot(dx, dz) }, count: s.hazards.tree.count };
+            d.chew();
+            return { dir: fallen(s, T), count: s.hazards.tree.count, outOfReach };
         };
         const plain = cut(false, false);
         const moved = cut(true, true);
         expect(moved.count).toBe(1);
+        // the time it took a player at the tree to get the ute out of reach, by input: within the
+        // tell with 2 s to spare to read it (so a teammate still chewing can't bring it down on the
+        // ute first). Measured: about 5 s of the 7.
+        expect(moved.outOfReach).toBeGreaterThan(0);
+        expect(moved.outOfReach).toBeLessThanOrEqual(S(TREE.tellS - 2));
         // the same cut, the same fall: nothing pulled it towards where the ute was
         expect(angleTo(moved.dir, plain.dir)).toBeLessThan(5);
     }, 120_000);
 
-    it('the budget: not in the quiet start, at most two, 60 s apart, and not during another hazard', () => {
+    it('only a fresh bite or blow sets it off: a cut left from the quiet start, or a tell given up, stays quiet', () => {
+        const T = 1;
+        // a bite in the quiet start (within reach): nothing then, and nothing once the quiet is over
+        const s = new LabSim({ level: timberYardLevel });
+        const at = uteFor(T);
+        s.physics.place(
+            s.vehicle!.id,
+            pose(at.x, yardHeight(at.x, at.z) + 0.3, at.z, quatFromYawPitchRoll(at.yaw, 0, 0))
+        );
+        s.runTo(60);
+        s.fpActive = true;
+        s.runTo(62);
+        const d = inputs(s, T);
+        d.standAt(0, -1);
+        d.bite();
+        expect(s.forestry.treeState(T).cut).toBeGreaterThan(0);
+        expect(s.tick).toBeLessThan(S(HAZARD.graceS));
+        // walk off; the quiet start ends with the half-cut tree standing in reach
+        d.walkTo(s.player.x - 2, s.player.z - 2);
+        s.runTo(S(HAZARD.graceS) + S(5));
+        expect(s.hazards.tree.count).toBe(0);
+        expect(s.hazards.tree.phase).toBe(0);
+        // the next bite does
+        d.walkTo(def.trees[T].x, def.trees[T].z - 1.1);
+        d.faceTrunk();
+        d.bite();
+        expect(s.hazards.tree.count).toBe(1);
+        expect(s.hazards.tree.phase).toBe(1);
+        // left unfinished: given up after its time, and not cracked again on its own (the cooldown
+        // and the quiet spell long over)
+        s.runTo(s.hazards.tree.since + S(TREE.giveUpS) + S(TREE.cooldownS) + S(10));
+        expect(s.hazards.tree.phase).toBe(0);
+        expect(s.hazards.tree.count).toBe(1);
+        expect(hazardTexts(s).filter((t) => t === TREE_TELL)).toHaveLength(1);
+    }, 120_000);
+
+    it('the budget: not in the quiet start, not within 60 s of the last, at most two, not during another hazard', () => {
         // the quiet start: cutting at once brings nothing
+        const T = 1;
         const early = new LabSim({ level: timberYardLevel });
-        early.physics.place(early.vehicle!.id, pose(UTE.x, yardHeight(UTE.x, UTE.z) + 0.3, UTE.z));
+        const at = uteFor(T);
+        early.physics.place(
+            early.vehicle!.id,
+            pose(at.x, yardHeight(at.x, at.z) + 0.3, at.z, quatFromYawPitchRoll(at.yaw, 0, 0))
+        );
         early.runTo(60);
         early.fpActive = true;
         early.runTo(62);
-        const e = inputs(early);
+        const e = inputs(early, T);
         e.standAt(0, -1);
         e.chew();
         expect(early.hazards.tree.count).toBe(0);
 
-        // two trees, both within the ute's reach: the second only 60 s after the first ends
-        const s = setUp();
-        const d = inputs(s);
+        // tree 1 felled under the hazard; tree 3 (also in reach of the ute) is the next one
+        const s = setUp(T);
+        const d = inputs(s, T);
         d.standAt(0, -1);
         d.chew();
+        s.runTo(s.tick + 5);
         expect(s.hazards.tree.count).toBe(1);
-        const firstEnd = s.tick;
-        // tree 3, also in reach, cut straight away: no hazard yet
+        expect(s.hazards.tree.phase).toBe(0);
+        const firstEnd = s.hazards.tree.ended;
         const t3 = def.trees[3];
-        const cutTree3 = () => {
-            s.placePlayer(t3.x, t3.z - 1.1, 0);
-            d.step({}, 20);
-            d.v.yaw = Math.atan2(0, -1);
-            d.v.pitch = -Math.atan2(s.player.y + EYE_HEIGHT - (def.ground(t3.x, t3.z) + 0.6), 1.1);
-            d.step({ grab: true });
-        };
-        cutTree3();
+        expect(Math.hypot(s.ute.pose.p.x - t3.x, s.ute.pose.p.z - t3.z) - 1.84).toBeLessThan(TREE.reach);
+        const d3 = inputs(s, 3);
+        d3.standAt(0, -1);
+        // 20 s after the first ended: the quiet spell (15 s) is over, the cooldown (60 s) is not
+        s.runTo(firstEnd + S(20));
+        d3.faceTrunk();
+        d3.bite();
+        expect(s.hazards.tree.phase).toBe(0);
         expect(s.hazards.tree.count).toBe(1);
-        // after the cooldown, a new cut on it starts the second
-        d.step({}, S(TREE.cooldownS));
-        cutTree3();
+        // a bite the tick the cooldown is over: the second, at once
+        s.runTo(firstEnd + S(TREE.cooldownS) - 1);
+        d3.faceTrunk();
+        d3.step({ grab: true });
+        d3.step();
         expect(s.hazards.tree.count).toBe(2);
-        expect(s.tick - firstEnd).toBeGreaterThanOrEqual(S(TREE.cooldownS));
-        // never a third: the director's count is spent
-        expect(TREE.max).toBe(2);
+        const second = s.hazards.tree.since;
+        expect(second - firstEnd).toBeGreaterThanOrEqual(S(TREE.cooldownS));
+        expect(second - firstEnd).toBeLessThanOrEqual(S(TREE.cooldownS) + 4);
+        // left unfinished, given up; after another cooldown, a third cut in reach: no third
+        s.runTo(second + S(TREE.giveUpS) + 2);
+        expect(s.hazards.tree.phase).toBe(0);
+        s.runTo(s.hazards.tree.ended + S(TREE.cooldownS) + S(5));
+        d3.faceTrunk();
+        d3.bite();
+        expect(s.hazards.tree.phase).toBe(0);
+        expect(s.hazards.tree.count).toBe(2);
 
         // another hazard running: a tree cut in reach waits (the bridge's flood first)
-        const f = setUp();
+        const f = setUp(T);
         bridgeBeams(f);
         runUntil(f, () => f.hazards.floodPhase === PHASE.tell, TO_SIREN);
-        const fi = inputs(f);
+        const fi = inputs(f, T);
         fi.standAt(0, -1);
         fi.step({ grab: true });
+        fi.step();
         expect(f.hazards.tree.phase).toBe(0);
         expect(f.hazards.tree.count).toBe(0);
-    }, 240_000);
+    }, 300_000);
 });
 
 describe('hazard director: determinism and the network', () => {
@@ -1117,7 +1225,7 @@ describe('hazard director: online, through real host and guest sessions', () => 
         hs.stop();
     }, 60_000);
 
-    it('the falling tree reaches the guest: the crack toast, and the trunk coming down towards the ute in the snapshots', async () => {
+    it('the falling tree reaches the guest: the crack toast, the crown swaying towards the ute, and the trunk coming down on it, in the snapshots', async () => {
         const { host, hs, gs, guestSim, run } = await online(3);
         const def = timberYardLevel.forestry!;
         const t = def.trees[1];
@@ -1125,14 +1233,26 @@ describe('hazard director: online, through real host and guest sessions', () => 
             host.vehicle!.id,
             pose(20.5, yardHeight(20.5, 4.5) + 0.3, 4.5, quatFromYawPitchRoll(0, 0, 0))
         );
-        // the host's player chews it from the north
-        host.placePlayer(t.x, t.z - 1.1, 0, 0);
+        // the host's player chews it from the west, the far side from the ute
+        host.placePlayer(t.x - 1.1, t.z, 0, 0);
         run(20);
         const look = {
-            yaw: Math.atan2(0, -1),
+            yaw: -Math.PI / 2,
             pitch: -Math.atan2(host.players[0].y + EYE_HEIGHT - (def.ground(t.x, t.z) + 0.6), 1.1)
         };
-        for (let i = 0; i < S(20) && host.forestry.treeState(1).phase === 'standing'; i++)
+        run(1, { ...look, grab: true });
+        run(S(3), look);
+        expect(host.hazards.tree.phase).toBe(1);
+        // the guest's copy of the tree's marker: swaying, towards the ute (east)
+        while (host.tick % 3 !== 0) run(1, look);
+        const marker = host.forestry.ents.markers[1];
+        const anim = new Float64Array(ANIM_MAX);
+        expect(guestSim.ring.sample(marker.slot, host.tick / 60, pose(), anim)).toBe(true);
+        expect(anim[TREE_SWAY]).toBeGreaterThan(0.3);
+        expect(Math.abs(anim[TREE_SWAY] - marker.anim[TREE_SWAY])).toBeLessThan(0.05);
+        const yaw = anim[TREE_SWAY_YAW];
+        expect(Math.sin(yaw)).toBeGreaterThan(0.95);
+        for (let i = 0; i < S(30) && host.forestry.treeState(1).phase === 'standing'; i++)
             run(1, { ...look, grab: i % 20 === 0 });
         expect(host.hazards.tree.count).toBe(1);
         run(S(1.2));
@@ -1142,7 +1262,8 @@ describe('hazard director: online, through real host and guest sessions', () => 
         const log = host.forestry.logOf(1)!;
         const out = pose();
         expect(guestSim.ring.sample(log.slot, host.tick / 60, out, new Float64Array(6))).toBe(true);
-        expect(out.p.x - t.x).toBeGreaterThan(0.5);
+        expect(out.p.x - t.x).toBeGreaterThan(1);
+        expect(Math.abs(out.p.z - t.z)).toBeLessThan(0.5);
         expect(Math.hypot(out.p.x - log.pose.p.x, out.p.z - log.pose.p.z)).toBeLessThan(0.05);
         gs.leave();
         hs.stop();

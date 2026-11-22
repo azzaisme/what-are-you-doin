@@ -1,20 +1,27 @@
 /**
- * Hazard (#74): a tree falls towards the ute. Start cutting a stand tree while the ute stands within
+ * Hazard (#74): a tree falls towards the ute. Bite or chop a stand tree while the ute stands within
  * its reach, and the pine cracks and leans towards the ute: it will fall its way.
  *
- * - **Tell:** a crack and a toast the moment the cut starts, and the tree cannot fall for TREE.tellS
- *   after it, however fast it is chewed or chopped (it hangs on its last fibres). That is the time to
- *   react.
- * - **What happens:** when it falls, a lean towards the ute (TREE.lean) joins the cut's push and the
- *   tree's own lean. Cut from anywhere but the ute's side and it comes down on or towards the ute.
- * - **Counterplay:** move the ute out of reach (no lean, it falls the way it was cut), or cut from
- *   the ute's side: the cut's push away from the cutter is stronger than the lean, so it falls away
- *   from the ute. (A rope waits for ropes.)
+ * - **Trigger:** a bite or blow on that tree this tick (its cut count went up), not an old partial
+ *   cut: a tree bitten during the quiet start, or left half cut, says nothing until someone cuts it
+ *   again.
+ * - **Tell:** a crack and a toast the moment the cut lands, and the crown sways and sheds needles
+ *   towards the ute, more and more over TREE.tellS (the sway is on the tree's marker, so guests see
+ *   it, a guest joining mid-tell too). The tree cannot fall during the tell, however fast it is
+ *   chewed or chopped (it hangs on its last fibres): that is the time to react.
+ * - **What happens:** while the ute is in reach, the tree's weight is shifted towards the ute: its
+ *   own lean is replaced by a lean of TREE.lean towards the ute. Cut from anywhere but the ute's
+ *   side and it comes down on or towards the ute.
+ * - **Counterplay, true of every stand tree:** move the ute out of reach (the tree's own lean comes
+ *   back: it falls the way it was cut, as if nothing happened), or cut from the ute's side: the
+ *   cut's push away from the cutter (0.07) beats TREE.lean whatever the tree's own lean, so it falls
+ *   straight away from the ute. (A rope waits for ropes.)
  * - **Budget:** the director's: one hazard at a time, a quiet spell after each, at most TREE.max,
  *   TREE.cooldownS apart.
  *
- * Host only, like the rest of the director: guests see the fall in the snapshots and get the tell's
- * toast with the level's events (its crack plays from that toast).
+ * Host only, like the rest of the director: guests see the sway and the fall in the snapshots and
+ * get the tell's toast with the level's events (its crack plays from that toast). A guest who joins
+ * mid-tell has missed the toast and its crack, but sees the sway.
  */
 
 import type { Forestry } from './forestry.ts';
@@ -24,10 +31,16 @@ const S = (s: number) => Math.round(s * 60);
 export const TREE = {
     /** The ute within this far (m, horizontally, trunk to the ute's nearest end) is within reach. */
     reach: 5.5,
-    /** From the crack, the tree cannot fall for this long (s). */
-    tellS: 4,
-    /** The lean towards the ute (rad): less than a cut's push (0.07), so cutting from its side wins. */
-    lean: 0.06,
+    /**
+     * From the crack, the tree cannot fall for this long (s). A player at the tree needs 5 s to
+     * walk to the ute, get in and drive it out of reach (tested, by input): 2 s more to read it.
+     */
+    tellS: 7,
+    /**
+     * The lean towards the ute (rad) that replaces the tree's own: less than a cut's push (0.07), so
+     * cutting from the ute's side leaves 0.035 away from it, twice what the forestry calls balanced.
+     */
+    lean: 0.035,
     /** With the tree still standing this long after the crack (nobody finishing it), it is over. */
     giveUpS: 60,
     cooldownS: 60,
@@ -45,7 +58,7 @@ export const TREE_TELL =
 
 export interface TreeHazardHost {
     readonly tick: number;
-    readonly forestry: Pick<Forestry, 'def' | 'treeCount' | 'treeState' | 'fallBias' | 'holdFall'>;
+    readonly forestry: Pick<Forestry, 'def' | 'treeCount' | 'treeState' | 'fallBias' | 'holdFall' | 'sway'>;
     /** Where the ute's body is (null: no drivable ute). */
     readonly utePos: { x: number; z: number } | null;
     say(text: string): void;
@@ -57,7 +70,10 @@ export class TreeHazard {
     tree = -1;
     since = 0;
     count = 0;
-    private ended = -1e9;
+    /** When the last one ended (its tick), for the cooldown. */
+    ended = -1e9;
+    /** Each tree's cut count at the last step: a fresh bite is a rise. */
+    private seen: number[] = [];
     private host: TreeHazardHost | null = null;
 
     reset(): void {
@@ -65,6 +81,7 @@ export class TreeHazard {
         this.tree = -1;
         this.since = this.count = 0;
         this.ended = -1e9;
+        this.seen = [];
     }
 
     get busy(): boolean {
@@ -83,18 +100,23 @@ export class TreeHazard {
         const f = h.forestry;
         if (!f.def) return;
         this.install(h);
+        // which trees took a bite or blow since the last step (the first step only learns the counts)
+        let bitten = -1;
+        for (let n = 0; n < f.treeCount; n++) {
+            const cuts = f.treeState(n).cuts;
+            const was = this.seen[n];
+            if (was !== undefined && cuts > was && bitten < 0) bitten = n;
+            this.seen[n] = cuts;
+        }
         if (this.phase === TREE_PHASE.idle) {
-            if (!mayStart || this.count >= TREE.max || h.tick - this.ended < S(TREE.cooldownS)) return;
-            for (let n = 0; n < f.treeCount; n++) {
-                const st = f.treeState(n);
-                if (st.phase !== 'standing' || st.cut <= 0 || this.uteDistance(h, n) > TREE.reach) continue;
-                this.phase = TREE_PHASE.tell;
-                this.tree = n;
-                this.since = h.tick;
-                this.count++;
-                h.say(TREE_TELL);
-                return;
-            }
+            if (bitten < 0 || !mayStart || this.count >= TREE.max || h.tick - this.ended < S(TREE.cooldownS)) return;
+            const st = f.treeState(bitten);
+            if (st.phase !== 'standing' || this.uteDistance(h, bitten) > TREE.reach) return;
+            this.phase = TREE_PHASE.tell;
+            this.tree = bitten;
+            this.since = h.tick;
+            this.count++;
+            h.say(TREE_TELL);
             return;
         }
         if (this.phase === TREE_PHASE.tell && h.tick - this.since >= S(TREE.tellS)) this.phase = TREE_PHASE.active;
@@ -107,16 +129,18 @@ export class TreeHazard {
         }
     }
 
-    /** The hooks into the forestry: the lean towards the ute, and the hold during the tell. */
+    /** The hooks into the forestry: the lean towards the ute, the hold and the sway during the tell. */
     private install(h: TreeHazardHost): void {
         this.host = h;
         const f = h.forestry;
         if (f.fallBias) return;
         f.fallBias = (n) => this.bias(n);
         f.holdFall = (n) => this.phase === TREE_PHASE.tell && n === this.tree;
+        f.sway = (n) => this.swayOf(n);
     }
 
-    private bias(n: number): { x: number; z: number } | null {
+    /** The unit direction from tree n to the ute, while it is the hazard's tree and the ute in reach. */
+    private toUte(n: number): { x: number; z: number } | null {
         const h = this.host;
         const t = h?.forestry.def?.trees[n];
         if (!h || !t || !h.utePos || this.phase === TREE_PHASE.idle || n !== this.tree) return null;
@@ -125,6 +149,22 @@ export class TreeHazard {
         const dx = h.utePos.x - t.x;
         const dz = h.utePos.z - t.z;
         const len = Math.hypot(dx, dz);
-        return len < 1e-6 ? null : { x: (dx / len) * TREE.lean, z: (dz / len) * TREE.lean };
+        return len < 1e-6 ? null : { x: dx / len, z: dz / len };
+    }
+
+    /** The extra tilt on the fall: the tree's own lean taken away, TREE.lean towards the ute put in. */
+    private bias(n: number): { x: number; z: number } | null {
+        const u = this.toUte(n);
+        const own = this.host?.forestry.def?.trees[n].lean;
+        if (!u) return null;
+        return { x: u.x * TREE.lean - (own?.x ?? 0), z: u.z * TREE.lean - (own?.z ?? 0) };
+    }
+
+    /** The crown's sway during the tell: growing to 1 over it, towards the ute. */
+    private swayOf(n: number): { amount: number; yaw: number } | null {
+        const u = this.toUte(n);
+        const h = this.host;
+        if (!u || !h || this.phase !== TREE_PHASE.tell) return null;
+        return { amount: Math.min(1, (h.tick - this.since + 1) / S(TREE.tellS)), yaw: Math.atan2(u.x, u.z) };
     }
 }

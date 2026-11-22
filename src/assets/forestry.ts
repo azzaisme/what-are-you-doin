@@ -32,9 +32,14 @@ import { LOG_RADIUS } from './props.ts';
 
 // ------------------------------------------------------------------------------- stand marker
 
-/** Stand marker channels: cut progress (0-1), state (TREE_*), unused. */
+/**
+ * Stand marker channels: cut progress (0-1), state (TREE_*), and a hazard's sway (0-1) and its
+ * direction (yaw, rad, as atan2(x, z)): src/fx/wood-fx.ts shakes the crown that way.
+ */
 export const TREE_CUT = 0;
 export const TREE_STATE = 1;
+export const TREE_SWAY = 2;
+export const TREE_SWAY_YAW = 3;
 export const TREE_STANDING = 0;
 export const TREE_DOWN = 1;
 /** Number of notch sizes drawn (the cut is shown in this many steps). */
@@ -69,7 +74,7 @@ export function standMarkerAsset(): VoxelAsset {
         schema: ASSET_SCHEMA_VERSION,
         name: 'stand-marker',
         parts,
-        animChannels: 2,
+        animChannels: 4,
         cellTier: 'base',
         evaluate(root: Pose, _anim: ArrayLike<number>, out: Pose[]) {
             for (let i = 0; i < parts.length; i++) composePose(root, IDENTITY, out[i]);

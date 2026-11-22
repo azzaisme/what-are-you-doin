@@ -337,7 +337,12 @@ function playtestFrame(t: number): void {
 if (level.forestry) {
     const f = sim.forestry.ents;
     fx.wood = new WoodFX(
-        { chips: f.chips.slot, needles: f.needles.slot, sawmill: f.sawmill.slot },
+        {
+            chips: f.chips.slot,
+            needles: f.needles.slot,
+            sawmill: f.sawmill.slot,
+            markers: f.markers.map((m) => m.slot)
+        },
         level.forestry.sawmill
     );
 }

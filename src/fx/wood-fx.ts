@@ -10,9 +10,12 @@
  * The same moments make their sounds (Epic 8, #82, through `sfx`, so nothing until the game's audio
  * runs): a chop at every bite or blow, a heavy thud when a felled tree's crown breaks off, and the
  * sawmill's motor held on while its blade runs, a little higher as the cut goes through.
+ *
+ * A hazard's sway (the falling tree, #74, on each stand tree's marker): the crown shakes, shedding
+ * needles on the side it leans to, further out as the sway grows, with a creak at each shake.
  */
 
-import { SAW_CUTTING, SAW_PROGRESS, SAW_STATE } from '../assets/forestry.ts';
+import { SAW_CUTTING, SAW_PROGRESS, SAW_STATE, TREE_SWAY, TREE_SWAY_YAW } from '../assets/forestry.ts';
 import { sfx } from '../audio/sfx.ts';
 import { SAWMILL, sawmillToWorld } from '../levels/forestry.ts';
 import type { SawmillSpot } from '../levels/forestry.ts';
@@ -26,7 +29,12 @@ export interface WoodSlots {
     chips: number;
     needles: number;
     sawmill: number;
+    /** The stand trees' markers (their sway); none: no sway shown. */
+    markers?: readonly number[];
 }
+
+/** A swaying crown sheds needles this often (s), this high over the tree's foot (m), this far out. */
+export const SWAY_FX = { every: 0.5, crownY: 4.5, out0: 0.6, out1: 1.6 } as const;
 
 /** Sawdust puffs this often while the blade runs (s). */
 const SAWDUST_EVERY = 0.2;
@@ -37,6 +45,7 @@ export class WoodFX {
     private lastChips = NaN;
     private lastNeedles = NaN;
     private lastPuff = -1;
+    private readonly lastShake: number[] = [];
     private readonly p = pose();
     private readonly anim = new Float64Array(ANIM_MAX);
 
@@ -49,6 +58,7 @@ export class WoodFX {
     reset(): void {
         this.lastChips = this.lastNeedles = NaN;
         this.lastPuff = -1;
+        this.lastShake.length = 0;
     }
 
     /** Spawns the bursts due at this voxel time. */
@@ -68,6 +78,23 @@ export class WoodFX {
                 sfx.play('thud', this.p.p, { gain: 1.2, pitch: 0.7 });
             }
             this.lastNeedles = c;
+        }
+        const markers = this.slots.markers ?? [];
+        for (let n = 0; n < markers.length; n++) {
+            if (!ring.sample(markers[n], time, this.p, this.anim)) continue;
+            const amount = this.anim[TREE_SWAY];
+            if (!(amount > 0.01)) continue;
+            const k = Math.floor(time / SWAY_FX.every);
+            if (k === this.lastShake[n]) continue;
+            this.lastShake[n] = k;
+            // shed on the side it leans to, further out as it goes
+            const yaw = this.anim[TREE_SWAY_YAW];
+            const out = SWAY_FX.out0 + (SWAY_FX.out1 - SWAY_FX.out0) * Math.min(1, amount);
+            const x = this.p.p.x + Math.sin(yaw) * out;
+            const y = this.p.p.y + SWAY_FX.crownY;
+            const z = this.p.p.z + Math.cos(yaw) * out;
+            burst('needles', x, y, z);
+            sfx.creak({ x, y, z }, 0.4 + 0.6 * Math.min(1, amount));
         }
         if (this.spot && ring.sample(this.slots.sawmill, time, this.p, this.anim)) {
             // the blade runs while cutting (the output phase also reads SAW_CUTTING, at progress 1)
