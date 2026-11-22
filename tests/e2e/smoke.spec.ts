@@ -40,7 +40,8 @@ type Lab = {
         nails: number;
         drawn: number;
         preview: unknown;
-        outlines: number[];
+        outlines: number[][];
+        viewLayers: string[][];
         slot2: number;
     };
     teleport(x: number, z: number, yaw?: number): void;
@@ -666,14 +667,15 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
     expect(problems).toEqual([]);
 });
 
-test("split screen: player 2's hammer aim shows player 2's nail outline", async ({ page }) => {
+test("split screen: player 2's hammer aim shows player 2's nail outline in player 2's view only", async ({ page }) => {
     test.setTimeout(300_000);
     const problems = await boot(page, '?level=yard&t=0.01&quality=low&noui#cell100');
     await lab(page, (l) => l.action('pause'));
     await lab(page, (l) => (l as unknown as { setPlayers(n: number): void }).setPlayers(2));
     const slot2 = await lab(page, (l) => l.joints().slot2);
     expect(slot2).toBeGreaterThan(0);
-    // player 1 looks at the sky; player 2 stands over a beam on the ground and looks down at it
+    // player 2 stands over a beam on the ground and looks down at it; player 1 looks at the same
+    // beam from 3 m away (out of hammer reach), so a shared outline would show in both views
     const p0 = await lab(page, (l) => l.player());
     await page.evaluate(
         ([x, y, z, eye]) => {
@@ -681,7 +683,7 @@ test("split screen: player 2's hammer aim shows player 2's nail outline", async 
                 teleport2(x: number, z: number, yaw: number): void;
                 look2(yaw: number, pitch: number): void;
             };
-            l.look(0, 0.6);
+            l.look(Math.atan2(-3, 0.6), -Math.atan2(eye - 0.2, Math.hypot(3, 0.6)));
             l.teleport2(x + 3, z, 0);
             l.placeProp('beam-0', x + 3, y + 0.3, z - 0.6, 0);
             l.look2(0, -Math.atan2(eye - 0.2, 0.55));
@@ -691,11 +693,35 @@ test("split screen: player 2's hammer aim shows player 2's nail outline", async 
     await page.waitForFunction(
         (s2) => {
             const o = (window as unknown as { __riverLab: Lab }).__riverLab.joints().outlines;
-            return o.length === 1 && o[0] === s2;
+            return o[1]?.length === 1 && o[1][0] === s2;
         },
         slot2,
         { timeout: 60_000 }
     );
+    // player 1's view (the top camera) draws no outline, player 2's (the bottom camera) draws
+    // player 2's; each camera renders its own outline layer and not the other's
+    const j = await lab(page, (l) => l.joints());
+    expect(j.outlines).toEqual([[], [slot2]]);
+    expect(j.viewLayers).toEqual([['View1'], ['View2']]);
+    // and on screen: the outline's bright green (tone-mapped) shows in the bottom half only
+    const shot = (await page.screenshot()).toString('base64');
+    const green = await page.evaluate(async (png) => {
+        const img = new Image();
+        img.src = `data:image/png;base64,${png}`;
+        await img.decode();
+        const c = document.createElement('canvas');
+        c.width = img.width;
+        c.height = img.height;
+        const g = c.getContext('2d')!;
+        g.drawImage(img, 0, 0);
+        const d = g.getImageData(0, 0, c.width, c.height).data;
+        const half = [0, 0];
+        for (let i = 0; i < d.length; i += 4)
+            if (d[i + 1] > 200 && d[i + 1] - d[i] > 45 && d[i + 1] - d[i + 2] > 60) half[(i / 4 / c.width) * 2 < c.height ? 0 : 1]++;
+        return half;
+    }, shot);
+    expect(green[0]).toBe(0);
+    expect(green[1]).toBeGreaterThan(20);
     expect(problems).toEqual([]);
 });
 

@@ -200,7 +200,7 @@ const tUpload = performance.now();
 pipeline.applyStatic();
 const staticUploadMs = performance.now() - tUpload;
 const reference = new ReferenceRenderer(app, sim, scene.worldLayer, scene.immediateLayer);
-const nailMarkers = new NailMarkers(app, scene.worldLayer, scene.immediateLayer);
+const nailMarkers = new NailMarkers(app, scene.worldLayer, scene.viewLayers);
 const fpInput = new FirstPersonInput(canvas);
 
 // ---- particles (voxel cells): falling leaves, landing dust and chips, splashes
@@ -1296,13 +1296,13 @@ function updateNails(time: number): void {
         }
         marks = hostNails;
     }
-    // every local player's hammer outline (split screen: player 2's too)
-    const previews: { x: number; y: number; z: number; ok: boolean; slot: number }[] = [];
+    // every local player's hammer outline, each in its own view (split screen: player 2's below)
+    const previews: { x: number; y: number; z: number; ok: boolean; slot: number; view: number }[] = [];
     if (state.mode === 'firstPerson') {
         const slots = guestSession ? [guestSession.slot] : state.players > 1 && localSlot2 > 0 ? [0, localSlot2] : [0];
-        for (const slot of slots) {
+        for (const [view, slot] of slots.entries()) {
             const h = guestSession ? guestSession.hud[slot] : sim.interactionIds(slot);
-            if (h?.nailAt && h.nail > 0) previews.push({ ...h.nailAt, ok: h.nail === 1, slot });
+            if (h?.nailAt && h.nail > 0) previews.push({ ...h.nailAt, ok: h.nail === 1, slot, view });
         }
     }
     nailMarkers.update(marks, sim.ring, time, tierCellCm('base', cellCm) / 100, previews);
@@ -2262,8 +2262,12 @@ window.__riverLab = {
         connections: sim.joints.graph.size,
         nails: sim.joints.graph.nailCount,
         drawn: nailMarkers.drawn,
-        /** Player slots whose hammer outline was drawn this frame. */
+        /** Per local view (0 top / full screen, 1 player 2's), the slots whose hammer outline it drew. */
         outlines: nailMarkers.outlineSlots,
+        /** The per-view outline layers each camera renders (main camera, player 2's camera). */
+        viewLayers: [scene.camera, scene.camera2].map((c) =>
+            scene.viewLayers.filter((l) => c.camera!.layers.includes(l.id)).map((l) => l.name)
+        ),
         /** Split screen: player 2's slot (-1 when one player). */
         slot2: localSlot2,
         preview: sim.nailPreview(0)

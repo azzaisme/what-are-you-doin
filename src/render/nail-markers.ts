@@ -3,7 +3,7 @@
  * is drawn as one dark cell of the base lattice where its head is (a grid-aware thickened proxy,
  * design doc §5.1 rule 5), following the piece it is driven into. The preview marker is UI (an
  * approved exception): the outline of the cell where the next nail would go, green if it would
- * hold, red if not.
+ * hold, red if not, drawn into the layer of that player's own view only (split screen).
  */
 
 import { Color, Entity, StandardMaterial } from 'playcanvas';
@@ -38,19 +38,19 @@ export class NailMarkers {
     private readonly root = new Entity('NailMarkers');
     private readonly heads: Entity[] = [];
     private readonly layer: Layer;
-    private readonly overlay: Layer;
+    private readonly views: readonly Layer[];
     private readonly app: AppBase;
     private readonly iron = iron();
     /** Nail heads placed by the last update. */
     drawn = 0;
-    /** Player slots whose hammer outline the last update drew. */
-    outlineSlots: number[] = [];
+    /** Per local view, the player slots whose hammer outline the last update drew into it. */
+    outlineSlots: number[][] = [];
 
-    /** `layer` draws the nail heads, `overlay` (an immediate layer) the preview outline. */
-    constructor(app: AppBase, layer: Layer, overlay: Layer) {
+    /** `layer` draws the nail heads, `views` (one immediate layer per local view) the outlines. */
+    constructor(app: AppBase, layer: Layer, views: readonly Layer[]) {
         this.app = app;
         this.layer = layer;
-        this.overlay = overlay;
+        this.views = views;
         app.root.addChild(this.root);
     }
 
@@ -62,15 +62,16 @@ export class NailMarkers {
     }
 
     /**
-     * Places the nail heads on their pieces at this render time, and each local player's preview.
-     * `cell` is the base lattice's cell size (m).
+     * Places the nail heads on their pieces at this render time, and each local player's preview
+     * in that player's view (`view`: 0 the main camera, 1 player 2's). `cell` is the base
+     * lattice's cell size (m).
      */
     update(
         marks: readonly NailMark[],
         ring: SnapshotRing,
         time: number,
         cell: number,
-        previews: readonly { x: number; y: number; z: number; ok: boolean; slot: number }[]
+        previews: readonly { x: number; y: number; z: number; ok: boolean; slot: number; view: number }[]
     ): void {
         const snap = (v: number) => (Math.floor(v / cell) + 0.5) * cell;
         let n = 0;
@@ -87,8 +88,10 @@ export class NailMarkers {
         }
         for (let i = n; i < this.heads.length; i++) this.heads[i].enabled = false;
         this.drawn = n;
-        this.outlineSlots = previews.map((p) => p.slot);
+        this.outlineSlots = this.views.map((_, v) => previews.filter((p) => p.view === v).map((p) => p.slot));
         for (const preview of previews) {
+            const view = this.views[preview.view];
+            if (!view) continue;
             const h = cell * 0.56;
             const x = snap(preview.x);
             const y = snap(preview.y);
@@ -98,7 +101,7 @@ export class NailMarkers {
                 _lines[i * 3 + 1] = c & 2 ? y + h : y - h;
                 _lines[i * 3 + 2] = c & 4 ? z + h : z - h;
             });
-            this.app.drawLineArrays(_lines, preview.ok ? OK : BAD, false, this.overlay);
+            this.app.drawLineArrays(_lines, preview.ok ? OK : BAD, false, view);
         }
     }
 }
