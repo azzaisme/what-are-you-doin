@@ -367,6 +367,9 @@ test('remappable controls: rebind a key and a pad button in Settings; they work 
         null,
         { timeout: 150_000 }
     );
+    // the reload seeks and pauses again (?t=): run live, as before it
+    if (await lab(page, (l) => (l as unknown as { paused(): boolean }).paused()))
+        await lab(page, (l) => l.action('pause'));
     const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('uncivil.bindings') ?? '{}'));
     expect(saved.keys.jump).toEqual(['KeyF', '']);
     expect(saved.keys.forward).toEqual(['', 'ArrowUp']);
