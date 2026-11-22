@@ -943,7 +943,9 @@ body.settings-open .crosshair {
         inset var(--vx) var(--vx) 0 #000,
         inset calc(var(--vx) * 2) calc(var(--vx) * 2) 0 #000a,
         inset calc(var(--vx) * 3) calc(var(--vx) * 3) 0 #0004,
-        inset calc(var(--vx) * -1) calc(var(--vx) * -1) 0 #ffffff40;
+        inset calc(var(--vx) * -1) calc(var(--vx) * -1) 0 #ffffff40,
+        /* a soft shadow pooling in the slot, deepest under the top-left rim */
+        inset calc(var(--vx) * 2) calc(var(--vx) * 3) calc(var(--vx) * 6) #000c;
 }
 
 /* the corners are built up: yellow L-blocks bolted on, one voxel proud of the frame, with depth */
