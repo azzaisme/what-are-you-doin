@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { BUCKET_LITRES, BUCKET_SLOPE_X, bucketAsset } from '../../src/assets/props.ts';
 import { MAX_PARTICLES, ParticleFX } from '../../src/fx/particles.ts';
 import { BRIDGE_X, BUCKET_STUMP, timberYardLevel } from '../../src/levels/timber-yard.ts';
-import { ACTION_POUR, neutralCommand } from '../../src/sim/commands.ts';
+import { ACTION_POUR, ACTION_RESET_PROPS, neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
 import { propBody } from '../../src/sim/lab-physics.ts';
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
@@ -246,6 +246,19 @@ describe('the bucket in the level (#61, #63)', () => {
         expect(s.pouring[0]).toBe(false);
         expect(Math.abs(accounted(s))).toBeLessThan(1e-9);
     }, 60_000);
+
+    it('Reset props refills every water source (recorded as a top-up)', () => {
+        const s = new LabSim({ level: timberYardLevel });
+        s.step(cmd(0));
+        const butt = s.water.sources[0];
+        // 25 L drawn from the butt and since spilled (as after a few refills)
+        butt.litres = 15;
+        s.water.spilled += 25;
+        expect(Math.abs(s.water.imbalance)).toBeLessThan(1e-9);
+        s.step(cmd(1, { action: ACTION_RESET_PROPS }));
+        expect(butt.litres).toBe(40);
+        expect(Math.abs(s.water.imbalance)).toBeLessThan(1e-9);
+    });
 
     it('a spare bucket after a fall is empty and fills on the stump; nothing is counted twice', () => {
         const s = new LabSim({ level: timberYardLevel });
