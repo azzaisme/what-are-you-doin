@@ -49,6 +49,8 @@ import {
     smoothstep
 } from './common.ts';
 import type { RockSpot, TerrainSpec, TreeSpot } from './common.ts';
+import { STAND_CROWN_RADIUS, drawStandTree } from './forestry.ts';
+import type { ForestryDef } from './forestry.ts';
 import { pieceVolume } from './level.ts';
 import type { LevelBuildResult, LevelDef, LevelLayout, LevelStage, PropPlacement, Rect, StaticPiece } from './level.ts';
 import { routeSign } from './route-signs.ts';
@@ -62,6 +64,7 @@ import {
     creekCenterZ,
     creekHalfWidth,
     yardHeight,
+    YARD_FORESTRY,
     yardLayout,
     yardPieces,
     yardProps,
@@ -965,6 +968,12 @@ function buildScenery(
         trees++;
     });
     let rocks = 0;
+    // the Timber Yard's logging stand (felled trees: the voxel worker follows the sim)
+    VALLEY_FORESTRY.trees.forEach((t, n) => {
+        if (!hit(t.x, t.z, STAND_CROWN_RADIUS)) return;
+        drawStandTree(world, t, n, surfaceY(t.x, t.z), stats);
+        trees++;
+    });
     sc.layout.rocks.forEach((k, n) => {
         if (!hit(k.x, k.z, sc.rockR[n])) return;
         rock(world, k.x, k.z, surfaceY(k.x, k.z), k.rx, k.ry, k.rz, k.yaw, stats, n + 5);
@@ -1026,6 +1035,27 @@ function atUT(u: number, t: number, lift: number, yaw = 0, pitch = 0, roll = 0):
     const w = routeToWorld(u, t);
     return pose(w.x, groundUT(u, t) + lift, w.z, quatFromYawPitchRoll(ROUTE_YAW + yaw, pitch, roll));
 }
+
+/** The Timber Yard's logging stand and sawmill, where the yard is (area 1). */
+const VALLEY_FORESTRY: ForestryDef = (() => {
+    const y = YARD_FORESTRY;
+    const saw = y.sawmill!;
+    const w = yardToWorld(saw.x, saw.z);
+    return {
+        // positions and leans turned with the yard
+        trees: y.trees.map((t) => ({
+            ...yardToWorld(t.x, t.z),
+            yaw: t.yaw + ROUTE_YAW,
+            lean: t.lean && {
+                x: t.lean.x * Math.cos(ROUTE_YAW) + t.lean.z * Math.sin(ROUTE_YAW),
+                z: -t.lean.x * Math.sin(ROUTE_YAW) + t.lean.z * Math.cos(ROUTE_YAW)
+            }
+        })),
+        sawmill: { x: w.x, z: w.z, yaw: saw.yaw + ROUTE_YAW, y: saw.y },
+        axe: y.axe ? fromYard(y.axe) : null,
+        ground: surfaceY
+    };
+})();
 
 /** How many of each prop the Valley uses (sim/lab-entities.ts sizes its pools from these). */
 export const VALLEY_PROPS = { planks: 12, beams: 12, crates: 6 };
@@ -1163,6 +1193,7 @@ export const valleyLevel: LevelDef = {
         ute: { mode: 'drivable', pose: yardActors.ute }
     },
     props: valleyProps(),
+    forestry: VALLEY_FORESTRY,
     rules: {
         objective: 'Deliver the bucket to the flower on the summit',
         goal: VALLEY_STAGES[VALLEY_STAGES.length - 1].goal,

@@ -77,6 +77,9 @@ Query parameters (handy for comparisons and screenshots):
 | Click, then mouse                          | look (first person; `Esc` releases the pointer and opens Settings)                         |
 | `W A S D`, `Shift`, `Space`                | walk, run, jump (first person; steps up 0.3 m, slides on steep slopes)                     |
 | Left click or `E`                          | grab what the crosshair points at / release it (the prompt says what)                      |
+| Left click or `E` at a banded pine         | chew it (empty hands) or chop it (holding the axe); it falls away from you                 |
+| Left click or `E`, axe in hand, at a log   | buck it into two short logs one beaver can carry; lay logs in the sawmill's guide to saw   |
+| Left click or `E` at the sawmill's lever   | switch the saw between planks (three per log) and a beam (one per log)                     |
 | Right click                                | throw what you hold                                                                        |
 | Mouse wheel                                | hold closer / further                                                                      |
 | `Q`                                        | drop                                                                                       |
