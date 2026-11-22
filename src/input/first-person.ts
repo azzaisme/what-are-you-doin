@@ -14,6 +14,9 @@ export class FirstPersonInput {
     yaw = 0;
     pitch = 0;
     sensitivity = 0.0022;
+    invertY = false;
+    /** While set (a menu is open), keys and mouse buttons do nothing in the game. */
+    suspended = false;
     carry = false;
     private readonly keys = new Set<string>();
     private seq = 0;
@@ -29,6 +32,7 @@ export class FirstPersonInput {
         this.canvas = canvas;
         window.addEventListener('keydown', (e) => {
             if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+            if (this.suspended) return;
             this.keys.add(e.code);
             if (e.code === 'Space') this.jumpQueued = true;
             if (this.active && !e.repeat) {
@@ -43,11 +47,11 @@ export class FirstPersonInput {
         document.addEventListener('mousemove', (e) => {
             if (!this.active || document.pointerLockElement !== this.canvas) return;
             this.yaw -= e.movementX * this.sensitivity;
-            this.pitch -= e.movementY * this.sensitivity;
+            this.pitch -= e.movementY * this.sensitivity * (this.invertY ? -1 : 1);
             this.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, this.pitch));
         });
         canvas.addEventListener('mousedown', (e) => {
-            if (!this.active) return;
+            if (!this.active || this.suspended) return;
             if (document.pointerLockElement !== canvas) {
                 this.lock();
                 return;
@@ -66,6 +70,13 @@ export class FirstPersonInput {
             },
             { passive: true }
         );
+    }
+
+    /** Forgets held keys and queued presses (a menu opened over the game). */
+    clear(): void {
+        this.keys.clear();
+        this.jumpQueued = this.grabQueued = this.throwQueued = false;
+        this.reachQueued = 0;
     }
 
     get locked(): boolean {

@@ -38,7 +38,7 @@ import {
 } from '../assets/ute.ts';
 import { windAt } from '../fx/wind.ts';
 import type { WindSample } from '../fx/wind.ts';
-import type { LevelDef } from '../levels/level.ts';
+import type { LevelDef, LevelStage } from '../levels/level.ts';
 import { BEAVER_LOOP, PLATEAU_Y, UTE_TRACK, groundSurfaceY, riverLabLevel } from '../levels/river-lab.ts';
 import {
     composePose,
@@ -506,7 +506,12 @@ export class LabSim {
             if (p.fallTicks > 45) {
                 p.fallTicks = 0;
                 this.progress.falls++;
-                const sp = p.safe.valid ? p.safe : { x: this.level.spawn.x + i * 1.2, z: this.level.spawn.z };
+                const st = this.stage;
+                const sp = p.safe.valid
+                    ? p.safe
+                    : st
+                      ? { x: st.start.x + i * 1.2, z: st.start.z }
+                      : { x: this.level.spawn.x + i * 1.2, z: this.level.spawn.z };
                 this.placePlayer(sp.x, sp.z, p.yaw, i);
                 const who = this.playerCount > 1 ? `Player ${i + 1}: splash!` : 'Splash!';
                 this.events.push({
@@ -527,14 +532,26 @@ export class LabSim {
         if (this.lostTicks > 90) {
             this.lostTicks = 0;
             this.progress.recoveries++;
-            pw.respawn(bk.id);
-            this.events.push({
-                tick: this.tick,
-                kind: 'recovered',
-                text: 'The bucket floated off. A spare one is back on the stump.'
-            });
+            const st = this.stage;
+            if (st) {
+                // journeys: the bucket comes back at the last checkpoint reached
+                pw.place(bk.id, pose(st.bucket.x, st.bucket.y, st.bucket.z));
+                this.events.push({
+                    tick: this.tick,
+                    kind: 'recovered',
+                    text: `The bucket fell in. A spare one is waiting at the ${st.name} start.`
+                });
+            } else {
+                pw.respawn(bk.id);
+                this.events.push({
+                    tick: this.tick,
+                    kind: 'recovered',
+                    text: 'The bucket floated off. A spare one is back on the stump.'
+                });
+            }
         }
-        if (!this.progress.goalReached) {
+        if (rules.stages) this.applyStages(rules.stages, bk.pose.p, body.body.linvel(), pw.holders(bk.id));
+        else if (!this.progress.goalReached) {
             const g = rules.goal;
             const v = body.body.linvel();
             const inside = bk.pose.p.x > g.minX && bk.pose.p.x < g.maxX && bk.pose.p.z > g.minZ && bk.pose.p.z < g.maxZ;
@@ -552,6 +569,46 @@ export class LabSim {
             }
         }
         this.applySteps(rules);
+    }
+
+    /** Journey levels: the stage being played (the last one once all are done), or null. */
+    get stage(): LevelStage | null {
+        const st = this.level.rules?.stages;
+        if (!st || st.length === 0) return null;
+        return st[Math.min(this.progress.step, st.length - 1)];
+    }
+
+    /**
+     * Journey stages (the Valley): the bucket resting inside the current stage's goal for 0.5 s
+     * completes it; the last one is the level's goal.
+     */
+    private applyStages(
+        stages: LevelStage[],
+        p: { x: number; z: number },
+        v: { x: number; y: number; z: number },
+        holders: number
+    ): void {
+        const k = this.progress.step;
+        if (k >= stages.length) return;
+        const g = stages[k].goal;
+        const inside = p.x > g.minX && p.x < g.maxX && p.z > g.minZ && p.z < g.maxZ;
+        const resting = Math.hypot(v.x, v.y, v.z) < 0.4 && holders === 0;
+        this.goalTicks = inside && resting ? this.goalTicks + 1 : 0;
+        if (this.goalTicks <= 30) return;
+        this.goalTicks = 0;
+        this.progress.step++;
+        const last = this.progress.step >= stages.length;
+        if (last) {
+            this.progress.goalReached = true;
+            this.progress.goalTick = this.tick;
+        }
+        this.events.push({
+            tick: this.tick,
+            kind: last ? 'goal' : 'step',
+            text: last
+                ? 'The bucket made it to the flower! The valley is yours.'
+                : `✓ ${stages[k].name} done! Next: ${stages[k + 1].name}`
+        });
     }
 
     /** The current tutorial step's text ("" when the level has none or all are done). */
@@ -616,7 +673,7 @@ export class LabSim {
         this.events.push({
             tick: this.tick,
             kind: last ? 'goal' : 'step',
-            text: last ? 'Tutorial complete! Now try the Timber Yard.' : `✓ ${st.text.replace(/\.$/, '')}`
+            text: last ? 'Tutorial complete! Now try the Valley.' : `✓ ${st.text.replace(/\.$/, '')}`
         });
         this.jumped = false;
     }

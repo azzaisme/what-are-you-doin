@@ -21,7 +21,7 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
         try {
             const { VoxelService } = await import('./voxel-service.ts');
             service = new VoxelService(msg.objects ? new Set(msg.objects) : undefined);
-            const { build, units } = service.build(msg.seed, msg.level, msg.data, msg.world ?? true);
+            const { build, units } = service.build(msg.seed, msg.level, msg.data, msg.world ?? true, msg.far ?? false);
             post({ type: 'ready', build, units }, transferables(units));
             ready = true;
             for (const m of queue.splice(0)) handle(m);
@@ -38,16 +38,19 @@ function handle(msg: ToWorker): void {
     if (!service) return;
     try {
         if (msg.type === 'frame') {
-            const { units, stats } = service.frame(
+            const { units, stats, tiles } = service.frame(
                 msg.frame,
                 msg.time,
                 msg.policy,
                 msg.reference,
                 msg.states,
                 msg.particles,
-                msg.particleCount ?? 0
+                msg.particleCount ?? 0,
+                msg.focus,
+                msg.nearTiles,
+                msg.nearTileSize
             );
-            post({ type: 'frame', units, stats }, transferables(units));
+            post({ type: 'frame', units, stats, tiles }, transferables(units));
         } else if (msg.type === 'query') {
             const result = msg.what === 'hash' ? service.world.dynamicHash() : service.verifyGrid();
             post({ type: 'query', id: msg.id, result });

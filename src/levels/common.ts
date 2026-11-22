@@ -121,8 +121,9 @@ export interface TerrainSpec {
     cutBaseY: number;
     /** Integer index of the top solid cell at (x, z). */
     topCell(x: number, z: number): number;
-    surface(x: number, z: number, top: number): number;
-    side(depthBelowTop: number, j: number, z: number): number;
+    /** `grad`: the ground's steepness there (rise over run, summed over x and z), from the column tops. */
+    surface(x: number, z: number, top: number, grad: number): number;
+    side(depthBelowTop: number, j: number, z: number, x: number): number;
 }
 
 /**
@@ -163,12 +164,71 @@ export function rasterizeTerrain(world: VoxelWorld, t: TerrainSpec): number {
                 bottom = Math.min(top - 1, n - 1);
             }
             bottoms[i - i0 + (k - k0) * W] = bottom;
-            world.setStatic(i, top, k, t.surface(x, z, top), 0);
-            for (let j = top - 1; j >= bottom; j--) world.setStatic(i, j, k, t.side(top - j, j, z), 0);
+            const o = i - i0 + (k - k0) * W;
+            const gx = i > i0 && i < i1 ? Math.abs(tops[o + 1] - tops[o - 1]) : 0;
+            const gz = k > k0 && k < k1 ? Math.abs(tops[o + W] - tops[o - W]) : 0;
+            world.setStatic(i, top, k, t.surface(x, z, top, (gx + gz) / 2), 0);
+            for (let j = top - 1; j >= bottom; j--) world.setStatic(i, j, k, t.side(top - j, j, z, x), 0);
             columns++;
         }
     }
     world.bedrock = { minI: i0, minK: k0, width: W, depth: D, bottom: bottoms };
+    return columns;
+}
+
+/**
+ * The same ground as `rasterizeTerrain`, for one tile of a streamed level: columns `r` only (clipped
+ * to the terrain), with the tile's own bedrock. Neighbouring tops come from the analytic surface, so
+ * a tile is identical whether its neighbours are built or not. Returns the number of columns.
+ */
+export function rasterizeTerrainTile(
+    world: VoxelWorld,
+    t: TerrainSpec,
+    r: { i0: number; i1: number; k0: number; k1: number },
+    tile: { ti: number; tk: number }
+): number {
+    const L0 = cellIndexX(t.minX);
+    const L1 = cellIndexX(t.maxX) - 1;
+    const M0 = cellIndexZ(t.minZ);
+    const M1 = cellIndexZ(t.maxZ) - 1;
+    const i0 = Math.max(r.i0, L0);
+    const i1 = Math.min(r.i1, L1);
+    const k0 = Math.max(r.k0, M0);
+    const k1 = Math.min(r.k1, M1);
+    if (i0 > i1 || k0 > k1) {
+        world.setTileBedrock(tile.ti, tile.tk, null);
+        return 0;
+    }
+    // tops with a one-column margin
+    const W = i1 - i0 + 3;
+    const D = k1 - k0 + 3;
+    const tops = new Int32Array(W * D);
+    for (let k = k0 - 1; k <= k1 + 1; k++) {
+        const z = cellCenterZ(k);
+        for (let i = i0 - 1; i <= i1 + 1; i++) tops[i - i0 + 1 + (k - k0 + 1) * W] = t.topCell(cellCenterX(i), z);
+    }
+    const cutBase = Math.floor(t.cutBaseY / GRID_SIZE);
+    const bw = r.i1 - r.i0 + 1;
+    const bd = r.k1 - r.k0 + 1;
+    const bottoms = new Int32Array(bw * bd).fill(-0x7fffffff);
+    let columns = 0;
+    for (let k = k0; k <= k1; k++) {
+        const z = cellCenterZ(k);
+        for (let i = i0; i <= i1; i++) {
+            const x = cellCenterX(i);
+            const o = i - i0 + 1 + (k - k0 + 1) * W;
+            const top = tops[o];
+            let bottom: number;
+            if (i === L0 || i === L1 || k === M0 || k === M1) bottom = Math.min(cutBase, top - 3);
+            else bottom = Math.min(top - 1, Math.min(tops[o - 1], tops[o + 1], tops[o - W], tops[o + W]) - 1);
+            bottoms[i - r.i0 + (k - r.k0) * bw] = bottom;
+            const grad = (Math.abs(tops[o + 1] - tops[o - 1]) + Math.abs(tops[o + W] - tops[o - W])) / 2;
+            world.setStatic(i, top, k, t.surface(x, z, top, grad), 0);
+            for (let j = top - 1; j >= bottom; j--) world.setStatic(i, j, k, t.side(top - j, j, z, x), 0);
+            columns++;
+        }
+    }
+    world.setTileBedrock(tile.ti, tile.tk, { minI: r.i0, minK: r.k0, width: bw, depth: bd, bottom: bottoms });
     return columns;
 }
 

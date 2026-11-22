@@ -44,6 +44,10 @@ import { initPhysics } from './sim/physics/world.ts';
 import { ANIM_MAX } from './sim/snapshots.ts';
 import type { CameraControlsApi } from './types/engine-scripts.ts';
 import { OnlinePanel } from './ui/online-panel.ts';
+import { SettingsMenu } from './ui/settings-menu.ts';
+import type { SettingValue } from './ui/settings-menu.ts';
+import { DEFAULT_SETTINGS, SETTING_RANGES, loadSettings, saveSettings, urlOverrides } from './ui/settings-store.ts';
+import type { Settings } from './ui/settings-store.ts';
 import {
     CELL_SIZE_MAX_CM,
     CELL_SIZE_DEFAULT_CM,
@@ -66,7 +70,17 @@ const setLoading = (t: string) => {
     if (loading) loading.textContent = t;
 };
 
-const initialQuality: Quality = QUALITY[params.get('quality') === 'low' ? 'low' : 'high'];
+// player settings: saved per browser; URL parameters override them for one visit (not saved)
+const settingsStorage = (() => {
+    try {
+        return localStorage;
+    } catch {
+        return null;
+    }
+})();
+const savedSettings: Settings = loadSettings(settingsStorage);
+const settings: Settings = { ...savedSettings, ...urlOverrides(params) };
+const initialQuality: Quality = QUALITY[settings.quality];
 // ?level=tutorial|yard|lab; otherwise the last level played; a first visit starts with the tutorial
 const LEVEL_KEY = 'uncivil.level';
 const storedLevel = (() => {
@@ -141,6 +155,20 @@ for (const tier of CELL_TIERS) {
         world: tier === 'base'
     });
 }
+// streamed levels (the Valley): a coarse far lattice holds the whole world, the base lane builds
+// only the tiles near this device's cameras
+if (level.stream)
+    lanes.push({
+        worker: new Worker(new URL('./workers/voxel-worker.ts', import.meta.url), {
+            type: 'module',
+            name: 'voxels-far'
+        }),
+        renderer: new VoxelRenderer(app, scene.worldLayer, level.stream.farCm / 100, true),
+        cellCm: level.stream.farCm,
+        objects: [],
+        world: true,
+        far: true
+    });
 const pipeline = new VoxelClient(lanes, sim);
 const build = await pipeline.init(1, level.id, level.data);
 setLoading('Uploading meshes…');
@@ -157,17 +185,11 @@ const watch = (name: string, bottom: number, timber: boolean) => {
     const e = sim.entities.find((x) => x.name === name);
     if (e) watched.push({ slot: e.slot, bottom, timber });
 };
-for (const n of [
-    'plank',
-    'held-plank',
-    'extra-plank-0',
-    'extra-plank-1',
-    'extra-plank-2',
-    'extra-plank-3',
-    'extra-plank-4'
-])
-    watch(n, 0.05, true);
-for (const n of ['beam-0', 'beam-1']) watch(n, 0.075, true);
+for (const e of sim.entities) {
+    if (e.name === 'plank' || e.name === 'held-plank' || e.name.startsWith('extra-plank')) watch(e.name, 0.05, true);
+    else if (e.name.startsWith('beam-')) watch(e.name, 0.075, true);
+    else if (e.name.startsWith('crate-')) watch(e.name, 0.25, true);
+}
 for (const n of ['log', 'extra-log-0', 'extra-log-1']) watch(n, 0.2, true);
 watch('cube', 0.25, true);
 watch('sphere', 0.3, false);
@@ -180,6 +202,22 @@ pipeline.particles = (time) => {
     fx.update(time, sim.ring, { x: cp.x, z: cp.z });
     return { buffer: fx.buffer, count: fx.count };
 };
+// streamed levels: the near world follows this device's cameras (both views in split screen)
+if (level.stream) {
+    const focus = new Float32Array(4);
+    pipeline.focus = () => {
+        const a = camera.getPosition();
+        focus[0] = a.x;
+        focus[1] = a.z;
+        if (state.players > 1) {
+            const b = scene.camera2.getPosition();
+            focus[2] = b.x;
+            focus[3] = b.z;
+            return focus;
+        }
+        return focus.subarray(0, 2);
+    };
+}
 const windNow = { x: 0, z: 0, speed: 0, gustiness: 0 };
 // gamepads (local co-op): the first pad to press A drives player 1, the next one joins as player 2
 const pads = new PadManager();
@@ -266,8 +304,8 @@ const state: State = {
     sunAzimuth: scene.sunAzimuth,
     stress: 0,
     quality: initialQuality.name,
-    fov: 52,
-    sensitivity: 2.2,
+    fov: settings.fov,
+    sensitivity: settings.mouseSensitivity,
     // the Epic 1 comfort-test plank is on by default in the River Lab only; in a level you start empty-handed
     carry: level.id === 'lab',
     uiHidden: false,
@@ -275,11 +313,12 @@ const state: State = {
     props: sim.propsMode,
     colliders: false,
     players: 1,
-    particles: true,
-    look: params.get('look') === 'pixel' ? 'pixel' : 'default',
-    cameraFeel: params.get('bob') !== 'off',
-    chase: params.get('view') === 'chase' || params.get('view') === 'side'
+    particles: settings.particles,
+    look: settings.look,
+    cameraFeel: settings.cameraBob,
+    chase: settings.overShoulder
 };
+fx.enabled = state.particles;
 const sideView = params.get('view') === 'side';
 scene.setPixelLook(state.look === 'pixel');
 
@@ -389,6 +428,7 @@ class LabDirector extends Script {
             pad1.carry = state.carry;
         }
         pads.poll(dt);
+        if (menu.open) menu.pollPad(menuPad(), dt);
         const look = touch.takeLook(fpInput.yaw, fpInput.pitch);
         fpInput.yaw = look.yaw;
         fpInput.pitch = look.pitch;
@@ -813,6 +853,7 @@ const host: PanelHost = {
                 state.forceVoxel = true;
                 break;
         }
+        persistFromState();
     },
     action(id) {
         if (id === 'pause') setPaused(!state.paused);
@@ -958,28 +999,8 @@ document.body.append(hud);
 const dock = document.createElement('div');
 dock.className = 'ui-dock';
 document.body.append(dock);
-// ---- voxel size: a per-player quality setting, applied by reloading (sizes derive from it at load)
-const cellUi = document.createElement('div');
-cellUi.className = 'cell-size';
-cellUi.innerHTML = `
-  <label>Voxel size <input type="range" min="${CELL_SIZE_MIN_CM}" max="${CELL_SIZE_MAX_CM}" step="0.5" value="${cellCm}"><output>${cellCm.toFixed(1)} cm</output></label>
-  <button type="button" disabled>Apply</button>
-  <button type="button" class="cell-reset"${cellCm === CELL_SIZE_DEFAULT_CM ? ' hidden' : ''}>Reset to ${CELL_SIZE_DEFAULT_CM} cm</button>
-  <small>finer = sharper, slower to load</small>`;
-dock.append(cellUi);
-const cellRange = cellUi.querySelector('input')!;
-const cellOut = cellUi.querySelector('output')!;
-const cellApply = cellUi.querySelector('button')!;
-for (const ev of ['pointerdown', 'mousedown', 'wheel', 'click', 'keydown'])
-    cellUi.addEventListener(ev, (e) => e.stopPropagation());
-cellRange.addEventListener('input', () => {
-    const v = clampCellSizeCm(Number(cellRange.value));
-    cellOut.textContent = `${v.toFixed(1)} cm`;
-    cellApply.disabled = v === cellCm;
-});
-cellApply.addEventListener('click', () => applyCellSize(Number(cellRange.value)));
-cellUi.querySelector('.cell-reset')!.addEventListener('click', () => applyCellSize(CELL_SIZE_DEFAULT_CM));
-
+// ---- voxel size: a per-player quality setting (Settings > Video), applied by reloading (sizes derive
+// from it at load)
 function applyCellSize(cm: number): void {
     const v = clampCellSizeCm(cm);
     // the default is stored as "no choice", so a saved size never hides a later default change
@@ -1115,6 +1136,17 @@ function updateObjective(): void {
         el.classList.toggle('done', done);
         return;
     }
+    const stages = r?.stages;
+    if (stages) {
+        // journeys: the stage being played, out of all of them
+        const k = guestSession ? guestSession.step : sim.progress.step;
+        const done = k >= stages.length;
+        el.textContent = done
+            ? '✓ The bucket reached the flower — the valley is yours'
+            : `${k + 1}/${stages.length} ${stages[k].name} · ${stages[k].objective}`;
+        el.classList.toggle('done', done);
+        return;
+    }
     const done = guestSession ? guestSession.goal : sim.progress.goalReached;
     el.textContent = r ? `${done ? '✓' : '○'} ${r.objective}` : '';
     el.classList.toggle('done', done);
@@ -1184,6 +1216,14 @@ document.addEventListener('pointerlockchange', updatePrompt);
 
 window.addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+    // the settings menu takes the keyboard while it is open (it handles its own keys)
+    if (menu.open) return;
+    if (e.code === 'Escape' && !e.repeat && !editing) {
+        // with the mouse captured, the browser's Esc releases it first (that opens the menu, below)
+        menu.show();
+        e.preventDefault();
+        return;
+    }
     switch (e.code) {
         case 'KeyP':
             setPaused(!state.paused);
@@ -1209,11 +1249,13 @@ window.addEventListener('keydown', (e) => {
         case 'KeyC':
             state.chase = !state.chase;
             panel.sync();
+            persistFromState();
             break;
         case 'KeyL':
             state.look = state.look === 'pixel' ? 'default' : 'pixel';
             scene.setPixelLook(state.look === 'pixel');
             panel.sync();
+            persistFromState();
             break;
         case 'F3':
             panel.visible = !panel.visible;
@@ -1598,6 +1640,308 @@ levelsBtn.addEventListener('click', (e) => {
     levelsPanel.style.display = open ? '' : 'none';
 });
 
+// ------------------------------------------------------------------------------------- settings
+
+/** Changes a setting for this visit and saves it (only what the player changed is saved). */
+function setSetting<K extends keyof Settings>(key: K, v: Settings[K]): void {
+    if (settings[key] === v) return;
+    settings[key] = v;
+    savedSettings[key] = v;
+    saveSettings(settingsStorage, savedSettings);
+}
+
+/** Settings that also live in the game state (the debug panel and hotkeys change them too). */
+function persistFromState(): void {
+    setSetting('fov', state.fov);
+    setSetting('mouseSensitivity', state.sensitivity);
+    setSetting('quality', state.quality);
+    setSetting('look', state.look);
+    setSetting('cameraBob', state.cameraFeel);
+    setSetting('overShoulder', state.chase);
+    setSetting('particles', state.particles);
+    if (menuReady) menu.sync();
+}
+
+function applyInputSettings(): void {
+    fpInput.sensitivity = settings.mouseSensitivity / 1000;
+    fpInput.invertY = settings.invertMouseY;
+    pads.lookScale = settings.padLookSpeed;
+    pads.invertY = settings.invertPadY;
+    touch.lookScale = settings.touchLookSpeed;
+}
+
+function applyUiSettings(): void {
+    document.documentElement.style.setProperty('--ui-scale', String(settings.uiScale));
+    document.body.classList.toggle('no-hints', !settings.controlHints);
+    layoutVars();
+}
+applyInputSettings();
+applyUiSettings();
+
+/** Settings keys that map onto debug panel controls (same side effects). */
+const PANEL_ID: Partial<Record<keyof Settings, string>> = {
+    fov: 'fov',
+    mouseSensitivity: 'sensitivity',
+    quality: 'quality',
+    look: 'look',
+    cameraBob: 'cameraFeel',
+    overShoulder: 'chase',
+    particles: 'particles'
+};
+let cellPending = cellCm;
+let menuReady = false;
+let menuPaused = false;
+let menuPadIndex = -1;
+
+/** The pad that drives the menu: the one that opened it, else the first connected. */
+function menuPad(): Gamepad | null {
+    try {
+        const all = navigator.getGamepads ? Array.from(navigator.getGamepads()) : [];
+        return (
+            all.find((g) => g && g.connected && g.index === menuPadIndex) ?? all.find((g) => g && g.connected) ?? null
+        );
+    } catch {
+        return null;
+    }
+}
+
+const pct = (v: number) => `${Math.round(v * 100)}%`;
+const times = (v: number) => `${v.toFixed(1)}×`;
+const menu = new SettingsMenu(
+    {
+        get(key): SettingValue {
+            if (key === 'cellCm') return cellPending;
+            if (key === 'uiHidden') return state.uiHidden;
+            if (key === 'debugPanel') return panel.visible;
+            return settings[key as keyof Settings];
+        },
+        set(key, v) {
+            if (key === 'cellCm') {
+                cellPending = clampCellSizeCm(Number(v));
+                menu.sync();
+                return;
+            }
+            if (key === 'uiHidden') {
+                setUiHidden(Boolean(v));
+                return;
+            }
+            if (key === 'debugPanel') {
+                panel.visible = Boolean(v);
+                return;
+            }
+            const k = key as keyof Settings;
+            const pid = PANEL_ID[k];
+            if (pid) {
+                host.set(pid, v as string | number | boolean);
+                panel.sync();
+                return;
+            }
+            (setSetting as (k: keyof Settings, v: SettingValue) => void)(k, v);
+            applyInputSettings();
+            applyUiSettings();
+        },
+        action(id) {
+            switch (id) {
+                case 'resume':
+                    menu.close();
+                    if (state.mode === 'firstPerson' && !touch.enabled) fpInput.lock();
+                    break;
+                case 'restart':
+                    menu.close();
+                    resetScene();
+                    break;
+                case 'levels':
+                    menu.close();
+                    renderLevels();
+                    levelsPanel.style.display = '';
+                    break;
+                case 'online':
+                    menu.close();
+                    online.button.click();
+                    break;
+                case 'applyCell':
+                    applyCellSize(cellPending);
+                    break;
+                case 'resetCell':
+                    applyCellSize(CELL_SIZE_DEFAULT_CM);
+                    break;
+                case 'resetAll':
+                    for (const k of Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]) {
+                        const v = DEFAULT_SETTINGS[k];
+                        const pid = PANEL_ID[k];
+                        if (pid) host.set(pid, v);
+                        else (setSetting as (k: keyof Settings, v: SettingValue) => void)(k, v);
+                    }
+                    applyInputSettings();
+                    applyUiSettings();
+                    panel.sync();
+                    menu.sync();
+                    break;
+            }
+        },
+        enabled(id) {
+            if (id === 'applyCell') return cellPending !== cellCm;
+            if (id === 'resetCell') return cellCm !== CELL_SIZE_DEFAULT_CM;
+            if (id === 'restart') return !guestSession;
+            return true;
+        },
+        shown(key) {
+            // touch look speed only where there is touch; mouse rows everywhere else
+            if (key === 'touchLookSpeed') return touchSeen;
+            if (key === 'mouseSensitivity' || key === 'invertMouseY')
+                return !touchSeen || matchMedia('(pointer: fine)').matches;
+            return true;
+        },
+        opened() {
+            // the game below gets no input, and solo play pauses (an online game keeps running)
+            fpInput.suspended = true;
+            fpInput.clear();
+            pads.suspended = true;
+            fpInput.unlock();
+            levelsPanel.style.display = 'none';
+            cellPending = cellCm;
+            menuPaused = !state.paused && !hostSession && !guestSession;
+            if (menuPaused) setPaused(true);
+            updatePrompt();
+        },
+        closed() {
+            fpInput.suspended = false;
+            pads.suspended = false;
+            if (menuPaused && state.paused) setPaused(false);
+            menuPaused = false;
+            updatePrompt();
+        }
+    },
+    [
+        {
+            id: 'game',
+            label: 'Game',
+            rows: [
+                { kind: 'button', id: 'resume', label: 'Resume', primary: true },
+                { kind: 'button', id: 'restart', label: 'Restart level' },
+                { kind: 'button', id: 'levels', label: 'Levels…' },
+                { kind: 'button', id: 'online', label: 'Play online…' },
+                { kind: 'toggle', key: 'uiHidden', label: 'Hide HUD', hint: 'H' },
+                { kind: 'toggle', key: 'debugPanel', label: 'Debug panel', hint: 'F3' }
+            ]
+        },
+        {
+            id: 'controls',
+            label: 'Controls',
+            rows: [
+                {
+                    kind: 'range',
+                    key: 'mouseSensitivity',
+                    label: 'Mouse sensitivity',
+                    ...SETTING_RANGES.mouseSensitivity,
+                    format: (v) => v.toFixed(1)
+                },
+                { kind: 'toggle', key: 'invertMouseY', label: 'Invert mouse Y' },
+                {
+                    kind: 'range',
+                    key: 'padLookSpeed',
+                    label: 'Gamepad look speed',
+                    ...SETTING_RANGES.padLookSpeed,
+                    format: times
+                },
+                { kind: 'toggle', key: 'invertPadY', label: 'Invert gamepad Y' },
+                {
+                    kind: 'range',
+                    key: 'touchLookSpeed',
+                    label: 'Touch look speed',
+                    ...SETTING_RANGES.touchLookSpeed,
+                    format: times
+                },
+                { kind: 'toggle', key: 'overShoulder', label: 'Over-the-shoulder camera', hint: 'C' }
+            ]
+        },
+        {
+            id: 'video',
+            label: 'Video',
+            rows: [
+                {
+                    kind: 'choice',
+                    key: 'quality',
+                    label: 'Quality',
+                    options: [
+                        { value: 'high', label: 'High' },
+                        { value: 'low', label: 'Low' }
+                    ]
+                },
+                {
+                    kind: 'range',
+                    key: 'cellCm',
+                    label: 'Voxel size',
+                    min: CELL_SIZE_MIN_CM,
+                    max: CELL_SIZE_MAX_CM,
+                    step: 0.5,
+                    format: (v) => `${v.toFixed(1)} cm`,
+                    hint: 'Finer is sharper but slower to load'
+                },
+                {
+                    kind: 'button',
+                    id: 'applyCell',
+                    label: 'Apply voxel size',
+                    hint: 'Reloads the level'
+                },
+                {
+                    kind: 'button',
+                    id: 'resetCell',
+                    label: `Reset voxel size to ${CELL_SIZE_DEFAULT_CM} cm`
+                },
+                {
+                    kind: 'choice',
+                    key: 'look',
+                    label: 'Look',
+                    hint: 'L',
+                    options: [
+                        { value: 'default', label: 'Default' },
+                        { value: 'pixel', label: 'Pixel' }
+                    ]
+                },
+                { kind: 'range', key: 'fov', label: 'Field of view', ...SETTING_RANGES.fov, format: (v) => `${v}°` },
+                { kind: 'toggle', key: 'cameraBob', label: 'Camera bob & kick', hint: 'Off for less motion' },
+                { kind: 'toggle', key: 'particles', label: 'Leaves & particles' }
+            ]
+        },
+        {
+            id: 'interface',
+            label: 'Interface',
+            rows: [
+                { kind: 'range', key: 'uiScale', label: 'Text & menu size', ...SETTING_RANGES.uiScale, format: pct },
+                { kind: 'toggle', key: 'controlHints', label: 'Control hints' },
+                { kind: 'button', id: 'resetAll', label: 'Reset all settings' }
+            ]
+        }
+    ]
+);
+menuReady = true;
+
+// opening it: the Settings button, Esc, Start on a pad, or losing the mouse in first person
+const settingsBtn = document.createElement('button');
+settingsBtn.type = 'button';
+settingsBtn.className = 'online-chip settings-chip';
+settingsBtn.innerHTML = '<span aria-hidden="true">⚙</span> Settings';
+settingsBtn.setAttribute('aria-haspopup', 'dialog');
+settingsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    menu.toggle();
+});
+dock.insertBefore(settingsBtn, levelsBtn);
+// the menu's footer shows pad buttons once a pad is in use
+const padSeen = () => document.body.classList.add('has-pad');
+window.addEventListener('gamepadconnected', padSeen);
+pads.onMenu = (pad) => {
+    padSeen();
+    if (menu.open) return; // the menu reads Start itself (it closes)
+    menuPadIndex = pad.index;
+    menu.show();
+};
+document.addEventListener('pointerlockchange', () => {
+    // Esc while playing: the browser releases the mouse (the key never reaches the page)
+    if (!fpInput.locked && state.mode === 'firstPerson' && !menu.open && !editing) menu.show();
+});
+
 // ------------------------------------------------------------------------------------- test API
 
 declare global {
@@ -1609,6 +1953,7 @@ declare global {
 window.__riverLab = {
     ready: true,
     seek,
+    paused: () => state.paused,
     set: (id: string, v: string | number | boolean) => host.set(id, v),
     action: (id: string) => host.action(id),
     stats: collectStats,
@@ -1690,6 +2035,12 @@ window.__riverLab = {
     /** Merges fields into the next player command (grab / throw / move edges for tests). */
     input: (c: Record<string, unknown>) => fpInput.inject(c),
     player: () => ({ ...sim.player, holding: sim.physics.heldId, eyeHeight: EYE_HEIGHT }),
+    /** Puts player 1 somewhere (tests and screenshots of big levels). */
+    teleport: (x: number, z: number, yaw?: number) => sim.placePlayer(x, z, yaw ?? sim.player.yaw, 0),
+    /** Streamed levels: near tiles built so far. */
+    nearTiles: () => pipeline.nearTiles.size,
+    /** Streamed levels: whether the near world is built over a square around (x, z). */
+    nearBuiltAt: (x: number, z: number, half = 3) => pipeline.nearCovers(x - half, x + half, z - half, z + half),
     level: level.id,
     progress: () => ({ ...sim.progress, events: sim.events.map((e) => e.kind), stepText: sim.stepText }),
     /** Places a named prop at a pose (tests and the evidence capture), as a teleport. */

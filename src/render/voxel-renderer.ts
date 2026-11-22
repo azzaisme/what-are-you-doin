@@ -29,6 +29,11 @@ import { VOXEL_LIT_DECLARATIONS_GLSL, VOXEL_LIT_MAIN_END_GLSL } from './shader-c
 interface Unit {
     key: number;
     mode: MeshMode;
+    /** Footprint (m), for hiding far units under built near tiles. */
+    minX: number;
+    maxX: number;
+    minZ: number;
+    maxZ: number;
     entity: Entity;
     meshes: Mesh[];
     instances: MeshInstance[];
@@ -58,10 +63,19 @@ export class VoxelRenderer {
     /** Cell size of the lattice this renderer draws (per-item sizes: one renderer per lattice). */
     readonly cellSize: number;
 
-    constructor(app: AppBase, layer: Layer, cellSize = GRID_SIZE) {
+    /** The far lattice of a streamed level: no shadows, sunk one cell, hidden under near tiles. */
+    readonly far: boolean;
+    /** Far units are shown only where this says the near world is not built. */
+    private staticFilter: ((minX: number, maxX: number, minZ: number, maxZ: number) => boolean) | null = null;
+
+    constructor(app: AppBase, layer: Layer, cellSize = GRID_SIZE, far = false) {
         this.app = app;
         this.layer = layer;
         this.cellSize = cellSize;
+        this.far = far;
+        // sunk by one of its own cells (still on its lattice): where far and near meet, the coarse
+        // ground stays under the fine one instead of poking through it
+        if (far) this.root.setLocalPosition(0, -cellSize, 0);
         app.root.addChild(this.root);
         this.createMaterials();
     }
@@ -99,10 +113,19 @@ export class VoxelRenderer {
         for (const m of units) {
             const map = m.mode === 'static' ? this.staticUnits : this.dynUnits;
             let u = map.get(m.key);
+            // streamed levels: a static unit that went empty (its tile left view) is dropped
+            if (m.mode === 'static' && m.quads === 0) {
+                if (u) {
+                    u.entity.destroy();
+                    map.delete(m.key);
+                }
+                continue;
+            }
             if (!u) {
                 u = this.createUnit(m);
                 map.set(m.key, u);
                 if (m.mode === 'dynamic') u.entity.enabled = this.dynamicVisible;
+                else if (this.staticFilter) u.entity.enabled = this.staticFilter(u.minX, u.maxX, u.minZ, u.maxZ);
             }
             for (let c = 0; c < SURFACE_CLASS_COUNT; c++) this.upload(u, c, m.classes[c]);
             u.quads = m.quads;
@@ -143,13 +166,17 @@ export class VoxelRenderer {
         entity.addComponent('render', {
             meshInstances: instances,
             layers: [this.layer.id],
-            castShadows: true,
+            castShadows: !this.far,
             receiveShadows: true
         });
         this.root.addChild(entity);
         return {
             key: m.key,
             mode: m.mode,
+            minX: m.minI * cs,
+            maxX: (m.minI + m.sx) * cs,
+            minZ: m.minK * cs,
+            maxZ: (m.minK + m.sz) * cs,
             entity,
             meshes,
             instances,
@@ -187,6 +214,13 @@ export class VoxelRenderer {
         mi.visible = true;
     }
 
+    /** Shows a static unit only where `show` says so (re-evaluated now and for new units). */
+    setStaticFilter(show: ((minX: number, maxX: number, minZ: number, maxZ: number) => boolean) | null): void {
+        this.staticFilter = show;
+        for (const u of this.staticUnits.values())
+            u.entity.enabled = show ? show(u.minX, u.maxX, u.minZ, u.maxZ) : true;
+    }
+
     setDynamicVisible(v: boolean): void {
         this.dynamicVisible = v;
         for (const u of this.dynUnits.values()) u.entity.enabled = v;
@@ -205,6 +239,7 @@ export class VoxelRenderer {
         let triangles = 0;
         let drawables = 0;
         for (const u of this.staticUnits.values()) {
+            if (!u.entity.enabled) continue;
             quads += u.quads;
             triangles += u.triangles;
             for (const m of u.instances) if (m.visible) drawables++;
@@ -227,8 +262,8 @@ export class VoxelRenderer {
     /** Render units must stay at the origin with identity rotation. */
     unitsAtIdentity(): boolean {
         for (const u of [...this.dynUnits.values(), ...this.staticUnits.values()]) {
-            const p = u.entity.getPosition();
-            const r = u.entity.getRotation();
+            const p = u.entity.getLocalPosition();
+            const r = u.entity.getLocalRotation();
             if (p.x !== 0 || p.y !== 0 || p.z !== 0 || r.w !== 1) return false;
         }
         return true;

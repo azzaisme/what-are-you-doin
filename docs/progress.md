@@ -1,5 +1,105 @@
 # Progress log
 
+## The Valley: the rest of the levels as one big map (2026-11-22, owner request)
+
+Owner: "Let's do the rest of the levels (one big map). Make sure it works for multiplayer and
+single player", with the world map (seven numbered areas).
+
+- **One 224 × 224 m map** (`src/levels/valley.ts`), on the Levels menu as "The Valley · the whole
+  journey". The route climbs from the yard to the summit, with a crossing that needs timber
+  between areas:
+    1. **Timber Yard:** the yard as it was, turned to face up the valley.
+    2. **Shallow Creek:** the old bridge gap (2.4 m), the yard's own crossing.
+    3. **Forest Road:** about 500 more trees, a log dump with three beams, and a culvert ditch
+       (2.6 m at the road).
+    4. **Gorge:** a 5.6 m gorge with a stone pier in the middle (two spans of 2.2 m), a snapped
+       trestle, and a waterfall from the works' outfall.
+    5. **Old Industrial Works:** a brick hall, a chimney, tanks, pipes, a tower crane with a hanging
+       crate, and a 1.5 m retaining wall up to the upper yard. Six crates are there to stack.
+    6. **Mountain Approach:** the road climbs in two pitches with a level bench at a crevasse
+       (2.4 m), and there is snow above 13 m.
+    7. **Flower Summit:** the giant flower in a ring of stones.
+- **Stages:** the objective shows "k/7 Area · what to do". A flag in the stage's colour marks each
+  goal, and a signpost marks each area. A bucket lost in a crossing comes back at the current
+  stage's start, and players who fall with no safe ground near go back there too.
+- **Streaming (ADR 0013):**
+    - near tiles are built around each local camera at the player's voxel size;
+    - a coarse 40 cm far lattice draws the rest of the map under fog;
+    - tiles far behind are released, so memory stays bounded.
+- **Multiplayer:**
+    - the host runs the whole map's physics;
+    - each guest streams around its own player, and the stage count travels in the host state;
+    - a guest joining from another level reloads into the Valley.
+- **Fixed on the way:** props more than 30 m from the yard's centre were silently sent back to their
+  spawn by a fixed physics safety box. The box now covers the level.
+- **Tests:**
+    - `tests/unit/valley.test.ts`:
+        - the route frame;
+        - crossings run right across the valley;
+        - a beam laid over each gap rests on both banks and the pier;
+        - a tile builds the same alone and among neighbours;
+        - streaming lets go of what it leaves;
+        - stages complete only in order;
+        - lost-bucket recovery;
+        - every prop at rest;
+        - snapshot positions far from the origin.
+    - e2e:
+        - single player: the Valley boots, stage 1 completes, and a teleport to the gorge streams the
+          world in;
+        - two tabs over the local transport: the guest's objective follows the host's stage.
+
+## Settings menu (2026-11-22, owner request)
+
+Owner: "Can I have a proper settings menu please. Accessible to both keyboard, mouse/gamepad/touch".
+
+- **Opening it:** the **Settings** button (bottom left), `Esc`, or Start on any gamepad. In first
+  person, `Esc` first releases the mouse (the browser takes that key press), and losing the mouse
+  opens the menu. Solo play pauses while it is open; an online game keeps running.
+- **Every input:**
+    - mouse and touch: tap a tab or control. Targets are at least 44 px, and the dialog scrolls on
+      short screens; on narrow screens each label sits above its control.
+    - keyboard: arrow keys (up / down rows, left / right change), `Q` / `E` or Page Up / Down for
+      sections, `Tab` cycles inside the dialog, `Enter` / `Space` press, `Esc` closes.
+    - gamepad: D-pad or left stick (held: repeats), **A** press, **B** or Start close,
+      **LB** / **RB** sections.
+    - the current row is always highlighted, not only after keyboard use, so a pad player can see
+      where they are.
+- **While it is open,** the game gets no input: keys, mouse buttons, pad sticks and buttons are
+  ignored, and the touch controls are hidden. The **A** that presses a menu button does not jump,
+  and doesn't join a second player.
+- **Sections:**
+    - Game: resume, restart level, levels, play online, hide HUD, debug panel.
+    - Controls: mouse sensitivity, invert mouse Y, gamepad look speed, invert gamepad Y, touch look
+      speed (touch devices), over-the-shoulder camera.
+    - Video: quality, voxel size (apply reloads; it moved here from the bottom-left box), look,
+      field of view, camera bob & kick, leaves & particles.
+    - Interface: text & menu size (80–160 %), control hints, reset all.
+- **Saved** in local storage (`uncivil.settings`), only what differs from the defaults; bad or
+  tampered data falls back to defaults. URL parameters (`?quality=`, `?look=`, `?bob=`, `?view=`)
+  still override for one visit, without being saved. The debug panel and the `C` / `L` hotkeys
+  change the same settings.
+- **Voxel styling** (owner: "more like the voxel/grid theme … build up the corners"):
+    - a 16×16-voxel frame (stepped corners, a bevel lit top-left and shaded bottom-right);
+    - yellow L-blocks with bolts on each corner, one voxel proud of the frame, extruded in 3D: the
+      face, three voxels of depth (a shaded right side and a dark underside, lit from the top left
+      on every corner) and a shadow cast on the frame;
+    - the whole face is the game's grey rock (owner: "the whole face look like the grey rock, with
+      random depth across it and then inset the menu item faces"): a tileable 32×32-voxel patch
+      of plates at random depths in the Rock palette, darker the deeper, with lit and shadowed
+      step edges; the frame's bevel tints it at the edges;
+    - each row, and the key-hint strip, is a slot cut into the rock: a dark floor, shadowed top
+      and left walls, lit bottom and right ones, with rock between the slots;
+    - buttons, tabs, switches, choices and sliders are blocks with stepped corners that press
+      down. Focus shows as a voxel ring inside them.
+    - `scripts/voxel-frame.mjs` generates the frame, corner and rock images (CSS data URIs).
+- **Accessibility:** a real dialog (`role=dialog`, `aria-modal`). Tabs are `role=tab`; switches
+  are `role=switch`; choices are radio groups; sliders give their value as text.
+- **Tests:**
+    - `tests/unit/settings.test.ts`: storage, clamping, junk and prototype-polluted data, URL
+      overrides.
+    - e2e: opens the menu with the mouse, `Esc` and a simulated gamepad, changes the field of view
+      by keyboard and invert-Y by pad, and checks both survive a reload.
+
 ## Holding things in your hands (2026-11-21, owner request)
 
 Owner: "It really needs to look like I am holding things with my arms".

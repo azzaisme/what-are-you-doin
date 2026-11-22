@@ -9,7 +9,7 @@ import type { Pose } from '../voxels/math.ts';
 import type { RasterStats, SamplingPolicy } from '../voxels/rasterizer.ts';
 import { box, cylinder, ellipsoid } from '../voxels/volumes.ts';
 import type { MaterialField, Volume } from '../voxels/volumes.ts';
-import type { VoxelWorld } from '../voxels/world.ts';
+import type { ColumnRect, VoxelWorld } from '../voxels/world.ts';
 
 import type { RockSpot, TreeSpot } from './common.ts';
 import type { LevelData } from './data.ts';
@@ -72,6 +72,18 @@ export type TutorialStep =
     | { kind: 'place'; text: string; entity: string; rect: Rect }
     | { kind: 'goal'; text: string };
 
+/** One stage of a journey level (the Valley): a checkpoint the bucket must reach, in order. */
+export interface LevelStage {
+    name: string;
+    objective: string;
+    /** The bucket counts as delivered when it rests inside this rectangle. */
+    goal: Rect;
+    /** Where players restart in this stage (a late join, or no safe ground yet). */
+    start: { x: number; z: number; yaw: number };
+    /** Where a lost bucket comes back in this stage. */
+    bucket: { x: number; y: number; z: number };
+}
+
 export interface LevelRules {
     /** The objective, shown in the HUD. */
     objective: string;
@@ -85,6 +97,8 @@ export interface LevelRules {
     lostY: number;
     /** Tutorial steps, done in order (the last is usually the goal). */
     steps?: TutorialStep[];
+    /** Journey stages, done in order (progress.step counts them); the last one's goal is `goal`. */
+    stages?: LevelStage[];
 }
 
 export interface LevelDef {
@@ -121,6 +135,26 @@ export interface LevelDef {
     scriptedProps: boolean;
     /** The data this level was made from (data levels and designer levels), sent to the worker. */
     data?: LevelData;
+    /**
+     * Streamed levels (too big to hold in voxels at once, the Valley): the voxel world is built in
+     * tiles around the cameras and dropped behind them, and a coarse far lattice shows the rest.
+     * `build` still builds everything (the far lattice, tests).
+     */
+    stream?: LevelStream;
+}
+
+export interface LevelStream {
+    /**
+     * Writes the static voxels of the columns `r` (inclusive) and registers the tile's bedrock.
+     * The world's clip is already set to `r`. Returns the number of terrain columns.
+     */
+    buildTile(world: VoxelWorld, seed: number, r: ColumnRect, tile: { ti: number; tk: number }): number;
+    /** Near-world radius (m): tiles within it of any camera are built. */
+    radius: number;
+    /** The far lattice's cell size (cm). */
+    farCm: number;
+    /** Distance fog (m): starts, and is complete at. */
+    fog: { start: number; end: number };
 }
 
 export function pieceVolume(p: StaticPiece): Volume {

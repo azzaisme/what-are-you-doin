@@ -8,7 +8,7 @@
  * Layout (little endian): u8 version, u32 tick, u16 count, then per visible entity:
  *   u16 index (sim entity order, identical on every device running the same build)
  *   u8 flags: bit 0-1 quaternion component dropped, bit 2 has animation
- *   i16 x3 position in 2 mm units (+-65 m)
+ *   i16 x3 position in 4 mm units (+-131 m: the Valley reaches +-125 m)
  *   i16 x3 the three smallest quaternion components, scaled by 32767 * sqrt(2)
  *   [u8 n, i16 x n animation channels in 1/500 units, angles wrapped to +-8 pi]
  * Entities not listed are hidden at that tick.
@@ -19,8 +19,8 @@ import { ANIM_MAX, writeEntity } from '../sim/snapshots.ts';
 import type { Pose } from '../voxels/math.ts';
 import { pose } from '../voxels/math.ts';
 
-export const SNAPSHOT_VERSION = 1;
-const POS_UNIT = 0.002;
+export const SNAPSHOT_VERSION = 2;
+const POS_UNIT = 0.004;
 const ANIM_UNIT = 1 / 500;
 /** Animation values are wrapped into +-ANIM_WRAP / 2 (angles grow without bound: walk phase, wheels). */
 const ANIM_WRAP = 16 * Math.PI;

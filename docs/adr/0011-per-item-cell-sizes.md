@@ -55,6 +55,7 @@ tell whether it held water. It also held none: the asset had a water level but n
 - **Overlaps are no longer resolved across lattices.** Within one lattice the compositor still
   resolves overlaps by priority. A fine object and a base object occupying the same space simply
   intersect, sorted by depth. For resting contact (a bucket on the ground) this is invisible.
-- **The fine lattice reaches ±80 m** (its chunk coordinates are limited). Beyond that, a fine
-  object is not drawn instead of crashing the worker. Levels are within ±60 m.
+- **The fine lattice reaches ±160 m across and ±18 m up** (its chunk coordinates are limited;
+  widened from ±80 m for the Valley). Beyond that, a fine object is not drawn instead of crashing
+  the worker. Levels stay within ±125 m across and below 18 m.
 - The debug grid-line overlay still draws the base lattice on every surface.

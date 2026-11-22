@@ -46,6 +46,8 @@ export const LAYER = {
 const ALL = 0xffff;
 export const groups = (member: number, filter: number) => ((member & 0xffff) << 16) | (filter & 0xffff);
 
+const HEIGHT_CACHE = new WeakMap<(x: number, z: number) => number, Map<string, Float32Array>>();
+
 /** Safety bounds applied after every step (design doc §6.1: bound angular velocity etc.). */
 export const LIMITS = {
     maxLinvel: 30,
@@ -225,6 +227,13 @@ export function handsHold(reach: number, drop: number, pitch: number): number {
 }
 
 export class PhysicsWorld {
+    /** Bodies outside this box (or below LIMITS.killY) go back to their spawn; levels may widen it. */
+    killBox: { minX: number; maxX: number; minZ: number; maxZ: number } = {
+        minX: LIMITS.minX,
+        maxX: LIMITS.maxX,
+        minZ: LIMITS.minZ,
+        maxZ: LIMITS.maxZ
+    };
     /**
      * How far from the shoulders held things are carried (m): in the player's hands. Things grabbed
      * from further away are drawn in to it. Infinity keeps the grab distance (the beavers).
@@ -287,13 +296,22 @@ export class PhysicsWorld {
     ): void {
         const cols = cells;
         const rows = cells;
-        const heights = new Float32Array((rows + 1) * (cols + 1));
-        for (let c = 0; c <= cols; c++) {
-            const x = minX + (c * (maxX - minX)) / cols;
-            for (let r = 0; r <= rows; r++) {
-                const z = minZ + (r * (maxZ - minZ)) / rows;
-                heights[r + c * (rows + 1)] = height(x, z);
+        // sampled once per level and size (a big level's heightfield is a million samples; the sim
+        // rebuilds its physics on every reset)
+        const key = `${minX},${maxX},${minZ},${maxZ},${cells}`;
+        let byKey = HEIGHT_CACHE.get(height);
+        if (!byKey) HEIGHT_CACHE.set(height, (byKey = new Map()));
+        let heights = byKey.get(key);
+        if (!heights) {
+            heights = new Float32Array((rows + 1) * (cols + 1));
+            for (let c = 0; c <= cols; c++) {
+                const x = minX + (c * (maxX - minX)) / cols;
+                for (let r = 0; r <= rows; r++) {
+                    const z = minZ + (r * (maxZ - minZ)) / rows;
+                    heights[r + c * (rows + 1)] = height(x, z);
+                }
             }
+            byKey.set(key, heights);
         }
         const desc = RAPIER.ColliderDesc.heightfield(
             rows,
@@ -902,10 +920,10 @@ export class PhysicsWorld {
             const lost =
                 !Number.isFinite(p.x + p.y + p.z) ||
                 p.y < LIMITS.killY ||
-                p.x < LIMITS.minX ||
-                p.x > LIMITS.maxX ||
-                p.z < LIMITS.minZ ||
-                p.z > LIMITS.maxZ;
+                p.x < this.killBox.minX ||
+                p.x > this.killBox.maxX ||
+                p.z < this.killBox.minZ ||
+                p.z > this.killBox.maxZ;
             if (lost) {
                 this.place(pb.id, pb.spawn);
                 s.recovered++;

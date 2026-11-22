@@ -11,6 +11,7 @@
  *   A           jump            RT           grab / release   RB               throw
  *   B           drop            Y            plank (player 1) X                ragdoll
  *   D-pad up/down  hold further / closer
+ *   Start (menu)   settings (any pad, joined or not)
  */
 
 import { ACTION_DROP, ACTION_NONE, ACTION_RAGDOLL, PITCH_LIMIT } from '../sim/commands.ts';
@@ -50,6 +51,9 @@ export class PadPlayer {
     yaw = 0;
     pitch = 0;
     carry = false;
+    /** Look speed (times LOOK_SPEED) and inverted vertical look, from the settings. */
+    lookScale = 1;
+    invertY = false;
     padIndex: number;
     private seq = 0;
     private prev: boolean[] = [];
@@ -72,10 +76,12 @@ export class PadPlayer {
         this.moveZ = -ly;
         this.sprint = b(PAD.L3) || (pad.buttons[PAD.LT]?.value ?? 0) > 0.4;
         const step = Math.min(dt, 0.1);
-        this.yaw -= rx * Math.abs(rx) * LOOK_SPEED.yaw * step;
+        const ls = this.lookScale;
+        this.yaw -= rx * Math.abs(rx) * LOOK_SPEED.yaw * ls * step;
+        const vy = this.invertY ? -ry : ry;
         this.pitch = Math.max(
             -PITCH_LIMIT,
-            Math.min(PITCH_LIMIT, this.pitch - ry * Math.abs(ry) * LOOK_SPEED.pitch * step)
+            Math.min(PITCH_LIMIT, this.pitch - vy * Math.abs(vy) * LOOK_SPEED.pitch * ls * step)
         );
         if (edge(PAD.A)) this.q.jump = true;
         if (edge(PAD.RT)) this.q.grab = true;
@@ -86,6 +92,12 @@ export class PadPlayer {
         if (edge(PAD.DOWN)) this.q.reach -= 0.25;
         if (allowCarry && edge(PAD.Y)) this.carry = !this.carry;
         this.prev = pad.buttons.map((x) => x.pressed);
+    }
+
+    /** Stops moving (a menu opened): the stick is ignored until it is next read. */
+    idle(): void {
+        this.moveX = this.moveZ = 0;
+        this.sprint = false;
     }
 
     /** True when the stick or a button is in use this frame (for merging with keyboard input). */
@@ -119,6 +131,17 @@ export class PadPlayer {
 export class PadManager {
     readonly players: (PadPlayer | null)[] = [null, null];
     private prevA = new Map<number, boolean>();
+    private prevMenu = new Map<number, boolean>();
+    /** Look settings applied to every player's pad. */
+    lookScale = 1;
+    invertY = false;
+    /**
+     * While set (a menu is open), pads move no one and press nothing: buttons are still tracked,
+     * so a press that closes the menu does not also act in the game.
+     */
+    suspended = false;
+    /** Start (menu) pressed on any pad, with that pad. */
+    onMenu: (pad: Gamepad) => void = () => undefined;
     /** Called when a pad joins as player `slot` (0 or 1), or when player 2's pad goes away. */
     onJoin: (slot: number) => void = () => undefined;
     onLeave: (slot: number) => void = () => undefined;
@@ -143,11 +166,26 @@ export class PadManager {
                 this.onLeave(s);
                 continue;
             }
+            pl.lookScale = this.lookScale;
+            pl.invertY = this.invertY;
+            const yaw = pl.yaw;
+            const pitch = pl.pitch;
             pl.poll(pad, dt, s === 0);
+            if (this.suspended) {
+                // the edges are swallowed and the view stays put
+                pl.take();
+                pl.yaw = yaw;
+                pl.pitch = pitch;
+                pl.idle();
+            }
         }
         for (const pad of pads) {
             if (!pad || !pad.connected) continue;
-            const a = !!pad.buttons[PAD.A]?.pressed || !!pad.buttons[PAD.MENU]?.pressed;
+            const m = !!pad.buttons[PAD.MENU]?.pressed;
+            const wasM = this.prevMenu.get(pad.index) ?? false;
+            this.prevMenu.set(pad.index, m);
+            if (m && !wasM) this.onMenu(pad);
+            const a = !!pad.buttons[PAD.A]?.pressed && !this.suspended;
             const was = this.prevA.get(pad.index) ?? false;
             this.prevA.set(pad.index, a);
             if (!a || was || this.players.some((p) => p?.padIndex === pad.index)) continue;

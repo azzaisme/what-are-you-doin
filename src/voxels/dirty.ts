@@ -6,9 +6,15 @@
 import { CHUNK_SIZE, GRID_SIZE } from './grid.ts';
 import type { VoxelWorld } from './world.ts';
 
-/** Static mesh region (one render unit): 6.4 x 3.2 x 6.4 m, expressed in cells. */
+/**
+ * Static mesh region (one render unit): 6.4 x 3.2 x 6.4 m, expressed in cells. The far lattice of a
+ * streamed level (cells over 20 cm) uses 25.6 x 12.8 x 25.6 m units: a few hundred for a whole map.
+ */
 const cellsFor = (metres: number) => Math.max(CHUNK_SIZE, Math.round(metres / GRID_SIZE / CHUNK_SIZE) * CHUNK_SIZE);
-export const STATIC_REGION = { x: cellsFor(6.4), y: cellsFor(3.2), z: cellsFor(6.4) };
+const FAR_LATTICE = GRID_SIZE > 0.2;
+export const STATIC_REGION = FAR_LATTICE
+    ? { x: cellsFor(25.6), y: cellsFor(12.8), z: cellsFor(25.6) }
+    : { x: cellsFor(6.4), y: cellsFor(3.2), z: cellsFor(6.4) };
 
 /** Dynamic render unit: 1.6 m cubes, expressed in cells (groups several 16^3 chunks). */
 export const DYNAMIC_REGION = cellsFor(1.6);

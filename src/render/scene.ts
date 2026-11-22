@@ -208,8 +208,8 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
 
     // ---- distance fog, coloured from the horizon each time the sun moves
     app.scene.fog.type = FOG_LINEAR;
-    app.scene.fog.start = 18;
-    app.scene.fog.end = 120;
+    app.scene.fog.start = level.stream?.fog.start ?? 18;
+    app.scene.fog.end = level.stream?.fog.end ?? 120;
 
     // ---- the river: one smooth surface exception (design doc §3.3 item 5)
     const W = level.water;

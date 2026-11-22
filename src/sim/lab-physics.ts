@@ -52,7 +52,7 @@ export function propBody(name: string): { shape: ShapeSpec; opts: BodyOptions } 
             shape: { type: 'cylinder', axis: 'x', r: LOG_RADIUS, half: 1.0 },
             opts: { density: 450, friction: 0.8, restitution: 0.05, angularDamping: 0.4 }
         };
-    if (name === 'cube')
+    if (name === 'cube' || name.startsWith('crate-'))
         return {
             shape: { type: 'box', hx: 0.25, hy: 0.25, hz: 0.25 },
             opts: { density: 200, friction: 0.7, restitution: 0.1 }
@@ -107,7 +107,20 @@ export function buildLabPhysics(level: LevelDef): PhysicsWorld {
     const pw = new PhysicsWorld();
     const B = level.bounds;
     const ground = level.terrainHeight;
-    pw.addTerrain(ground, B.minX, B.maxX, B.minZ, B.maxZ, TERRAIN_CELLS);
+    // the same spacing (about 0.223 m) whatever the level's size: the Valley needs about 1,000 cells
+    const cells = Math.max(
+        TERRAIN_CELLS,
+        Math.round((TERRAIN_CELLS * Math.max(B.maxX - B.minX, B.maxZ - B.minZ)) / 56)
+    );
+    pw.addTerrain(ground, B.minX, B.maxX, B.minZ, B.maxZ, cells);
+    // the safety box covers the level (with a margin), never less than the default box
+    const k = pw.killBox;
+    pw.killBox = {
+        minX: Math.min(k.minX, B.minX - 2),
+        maxX: Math.max(k.maxX, B.maxX + 2),
+        minZ: Math.min(k.minZ, B.minZ - 2),
+        maxZ: Math.max(k.maxZ, B.maxZ + 2)
+    };
 
     // trees: trunk cylinder plus the four needle cones (the same layout the voxel build uses)
     const layout = level.layout(1);
