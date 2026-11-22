@@ -52,7 +52,16 @@ import type { RockSpot, TerrainSpec, TreeSpot } from './common.ts';
 import { STAND_CROWN_RADIUS, drawStandTree } from './forestry.ts';
 import type { ForestryDef } from './forestry.ts';
 import { pieceVolume } from './level.ts';
-import type { LevelBuildResult, LevelDef, LevelLayout, LevelStage, PropPlacement, Rect, StaticPiece } from './level.ts';
+import type {
+    LevelBuildResult,
+    LevelDef,
+    LevelLayout,
+    LevelStage,
+    PropPlacement,
+    Rect,
+    StaticPiece,
+    WaterSource
+} from './level.ts';
 import { routeSign } from './route-signs.ts';
 import { nearestPath } from './side-paths.ts';
 import type { SidePath } from './side-paths.ts';
@@ -65,6 +74,7 @@ import {
     YARD_Y,
     creekCenterZ,
     creekHalfWidth,
+    yardButt,
     yardHeight,
     YARD_FORESTRY,
     yardLayout,
@@ -73,6 +83,7 @@ import {
     yardSideMaterial,
     yardSurfaceMaterial
 } from './timber-yard.ts';
+import { waterButt } from './water-butt.ts';
 
 // ------------------------------------------------------------------------------- the route frame
 
@@ -482,8 +493,7 @@ function valleyPieces(): StaticPiece[] {
     P.push(piece('trestle-snapped', boxS(0.1, 0.1, 1.3), gu + 2.3, rim - 1.0, 0.8, darkTimber, { pitch: 0.9 }));
     P.push(piece('trestle-leg', boxS(0.09, 2.0, 0.09), gu - 1.6, 0.5, -1.5, darkTimber, { roll: 0.35 }));
     // the outfall: a concrete pipe end in the far wall, and the water falling from it
-    const wt = 15;
-    const wu = gorgeU(wt) + GORGE.hw;
+    const { u: wu, t: wt } = waterfallSpot();
     P.push(
         piece('outfall', { type: 'cylinder', axis: 'z', r: 0.7, half: 0.6 }, wu + 0.3, rim - 0.6, wt, concrete, {
             priority: 3
@@ -747,6 +757,8 @@ function valleyPieces(): StaticPiece[] {
     }
     P.push(...signpost(192, -2.6, 6));
     P.push(...landmarkPieces());
+    // ---- water tanks (Epic 7): where the spare buckets of the works and the summit road wait
+    for (const b of valleyButts()) P.push(...b.pieces);
     return P;
 }
 
@@ -1151,6 +1163,26 @@ const bucketAt = (u: number, t: number) => {
 
 const stump = yardToWorld(BUCKET_STUMP.x, BUCKET_STUMP.z);
 
+/**
+ * Water butts beyond the yard (Epic 7), each filling a bucket standing on a stage's spare-bucket
+ * spot, its barrel to the side of the road (+t).
+ */
+function valleyButts(): ReturnType<typeof waterButt>[] {
+    const butt = (name: string, u: number, t: number, litres: number) => {
+        const w = routeToWorld(u, t);
+        return waterButt(name, w.x, w.z, groundUT(u, t), groundUT(u, t + 0.62), -Math.PI / 4, litres);
+    };
+    return [butt('works water tank', 96, 1.8, 30), butt('mountain spring butt', 175, roadT(175) + 0.8, 20)];
+}
+
+function valleySources(): WaterSource[] {
+    const y = yardButt().source;
+    const w = yardToWorld(y.x, y.z);
+    return [{ ...y, x: w.x, z: w.z }, ...valleyButts().map((b) => b.source)];
+}
+
+const summit = routeToWorld(SUMMIT_U, 0);
+
 export const VALLEY_STAGES: LevelStage[] = [
     {
         name: 'Timber Yard',
@@ -1196,10 +1228,11 @@ export const VALLEY_STAGES: LevelStage[] = [
     },
     {
         name: 'Flower Summit',
-        objective: 'Set the bucket down by the flower',
+        objective: 'Water the flower: hold the bucket inside the ring of stones and pour (R)',
         goal: square(SUMMIT_U, 0, 2.0),
         start: restart(175, roadT(175)),
-        bucket: bucketAt(175, roadT(175) + 0.8)
+        bucket: bucketAt(175, roadT(175) + 0.8),
+        flower: { x: summit.x, z: summit.z, r: 2.2 }
     }
 ];
 
@@ -1217,12 +1250,26 @@ const yardActors = {
     ute: fromYard(pose(-10.5, YARD_Y + 0.002, 4.6, quatFromYawPitchRoll(Math.PI / 2 + 0.15, 0, 0)))
 };
 
+/** Where the gorge's waterfall comes out of the far wall (route coordinates: along u, across t). */
+function waterfallSpot(): { u: number; t: number } {
+    const t = 15;
+    return { u: gorgeU(t) + GORGE.hw, t };
+}
+
+/** The waterfall's middle, in the world: its roar is heard from here (Epic 8, #80). */
+export function valleyWaterfall(): { x: number; y: number; z: number } {
+    const { u, t } = waterfallSpot();
+    const w = routeToWorld(u - 0.35, t);
+    return { x: w.x, y: (WALL.low - 0.6 + CREEK_WATER_Y) / 2, z: w.z };
+}
+
 export const valleyLevel: LevelDef = {
     id: 'valley',
     name: 'The Valley',
     bounds: VALLEY_BOUNDS,
     playArea: { minX: -109, maxX: 109, minZ: -109, maxZ: 109 },
     water: { y: CREEK_WATER_Y, cx: 0, cz: 0, halfX: 112, halfZ: 112 },
+    sounds: { waterfalls: [valleyWaterfall()] },
     terrainHeight: valleyHeight,
     layout: valleyLayout,
     build: buildValley,
@@ -1249,12 +1296,13 @@ export const valleyLevel: LevelDef = {
     props: valleyProps(),
     forestry: VALLEY_FORESTRY,
     rules: {
-        objective: 'Deliver the bucket to the flower on the summit',
+        objective: 'Bring water to the flower on the summit',
         goal: VALLEY_STAGES[VALLEY_STAGES.length - 1].goal,
         fallY: -0.2,
         isSafe,
         lostY: CREEK_WATER_Y + 0.15,
-        stages: VALLEY_STAGES
+        stages: VALLEY_STAGES,
+        waterSources: valleySources()
     },
     scriptedProps: false
 };

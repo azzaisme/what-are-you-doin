@@ -18,7 +18,7 @@ import {
     saveBindings
 } from '../../src/input/bindings.ts';
 import { PadPlayer } from '../../src/input/gamepad.ts';
-import { ACTION_DROP, ACTION_NONE } from '../../src/sim/commands.ts';
+import { ACTION_DROP, ACTION_NONE, ACTION_POUR } from '../../src/sim/commands.ts';
 
 function memory() {
     const data = new Map<string, string>();
@@ -154,5 +154,28 @@ describe('remappable controls', () => {
         expect(p.command().jump).toBe(true);
         p.poll(pad([PAD_BUTTONS.X, PAD_BUTTONS.Y]), 0.016, true);
         expect(p.command().jump).toBe(false);
+    });
+
+    it('pour (Epic 7) is remappable: R and Y by default; binding R or Y to something else takes it off pour', () => {
+        const b = defaultBindings();
+        expect(actionForKey(b, 'KeyR')).toBe('pour');
+        expect(b.pad.pour).toEqual([PAD_BUTTONS.Y, -1]);
+        expect(b.pad.plank).toEqual([PAD_BUTTONS.RIGHT, -1]);
+        // R to ragdoll: it says pour lost it, and R no longer pours
+        expect(bindKey(b, 'ragdoll', 1, 'KeyR')).toBe('pour');
+        expect(actionForKey(b, 'KeyR')).toBe('ragdoll');
+        expect(b.keys.pour).toEqual(['', '']);
+        // on a pad: Y to jump stops Y pouring; pour moved to LB pours from there
+        const p = new PadPlayer(0);
+        expect(bindPad(p.bindings, 'jump', 1, PAD_BUTTONS.Y)).toBe('pour');
+        p.poll(pad([PAD_BUTTONS.Y]), 0.016, true);
+        let c = p.command();
+        expect(c.action).toBe(ACTION_NONE);
+        expect(c.jump).toBe(true);
+        bindPad(p.bindings, 'pour', 0, PAD_BUTTONS.LB);
+        p.poll(pad([]), 0.016, true);
+        p.poll(pad([PAD_BUTTONS.LB]), 0.016, true);
+        c = p.command();
+        expect(c.action).toBe(ACTION_POUR);
     });
 });

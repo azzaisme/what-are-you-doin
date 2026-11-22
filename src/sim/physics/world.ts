@@ -109,6 +109,10 @@ export interface PhysBody {
  * without this, Rapier's penetration recovery could fling it (measured: a plank at 21 m/s).
  */
 export const RELEASE_GUARD_TICKS = 30;
+/** Setting down a hanging body: hand speed (m/s), grip slack that means it rests (m), farthest reach (m). */
+export const SET_DOWN = { speed: 1.2, slack: 0.12, reach: 2.2 } as const;
+/** How far a poured bucket tips from hanging (rad): past horizontal, mouth down towards the view. */
+export const POUR_ANGLE = (115 * Math.PI) / 180;
 export const RELEASE_MIN_CAP = 8;
 
 export interface PhysicsStats {
@@ -195,9 +199,15 @@ export class Rig {
     /** Twist the wrist wants over what it can give (1 or more: tipping), and the angle off (rad). */
     wristLoad = 0;
     wristAngle = 0;
+    /** Tipping what hangs from its grab point forward (pouring the bucket, Epic 7). */
+    pour = false;
+    /** Setting down what hangs from the hand: how far the hand has lowered it (m), or -1. */
+    lowering = -1;
     stretchTime = 0;
     prevTarget = { x: 0, y: 0, z: 0 };
     hasPrevTarget = false;
+    /** The hold point relative to the eye last tick (a hanging bucket's hand eases, see GRAB.handSpeed). */
+    prevOffset = { x: 0, y: 0, z: 0 };
     grabError = 0;
     grabForce = 0;
     readonly body: RAPIER.RigidBody;
@@ -219,6 +229,7 @@ export class Rig {
 }
 
 const _wristTarget: Quat = { x: 0, y: 0, z: 0, w: 1 };
+const _up = { x: 0, y: 0, z: 0 };
 const _wrist: WristResult = { tx: 0, ty: 0, tz: 0, angle: 0, load: 0 };
 const AXIS_X = { x: 1, y: 0, z: 0 };
 const AXIS_Y = { x: 0, y: 1, z: 0 };
@@ -722,6 +733,8 @@ export class PhysicsWorld {
         r.wristValid = false;
         r.wristLoad = 0;
         r.wristAngle = 0;
+        r.pour = false;
+        r.lowering = -1;
         r.stretchTime = 0;
         r.hasPrevTarget = false;
         const n = (this.holdCount.get(pb.id) ?? 0) + 1;
@@ -765,6 +778,8 @@ export class PhysicsWorld {
         const pb = r?.held;
         if (!r || !pb) return;
         r.held = null;
+        r.pour = false;
+        r.lowering = -1;
         const n = (this.holdCount.get(pb.id) ?? 1) - 1;
         if (n <= 0) {
             this.holdCount.delete(pb.id);
@@ -805,6 +820,38 @@ export class PhysicsWorld {
         if (g) g.cap += j / Math.max(pb.body.mass(), 1e-3);
     }
 
+    /**
+     * Lets go the way a hand would: something hanging from its grab point (the bucket) is lowered
+     * until it rests on what is below (or the hand has gone SET_DOWN.reach down), then released, so
+     * setting it down does not drop it; anything else is released at once. Letting go again while
+     * it is being lowered drops it.
+     */
+    letGo(p = 0): void {
+        const r = this.rigs[p];
+        if (!r?.held) return;
+        if (r.held.grabPoint && r.lowering < 0) {
+            r.lowering = 0;
+            r.pour = false;
+        } else this.release(p);
+    }
+
+    /** True while a player is setting down what they hold. */
+    settingDown(p = 0): boolean {
+        return (this.rigs[p]?.lowering ?? -1) >= 0;
+    }
+
+    /**
+     * Pouring (Epic 7): a player holding something by its fixed grab point (the bucket by its
+     * handle) tips it forward, mouth towards where they look, or lets it hang again. Returns whether
+     * they are now pouring.
+     */
+    setPour(on: boolean, p = 0): boolean {
+        const r = this.rigs[p];
+        if (!r) return false;
+        r.pour = on && !!r.held?.grabPoint;
+        return r.pour;
+    }
+
     adjustHold(delta: number, p = 0): void {
         const r = this.rigs[p];
         if (!r) return;
@@ -831,14 +878,46 @@ export class PhysicsWorld {
             else if (r.holdDist > want) r.holdDist = Math.max(want, r.holdDist - 3 * SIM_DT);
             else r.holdDist = Math.min(want, r.holdDist + 1 * SIM_DT);
         }
-        _target.x = eye.x + d.x * r.holdDist;
-        _target.y = eye.y + d.y * r.holdDist;
-        _target.z = eye.z + d.z * r.holdDist;
+        let ox = d.x * r.holdDist;
+        let oy = d.y * r.holdDist;
+        let oz = d.z * r.holdDist;
+        if (pb.grabPoint && r.hasPrevTarget) {
+            // something hanging from your hand (the bucket) follows a flick of the view at the
+            // speed a hand moves, not at once: snapping the view up from the ground would otherwise
+            // yank it a metre in a tick and fling its water out (Epic 7)
+            const ex = ox - r.prevOffset.x;
+            const ey = oy - r.prevOffset.y;
+            const ez = oz - r.prevOffset.z;
+            const e = Math.hypot(ex, ey, ez);
+            const max = GRAB.handSpeed * SIM_DT;
+            if (e > max) {
+                const k = max / e;
+                ox = r.prevOffset.x + ex * k;
+                oy = r.prevOffset.y + ey * k;
+                oz = r.prevOffset.z + ez * k;
+            }
+        }
+        r.prevOffset.x = ox;
+        r.prevOffset.y = oy;
+        r.prevOffset.z = oz;
+        _target.x = eye.x + ox;
+        _target.y = eye.y + oy;
+        _target.z = eye.z + oz;
         const b = pb.body;
         const t = b.translation();
         const q = b.rotation();
         rotate(q, r.heldLocal.x, r.heldLocal.y, r.heldLocal.z, _v);
         const anchor = { x: t.x + _v.x, y: t.y + _v.y, z: t.z + _v.z };
+        if (r.lowering >= 0) {
+            // setting it down: the hand goes down at a steady pace; once the grip is well below the
+            // handle (what is underneath holds it up) or the arm is at full stretch, let go
+            r.lowering += SET_DOWN.speed * SIM_DT;
+            _target.y -= r.lowering;
+            if (anchor.y - _target.y > SET_DOWN.slack || r.lowering > SET_DOWN.reach) {
+                this.release(p);
+                return;
+            }
+        }
         const av = b.velocityAtPoint(anchor);
         // the hold point's own velocity: walking plus swinging round with the view
         if (r.hasPrevTarget) {
@@ -913,6 +992,7 @@ export class PhysicsWorld {
         r.wristAngle = 0;
         if (pb.grabPoint) {
             r.wristValid = false;
+            if (r.pour) this.applyPour(r, pb, yaw);
             return;
         }
         // shared: each grip gives its share, so two wrists that disagree (the carriers turn
@@ -947,6 +1027,62 @@ export class PhysicsWorld {
         b.applyTorqueImpulse({ x: t.tx * SIM_DT, y: t.ty * SIM_DT, z: t.tz * SIM_DT }, true);
         r.wristLoad = t.load;
         r.wristAngle = t.angle;
+    }
+
+    /**
+     * Tips a hanging body forward about the player's right (yaw 0 looks along -z: the body's +y
+     * turns towards -z and down by POUR_ANGLE), with one wrist's strength.
+     */
+    private applyPour(r: Rig, pb: PhysBody, yaw: number): void {
+        const b = pb.body;
+        // swing only: turn the body's up axis towards "forward and down by POUR_ANGLE from up",
+        // whichever way the bucket happens to face about its own axis
+        const sa = Math.sin(POUR_ANGLE);
+        const ca = Math.cos(POUR_ANGLE);
+        const wx = -Math.sin(yaw) * sa;
+        const wy = ca;
+        const wz = -Math.cos(yaw) * sa;
+        rotate(b.rotation(), 0, 1, 0, _up);
+        let ax = _up.y * wz - _up.z * wy;
+        let ay = _up.z * wx - _up.x * wz;
+        let az = _up.x * wy - _up.y * wx;
+        const sn = Math.hypot(ax, ay, az);
+        const angle = Math.atan2(sn, _up.x * wx + _up.y * wy + _up.z * wz);
+        if (sn > 1e-9) {
+            ax /= sn;
+            ay /= sn;
+            az /= sn;
+        } else ax = ay = az = 0;
+        // the swinging part of the spin (not about its own axis)
+        const w = b.angvel();
+        const along = w.x * _up.x + w.y * _up.y + w.z * _up.z;
+        const sx = w.x - along * _up.x;
+        const sy = w.y - along * _up.y;
+        const sz = w.z - along * _up.z;
+        // it turns about the hand, not its own centre: size the spring for that (parallel axis),
+        // or gravity about the handle holds it short of the pour
+        const invI = b.effectiveWorldInvInertia();
+        const com = b.worldCom();
+        const t0 = b.translation();
+        rotate(b.rotation(), r.heldLocal.x, r.heldLocal.y, r.heldLocal.z, _v);
+        const lever = Math.hypot(t0.x + _v.x - com.x, t0.y + _v.y - com.y, t0.z + _v.z - com.z);
+        const inertia = 3 / Math.max(1e-9, invI.m11 + invI.m22 + invI.m33) + b.mass() * lever * lever;
+        const w0 = 2 * Math.PI * GRAB.wristFrequency;
+        const c = 2 * GRAB.wristDamping * w0;
+        let tx = inertia * (w0 * w0 * angle * ax - c * sx);
+        let ty = inertia * (w0 * w0 * angle * ay - c * sy);
+        let tz = inertia * (w0 * w0 * angle * az - c * sz);
+        const mag = Math.hypot(tx, ty, tz);
+        if (mag > GRAB.maxTorque) {
+            const k = GRAB.maxTorque / mag;
+            tx *= k;
+            ty *= k;
+            tz *= k;
+        }
+        if (!Number.isFinite(tx + ty + tz)) tx = ty = tz = 0;
+        b.applyTorqueImpulse({ x: tx * SIM_DT, y: ty * SIM_DT, z: tz * SIM_DT }, true);
+        r.wristLoad = GRAB.maxTorque > 0 ? mag / GRAB.maxTorque : 0;
+        r.wristAngle = angle;
     }
 
     /**
