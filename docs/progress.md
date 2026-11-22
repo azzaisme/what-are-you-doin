@@ -83,9 +83,13 @@ Lab's walking co-worker are beaver engineers again.
 
 - **The Timber Yard bridge** plays as before: stop 0.35–0.6 m back from the bank, look down, let
   go. The playthrough test is unchanged, with one exception.
-    - Stepping up onto freshly laid beams stalls for about 5 s, with either body. It is a step-up
-      issue in the character controller, and Epic 5's approach ramps will replace the bare beam ends.
-    - The test's walk now allows for that stall (1,800 ticks instead of 900).
+    - Getting onto the laid beams can take about 5 s, with either body. Their near ends rest 10 cm
+      past the edge of the abutment's stone cap. That leaves a 10 cm ledge, narrower than the
+      character controller's 12 cm minimum step width, so the cap (10 cm up) and the beams (20 cm
+      up) can't be stepped one after the other, and you crawl up.
+    - Measured: laid 10 cm further out, the slow part drops from 5.4 s to 0.9 s. Epic 5's approach
+      ramps can remove it.
+    - The test's walk allows for it (1,800 ticks instead of 900).
 - **Throwing the bucket over the creek** works from the near abutment, as before.
 - **Planks gripped off centre** tip about your paws, more the further out you grip them, while they
   hang free.
