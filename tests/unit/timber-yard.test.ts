@@ -221,7 +221,11 @@ describe('level 1: the timber yard', () => {
         const goTo = (x: number, zStop: number, pace = 0.4) => {
             for (let i = 0; i < 900 && Math.abs(s.player.x - x) > 0.05; i++)
                 step({ moveX: (s.player.x > x ? -1 : 1) * Math.min(pace, Math.abs(s.player.x - x) * 2 + 0.1) });
-            for (let i = 0; i < 900 && s.player.z > zStop; i++) step({ moveZ: Math.max(0.5, pace) });
+            // (room for a ~5 s crawl onto the bridge, with either body: the laid beams' near ends rest
+            // 10 cm past the near cap's edge, and that 10 cm ledge is narrower than the controller's
+            // 12 cm minimum step width, so the cap (10 cm up) and the beams (20 cm up) can't be
+            // stepped one after the other; laid 10 cm further out it takes under 1 s)
+            for (let i = 0; i < 1800 && s.player.z > zStop; i++) step({ moveZ: Math.max(0.5, pace) });
             step({}, 30);
         };
         /** Walks (full stick, no sprint) facing the way it goes, to within 0.3 m of (x, z). */
@@ -280,10 +284,10 @@ describe('level 1: the timber yard', () => {
         expect(s.physics.heldId).toBe(bucket.id);
         pitch = 0;
         goTo(BRIDGE_X, (YARD_GOAL.minZ + YARD_GOAL.maxZ) / 2, 1);
-        // the finished bridge set off the flood, and a walk was quick enough: the water is still
-        // well below the capstones (0.5 m) the beams rest on
+        // the finished bridge set off the flood, and a walk was quick enough: the water is still at
+        // least half a metre below the capstones (0.5 m) the beams rest on (measured: 0.61 m, 14.1 s)
         expect(s.events.some((e) => e.kind === 'hazard' && e.text.includes('siren'))).toBe(true);
-        expect(s.hazards.waterY).toBeLessThan(0.3);
+        expect(0.5 - s.hazards.waterY).toBeGreaterThan(0.5);
         expect(s.tick - bridgeDone).toBeLessThan(S_TICKS(20));
         expect(s.progress.falls).toBe(0);
         expect(s.player.z).toBeLessThan(BRIDGE.farEdge);

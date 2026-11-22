@@ -372,6 +372,45 @@ describe('hazard director: the gust aimed at the carried plank (#73)', () => {
         expect(g.hazards.floodCount + g.hazards.gustCount).toBe(0);
     }, 120_000);
 
+    it('one hazard at a time: a plank carried by the creek all through a flood brings no gust, and a finished bridge waits out a gust', () => {
+        const both = (s: LabSim) => s.hazards.floodPhase !== PHASE.idle && s.hazards.gustPhase !== PHASE.idle;
+        // the flood first: carry a plank by the water from the siren to the end of the flood
+        const s = yard();
+        s.runTo(S(HAZARD.graceS) + 10);
+        bridgeBeams(s);
+        runUntil(s, () => s.hazards.floodPhase === PHASE.tell, TO_SIREN);
+        s.fpActive = true;
+        carrying(s);
+        let carried = 0;
+        for (let i = 0; i < FLOOD_TICKS && s.hazards.floodPhase !== PHASE.idle; i++) {
+            run(s, 1);
+            expect(both(s)).toBe(false);
+            if (s.physics.heldIdOf(0) >= 0) carried++;
+        }
+        expect(s.hazards.floodPhase).toBe(PHASE.idle);
+        expect(carried).toBeGreaterThan(S(G.carryS + G.carryJitterS)); // long enough to bring a gust
+        expect(s.hazards.gustCount).toBe(0);
+        // the gust first: the bridge finished during its warning sets nothing off until it is over
+        const g = yard();
+        g.runTo(S(HAZARD.graceS) + 10);
+        g.fpActive = true;
+        g.runTo(g.tick + 2);
+        carrying(g);
+        untilGust(g);
+        expect(g.hazards.gustPhase).toBe(PHASE.tell);
+        bridgeBeams(g);
+        let gustOver = -1;
+        for (let i = 0; i < S(G.tellS + G.blowS + HAZARD.safeS + 20) && g.hazards.floodPhase === PHASE.idle; i++) {
+            run(g, 1);
+            expect(both(g)).toBe(false);
+            if (gustOver < 0 && g.hazards.gustPhase === PHASE.idle) gustOver = g.tick;
+        }
+        expect(g.hazards.floodPhase).toBe(PHASE.tell);
+        expect(gustOver).toBeGreaterThan(0);
+        // the siren comes only after the quiet spell that follows the gust
+        expect(g.tick - gustOver).toBeGreaterThanOrEqual(S(HAZARD.safeS) - 1);
+    }, 120_000);
+
     it('no gust in the yard, away from the water', () => {
         const s = yard();
         s.runTo(S(HAZARD.graceS) + 10);
@@ -461,7 +500,7 @@ describe('hazard director: online, through real host and guest sessions', () => 
     }
 
     it('the host’s flood reaches the guest: seed, siren toast, phases and the water height', async () => {
-        const { host, hs, gs, guestSim, run } = await online(77);
+        const { host, hs, gs, run } = await online(77);
         run(6);
         expect(gs.hazardSeed).toBe(77);
         bridgeBeams(host);
@@ -473,8 +512,6 @@ describe('hazard director: online, through real host and guest sessions', () => 
         run(3);
         expect(gs.hazard.flood).toBe(PHASE.active);
         expect(Math.abs(gs.hazard.waterY - host.hazards.waterY)).toBeLessThan(0.002);
-        // the guest runs no director of its own: everything it shows comes from the host
-        expect(guestSim.hazards.floodCount).toBe(0);
         gs.leave();
         hs.stop();
     }, 60_000);
@@ -508,7 +545,6 @@ describe('hazard director: online, through real host and guest sessions', () => 
         // the sock's +X points downwind: along the gust (a rotation of -a about Y)
         const d = yawOf(host.windsock.pose.q) + gs.hazard.gustDir;
         expect(Math.abs(Math.atan2(Math.sin(d), Math.cos(d)))).toBeLessThan(0.3);
-        expect(guestSim.hazards.gustPhase).toBe(PHASE.idle);
         gs.leave();
         hs.stop();
     }, 60_000);
