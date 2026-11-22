@@ -52,7 +52,7 @@ Then start a timer and stay quiet.
     - **The ute** (if they park it on a slope): do they hear the ratchet and read the warning? Do
       they run to get in, or wedge something against a wheel?
     - **The falling tree** (if they cut a stand tree with the ute close by): do they hear the
-      crack, see the crown sway and read the warning? Do they move the ute, go round to cut from its side, or carry on?
+      crack, see the tree lean and read the warning? Do they move the ute, go round to cut from its side, or carry on?
     - **Every fall into the creek:** what were they trying to do?
     - **Stuck:** a minute or more with no progress. Note what they are trying.
 
@@ -111,8 +111,8 @@ slice may be too short.
   in the creek, the ute's usual recovery applies: it rights itself, and the driver can drop it back
   on firm ground.
 - **The falling tree:** take a bite (or a blow) out of a stand tree while the ute stands within
-  5.5 m of it, and the pine cracks: a toast says it leans towards the ute, and its crown sways and
-  sheds needles towards it. It can't fall for 7 s after that, however fast it is chewed. Then, if
+  5.5 m of it, and the pine cracks: a toast says it leans towards the ute, and the whole tree leans
+  over towards it, shaking and shedding needles. It can't fall for 7 s after that, however fast it is chewed. Then, if
   the ute is still in reach, it falls towards it. Moving the ute out of reach, or cutting from the
   ute's side, makes it fall away, on every tree in the stand. At most two, 60 s apart. A tree cut a
   little and left alone sets nothing off until someone cuts it again.

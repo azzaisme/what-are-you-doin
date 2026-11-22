@@ -32,7 +32,9 @@ import {
     TREE_STANDING,
     TREE_STATE,
     TREE_SWAY,
-    TREE_SWAY_YAW
+    TREE_SWAY_YAW,
+    TREE_TILT_X,
+    TREE_TILT_Z
 } from '../assets/forestry.ts';
 import { LOG_RADIUS } from '../assets/props.ts';
 import { CROWN_TRUNK_TOP, LOG_LENGTH, STUMP_HEIGHT, standPose, standTilt } from '../levels/forestry.ts';
@@ -157,12 +159,12 @@ export class Forestry {
     /**
      * Hazard hooks (Epic 8, src/sim/hazard-tree.ts): an extra lean (a tilt, rad, towards x/z) on a
      * tree's fall, whether a cut-through tree must hang on a moment before it falls, and how far
-     * (0-1) and which way (yaw, rad, as atan2(x, z)) a standing tree sways (published on its marker,
-     * so every device shakes its crown).
+     * (0-1) and which way (yaw, rad, as atan2(x, z)) a standing tree leans, with its whole tilt
+     * (published on its marker, so every device draws it leaning).
      */
     fallBias: ((n: number) => { x: number; z: number } | null) | null = null;
     holdFall: ((n: number) => boolean) | null = null;
-    sway: ((n: number) => { amount: number; yaw: number } | null) | null = null;
+    sway: ((n: number) => { amount: number; yaw: number; tilt: { x: number; z: number } } | null) | null = null;
     private tick = 0;
     private fxChips = 0;
     private fxNeedles = 0;
@@ -752,6 +754,8 @@ export class Forestry {
             const sway = st.phase === 'standing' ? this.sway?.(n) : null;
             m.anim[TREE_SWAY] = sway ? sway.amount : 0;
             m.anim[TREE_SWAY_YAW] = sway ? sway.yaw : 0;
+            m.anim[TREE_TILT_X] = sway ? sway.tilt.x : 0;
+            m.anim[TREE_TILT_Z] = sway ? sway.tilt.z : 0;
         }
         for (let k = 0; k < e.crowns.length; k++) {
             const c = e.crowns[k];

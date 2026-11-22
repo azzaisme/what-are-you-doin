@@ -5,9 +5,11 @@
  * - **Trigger:** a bite or blow on that tree this tick (its cut count went up), not an old partial
  *   cut: a tree bitten during the quiet start, or left half cut, says nothing until someone cuts it
  *   again.
- * - **Tell:** a crack and a toast the moment the cut lands, and the crown sways and sheds needles
- *   towards the ute, more and more over TREE.tellS (the sway is on the tree's marker, so guests see
- *   it, a guest joining mid-tell too). The tree cannot fall during the tell, however fast it is
+ * - **Tell:** a crack and a toast the moment the cut lands, and the tree leans over towards the ute
+ *   (shaking, shedding needles on that side) more and more over TREE.tellS: its marker draws it
+ *   tilted while the voxel worker takes the static tree away, so guests see it too, a guest joining
+ *   mid-tell as well. It stays leaning until it falls, and stands back up (static again) if the
+ *   ute is moved out of reach or the hazard is given up with it standing. The tree cannot fall during the tell, however fast it is
  *   chewed or chopped (it hangs on its last fibres): that is the time to react.
  * - **What happens:** while the ute is in reach, the tree's weight is shifted towards the ute: its
  *   own lean is replaced by a lean of TREE.lean towards the ute. Cut from anywhere but the ute's
@@ -19,9 +21,9 @@
  * - **Budget:** the director's: one hazard at a time, a quiet spell after each, at most TREE.max,
  *   TREE.cooldownS apart.
  *
- * Host only, like the rest of the director: guests see the sway and the fall in the snapshots and
+ * Host only, like the rest of the director: guests see the lean and the fall in the snapshots and
  * get the tell's toast with the level's events (its crack plays from that toast). A guest who joins
- * mid-tell has missed the toast and its crack, but sees the sway.
+ * mid-tell has missed the toast and its crack, but sees the lean.
  */
 
 import type { Forestry } from './forestry.ts';
@@ -41,6 +43,12 @@ export const TREE = {
      * cutting from the ute's side leaves 0.035 away from it, twice what the forestry calls balanced.
      */
     lean: 0.035,
+    /**
+     * How the tree is drawn leaning over the tell (rad): from its own lean to this far towards the
+     * ute, with a shake of this much at 2 Hz (its top, 7 m up, moves about 1.4 m).
+     */
+    shown: 0.2,
+    shake: 0.02,
     /** With the tree still standing this long after the crack (nobody finishing it), it is over. */
     giveUpS: 60,
     cooldownS: 60,
@@ -129,7 +137,7 @@ export class TreeHazard {
         }
     }
 
-    /** The hooks into the forestry: the lean towards the ute, the hold and the sway during the tell. */
+    /** The hooks into the forestry: the pull towards the ute, the hold during the tell, the drawn lean. */
     private install(h: TreeHazardHost): void {
         this.host = h;
         const f = h.forestry;
@@ -160,11 +168,23 @@ export class TreeHazard {
         return { x: u.x * TREE.lean - (own?.x ?? 0), z: u.z * TREE.lean - (own?.z ?? 0) };
     }
 
-    /** The crown's sway during the tell: growing to 1 over it, towards the ute. */
-    private swayOf(n: number): { amount: number; yaw: number } | null {
+    /**
+     * The lean drawn from the crack until it falls (or is given up): growing to 1 over the tell,
+     * towards the ute, and the tree's whole tilt (from its own lean to TREE.shown towards the ute,
+     * shaking). Out of the ute's reach, none: it stands back up.
+     */
+    private swayOf(n: number): { amount: number; yaw: number; tilt: { x: number; z: number } } | null {
         const u = this.toUte(n);
         const h = this.host;
-        if (!u || !h || this.phase !== TREE_PHASE.tell) return null;
-        return { amount: Math.min(1, (h.tick - this.since + 1) / S(TREE.tellS)), yaw: Math.atan2(u.x, u.z) };
+        if (!u || !h) return null;
+        const t = h.tick - this.since + 1;
+        const a = Math.min(1, t / S(TREE.tellS));
+        const own = h.forestry.def?.trees[n].lean;
+        const towards = a * TREE.shown + a * TREE.shake * Math.sin((2 * Math.PI * t) / 30);
+        return {
+            amount: a,
+            yaw: Math.atan2(u.x, u.z),
+            tilt: { x: (own?.x ?? 0) * (1 - a) + u.x * towards, z: (own?.z ?? 0) * (1 - a) + u.z * towards }
+        };
     }
 }

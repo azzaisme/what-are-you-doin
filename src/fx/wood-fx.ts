@@ -11,8 +11,9 @@
  * runs): a chop at every bite or blow, a heavy thud when a felled tree's crown breaks off, and the
  * sawmill's motor held on while its blade runs, a little higher as the cut goes through.
  *
- * A hazard's sway (the falling tree, #74, on each stand tree's marker): the crown shakes, shedding
- * needles on the side it leans to, further out as the sway grows, with a creak at each shake.
+ * A hazard's lean (the falling tree, #74, on each stand tree's marker, which draws the tree tilted):
+ * the leaning crown sheds needles on the side it leans to, further out as the lean grows, with a
+ * creak each time.
  */
 
 import { SAW_CUTTING, SAW_PROGRESS, SAW_STATE, TREE_SWAY, TREE_SWAY_YAW } from '../assets/forestry.ts';
@@ -29,11 +30,11 @@ export interface WoodSlots {
     chips: number;
     needles: number;
     sawmill: number;
-    /** The stand trees' markers (their sway); none: no sway shown. */
+    /** The stand trees' markers (their lean); none: no needles shed for it. */
     markers?: readonly number[];
 }
 
-/** A swaying crown sheds needles this often (s), this high over the tree's foot (m), this far out. */
+/** A leaning crown sheds needles this often (s), this high over the tree's foot (m), this far out. */
 export const SWAY_FX = { every: 0.5, crownY: 4.5, out0: 0.6, out1: 1.6 } as const;
 
 /** Sawdust puffs this often while the blade runs (s). */

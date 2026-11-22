@@ -86,7 +86,7 @@ import {
     OLD_CELL_SIZE_STORAGE_KEYS,
     clampCellSizeCm
 } from './voxels/grid.ts';
-import { pose } from './voxels/math.ts';
+import { pose, quatFromYawPitchRoll } from './voxels/math.ts';
 import { SAMPLING_POLICIES } from './voxels/rasterizer.ts';
 import type { SamplingPolicy } from './voxels/rasterizer.ts';
 
@@ -2492,6 +2492,15 @@ window.__riverLab = {
     player: () => ({ ...sim.player, holding: sim.physics.heldId, eyeHeight: EYE_HEIGHT }),
     /** Puts player 1 somewhere (tests and screenshots of big levels). */
     teleport: (x: number, z: number, yaw?: number) => sim.placePlayer(x, z, yaw ?? sim.player.yaw, 0),
+    /** Puts the ute down at (x, z), facing yaw, on the ground there (tests: a ute by the logging stand). */
+    placeUte: (x: number, z: number, yaw = 0) => {
+        if (!sim.vehicle) return false;
+        sim.physics.place(
+            sim.vehicle.id,
+            pose(x, (level.forestry?.ground(x, z) ?? sim.ute.pose.p.y) + 0.3, z, quatFromYawPitchRoll(yaw, 0, 0))
+        );
+        return true;
+    },
     /** Streamed levels: near tiles built so far. */
     nearTiles: () => pipeline.nearTiles.size,
     /** Streamed levels: whether the near world is built over a square around (x, z). */
@@ -2516,6 +2525,7 @@ window.__riverLab = {
         tick: sim.tick,
         floods: sim.hazards.floodCount,
         gusts: sim.hazards.gustCount,
+        tree: sim.hazards.tree.phase,
         planeY: scene.waterEntity.getPosition().y
     }),
     /** The playtest log as text. */

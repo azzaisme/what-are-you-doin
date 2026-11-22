@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { TREE_SWAY, TREE_SWAY_YAW } from '../../src/assets/forestry.ts';
+import { TREE_SWAY, TREE_SWAY_YAW, standMarkerAsset } from '../../src/assets/forestry.ts';
 import {
     BRIDGE,
     BRIDGE_X,
@@ -840,10 +840,19 @@ describe('hazard director: a tree falls towards the ute (#74)', () => {
     const toUteOf = (s: LabSim, n: number) => unit(s.ute.pose.p.x - def.trees[n].x, s.ute.pose.p.z - def.trees[n].z);
     const angleTo = (a: { x: number; z: number }, b: { x: number; z: number }) =>
         (Math.acos(Math.max(-1, Math.min(1, a.x * b.x + a.z * b.z))) * 180) / Math.PI;
+    /** How far (m) the marker draws the top of the crown from the foot, towards `dir`. */
+    const crownTowards = (anim: ArrayLike<number>, dir: { x: number; z: number }) => {
+        const a = standMarkerAsset();
+        const out = a.parts.map(() => pose());
+        a.evaluate(pose(), anim, out);
+        if (a.partHidden!(anim, a.parts.length - 1)) return -1;
+        const top = out[out.length - 1].p;
+        return top.x * dir.x + top.z * dir.z;
+    };
     const uteReach = (s: LabSim, n: number) =>
         Math.hypot(s.ute.pose.p.x - def.trees[n].x, s.ute.pose.p.z - def.trees[n].z) - 1.84;
 
-    it('cut with the ute in reach: a crack at the first bite, the crown sways towards the ute, no fall for the whole tell, then it comes down on the ute', () => {
+    it('cut with the ute in reach: a crack at the first bite, the tree leans over towards the ute, no fall for the whole tell, then it comes down on the ute', () => {
         // tree 1 (no lean of its own), the ute east of it, chewed from the west (the far side)
         const T = 1;
         const s = setUp(T);
@@ -856,21 +865,27 @@ describe('hazard director: a tree falls towards the ute (#74)', () => {
         expect(s.hazards.tree.phase).toBe(1);
         const crack = s.tick;
         expect(hazardTexts(s).some((t) => t.includes('leaning towards the ute'))).toBe(true);
-        // the tell you can see: the marker's sway grows, aimed at the ute (what every device draws)
+        // the tell you can see: the marker draws the tree leaning, its crown further towards the ute
+        // as the tell goes on (what every device draws from the marker's channels)
         const marker = s.forestry.ents.markers[T];
-        const sway0 = marker.anim[TREE_SWAY];
+        const lean0 = crownTowards(marker.anim, toUte);
         d.step({}, S(3));
-        const sway1 = marker.anim[TREE_SWAY];
-        expect(sway0).toBeGreaterThan(0);
-        expect(sway1).toBeGreaterThan(sway0 + 0.3);
+        const lean1 = crownTowards(marker.anim, toUte);
+        d.step({}, S(3));
+        const lean2 = crownTowards(marker.anim, toUte);
+        expect(lean0).toBeGreaterThanOrEqual(0);
+        expect(lean1).toBeGreaterThan(lean0 + 0.25);
+        expect(lean2).toBeGreaterThan(lean1 + 0.25);
+        expect(lean2).toBeGreaterThan(0.6);
         const yaw = marker.anim[TREE_SWAY_YAW];
         expect(angleTo({ x: Math.sin(yaw), z: Math.cos(yaw) }, toUte)).toBeLessThan(5);
         // chewed as fast as it goes: still standing until the tell is over
         d.chew();
         const down = s.tick;
         expect(down - crack).toBeGreaterThanOrEqual(S(TREE.tellS));
-        // no sway once it falls
+        // once it falls the marker draws no tree (the falling log takes over)
         expect(marker.anim[TREE_SWAY]).toBe(0);
+        expect(marker.asset.partHidden!(marker.anim, marker.asset.parts.length - 1)).toBe(true);
         // the forestry's creak names no direction while the hazard pulls it (the ute could move)
         const creak = s.events.filter((e) => e.text.startsWith('The pine creaks'));
         expect(creak.map((e) => e.text)).toEqual(['The pine creaks: stand clear!']);
@@ -914,6 +929,18 @@ describe('hazard director: a tree falls towards the ute (#74)', () => {
             expect(s.hazards.tree.count, `tree ${n}`).toBe(1);
             // straight away from the ute: the push beats the pull by 0.035, whatever the tree's lean
             expect(angleTo(fallen(s, n), toUte), `tree ${n}`).toBeGreaterThan(160);
+        }
+    }, 240_000);
+
+    it('the leaning trees too: cut from the far side, it comes down on the ute, whatever its own lean', () => {
+        for (const n of [0, 2, 5]) {
+            const s = setUp(n);
+            const d = inputs(s, n);
+            const toUte = toUteOf(s, n);
+            d.standAt(-toUte.x, -toUte.z);
+            d.chew();
+            expect(s.hazards.tree.count, `tree ${n}`).toBe(1);
+            expect(angleTo(fallen(s, n), toUte), `tree ${n}`).toBeLessThan(10);
         }
     }, 240_000);
 
@@ -963,7 +990,7 @@ describe('hazard director: a tree falls towards the ute (#74)', () => {
         expect(moved.count).toBe(1);
         // the time it took a player at the tree to get the ute out of reach, by input: within the
         // tell with 2 s to spare to read it (so a teammate still chewing can't bring it down on the
-        // ute first). Measured: about 5 s of the 7.
+        // ute first): S(7 - 2) = 300 ticks. Measured: 298 (deterministic).
         expect(moved.outOfReach).toBeGreaterThan(0);
         expect(moved.outOfReach).toBeLessThanOrEqual(S(TREE.tellS - 2));
         // the same cut, the same fall: nothing pulled it towards where the ute was
@@ -1000,8 +1027,15 @@ describe('hazard director: a tree falls towards the ute (#74)', () => {
         expect(s.hazards.tree.phase).toBe(1);
         // left unfinished: given up after its time, and not cracked again on its own (the cooldown
         // and the quiet spell long over)
+        const leaning = s.forestry.ents.markers[T];
+        s.runTo(s.hazards.tree.since + S(TREE.giveUpS) - 10);
+        expect(crownTowards(leaning.anim, toUteOf(s, T))).toBeGreaterThan(0.6);
         s.runTo(s.hazards.tree.since + S(TREE.giveUpS) + S(TREE.cooldownS) + S(10));
         expect(s.hazards.tree.phase).toBe(0);
+        // given up: it stands back up (the marker draws no tree, the static one is back: the
+        // worker's side is in tests/unit/forestry.test.ts)
+        expect(leaning.anim[TREE_SWAY]).toBe(0);
+        expect(crownTowards(leaning.anim, toUteOf(s, T))).toBe(-1);
         expect(s.hazards.tree.count).toBe(1);
         expect(hazardTexts(s).filter((t) => t === TREE_TELL)).toHaveLength(1);
     }, 120_000);
@@ -1225,7 +1259,7 @@ describe('hazard director: online, through real host and guest sessions', () => 
         hs.stop();
     }, 60_000);
 
-    it('the falling tree reaches the guest: the crack toast, the crown swaying towards the ute, and the trunk coming down on it, in the snapshots', async () => {
+    it('the falling tree reaches the guest: the crack toast, the tree leaning over towards the ute, and the trunk coming down on it, in the snapshots', async () => {
         const { host, hs, gs, guestSim, run } = await online(3);
         const def = timberYardLevel.forestry!;
         const t = def.trees[1];
@@ -1250,8 +1284,22 @@ describe('hazard director: online, through real host and guest sessions', () => 
         expect(guestSim.ring.sample(marker.slot, host.tick / 60, pose(), anim)).toBe(true);
         expect(anim[TREE_SWAY]).toBeGreaterThan(0.3);
         expect(Math.abs(anim[TREE_SWAY] - marker.anim[TREE_SWAY])).toBeLessThan(0.05);
-        const yaw = anim[TREE_SWAY_YAW];
-        expect(Math.sin(yaw)).toBeGreaterThan(0.95);
+        expect(Math.sin(anim[TREE_SWAY_YAW])).toBeGreaterThan(0.95);
+        // the tree the guest draws from them leans east, as the host's does, and further on
+        const drawnTop = (a: ArrayLike<number>) => {
+            const asset = standMarkerAsset();
+            const out = asset.parts.map(() => pose());
+            asset.evaluate(pose(), a, out);
+            expect(asset.partHidden!(a, asset.parts.length - 1)).toBe(false);
+            return out[out.length - 1].p.x;
+        };
+        const guest0 = drawnTop(anim);
+        expect(guest0).toBeGreaterThan(0.2);
+        expect(Math.abs(guest0 - drawnTop(marker.anim))).toBeLessThan(0.1);
+        run(S(3), look);
+        while (host.tick % 3 !== 0) run(1, look);
+        expect(guestSim.ring.sample(marker.slot, host.tick / 60, pose(), anim)).toBe(true);
+        expect(drawnTop(anim)).toBeGreaterThan(guest0 + 0.25);
         for (let i = 0; i < S(30) && host.forestry.treeState(1).phase === 'standing'; i++)
             run(1, { ...look, grab: i % 20 === 0 });
         expect(host.hazards.tree.count).toBe(1);
