@@ -1195,6 +1195,7 @@ function interactionText(i: number, pad: boolean): string {
         return pad
             ? 'Driving · left stick drive and steer · A brake · RT get out'
             : 'Driving · W/S throttle · A/D steer · Space brake · click or E to get out';
+    if (it.seat >= 0) return pad ? 'Riding along · RT get out' : 'Riding along · click or E to get out';
     if (it.target === 'ute') return pad ? 'RT to drive the ute' : 'Click to drive the ute';
     if (it.holding)
         return pad
@@ -1210,21 +1211,22 @@ function guestInteraction(): {
     target: string | null;
     shared: boolean;
     driving: boolean;
+    seat: number;
 } | null {
     if (!guestSession) return null;
     const h = guestSession.hud[guestSession.slot];
-    if (!h) return { holding: null, target: null, shared: false, driving: false };
+    if (!h) return { holding: null, target: null, shared: false, driving: false, seat: -1 };
     const name = (id: number) => (id < 0 ? null : (sim.entities.find((e) => e.id === id)?.name ?? null));
-    return { holding: name(h.held), target: name(h.target), shared: h.shared, driving: h.driving };
+    return { holding: name(h.held), target: name(h.target), shared: h.shared, driving: h.driving, seat: h.seat };
 }
 
-/** The ute's yaw last render frame, per local view (NaN when that view's player isn't driving). */
+/** The ute's yaw last render frame, per local view (NaN when that view's player isn't in it). */
 const lastUteYaw = [NaN, NaN];
 const utePose = pose();
 const uteAnim = new Float64Array(ANIM_MAX);
 function followUte(view: number, slot: number, time: number): void {
-    const driving = guestSession ? !!guestSession.hud[slot]?.driving : sim.driver === slot && slot >= 0;
-    if (!driving || !sim.ring.sample(sim.ute.slot, time, utePose, uteAnim)) {
+    const seated = slot >= 0 && (guestSession ? (guestSession.hud[slot]?.seat ?? -1) : sim.seatOf(slot)) >= 0;
+    if (!seated || !sim.ring.sample(sim.ute.slot, time, utePose, uteAnim)) {
         lastUteYaw[view] = NaN;
         return;
     }
@@ -1252,13 +1254,15 @@ function updatePrompt(): void {
             touch.setHolding(!!it.holding);
             t = it.driving
                 ? 'Driving · stick to drive · jump to brake · grab to get out'
-                : it.holding
-                  ? `Holding ${propLabel(it.holding)}${it.shared ? ' together' : ''}`
-                  : it.target === 'ute'
-                    ? 'Grab to drive the ute'
-                    : it.target
-                      ? `Grab ${propLabel(it.target)}`
-                      : '';
+                : it.seat >= 0
+                  ? 'Riding along · grab to get out'
+                  : it.holding
+                    ? `Holding ${propLabel(it.holding)}${it.shared ? ' together' : ''}`
+                    : it.target === 'ute'
+                      ? 'Grab to drive the ute'
+                      : it.target
+                        ? `Grab ${propLabel(it.target)}`
+                        : '';
         } else if (!fpInput.locked && !pads.players[0]) t = 'Click to look around';
         else t = interactionText(0, !fpInput.locked);
     }

@@ -82,15 +82,23 @@ export class UteVehicle {
 
     constructor(pw: PhysicsWorld, id: number, spawn: Pose) {
         this.pw = pw;
-        // ~760 kg: a light lower body with a low ballast (centre of mass ~0.4 m up), a lighter cab
+        // ~760 kg, shaped like the voxel ute (heights above the ground at rest): a lower body with a low
+        // ballast (centre of mass ~0.6 m up), the hood, the cab, and an open cargo bed (#44) with a floor,
+        // sides and a tailgate, so loads ride in it
         this.pb = pw.addDynamicCompound(
             id,
             [
-                // the body's collider rides 0.32 m up (the voxel skirts hang lower): a ute clears a
-                // beam end or a kerb its wheels can climb
-                { shape: { type: 'box', hx: 0.8, hy: 0.25, hz: 1.84 }, x: 0, y: 0.57, z: 0, density: 150 },
-                { shape: { type: 'box', hx: 0.6, hy: 0.08, hz: 1.4 }, x: 0, y: 0.42, z: 0, density: 500 },
-                { shape: { type: 'box', hx: 0.76, hy: 0.3, hz: 0.55 }, x: 0, y: 1.0, z: 0.15, density: 60 }
+                // the lower body rides 0.45 m up (the voxel skirts hang lower): a ute clears a beam end
+                // or a kerb its wheels can climb
+                { shape: { type: 'box', hx: 0.8, hy: 0.215, hz: 1.84 }, x: 0, y: 0.665, z: 0, density: 150 },
+                { shape: { type: 'box', hx: 0.6, hy: 0.05, hz: 1.4 }, x: 0, y: 0.5, z: 0, density: 800 },
+                { shape: { type: 'box', hx: 0.77, hy: 0.05, hz: 0.55 }, x: 0, y: 0.92, z: 1.24, density: 60 },
+                { shape: { type: 'box', hx: 0.76, hy: 0.3, hz: 0.55 }, x: 0, y: 1.18, z: 0.15, density: 60 },
+                // the bed: floor (top at 0.97 m), sides and tailgate (top at 1.25 m); the cab closes the front
+                { shape: { type: 'box', hx: 0.78, hy: 0.05, hz: 0.7 }, x: 0, y: 0.92, z: -1.1, density: 60 },
+                { shape: { type: 'box', hx: 0.05, hy: 0.15, hz: 0.86 }, x: 0.75, y: 1.1, z: -0.94, density: 60 },
+                { shape: { type: 'box', hx: 0.05, hy: 0.15, hz: 0.86 }, x: -0.75, y: 1.1, z: -0.94, density: 60 },
+                { shape: { type: 'box', hx: 0.8, hy: 0.15, hz: 0.05 }, x: 0, y: 1.1, z: -1.77, density: 60 }
             ],
             spawn,
             // never asleep: its wheels are rays, not contacts, so nothing would wake it when the ground

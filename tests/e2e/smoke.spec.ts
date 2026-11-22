@@ -27,7 +27,7 @@ type Lab = {
     level: string;
     progress(): { goalReached: boolean; falls: number; recoveries: number; events: string[] };
     placeProp(name: string, x: number, y: number, z: number, yaw?: number): boolean;
-    interaction(): { holding: string | null; target: string | null; shared: boolean; driving: boolean };
+    interaction(): { holding: string | null; target: string | null; shared: boolean; driving: boolean; seat: number };
     teleport(x: number, z: number, yaw?: number): void;
     ute(): { x: number; y: number; z: number; yaw: number; speed: number; driver: number; drivable: boolean };
 };

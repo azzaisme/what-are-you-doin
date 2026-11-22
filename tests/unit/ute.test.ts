@@ -198,6 +198,84 @@ describe('wheels load what holds them up (Epic 4 gate)', () => {
     });
 });
 
+describe('the cargo bed carries loads (#44)', () => {
+    it('a crate dropped in the bed rides along as the ute pulls away and brakes', () => {
+        const pw = world();
+        const u = new UteVehicle(pw, 1, pose(0, 0.3, -30));
+        run(pw, u, NO_DRIVE, 120);
+        // a 0.5 m, ~30 kg crate set down in the middle of the bed (floor top at 0.97 m)
+        const crate = pw.addDynamic(2, { type: 'box', hx: 0.25, hy: 0.25, hz: 0.25 }, pose(0, 1.3, -31.1), {
+            density: 240,
+            friction: 0.6
+        });
+        run(pw, u, NO_DRIVE, 90);
+        const local = () => {
+            const c = crate.body.translation();
+            const b = u.pb.body.translation();
+            return { x: c.x - b.x, y: c.y - b.y, z: c.z - b.z };
+        };
+        // resting on the bed floor
+        expect(local().y).toBeGreaterThan(1.15);
+        expect(local().y).toBeLessThan(1.3);
+        run(pw, u, { throttle: 1, steer: 0, brake: false }, 60 * 3);
+        run(pw, u, { throttle: 0, steer: 0, brake: true }, 60 * 2);
+        const l = local();
+        console.log('crate in the bed after a run and a stop', l.x.toFixed(2), l.y.toFixed(2), l.z.toFixed(2));
+        expect(u.pb.body.translation().z).toBeGreaterThan(-30 + 10);
+        // still inside the bed: between the sides, the tailgate and the cab, on the floor
+        expect(Math.abs(l.x)).toBeLessThan(0.7 - 0.2);
+        expect(l.z).toBeGreaterThan(-1.72 + 0.2);
+        expect(l.z).toBeLessThan(-0.4 - 0.2);
+        expect(l.y).toBeLessThan(1.3);
+    });
+});
+
+describe('the passenger seat (#43)', () => {
+    it("getting in from the ute's left takes the passenger seat, which rides but does not drive", async () => {
+        const { LabSim, EYE_HEIGHT, UTE_SEATS } = await import('../../src/sim/lab-sim.ts');
+        const { timberYardLevel } = await import('../../src/levels/timber-yard.ts');
+        const { neutralCommand } = await import('../../src/sim/commands.ts');
+        const s = new LabSim({ level: timberYardLevel });
+        let n = 0;
+        let yaw = 0;
+        let pitch = 0;
+        const step = (c: Record<string, unknown> = {}, k = 1) => {
+            for (let i = 0; i < k; i++) s.step({ ...neutralCommand(n++, yaw, pitch), ...c });
+        };
+        step({}, 90);
+        s.fpActive = true;
+        const ute = s.ute;
+        const u0 = { ...ute.pose.p };
+        const q = ute.pose.q;
+        const uy = Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.x * q.x));
+        // the passenger door: the ute's left side (local +x)
+        const sideX = Math.cos(uy);
+        const sideZ = -Math.sin(uy);
+        s.placePlayer(u0.x + sideX * 2.2, u0.z + sideZ * 2.2, 0);
+        step({}, 20);
+        yaw = Math.atan2(sideX, sideZ);
+        pitch = -Math.atan2(s.player.y + EYE_HEIGHT - (u0.y + 0.6), 2.2 - 0.8);
+        step({}, 5);
+        step({ grab: true });
+        expect(s.seatOf(0)).toBe(1);
+        expect(s.driver).toBe(-1);
+        expect(s.interaction().seat).toBe(1);
+        expect(s.interaction().driving).toBe(false);
+        step({}, 10);
+        expect(s.player.y + EYE_HEIGHT - ute.pose.p.y).toBeCloseTo(UTE_SEATS[1].eyeY, 1);
+        // the passenger's throttle does nothing: the handbrake holds it
+        step({ moveZ: 1 }, 90);
+        expect(Math.hypot(ute.pose.p.x - u0.x, ute.pose.p.z - u0.z)).toBeLessThan(0.1);
+        // out on the left, beside the passenger door
+        step({ grab: true });
+        expect(s.seatOf(0)).toBe(-1);
+        step({}, 10);
+        const ox = s.player.x - ute.pose.p.x;
+        const oz = s.player.z - ute.pose.p.z;
+        expect(ox * sideX + oz * sideZ).toBeGreaterThan(1);
+    }, 60_000);
+});
+
 describe('driving the Timber Yard ute with player commands', () => {
     it('get in by looking at it and pressing grab, drive it, brake, get out beside the door', async () => {
         const { LabSim, EYE_HEIGHT, UTE_SEAT } = await import('../../src/sim/lab-sim.ts');
@@ -277,13 +355,19 @@ describe('the ute crosses a beam bridge (Epic 4 gate)', () => {
         const flatAlongZ = quatMul(quatFromYawPitchRoll(Math.PI / 2, 0, 0), quatFromYawPitchRoll(0, Math.PI / 2, 0));
         const beams = [byName('beam-0'), byName('beam-1')];
         beams.forEach((b, i) =>
-            s.physics.place(b.id, pose(BRIDGE_X + (i === 0 ? -1 : 1) * UTE_TRACK_HALF, YARD_Y + 0.12, BRIDGE.zc, flatAlongZ))
+            s.physics.place(
+                b.id,
+                pose(BRIDGE_X + (i === 0 ? -1 : 1) * UTE_TRACK_HALF, YARD_Y + 0.12, BRIDGE.zc, flatAlongZ)
+            )
         );
         let n = 0;
         for (; n < 60; n++) s.step(neutralCommand(n));
         // the ute on the yard bank, lined up with the bridge, facing the creek (-z)
         const v = s.vehicle!;
-        s.physics.place(v.id, pose(BRIDGE_X, YARD_Y + 0.25, BRIDGE.nearEdge + 3.2, quatFromYawPitchRoll(Math.PI, 0, 0)));
+        s.physics.place(
+            v.id,
+            pose(BRIDGE_X, YARD_Y + 0.25, BRIDGE.nearEdge + 3.2, quatFromYawPitchRoll(Math.PI, 0, 0))
+        );
         for (; n < 120; n++) s.step(neutralCommand(n));
         // player 1 in the driver's seat, easing forward
         s.fpActive = true;
