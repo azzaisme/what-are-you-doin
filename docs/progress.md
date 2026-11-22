@@ -1,5 +1,129 @@
 # Progress log
 
+## Epic 6: logging and the sawmill (2026-11-22)
+
+East of the Timber Yard there is now a logging stand: six pines with an orange band round the
+trunk. You can bring them down, carry the logs to a working sawmill and saw them into planks or
+beams. The Valley has the same stand and sawmill where the yard is.
+
+### How to play it
+
+- **Chew a pine:** look at a banded trunk with empty hands and click (or E, RT, touch grab). Ten
+  bites fell it (a bite every 0.3 s; two beavers chewing go twice as fast).
+- **Chop with the axe:** the axe lies by the sawmill's infeed. Holding it, click a banded trunk:
+  four blows fell it. Q (B on a pad) puts the axe down.
+- **Read the lean, stand clear:** a tree falls away from the side you cut it from, pulled towards
+  the way it leans by its weight. One tree in the stand leans so hard it falls its own way whatever
+  you do. At 70 % it creaks and the toast says where it will fall ("It will fall to the
+  north-east: stand clear!").
+- **Move the log:** the felled trunk is a 113 kg log. Two beavers lift it together, one either side
+  of its middle. Alone, chop it with the axe three times to buck it into two short logs (57 kg):
+  one beaver carries those.
+- **Saw it:** lay a log (or a short log) still, lengthways, in the sawmill's guide (the low rails on
+  its east side) and let go. After half a second the sawmill takes it, the blade turns for 4 s and
+  the pieces come out on the rack on the west side.
+- **Planks or a beam:** grab the lever on the sawmill's north post to switch. Planks: three from a
+  log, one from a short log. Beam: one 3.2 m beam from a whole log (a short log still makes a
+  plank). They are ordinary planks and beams: build with them.
+- **The lamp on the motor:** green ready, orange sawing, red stopped.
+
+### What was built
+
+- **Cut state (#55):** each stand tree has a cut (0–100 %) that bites and blows add to, drawn as a
+  pale band of exposed wood round the trunk that widens as the cut deepens, and shown in the prompt
+  ("Click to chew the pine · cut 40%").
+- **Falling timber (#56):**
+    - When the cut completes, the trunk above a 0.3 m stump becomes a physical log, once, exactly
+      where it stood, starting from its lean plus a small push away from the cut.
+    - Its weight biases the fall: stand trees lean (drawn leaning, up to about 6°) and the lean
+      adds to the push.
+    - The crown rides it and breaks off in a burst of needles as it lands.
+    - The voxel tree leaves the static world and a stump with rings stays (the voxel worker reads
+      the tree's state from the snapshots, so a guest's world shows the same).
+    - Stand trees have no foliage collision: the needles never block a grab, stop a player or catch
+      a falling trunk.
+- **Sawmill (#57):**
+    - Feed interlock: a log is taken only when it lies still, lengthways and unheld in the guide;
+      once taken it leaves the physics world, so it can never be grabbed or sawn again. A second
+      log waits in the guide until the first is done.
+    - Safety interlocks: the blade stops while anyone stands at it ("Safety stop"), and pieces only
+      come out where the rack is clear of bodies and players; otherwise the machine waits
+      ("Outfeed blocked").
+    - Planks or a beam, chosen with a lever.
+    - Moving voxel parts: the turning blade, the lamp, a progress bar and the lever. The old
+      decorative saw bench is gone.
+- **Wood effects (#58):** chips at every bite and blow, needles when a crown breaks off or a stump
+  regrows, sawdust while the blade runs. Pooled voxel particles worked out on each device; nothing
+  extra is sent.
+- **Resources and solo play (#59):**
+    - A stump regrows into a full tree 45 s after felling, once its log has gone and nobody is
+      standing there.
+    - The yard's own logs come back to the log pile 20 s after being sawn.
+    - Felled logs, short logs and sawn pieces lost in the creek go back to their pools.
+    - Solo: fell with the axe, buck the log, carry the halves.
+- **Simple tools:** the axe (quicker than chewing, and the only way to buck a log).
+- **Online:** guests chew, chop, carry and saw through the same commands; prompts, the cut, felled
+  trees and the sawmill's state reach them in the host's snapshots. A Valley snapshot grew from 734
+  to 927 bytes (1,896 base64 characters with every pooled piece out at once; the budget is 4,096).
+
+### Test results (actual)
+
+`tests/unit/forestry-gate.test.ts` (4 tests) plays through player commands only: no prop is put
+anywhere by hand and nobody is teleported. Both voxel sizes:
+
+| Test                        | What happens, all by input                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Gate: two beavers**       | walk to tree 2, chew it down together; walk round the log, take it either side of its middle, carry it into the guide (never lower than 0.45 m above where it lay; the test asks for 0.3 m); 3 planks; one shoulders the yard's two beams across the creek, the other carries each plank out along the beams and lays it across them over the gap; a player walks over them to the far bank, no fall; the stump has regrown since its log was sawn |
+| **Gate: solo**              | walk to the axe and pick it up, chop tree 4 down (4 blows), buck the log (3 blows), drop the axe, carry the west half into the guide: 1 plank                                                                                                                                                                                                                                                                                                      |
+| Determinism                 | the same interleaved two-player bites and walks, run twice: every entity identical                                                                                                                                                                                                                                                                                                                                                                 |
+| **Online (host and guest)** | over the real host/guest sessions: the guest walks to the axe, picks it up, chops tree 2 down and hears "Timber!"; host and guest carry the log into the guide; the guest's snapshots show the saw running (progress to over 90 %) and the 3 planks; the guest's own voxel world, fed from its snapshots, shows a stump where tree 2 stood and tree 1 still standing; the guest bucks a log on the pile and sees the two halves                    |
+
+`tests/unit/forestry.test.ts` (20 tests) checks the parts. Some of these put a log in the guide or
+a player beside a tree directly, to test one thing at a time:
+
+| Test                            | Result                                                                                                                                                                               |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Stand layout                    | 3 m apart, clear of the scenery's crowns, a falling trunk stays inside the play area's walls                                                                                         |
+| Chew an upright tree            | 10 bites; chewed from the west it falls east; the log lies along the fall                                                                                                            |
+| Fall direction from eight sides | worst 1.4° from the prediction (the push plus the lean)                                                                                                                              |
+| Weight                          | tree 0 (leans 0.11 rad north) chewed from the west falls north-east as predicted (58° from the push); chewed from the north it still falls north; an upright tree falls exactly away |
+| Same cuts twice                 | identical log position                                                                                                                                                               |
+| Two beavers chewing             | 5 bites each, under 2.6 s                                                                                                                                                            |
+| Pressing every tick             | still one bite per 0.3 s                                                                                                                                                             |
+| Axe                             | 4 blows fell a tree, 3 blows buck a log into two halves under 60 kg                                                                                                                  |
+| Sawmill                         | a log in the guide gives 3 planks, once; 600 ticks later still 3; the pile's log comes back                                                                                          |
+| Lever                           | grabbing it sets beams: a log gives one beam (beam-12), a short log still a plank; grab again: planks                                                                                |
+| Two logs                        | the second waits and is sawn after the first                                                                                                                                         |
+| A plank, a log across the guide | not taken                                                                                                                                                                            |
+| Player at the blade             | saw stops (progress +<2 % in 2 s), carries on when they leave                                                                                                                        |
+| Rack blocked                    | no planks, the machine waits; clear it and all 3 come out                                                                                                                            |
+| Regrowth                        | no regrowth while the log still lies by the stump (regrowth after sawing: the gate test)                                                                                             |
+| Lost log                        | a felled log in the creek returns to its pool                                                                                                                                        |
+| Voxel worker                    | felled: every tree cell gone, stump drawn, ground untouched; regrown: identical to the start                                                                                         |
+| Effects                         | 10 bites → 10 chip bursts; 1 needle burst; sawdust while sawing                                                                                                                      |
+| The Valley                      | a stand tree falls there by chewing; the sawmill is there and its lever works                                                                                                        |
+| Guest chewing                   | a guest's grab presses chew a tree down on the host; its snapshots show the tree felled                                                                                              |
+
+- Unit tests: 374 pass (48 files, both voxel sizes).
+- Browser test: in the Timber Yard, chew tree 2 down with injected clicks, then grab the sawmill's
+  lever to set beams (screenshots in `test-results/logging-*.png`).
+- Cost of a felling in the voxel worker (one-off, off the main thread): 83 ms to clear the tree and
+  draw the stump at 5 cm, 134 ms to regrow it (18 and 22 ms at 10 cm).
+
+### Known limits
+
+- **One beaver cannot drag a whole log:** pulled by one end it tips up on the other instead of
+  sliding. Buck it with the axe.
+- **A log's foot can land on its own stump** and lie there tilted (up to about 15°).
+- **The yard's creek (2.6 m) is wider than a plank (2.4 m):** planks deck the beams there (or make
+  beams at the sawmill: a sawn beam spans it).
+- **Pools can fill up:** with 15 sawn planks (or 4 sawn beams) lying about the sawmill waits, and
+  with six felled logs lying about no more trees fall until one is sawn. The toasts say so.
+- **A felling or a regrowth costs one slow voxel frame** (above) while the tree is re-drawn.
+- **Far away in the Valley** (the coarse far lattice), felled stand trees still show standing.
+- **No sawmill or chopping sounds yet** (they come with the shared sound effects).
+- **Not tried on a real phone or pad.**
+
 ## Online: 8 players, reconnect, bad-network testing (2026-11-22, Epic 10)
 
 Online games now take up to **8 players** (was 4). A guest whose connection drops, or who reloads the
