@@ -588,12 +588,14 @@ const SAWMILL_SPOT = { x: 4.6, z: 9.6, yaw: 0, y: YARD_Y };
  */
 export const YARD_FORESTRY: ForestryDef = {
     trees: [
-        { x: 13.0, z: 4.3, yaw: 0.3 },
+        // leans (rad, towards x/z): their weight pulls the fall their way; tree 0 leans hard north,
+        // more than a cut's push, so it falls north whichever side it is cut from
+        { x: 13.0, z: 4.3, yaw: 0.3, lean: { x: 0, z: -0.11 } },
         { x: 16.0, z: 4.5, yaw: 1.7 },
-        { x: 13.1, z: 7.3, yaw: 2.9 },
-        { x: 16.1, z: 7.5, yaw: 4.1 },
-        { x: 12.9, z: 10.3, yaw: 5.3 },
-        { x: 16.0, z: 10.5, yaw: 0.9 }
+        { x: 13.1, z: 7.3, yaw: 2.9, lean: { x: -0.05, z: 0 } },
+        { x: 16.1, z: 7.5, yaw: 4.1, lean: { x: 0.04, z: 0.03 } },
+        { x: 12.9, z: 10.3, yaw: 5.3, lean: { x: -0.03, z: 0 } },
+        { x: 16.0, z: 10.5, yaw: 0.9, lean: { x: 0.05, z: -0.02 } }
     ],
     sawmill: SAWMILL_SPOT,
     axe: pose(8.4, YARD_Y + 0.06, 8.5, quatFromYawPitchRoll(0.3, 0, Math.PI / 2)),

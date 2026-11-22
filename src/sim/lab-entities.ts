@@ -49,6 +49,8 @@ export const STAND_TREES = 6;
 export const FELLED_LOGS = 6;
 export const SHORT_LOGS = 6;
 export const SAWN_PLANKS = 15;
+/** Beams the sawmill makes in beam mode (`beam-12` on: ordinary beams). */
+export const SAWN_BEAMS = 4;
 /** The first sawn plank's `extra-plank-N` number. */
 export const SAWN_PLANK0 = EXTRA_PLANKS;
 
@@ -104,6 +106,8 @@ export interface ForestryEntities {
     felled: SimEntity[];
     short: SimEntity[];
     sawn: SimEntity[];
+    /** Sawn beams (the sawmill's beam mode). */
+    beams: SimEntity[];
     axe: SimEntity;
     sawmill: SimEntity;
     /** Effect counters (no voxels): where chips flew and needles burst, and how many times. */
@@ -172,12 +176,17 @@ export function createLabEntities(): LabEntities {
         const name = `extra-plank-${SAWN_PLANK0 + n}`;
         sawn.push(add(380 + n, name, plankAsset(name), 1));
     }
+    const beams: SimEntity[] = [];
+    for (let n = 0; n < SAWN_BEAMS; n++) {
+        const name = `beam-${EXTRA_BEAMS + n}`;
+        beams.push(add(396 + n, name, beamAsset(name), 1));
+    }
     const axe = add(440, 'axe', axeAsset(), 2);
-    const sawmill = add(441, 'sawmill', sawmillAsset(SAWMILL.blade.y, SAWMILL.blade.r, SAWMILL.housing.top), 4);
+    const sawmill = add(441, 'sawmill', sawmillAsset(SAWMILL.blade.y, SAWMILL.blade.r, SAWMILL.housing.top, SAWMILL.lever), 4);
     const chips = add(442, 'chips-fx', counterAsset('chips-fx'), 0);
     const needles = add(443, 'needles-fx', counterAsset('needles-fx'), 0);
-    const forestry: ForestryEntities = { markers, crowns, felled, short, sawn, axe, sawmill, chips, needles };
-    for (const e of [...markers, ...crowns, ...felled, ...short, ...sawn, axe, sawmill, chips, needles])
+    const forestry: ForestryEntities = { markers, crowns, felled, short, sawn, beams, axe, sawmill, chips, needles };
+    for (const e of [...markers, ...crowns, ...felled, ...short, ...sawn, ...beams, axe, sawmill, chips, needles])
         e.visible = false;
     const avatars: SimEntity[] = [];
     for (let n = 0; n < MAX_PLAYERS; n++) avatars.push(add(910 + n, `avatar-${n}`, BODY.asset, 3));

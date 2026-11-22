@@ -20,8 +20,8 @@
  */
 
 import { LOG_RADIUS } from '../assets/props.ts';
-import { pose, quatFromYawPitchRoll, quatRotate } from '../voxels/math.ts';
-import type { Pose } from '../voxels/math.ts';
+import { pose, quatFromAxisAngle, quatFromYawPitchRoll, quatMul, quatRotate } from '../voxels/math.ts';
+import type { Pose, Quat } from '../voxels/math.ts';
 import { M, voxel, voxelMaterial } from '../voxels/palette.ts';
 import type { RasterStats } from '../voxels/rasterizer.ts';
 import { cone, cylinder, latticeShade, solid } from '../voxels/volumes.ts';
@@ -50,6 +50,29 @@ export interface StandTree {
     z: number;
     /** Turns the needle pattern (looks only). */
     yaw: number;
+    /**
+     * How the tree leans (its weight): a horizontal vector towards the lean whose length is the
+     * tilt from upright (rad). A leaning tree is drawn leaning, and its weight pulls the fall its
+     * way (src/sim/forestry.ts). Absent: upright.
+     */
+    lean?: { x: number; z: number };
+}
+
+/** The tilt of a leaning stand tree: up turned towards its lean by the lean's length. */
+export function standTilt(t: StandTree, out: Quat = { x: 0, y: 0, z: 0, w: 1 }): Quat {
+    const lx = t.lean?.x ?? 0;
+    const lz = t.lean?.z ?? 0;
+    const a = Math.hypot(lx, lz);
+    // up x lean: turning about it tips the top towards the lean
+    return quatFromAxisAngle(lz, 0, -lx, a, out);
+}
+
+/** The pose of a point of a stand tree `y` up its (leaning) axis from its foot, with its yaw. */
+export function standPose(t: StandTree, ground: number, y: number): Pose {
+    const tilt = standTilt(t);
+    const v = { x: 0, y: 0, z: 0 };
+    quatRotate(tilt, 0, y, 0, v);
+    return pose(t.x + v.x, ground + v.y, t.z + v.z, quatMul(tilt, quatFromYawPitchRoll(t.yaw, 0, 0)));
 }
 
 export interface SawmillSpot {
@@ -87,6 +110,8 @@ export const SAWMILL = {
     guard: { halfX: 0.8, halfZ: 0.85 },
     /** Outfeed rack: planks come out here, side by side, long axis x. */
     outfeed: { x: -2.05, bars: [-1.05, -2.05, -3.05], barTop: 0.1, laneZ: [-0.3, 0, 0.3] },
+    /** The mode lever's pivot (on the near post): grab it to switch between planks and a beam. */
+    lever: { x: 0.2, y: 0.95, z: -0.8 },
     /** Height of the log's centre while it is fed through. */
     feedY: LOG_RADIUS + 0.02
 } as const;
@@ -142,6 +167,9 @@ export function sawmillPieces(s: SawmillSpot): StaticPiece[] {
     add('saw-motor', { type: 'box', hx: 0.3, hy: 0.2, hz: 0.24 }, 0, H.top + 0.2, 0, (_x, y) =>
         voxel(y > 0.08 ? M.HiVis : M.UteTrim, 0)
     );
+    // the mode lever's mount on the near post
+    const L = SAWMILL.lever;
+    add('saw-lever-mount', { type: 'box', hx: 0.06, hy: 0.06, hz: 0.04 }, L.x, L.y, L.z + 0.04, dark, 3, false);
     // the blade guard: a hood over the top of the blade (the blade itself turns: the entity)
     add('saw-hood', { type: 'box', hx: 0.5, hy: 0.04, hz: 0.1 }, 0, SAWMILL.blade.y + SAWMILL.blade.r + 0.1, 0, dark);
     // infeed guide: two low rails along x
@@ -237,9 +265,8 @@ const treeSeed = (n: number) => 9100 + n * 13;
 
 /** Draws a standing stand tree into the static layer. */
 export function drawStandTree(world: VoxelWorld, t: StandTree, n: number, ground: number, stats: RasterStats): void {
-    const q = quatFromYawPitchRoll(t.yaw, 0, 0);
     for (const v of treeVolumes(treeSeed(n)))
-        world.rasterizeStatic(v.volume, pose(t.x, ground + v.y, t.z, q), 'coverage50', v.priority, stats);
+        world.rasterizeStatic(v.volume, standPose(t, ground, v.y), 'coverage50', v.priority, stats);
 }
 
 /** Draws a stump into the static layer. */
@@ -254,14 +281,13 @@ export function drawStump(world: VoxelWorld, t: StandTree, ground: number, stats
  * trees, so nothing else of these materials lies inside).
  */
 export function clearStandTree(world: VoxelWorld, t: StandTree, n: number, ground: number, stats: RasterStats): number {
-    const q = quatFromYawPitchRoll(t.yaw, 0, 0);
     let cleared = 0;
     const sink = (i: number, j: number, k: number) => {
         const v = world.staticAt(i, j, k);
         if (v !== 0 && TREE_MATERIALS.has(voxelMaterial(v)) && world.clearStatic(i, j, k)) cleared++;
     };
     for (const v of treeVolumes(treeSeed(n)))
-        world.forEachCell(v.volume, pose(t.x, ground + v.y, t.z, q), 'coverage50', sink, stats);
+        world.forEachCell(v.volume, standPose(t, ground, v.y), 'coverage50', sink, stats);
     const half = (STUMP_HEIGHT + 0.05) / 2;
     world.forEachCell(stumpVolume(), pose(t.x, ground + half - 0.05, t.z), 'coverage50', sink, stats);
     return cleared;

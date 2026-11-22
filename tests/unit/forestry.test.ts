@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { TREE_CUT, TREE_STATE } from '../../src/assets/forestry.ts';
+import { SAW_MODE, TREE_CUT, TREE_STATE } from '../../src/assets/forestry.ts';
 import { MAX_PARTICLES, ParticleFX } from '../../src/fx/particles.ts';
 import { WoodFX } from '../../src/fx/wood-fx.ts';
 import { PINE_TRUNK_HEIGHT } from '../../src/levels/common.ts';
@@ -114,7 +114,7 @@ describe('forestry: the logging stand', () => {
     it('chewing a stand tree ten times fells it away from the chewer; the trunk becomes one log', () => {
         const s = yard();
         const from = { k: 100 };
-        const tree = 2;
+        const tree = 1; // upright: no lean to pull it
         const t = YARD_FORESTRY.trees[tree];
         // stand west of the tree: it falls east
         standBy(s, tree, Math.PI);
@@ -143,7 +143,8 @@ describe('forestry: the logging stand', () => {
         expect(p.y).toBeLessThan(YARD_Y + 0.6);
         expect(p.x - t.x).toBeGreaterThan(0.8);
         expect(Math.abs(p.z - t.z)).toBeLessThan(0.4);
-        expect(Math.abs(axisOf(log.pose).y)).toBeLessThan(0.2);
+        // lying (its foot may rest on its own stump: up to ~15 degrees)
+        expect(Math.abs(axisOf(log.pose).y)).toBeLessThan(0.3);
         expect(Math.abs(axisOf(log.pose).x)).toBeGreaterThan(0.9);
         // only a stump is left: a ray at chest height passes where the trunk stood
         expect(s.forestry.aimTree({ x: t.x - 1.5, y: YARD_Y + 1, z: t.z }, -Math.PI / 2, 0)).toBe(-1);
@@ -162,8 +163,9 @@ describe('forestry: the logging stand', () => {
             standBy(s, tree, a);
             cutDown(s, tree, from);
             const d = s.forestry.fallDirection(tree);
-            // away from the chewer
-            expect(d.x * Math.cos(a) + d.z * Math.sin(a)).toBeLessThan(-0.99);
+            // away from the chewer, give or take the tree's lean (an upright tree: exactly away)
+            const lean = YARD_FORESTRY.trees[tree].lean;
+            if (!lean) expect(d.x * Math.cos(a) + d.z * Math.sin(a)).toBeLessThan(-0.99);
             // just landed (it may roll in a gust later)
             for (let k = 0; k < 100; k++) s.step(cmd(from.k++));
             const t = YARD_FORESTRY.trees[tree];
@@ -175,6 +177,36 @@ describe('forestry: the logging stand', () => {
         }
         expect(Math.max(...worst)).toBeLessThan(15);
     }, 60_000);
+
+    it("a tree's weight biases the fall: a leaning tree falls between the push and its lean", () => {
+        // tree 0 leans 0.11 rad north (more than a cut's 0.07 push): chewed from the west, the push
+        // is east, and it falls north-east (about 58 degrees from the push), as predicted
+        const s = yard();
+        const from = { k: 100 };
+        standBy(s, 0, Math.PI);
+        cutDown(s, 0, from);
+        const d = s.forestry.fallDirection(0);
+        const want = Math.atan2(d.z, d.x);
+        expect(Math.abs(want - Math.atan2(-0.11, 0.07))).toBeLessThan(1e-6);
+        expect((Math.abs(want) * 180) / Math.PI).toBeGreaterThan(45); // far from "away" (east, 0)
+        expect(s.events.some((e) => e.text.includes('north-east'))).toBe(true);
+        for (let k = 0; k < 100; k++) s.step(cmd(from.k++));
+        const t = YARD_FORESTRY.trees[0];
+        const p = s.forestry.logOf(0)!.pose.p;
+        const got = Math.atan2(p.z - t.z, p.x - t.x);
+        expect((Math.abs(Math.atan2(Math.sin(got - want), Math.cos(got - want))) * 180) / Math.PI).toBeLessThan(15);
+        // chewed from the north (pushing it south), it still falls north: its weight wins
+        const s2 = yard();
+        const f2 = { k: 100 };
+        standBy(s2, 0, -Math.PI / 2 + 0.7, 1.0);
+        cutDown(s2, 0, f2);
+        expect(s2.forestry.fallDirection(0).z).toBeLessThan(0);
+        // an upright tree (1) falls exactly away from the cut
+        const s3 = yard();
+        standBy(s3, 1, 0);
+        cutDown(s3, 1, { k: 100 });
+        expect(s3.forestry.fallDirection(1).x).toBeCloseTo(-1, 6);
+    });
 
     it('the same cuts give the same fall (deterministic)', () => {
         const run = () => {
@@ -293,6 +325,43 @@ describe('the sawmill', () => {
         for (let n = 0; n < WOOD.respawnTicks; n++) s.step(cmd(k++));
         expect(s.physics.bodies.get(log.id)!.enabled).toBe(true);
         expect(log.visible).toBe(true);
+    });
+
+    it('its lever switches it to beams: a whole log makes one 3.2 m beam, a short log still a plank', () => {
+        const s = yard();
+        const L = SAWMILL.lever;
+        const lever = sawmillToWorld(SPOT, L.x, L.y + 0.12, L.z);
+        // stand in front of the near post and grab the lever
+        s.placePlayer(lever.x + 0.2, lever.z - 1.2, 0);
+        let k = 100;
+        for (let n = 0; n < 20; n++) s.step(cmd(k++));
+        const look = lookAt(s, 0, lever.x, lever.y, lever.z);
+        s.step(cmd(k++, look));
+        expect(s.interaction(0).target).toBe('sawmill');
+        s.step(cmd(k++, { ...look, grab: true }));
+        expect(s.sawmill!.mode).toBe('beam');
+        expect(s.physics.heldId).toBe(-1);
+        expect(s.sawmill!.entity.anim[SAW_MODE]).toBe(1);
+        // a log in the guide: one beam
+        s.placePlayer(SPOT.x, SPOT.z + 3, 0);
+        s.physics.place(s.log.id, inGuide());
+        for (let n = 0; n < SAW.settleTicks + SAW.cutTicks + 60; n++) s.step(cmd(k++));
+        const beams = s.entities.filter((e) => e.name.startsWith('beam-') && e.visible && e.id >= 396);
+        expect(beams.map((b) => b.name)).toEqual(['beam-12']);
+        expect(s.sawmill!.stats.planks).toBe(1);
+        const b = beams[0].pose.p;
+        expect(Math.abs(b.y - (YARD_Y + 0.1 + 0.075))).toBeLessThan(0.05);
+        // a short log: still a plank (too short for a beam)
+        const short = byName(s, 'short-log-0');
+        s.physics.setEnabled(short.id, true);
+        s.physics.place(short.id, inGuide());
+        for (let n = 0; n < SAW.settleTicks + SAW.cutTicks + 60; n++) s.step(cmd(k++));
+        expect(s.entities.filter((e) => e.name.startsWith('extra-plank-') && e.visible && e.id >= 380).length).toBe(1);
+        // and back to planks
+        s.placePlayer(lever.x + 0.2, lever.z - 1.2, 0);
+        for (let n = 0; n < 20; n++) s.step(cmd(k++));
+        s.step(cmd(k++, { ...lookAt(s, 0, lever.x, lever.y, lever.z), grab: true }));
+        expect(s.sawmill!.mode).toBe('planks');
     });
 
     it('a second log waits in the guide until the first is sawn', () => {
@@ -425,8 +494,8 @@ describe('the gate: a tree becomes planks in a bridge', () => {
         }
         expect(s.physics.holders(log.id)).toBe(2);
         expect(x0 - log.pose.p.x).toBeGreaterThan(2.4);
-        // carried, not dragged: off the ground all the way (low: 113 kg is near two beavers' limit)
-        expect(minY).toBeGreaterThan(y0 + 0.05);
+        // carried at a sensible height all the way: measured 0.41 m above where it lay
+        expect(minY).toBeGreaterThan(y0 + 0.3);
         both({ grab: true }, { grab: true });
         expect(s.physics.holders(log.id)).toBe(0);
         // the rest of the way to the mill is more of the same: lay it in the infeed guide

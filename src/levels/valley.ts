@@ -938,7 +938,15 @@ const VALLEY_FORESTRY: ForestryDef = (() => {
     const saw = y.sawmill!;
     const w = yardToWorld(saw.x, saw.z);
     return {
-        trees: y.trees.map((t) => ({ ...yardToWorld(t.x, t.z), yaw: t.yaw + ROUTE_YAW })),
+        // positions and leans turned with the yard
+        trees: y.trees.map((t) => ({
+            ...yardToWorld(t.x, t.z),
+            yaw: t.yaw + ROUTE_YAW,
+            lean: t.lean && {
+                x: t.lean.x * Math.cos(ROUTE_YAW) + t.lean.z * Math.sin(ROUTE_YAW),
+                z: -t.lean.x * Math.sin(ROUTE_YAW) + t.lean.z * Math.cos(ROUTE_YAW)
+            }
+        })),
         sawmill: { x: w.x, z: w.z, yaw: saw.yaw + ROUTE_YAW, y: saw.y },
         axe: y.axe ? fromYard(y.axe) : null,
         ground: surfaceY

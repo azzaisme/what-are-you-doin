@@ -27,7 +27,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 
 import { LOG_CENTRE_HEIGHT, TREE_CUT, TREE_DOWN, TREE_STANDING, TREE_STATE } from '../assets/forestry.ts';
 import { LOG_RADIUS } from '../assets/props.ts';
-import { CROWN_TRUNK_TOP, LOG_LENGTH, STUMP_HEIGHT } from '../levels/forestry.ts';
+import { CROWN_TRUNK_TOP, LOG_LENGTH, STUMP_HEIGHT, standPose, standTilt } from '../levels/forestry.ts';
 import type { ForestryDef } from '../levels/forestry.ts';
 import type { LevelDef } from '../levels/level.ts';
 import { pose, quatFromAxisAngle, quatFromYawPitchRoll, quatMul, quatRotate } from '../voxels/math.ts';
@@ -145,7 +145,7 @@ export class Forestry {
     /** Pool entities with physics bodies (the sim reads their poses like any prop). */
     get props(): SimEntity[] {
         const e = this.ents;
-        return [...e.felled, ...e.short, ...e.sawn, e.axe];
+        return [...e.felled, ...e.short, ...e.sawn, ...e.beams, e.axe];
     }
 
     get treeCount(): number {
@@ -182,7 +182,7 @@ export class Forestry {
         if (!def) return;
         const park = pose(0, -50, 0);
         // pool bodies exist from the start, disabled: enabling one never reorders the world
-        for (const ent of [...e.felled, ...e.short, ...e.sawn]) {
+        for (const ent of [...e.felled, ...e.short, ...e.sawn, ...e.beams]) {
             const b = propBody(ent.name)!;
             pw.addDynamic(ent.id, b.shape, park, b.opts);
             pw.setEnabled(ent.id, false);
@@ -235,10 +235,13 @@ export class Forestry {
             return;
         }
         const half = CROWN_TRUNK_TOP / 2;
+        // leaning with the tree
+        const at = standPose(t, g, half - 0.05);
         st.colliders.push(
             pw.addStatic(
                 RAPIER.ColliderDesc.cylinder(half, LOG_RADIUS + 0.02)
-                    .setTranslation(t.x, g + half - 0.05, t.z)
+                    .setTranslation(at.p.x, at.p.y, at.p.z)
+                    .setRotation(standTilt(t))
                     .setFriction(0.8)
             )
         );
@@ -261,19 +264,28 @@ export class Forestry {
         for (let n = 0; n < this.treeCount; n++) {
             if (this.trees[n].phase !== 'standing') continue;
             const t = this.def.trees[n];
-            // ray against the circle in the ground plane
-            const ox = eye.x - t.x;
-            const oz = eye.z - t.z;
-            const a = d.x * d.x + d.z * d.z;
-            if (a < 1e-9) continue;
-            const b = ox * d.x + oz * d.z;
-            const c = ox * ox + oz * oz - r * r;
-            const disc = b * b - a * c;
-            if (disc < 0) continue;
-            const tt = c < 0 ? 0 : (-b - Math.sqrt(disc)) / a;
-            if (tt < 0 || tt > bestT) continue;
-            const y = eye.y + d.y * tt;
             const g = this.ground(n);
+            // ray against the trunk's circle in the ground plane, at the height the ray meets it
+            // (a leaning trunk's centre moves with height: two passes find it)
+            let tt = -1;
+            let y = eye.y;
+            for (let pass = 0; pass < 2; pass++) {
+                const h = Math.max(0, y - g);
+                const ox = eye.x - (t.x + (t.lean?.x ?? 0) * h);
+                const oz = eye.z - (t.z + (t.lean?.z ?? 0) * h);
+                const a = d.x * d.x + d.z * d.z;
+                if (a < 1e-9) break;
+                const b = ox * d.x + oz * d.z;
+                const c = ox * ox + oz * oz - r * r;
+                const disc = b * b - a * c;
+                if (disc < 0) {
+                    tt = -1;
+                    break;
+                }
+                tt = c < 0 ? 0 : (-b - Math.sqrt(disc)) / a;
+                y = eye.y + d.y * tt;
+            }
+            if (tt < 0 || tt > bestT) continue;
             if (y < g - 0.1 || y > g + LOG_CENTRE_HEIGHT + LOG_LENGTH / 2) continue;
             best = n;
             bestT = tt;
@@ -382,21 +394,39 @@ export class Forestry {
         st.cut = Math.min(1, Math.round((st.cut + amount) * 1e6) / 1e6);
         if (st.cut >= WOOD.warnAt && !st.warned && st.cut < 1) {
             st.warned = true;
-            this.say('The pine creaks and leans. It will fall away from the side you cut: stand clear!');
+            this.say(`The pine creaks. It will fall ${compass(this.fallDirection(n))}: stand clear!`);
         }
         if (st.cut >= 1) this.fell(n);
     }
 
-    /** The direction (unit, horizontal) a tree will fall: away from the side it was cut from. */
-    fallDirection(n: number): { x: number; z: number } {
+    /**
+     * How a tree starts to fall, as a horizontal tilt vector (its length the tilt in rad): the cut
+     * pushes it WOOD.tilt0 away from the side it was cut from, and its weight adds its lean. A tree
+     * leaning hard enough falls its own way whatever side it is cut from.
+     */
+    fallTilt(n: number): { x: number; z: number } {
         const st = this.trees[n];
+        const t = this.def!.trees[n];
         const len = Math.hypot(st.dirX, st.dirZ);
+        let ax = len < 1e-3 ? 0 : -st.dirX / len;
+        let az = len < 1e-3 ? 0 : -st.dirZ / len;
+        const x = (t.lean?.x ?? 0) + ax * WOOD.tilt0;
+        const z = (t.lean?.z ?? 0) + az * WOOD.tilt0;
+        if (Math.hypot(x, z) > WOOD.tilt0 * 0.25) return { x, z };
+        // balanced (cut evenly all round, or the push cancels the lean): the cut decides, else
+        // its crown's yaw does
         if (len < 1e-3) {
-            // cut evenly from every side: it goes the way its crown leans (its yaw)
-            const yaw = this.def!.trees[n].yaw;
-            return { x: Math.sin(yaw), z: Math.cos(yaw) };
+            ax = Math.sin(t.yaw);
+            az = Math.cos(t.yaw);
         }
-        return { x: -st.dirX / len, z: -st.dirZ / len };
+        return { x: ax * WOOD.tilt0, z: az * WOOD.tilt0 };
+    }
+
+    /** The direction (unit, horizontal) a tree will fall: its cut and its weight (fallTilt). */
+    fallDirection(n: number): { x: number; z: number } {
+        const v = this.fallTilt(n);
+        const len = Math.hypot(v.x, v.z);
+        return { x: v.x / len, z: v.z / len };
     }
 
     private fell(n: number): void {
@@ -412,11 +442,13 @@ export class Forestry {
         }
         const pw = this.pw;
         const t = this.def!.trees[n];
+        const tv = this.fallTilt(n);
         const d = this.fallDirection(n);
         const g = this.ground(n);
-        // the trunk becomes the log, once: upright where it stood (log axis +x up), tipped away
+        // the trunk becomes the log, once: where it stood (log axis +x up), at its lean plus the
+        // cut's push, turning the way it falls
         const axis = { x: d.z, y: 0, z: -d.x }; // up x d: rotating about it tips the top towards d
-        const tilt = quatFromAxisAngle(axis.x, axis.y, axis.z, WOOD.tilt0);
+        const tilt = quatFromAxisAngle(axis.x, axis.y, axis.z, Math.hypot(tv.x, tv.z));
         const upright = quatFromAxisAngle(0, 0, 1, Math.PI / 2);
         const q = quatMul(tilt, upright);
         const pivotY = g + STUMP_HEIGHT + 0.02;
@@ -481,10 +513,11 @@ export class Forestry {
 
     // ------------------------------------------------------------------------------- pools
 
-    /** Free pooled pieces of a kind. */
-    freeSawn(): number {
+    /** Free sawn pieces of a kind (planks or beams) in their pool. */
+    freeSawn(kind: 'plank' | 'beam' = 'plank'): number {
         let n = 0;
-        for (const e of this.ents.sawn) if (!this.pw.bodies.get(e.id)!.enabled) n++;
+        for (const e of kind === 'beam' ? this.ents.beams : this.ents.sawn)
+            if (!this.pw.bodies.get(e.id)!.enabled) n++;
         return n;
     }
 
@@ -516,10 +549,10 @@ export class Forestry {
         if (this.levelLogs.some((e) => e.id === id)) this.respawnAt.set(id, this.tick + WOOD.respawnTicks);
     }
 
-    /** A free sawn plank, placed and enabled; returns its entity or null. */
-    spawnPlank(at: Pose): SimEntity | null {
+    /** A free sawn plank (or beam), placed and enabled; returns its entity or null. */
+    spawnPlank(at: Pose, kind: 'plank' | 'beam' = 'plank'): SimEntity | null {
         const pw = this.pw;
-        const e = this.ents.sawn.find((x) => !pw.bodies.get(x.id)!.enabled);
+        const e = (kind === 'beam' ? this.ents.beams : this.ents.sawn).find((x) => !pw.bodies.get(x.id)!.enabled);
         if (!e) return null;
         const pb = pw.bodies.get(e.id)!;
         setPose(pb.spawn, at.p.x, at.p.y + 0.05, at.p.z, at.q);
@@ -534,7 +567,7 @@ export class Forestry {
     /** Every pooled piece back in its pool, trees and the axe as they were (Reset props). */
     resetProps(): void {
         const pw = this.pw;
-        for (const e of [...this.ents.felled, ...this.ents.short, ...this.ents.sawn]) this.take(e.id);
+        for (const e of [...this.ents.felled, ...this.ents.short, ...this.ents.sawn, ...this.ents.beams]) this.take(e.id);
         for (const e of this.levelLogs) {
             this.respawnAt.delete(e.id);
             if (pw.bodies.has(e.id)) pw.setEnabled(e.id, true);
@@ -594,7 +627,7 @@ export class Forestry {
         // pooled pieces lost in the creek go back to their pools; the axe and level logs come home
         const lostY = this.level.rules?.lostY;
         if (lostY !== undefined) {
-            for (const ent of [...e.felled, ...e.short, ...e.sawn, e.axe, ...this.levelLogs]) {
+            for (const ent of [...e.felled, ...e.short, ...e.sawn, ...e.beams, e.axe, ...this.levelLogs]) {
                 const b = pw.bodies.get(ent.id);
                 if (!b || !b.enabled) continue;
                 const lost = ent.pose.p.y < lostY && pw.holders(ent.id) === 0;

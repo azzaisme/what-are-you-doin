@@ -552,7 +552,8 @@ export class LabSim {
                 else pw.release(i);
             } else if (pw.tryGrab(eye, cmd.yaw, cmd.pitch, i)) {
                 // grabbed
-            } else if (this.forestry.strike(i, eye, p, cmd.yaw, cmd.pitch, -1)) ev.missed = true;
+            } else if (this.sawmill?.pressLever(eye, cmd.yaw, cmd.pitch)) ev.grabbed = true;
+            else if (this.forestry.strike(i, eye, p, cmd.yaw, cmd.pitch, -1)) ev.missed = true;
             else if (!this.enterUte(i, eye, cmd)) ev.missed = true;
         }
         pw.applyGrab(eye, cmd.yaw, cmd.pitch, i);
@@ -1368,6 +1369,8 @@ export class LabSim {
         let target = held >= 0 ? -1 : pw.probe(eye, p.yaw, p.pitch, i);
         // what a grab would cut (a stand tree with empty hands; a tree or a log with the axe)
         if (target < 0) target = this.forestry.aim(eye, p.yaw, p.pitch, i, held);
+        // the sawmill's mode lever (with empty hands)
+        if (target < 0 && held < 0 && this.sawmill?.aimLever(eye, p.yaw, p.pitch)) target = this.sawmill.entity.id;
         if (
             held < 0 &&
             target < 0 &&

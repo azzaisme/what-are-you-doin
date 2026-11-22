@@ -12,7 +12,7 @@ import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs';
 import { BEAVER_ARM_REACH, BEAVER_LEAN, BEAVER_WALK_AMOUNT, BEAVER_WALK_PHASE } from './assets/beaver.ts';
 import { CELL_TIERS, assetTier, tierCellCm } from './assets/cell-tier.ts';
 import type { CellTier } from './assets/cell-tier.ts';
-import { TREE_CUT } from './assets/forestry.ts';
+import { SAW_MODE, TREE_CUT } from './assets/forestry.ts';
 import { DebugPanel } from './debug/panel.ts';
 import type { PanelHost } from './debug/panel.ts';
 import { DESIGN_KEY, Designer, loadDraft } from './editor/designer.ts';
@@ -1210,7 +1210,7 @@ function interactionText(i: number, pad: boolean): string {
             : 'Driving · W/S throttle · A/D steer · Space brake · Q recover · click or E to get out';
     if (it.seat >= 0) return pad ? 'Riding along · RT get out' : 'Riding along · click or E to get out';
     if (it.target === 'ute') return pad ? 'RT to drive the ute' : 'Click to drive the ute';
-    const wood = woodPrompt(it, pad ? 'pad' : 'mouse', treeCut);
+    const wood = woodPrompt(it, pad ? 'pad' : 'mouse', treeCut, sawBeams());
     if (wood) return wood;
     if (it.holding)
         return pad
@@ -1227,6 +1227,13 @@ function treeCut(marker: string): number {
     const e = sim.entities.find((x) => x.name === marker);
     if (!e || !sim.ring.sample(e.slot, sim.ring.newestTick * SIM_DT, cutPose, cutAnim)) return 0;
     return cutAnim[TREE_CUT];
+}
+
+/** Whether the sawmill is set to beams, from the newest snapshot. */
+function sawBeams(): boolean {
+    const e = sim.forestry.ents.sawmill;
+    if (!sim.ring.sample(e.slot, sim.ring.newestTick * SIM_DT, cutPose, cutAnim)) return false;
+    return cutAnim[SAW_MODE] > 0.5;
 }
 
 /** A guest's prompt comes from the host (guests run no physics). */
@@ -1278,8 +1285,8 @@ function updatePrompt(): void {
             touch.setHolding(!!it.holding);
             t = it.driving
                 ? 'Driving · stick to drive · jump to brake · drop to recover · grab to get out'
-                : woodPrompt(it, 'touch', treeCut)
-                  ? woodPrompt(it, 'touch', treeCut)!
+                : woodPrompt(it, 'touch', treeCut, sawBeams())
+                  ? woodPrompt(it, 'touch', treeCut, sawBeams())!
                   : it.seat >= 0
                     ? 'Riding along · grab to get out'
                     : it.holding

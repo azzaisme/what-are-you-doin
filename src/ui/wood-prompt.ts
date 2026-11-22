@@ -12,6 +12,7 @@ export function woodLabel(name: string): string | null {
     if (name.startsWith('felled-log')) return 'log (heavy)';
     if (name.startsWith('short-log')) return 'short log';
     if (/^tree-\d+$/.test(name)) return 'pine';
+    if (name === 'sawmill') return 'sawmill lever';
     return null;
 }
 
@@ -24,11 +25,16 @@ const isLog = (name: string) => name === 'log' || name.startsWith('extra-log') |
 export function woodPrompt(
     it: { holding: string | null; target: string | null },
     input: PromptInput,
-    cut: (marker: string) => number
+    cut: (marker: string) => number,
+    sawBeams = false
 ): string | null {
     const t = it.target;
     if (!t) return null;
     const press = input === 'mouse' ? 'Click' : input === 'pad' ? 'RT' : 'Grab';
+    if (t === 'sawmill' && !it.holding)
+        return sawBeams
+            ? `Saw set to beams (one per log) · ${press} to set it to planks`
+            : `Saw set to planks (three per log) · ${press} to set it to beams`;
     const drop = input === 'mouse' ? 'Q' : input === 'pad' ? 'B' : 'drop';
     const tree = /^tree-\d+$/.test(t);
     const pct = tree ? Math.round(cut(t) * 100) : 0;

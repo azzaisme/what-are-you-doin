@@ -21,7 +21,7 @@ import {
     STUMP_HEIGHT,
     needleCone
 } from '../levels/forestry.ts';
-import { aabb, composePose, pose, quatFromAxisAngle, quatMul } from '../voxels/math.ts';
+import { aabb, composePose, pose, quatFromAxisAngle, quatMul, quatRotate } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
 import { M, voxel } from '../voxels/palette.ts';
 import { box, cylinder, implicit, latticeShade, solid } from '../voxels/volumes.ts';
@@ -135,10 +135,13 @@ export function crownAsset(): VoxelAsset {
 
 // ------------------------------------------------------------------------------- sawmill
 
-/** Sawmill channels: blade angle (rad), cut progress (0-1), state (SAW_*). */
+/** Sawmill channels: blade angle (rad), cut progress (0-1), state (SAW_*), mode (SAW_PLANKS/SAW_BEAM). */
 export const SAW_SPIN = 0;
 export const SAW_PROGRESS = 1;
 export const SAW_STATE = 2;
+export const SAW_MODE = 3;
+export const SAW_PLANKS = 0;
+export const SAW_BEAM = 1;
 export const SAW_READY = 0;
 export const SAW_CUTTING = 1;
 export const SAW_STOPPED = 2;
@@ -150,7 +153,12 @@ const SAW_BAR = 5;
  * (a disc across the feed line, axis z, with dark teeth so its turning shows), a lamp on the motor
  * (green ready, orange sawing, red stopped) and a progress bar along the beam.
  */
-export function sawmillAsset(bladeY: number, bladeR: number, top: number): VoxelAsset {
+export function sawmillAsset(
+    bladeY: number,
+    bladeR: number,
+    top: number,
+    lever: { x: number; y: number; z: number }
+): VoxelAsset {
     const parts: AssetPart[] = [];
     const offsets: Pose[] = [];
     // blade: built in the x-y plane (a z cylinder), teeth every 45 degrees
@@ -185,13 +193,31 @@ export function sawmillAsset(bladeY: number, bladeR: number, top: number): Voxel
         });
         offsets.push(pose(0.47, top - 0.1, -0.4 + (n * 0.8) / (SAW_BAR - 1)));
     }
+    // the mode lever on the near post: thrown towards the infeed for planks, the outfeed for a beam
+    const LEVER_HALF = 0.17;
+    for (const [name, angle] of [
+        ['lever-planks', -0.6],
+        ['lever-beam', 0.6]
+    ] as const) {
+        parts.push({
+            name,
+            volume: box(0.025, LEVER_HALF, 0.025, (_x, y) => voxel(y > LEVER_HALF - 0.06 ? M.HiVis : M.UteTrim, 0)),
+            priority: 5,
+            refColor: 0xf26a1b
+        });
+        const q = quatFromAxisAngle(0, 0, 1, angle);
+        const v = { x: 0, y: 0, z: 0 };
+        quatRotate(q, 0, LEVER_HALF, 0, v);
+        offsets.push(pose(lever.x + v.x, lever.y + v.y, lever.z + v.z, q));
+    }
+    const LEVER0 = parts.length - 2;
     const spin = { x: 0, y: 0, z: 0, w: 1 };
     const tmp = pose();
     return {
         schema: ASSET_SCHEMA_VERSION,
         name: 'sawmill',
         parts,
-        animChannels: 3,
+        animChannels: 4,
         cellTier: 'base',
         evaluate(root: Pose, anim: ArrayLike<number>, out: Pose[]) {
             // the blade turns about its own axis (z)
@@ -205,6 +231,7 @@ export function sawmillAsset(bladeY: number, bladeR: number, top: number): Voxel
         },
         partHidden(anim: ArrayLike<number>, part: number) {
             if (part === 0) return false;
+            if (part >= LEVER0) return part - LEVER0 !== (anim[SAW_MODE] > 0.5 ? SAW_BEAM : SAW_PLANKS);
             const state = Math.round(anim[SAW_STATE]);
             if (part <= 3) return part - 1 !== state;
             const seg = part - 4;

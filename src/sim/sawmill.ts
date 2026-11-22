@@ -16,7 +16,18 @@
 
 import RAPIER from '@dimforge/rapier3d-compat';
 
-import { SAW_CUTTING, SAW_PROGRESS, SAW_READY, SAW_SPIN, SAW_STATE, SAW_STOPPED } from '../assets/forestry.ts';
+import {
+    SAW_BEAM,
+    SAW_CUTTING,
+    SAW_MODE,
+    SAW_PLANKS,
+    SAW_PROGRESS,
+    SAW_READY,
+    SAW_SPIN,
+    SAW_STATE,
+    SAW_STOPPED
+} from '../assets/forestry.ts';
+import { BEAM_HALF } from '../assets/props.ts';
 import { SAWMILL, sawmillToWorld, worldToSawmill } from '../levels/forestry.ts';
 import type { SawmillSpot } from '../levels/forestry.ts';
 import { pose, quatFromYawPitchRoll, quatMul, quatRotate, quatSlerp } from '../voxels/math.ts';
@@ -24,6 +35,7 @@ import type { Pose } from '../voxels/math.ts';
 
 import type { Forestry, WoodKind } from './forestry.ts';
 import type { SimEntity } from './lab-entities.ts';
+import { GRAB, viewDir } from './physics/grab.ts';
 import { LAYER, groups } from './physics/world.ts';
 import type { PhysicsWorld } from './physics/world.ts';
 
@@ -45,6 +57,8 @@ export const PLANKS_PER_LOG = 3;
 const YIELD: Record<WoodKind, number> = { log: PLANKS_PER_LOG, short: 1 };
 
 export type SawPhase = 'ready' | 'cutting' | 'output';
+/** What the sawmill makes from a whole log: three planks, or one beam (set with its lever). */
+export type SawMode = 'planks' | 'beam';
 
 export class Sawmill {
     readonly spot: SawmillSpot;
@@ -52,6 +66,9 @@ export class Sawmill {
     private readonly wood: Forestry;
     private pw!: PhysicsWorld;
     phase: SawPhase = 'ready';
+    mode: SawMode = 'planks';
+    /** What the piece being sawn comes out as. */
+    private out: 'plank' | 'beam' = 'plank';
     /** The piece being sawn (entity), its kind, and where it lay when taken. */
     private piece: SimEntity | null = null;
     private kind: WoodKind = 'log';
@@ -77,6 +94,8 @@ export class Sawmill {
     build(pw: PhysicsWorld): void {
         this.pw = pw;
         this.phase = 'ready';
+        this.mode = 'planks';
+        this.out = 'plank';
         this.piece = null;
         this.progress = 0;
         this.pending = 0;
@@ -130,10 +149,13 @@ export class Sawmill {
         }
         if (++this.settled < SAW.settleTicks) return;
         const kind = this.wood.woodKind(found)!;
-        if (this.wood.freeSawn() < YIELD[kind]) {
+        // a beam takes a whole log; a short log only ever makes a plank
+        const out = this.mode === 'beam' && kind === 'log' ? 'beam' : 'plank';
+        const count = out === 'beam' ? 1 : YIELD[kind];
+        if (this.wood.freeSawn(out) < count) {
             if (!this.toldFull) {
                 this.toldFull = true;
-                this.wood.say('The sawmill waits: too many sawn planks lying about. Use some first.');
+                this.wood.say(`The sawmill waits: too many sawn ${out}s lying about. Use some first.`);
             }
             return;
         }
@@ -142,6 +164,7 @@ export class Sawmill {
         const e = this.wood.sawable.find((x) => x.id === found)!;
         this.piece = e;
         this.kind = kind;
+        this.out = out;
         this.from.p.x = e.pose.p.x;
         this.from.p.y = e.pose.p.y;
         this.from.p.z = e.pose.p.z;
@@ -183,7 +206,7 @@ export class Sawmill {
         this.wood.take(id);
         this.piece!.visible = false;
         this.piece = null;
-        this.pending = YIELD[this.kind];
+        this.pending = this.out === 'beam' ? 1 : YIELD[this.kind];
         this.phase = 'output';
     }
 
@@ -193,7 +216,7 @@ export class Sawmill {
      */
     private output(): void {
         if (this.pending > 0) {
-            const at = this.freeSpot();
+            const at = this.freeSpot(this.out);
             if (!at) {
                 if (this.stopped !== 'outfeed') {
                     this.stopped = 'outfeed';
@@ -202,7 +225,7 @@ export class Sawmill {
                 }
                 return;
             }
-            if (!this.wood.spawnPlank(at)) return;
+            if (!this.wood.spawnPlank(at, this.out)) return;
             this.pending--;
             this.stats.planks++;
             this.stopped = '';
@@ -211,26 +234,35 @@ export class Sawmill {
         this.stopped = '';
         this.phase = 'ready';
         this.progress = 0;
-        this.wood.say('Fresh planks on the rack.');
+        this.wood.say(this.out === 'beam' ? 'A fresh beam on the rack.' : 'Fresh planks on the rack.');
     }
 
-    /** The first clear plank place on the rack (three lanes, two layers), or null. */
-    private freeSpot(): Pose | null {
+    /** The first clear place on the rack for a plank or a beam (three lanes, two layers), or null. */
+    private freeSpot(out: 'plank' | 'beam'): Pose | null {
         const O = SAWMILL.outfeed;
         const flat = quatMul(quatFromYawPitchRoll(this.spot.yaw, 0, 0), quatFromYawPitchRoll(0, Math.PI / 2, 0));
+        // half thickness lying flat (plank 0.1 m, beam 0.15 m)
+        const half = out === 'beam' ? BEAM_HALF.z : 0.05;
         for (let layer = 0; layer < 2; layer++)
             for (const z of O.laneZ) {
-                const w = sawmillToWorld(this.spot, O.x, O.barTop + 0.05 + 0.003 + layer * 0.105, z);
-                if (this.clear(w, flat)) return pose(w.x, w.y, w.z, flat);
+                const w = sawmillToWorld(this.spot, O.x, O.barTop + half + 0.003 + layer * (2 * half + 0.005), z);
+                if (this.clear(w, flat, out)) return pose(w.x, w.y, w.z, flat);
             }
         return null;
     }
 
-    /** True when a plank at this pose would touch no body or player (static geometry aside). */
-    private clear(p: { x: number; y: number; z: number }, q: { x: number; y: number; z: number; w: number }): boolean {
+    /** True when a plank (or beam) at this pose would touch no body or player (static geometry aside). */
+    private clear(
+        p: { x: number; y: number; z: number },
+        q: { x: number; y: number; z: number; w: number },
+        out: 'plank' | 'beam'
+    ): boolean {
         let hit = false;
-        // a little larger than a plank, so new planks never start pressed into anything
-        const shape = new RAPIER.Cuboid(1.24, 0.12, 0.045);
+        // a little longer and wider than the piece, so new pieces never start pressed into anything
+        const shape =
+            out === 'beam'
+                ? new RAPIER.Cuboid(BEAM_HALF.x + 0.04, BEAM_HALF.y + 0.02, BEAM_HALF.z - 0.005)
+                : new RAPIER.Cuboid(1.24, 0.12, 0.045);
         this.pw.world.intersectionsWithShape(
             p,
             q,
@@ -291,6 +323,36 @@ export class Sawmill {
         e.anim[SAW_SPIN] = this.spin;
         e.anim[SAW_PROGRESS] = this.phase === 'cutting' ? this.progress : this.phase === 'output' ? 1 : 0;
         e.anim[SAW_STATE] = this.stopped ? SAW_STOPPED : this.phase === 'ready' ? SAW_READY : SAW_CUTTING;
+        e.anim[SAW_MODE] = this.mode === 'beam' ? SAW_BEAM : SAW_PLANKS;
+    }
+
+    /** True when the view ray from the eye meets the mode lever within reach. */
+    aimLever(eye: { x: number; y: number; z: number }, yaw: number, pitch: number): boolean {
+        const L = SAWMILL.lever;
+        const c = sawmillToWorld(this.spot, L.x, L.y + 0.12, L.z);
+        const d = viewDir(yaw, pitch, _v);
+        const ox = c.x - eye.x;
+        const oy = c.y - eye.y;
+        const oz = c.z - eye.z;
+        const t = ox * d.x + oy * d.y + oz * d.z;
+        if (t < 0 || t > GRAB.reach) return false;
+        const px = ox - d.x * t;
+        const py = oy - d.y * t;
+        const pz = oz - d.z * t;
+        return px * px + py * py + pz * pz < 0.22 * 0.22;
+    }
+
+    /** A grab at the lever: switches between planks and a beam (the piece being sawn keeps its own). */
+    pressLever(eye: { x: number; y: number; z: number }, yaw: number, pitch: number): boolean {
+        if (!this.aimLever(eye, yaw, pitch)) return false;
+        this.mode = this.mode === 'planks' ? 'beam' : 'planks';
+        this.wood.say(
+            this.mode === 'beam'
+                ? 'The sawmill is set to beams: one 3.2 m beam from each whole log.'
+                : 'The sawmill is set to planks: three planks from each log.'
+        );
+        this.publish();
+        return true;
     }
 
     /** True while the blade turns (sawdust). */
