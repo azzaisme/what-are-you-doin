@@ -452,6 +452,14 @@ body.ui-hidden .inspector-hint {
     font-weight: 600;
 }
 
+/* the world fighting back (Epic 8): a warning, never colour alone (the text says what to do) */
+.toast-hazard {
+    background: #5a1f12eb;
+    border: 2px solid #f26a1b;
+    font-size: 17px;
+    font-weight: 600;
+}
+
 .toast-warn {
     background: #5a3d12e6;
 }
@@ -1436,4 +1444,100 @@ body.has-pad .settings-foot .foot-pad {
         font-size: 11px;
         letter-spacing: 0.03em;
     }
+}
+
+/* ---- the playtest log viewer (Settings → Game → Playtest log) ---------------------------------- */
+.playtest-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 110;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: #05080bb0;
+    zoom: var(--ui-scale);
+}
+
+.playtest-backdrop[hidden] {
+    display: none;
+}
+
+.playtest {
+    width: min(760px, 100%);
+    gap: 10px;
+    padding: 4px 6px 8px;
+}
+
+.playtest-hint {
+    margin: 0;
+    font-size: 14px;
+    opacity: 0.85;
+}
+
+.playtest-note {
+    display: flex;
+    gap: 8px;
+}
+
+.playtest-note input {
+    flex: 1;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 10px;
+    font: inherit;
+    border-radius: 6px;
+    border: 1px solid #ffffff40;
+    background: #0e1418cc;
+    color: inherit;
+}
+
+.playtest textarea {
+    flex: 1;
+    min-height: 220px;
+    width: 100%;
+    box-sizing: border-box;
+    resize: none;
+    padding: 8px;
+    font:
+        12px/1.4 ui-monospace,
+        Menlo,
+        Consolas,
+        monospace;
+    white-space: pre;
+    border-radius: 6px;
+    border: 1px solid #ffffff30;
+    background: #0a0f12e6;
+    color: #e8e4d8;
+}
+
+.playtest-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.playtest button {
+    min-height: 44px;
+    padding: 0 14px;
+    font: inherit;
+    border-radius: 6px;
+    border: 1px solid #ffffff40;
+    background: #2a3b44;
+    color: inherit;
+    cursor: pointer;
+}
+
+.playtest .settings-close {
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+}
+
+.playtest button:focus-visible,
+.playtest input:focus-visible,
+.playtest textarea:focus-visible {
+    outline: 3px solid #f2c94c;
+    outline-offset: 2px;
 }

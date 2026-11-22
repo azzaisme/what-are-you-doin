@@ -95,6 +95,27 @@ describe('particles', () => {
         expect(fx.spawned.splash).toBeGreaterThanOrEqual(1);
     });
 
+    it('the gust’s warning: a stream of leaves blows past the player along the gust', () => {
+        const a = new LabSim({ level: timberYardLevel });
+        const fx = new ParticleFX(timberYardLevel, []);
+        const base = fx.update(30, a.ring, { x: 4, z: 3 });
+        fx.gust(30, 4, 1.5, 3, 0, -1);
+        expect(fx.spawned.gust).toBe(1);
+        // a second in: about forty more leaf cells, around the player, moving towards -z
+        const n1 = fx.update(31, a.ring, { x: 4, z: 3 });
+        expect(n1 - base).toBeGreaterThan(25);
+        const zs = (n: number, from: number) => {
+            const out: number[] = [];
+            for (let i = from; i < n; i++) out.push(fx.buffer[i * 4 + 2]);
+            return out.reduce((p, c) => p + c, 0) / Math.max(1, out.length);
+        };
+        const z1 = zs(n1, base);
+        const n2 = fx.update(31.5, a.ring, { x: 4, z: 3 });
+        expect(zs(n2, base)).toBeLessThan(z1 - 1);
+        // gone after a few seconds
+        expect(fx.update(34, a.ring, { x: 4, z: 3 })).toBeLessThan(base + 5);
+    });
+
     it('particle cells lie on the global grid, behind real objects', () => {
         const w = new VoxelWorld();
         w.addObject(990, 0);

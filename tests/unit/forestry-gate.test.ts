@@ -76,7 +76,9 @@ class Play {
     guestSim: LabSim | null = null;
 
     constructor(players: number) {
-        this.s = new LabSim({ level: timberYardLevel });
+        // the hazards are off: this gate checks logging and the sawmill. (With them on, the two beams
+        // laid across set off the flood while the planks are being decked, as the game intends.)
+        this.s = new LabSim({ level: timberYardLevel, hazards: false });
         this.s.step(neutralCommand(0));
         this.s.fpActive = true;
         if (players > 1) this.s.setPlayerCount(players);

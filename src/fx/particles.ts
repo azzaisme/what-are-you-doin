@@ -60,7 +60,7 @@ interface Crown {
     r: number;
 }
 
-type BurstKind = 'dust' | 'chips' | 'splash' | 'needles' | 'sawdust';
+type BurstKind = 'dust' | 'chips' | 'splash' | 'needles' | 'sawdust' | 'gust';
 
 interface Burst {
     t0: number;
@@ -70,6 +70,9 @@ interface Burst {
     kind: BurstKind;
     n: number;
     seed: number;
+    /** A gust's direction (unit, XZ). */
+    dx?: number;
+    dz?: number;
 }
 
 /** What the effects watch: entity slots with a rough "size" (for landing detection) and material. */
@@ -98,12 +101,16 @@ export class ParticleFX {
     private readonly p = pose();
     private readonly anim = new Float64Array(ANIM_MAX);
     /** Effects spawned (cumulative, for tests and the debug panel). */
-    readonly spawned = { dust: 0, chips: 0, splash: 0, needles: 0, sawdust: 0 };
+    readonly spawned = { dust: 0, chips: 0, splash: 0, needles: 0, sawdust: 0, gust: 0 };
     /** Logging effects (levels with a logging stand or a sawmill): chips, needles, sawdust. */
     wood: WoodFX | null = null;
 
+    /** The water surface now (it rises in a flood). */
+    waterY: number;
+
     constructor(level: LevelDef, watched: WatchedEntity[]) {
         this.level = level;
+        this.waterY = level.water.y;
         this.wind = level.wind ?? CALM;
         this.watched = watched;
         const trees: TreeSpot[] = level.layout(1).trees.filter((t) => t.kind === 'oak');
@@ -173,14 +180,15 @@ export class ParticleFX {
             let z = z0 + d.z * 0.8 + 0.18 * Math.cos(fallAge * 2.3 + fl);
             let y = y0 - vs * fallAge;
             const g = this.level.terrainHeight(cellCentre(x), cellCentre(z));
-            const inWater = g < water.y && Math.abs(x - water.cx) < water.halfX && Math.abs(z - water.cz) < water.halfZ;
+            const inWater =
+                g < this.waterY && Math.abs(x - water.cx) < water.halfX && Math.abs(z - water.cz) < water.halfZ;
             if (age >= landAge || y <= restY(g)) {
                 if (inWater) {
                     // float on the creek and keep drifting slowly downwind
                     const d2 = windTravel(tSpawn + landAge, t, this.wind, 0.5);
                     x += d2.x * 0.15;
                     z += d2.z * 0.15;
-                    y = water.y + 0.01;
+                    y = this.waterY + 0.01;
                 } else {
                     y = restY(g);
                 }
@@ -221,14 +229,14 @@ export class ParticleFX {
                     this.spawn(t, x, restY(g), z, w.timber ? 'chips' : 'dust', w.timber ? 14 : 10);
                 // dropped into the water
                 const inWaterArea =
-                    Math.abs(x - water.cx) < water.halfX && Math.abs(z - water.cz) < water.halfZ && g < water.y;
+                    Math.abs(x - water.cx) < water.halfX && Math.abs(z - water.cz) < water.halfZ && g < this.waterY;
                 if (
                     inWaterArea &&
-                    prev.y - (w.eyeHeight ? 0 : w.bottom) > water.y &&
-                    y - (w.eyeHeight ? 0 : w.bottom) <= water.y &&
+                    prev.y - (w.eyeHeight ? 0 : w.bottom) > this.waterY &&
+                    y - (w.eyeHeight ? 0 : w.bottom) <= this.waterY &&
                     prev.vy < -0.8
                 ) {
-                    this.spawn(t, x, water.y, z, 'splash', w.eyeHeight ? 26 : 18);
+                    this.spawn(t, x, this.waterY, z, 'splash', w.eyeHeight ? 26 : 18);
                 }
                 this.prev.set(w.slot, { y, vy, vx: 0, vz: 0, visible: true });
             } else {
@@ -237,9 +245,26 @@ export class ParticleFX {
         }
     }
 
-    private spawn(t0: number, x: number, y: number, z: number, kind: BurstKind, n: number): void {
+    /**
+     * The aimed gust's warning (Epic 8): a stream of leaves blowing past (x, z), along (dx, dz), from
+     * upwind of it. Every device starts it from the host's hazard state, so all see it.
+     */
+    gust(t0: number, x: number, y: number, z: number, dx: number, dz: number): void {
+        this.spawn(t0, x, y, z, 'gust', GUST_LEAVES, dx, dz);
+    }
+
+    private spawn(
+        t0: number,
+        x: number,
+        y: number,
+        z: number,
+        kind: BurstKind,
+        n: number,
+        dx?: number,
+        dz?: number
+    ): void {
         this.spawned[kind]++;
-        this.bursts.push({ t0, x, y, z, kind, n, seed: ++this.burstSeq });
+        this.bursts.push({ t0, x, y, z, kind, n, seed: ++this.burstSeq, dx, dz });
         if (this.bursts.length > 24) this.bursts.shift();
     }
 
@@ -256,9 +281,15 @@ export class ParticleFX {
                         ? 1.6
                         : b.kind === 'sawdust'
                           ? 0.6
-                          : 1.1;
+                          : b.kind === 'gust'
+                            ? 2.6
+                            : 1.1;
             if (age < 0 || age > life) continue;
             live.push(b);
+            if (b.kind === 'gust') {
+                this.drawGust(b, age);
+                continue;
+            }
             if (b.kind === 'needles' || b.kind === 'sawdust') {
                 this.drawWood(b, age);
                 continue;
@@ -282,6 +313,25 @@ export class ParticleFX {
         this.bursts = live;
     }
 
+    /** Leaves streaming with the gust: from 4 m upwind, through and past the target, fluttering. */
+    private drawGust(b: Burst, age: number): void {
+        const dx = b.dx ?? 1;
+        const dz = b.dz ?? 0;
+        for (let i = 0; i < b.n; i++) {
+            const start = u(b.seed, i, 4) * 0.8; // they come in over the first 0.8 s
+            const a = age - start;
+            if (a < 0) continue;
+            const speed = 4.5 + 3 * u(b.seed, i, 5);
+            const along = -4 + speed * a;
+            const side = (u(b.seed, i, 6) - 0.5) * 3 + 0.25 * Math.sin(a * 9 + i);
+            const x = b.x + dx * along - dz * side;
+            const z = b.z + dz * along + dx * side;
+            const y = b.y - 1.2 + 2.4 * u(b.seed, i, 7) + 0.3 * Math.sin(a * 6 + i * 1.7);
+            const mat = LEAF_MATS[Math.floor(u(b.seed, i, 8) * LEAF_MATS.length)];
+            this.push(x, y, z, voxel(mat, i & 3));
+        }
+    }
+
     /**
      * Needles: a cloud from a crown, drifting down slowly and spreading (about the crown's size).
      * Sawdust: a short low spray out of the blade.
@@ -303,3 +353,6 @@ export class ParticleFX {
         }
     }
 }
+
+/** Leaves in the gust's warning stream. */
+const GUST_LEAVES = 40;
