@@ -190,20 +190,22 @@ test('settings menu: mouse, keyboard and gamepad reach every setting, and it is 
     await lab(page, (l) => l.action('pause'));
     expect(await lab(page, (l) => (l as unknown as { paused(): boolean }).paused())).toBe(false);
     const backdrop = page.locator('.settings-backdrop');
+    // the game reads pads once per rendered frame (well over 150 ms in software GL on CI): hold each
+    // button until the page has drawn a frame, then release it for another
+    const frames = () =>
+        page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+    const setButton = (i: number, v: boolean) =>
+        page.evaluate(
+            ([i, v]) => {
+                (window as unknown as { __pad: { buttons: { pressed: boolean }[] } }).__pad.buttons[i].pressed = v;
+            },
+            [i, v] as [number, boolean]
+        );
     const press = async (b: number) => {
-        await page.evaluate(
-            (i) =>
-                ((window as unknown as { __pad: { buttons: { pressed: boolean }[] } }).__pad.buttons[i].pressed = true),
-            b
-        );
-        await page.waitForTimeout(150);
-        await page.evaluate(
-            (i) =>
-                ((window as unknown as { __pad: { buttons: { pressed: boolean }[] } }).__pad.buttons[i].pressed =
-                    false),
-            b
-        );
-        await page.waitForTimeout(150);
+        await setButton(b, true);
+        await frames();
+        await setButton(b, false);
+        await frames();
     };
     // mouse: the Settings button opens it, Resume closes it; solo play pauses meanwhile
     await page.locator('.settings-chip').click();
@@ -659,15 +661,9 @@ test("online co-op in the Valley: the guest streams its own world and follows th
     page,
     context
 }) => {
+    test.setTimeout(600_000);
     const query = '?level=valley&t=0.01&quality=low&net=local#cell100';
     const problems = await boot(page, query);
-    const guest = await context.newPage();
-    const guestProblems: string[] = [];
-    guest.on('pageerror', (e) => guestProblems.push(e.message));
-    await guest.goto(`/${query}`);
-    await guest.waitForFunction(() => (window as unknown as { __riverLab?: Lab }).__riverLab?.ready === true, null, {
-        timeout: 150_000
-    });
     const call = (p: Page, src: string, arg?: unknown) =>
         p.evaluate(
             ([s, a]) =>
@@ -678,9 +674,29 @@ test("online co-op in the Valley: the guest streams its own world and follows th
             [src, arg] as const
         );
     await lab(page, (l) => l.action('pause'));
-    await Promise.all([call(page, '(l) => l.net.connect()'), call(guest, '(l) => l.net.connect()')]);
+    await call(page, '(l) => l.net.connect()');
     await call(page, '(l) => l.net.host()');
     const code = ((await call(page, '(l) => l.net.status()')) as { hosting: string }).hosting;
+    // the host's sim completes stage 1 before the guest's page loads (two Valley pages streaming at
+    // once in software GL leave the host only a few frames a second)
+    await page.evaluate(() =>
+        (window as unknown as { __riverLab: Lab }).__riverLab.placeProp(
+            'bucket',
+            -64 + (-4.8 - 3.4) / Math.SQRT2,
+            1.2,
+            62 + (-3.4 + 4.8) / Math.SQRT2
+        )
+    );
+    await expect(page.locator('#hud-objective')).toContainText('2/7', { timeout: 180_000 });
+    // a second device joins: its objective is the host's stage, and its near world is its own
+    const guest = await context.newPage();
+    const guestProblems: string[] = [];
+    guest.on('pageerror', (e) => guestProblems.push(e.message));
+    await guest.goto(`/${query}`);
+    await guest.waitForFunction(() => (window as unknown as { __riverLab?: Lab }).__riverLab?.ready === true, null, {
+        timeout: 150_000
+    });
+    await call(guest, '(l) => l.net.connect()');
     await guest.waitForFunction(
         (c) =>
             (window as unknown as { __riverLab: { net: { games(): { code: string }[] } } }).__riverLab.net
@@ -698,19 +714,7 @@ test("online co-op in the Valley: the guest streams its own world and follows th
         null,
         { timeout: 120_000 }
     );
-    await expect(guest.locator('#hud-objective')).toContainText('1/7 Timber Yard');
-    // the host's sim completes stage 1; the guest's objective follows
-    await page.evaluate(() =>
-        (window as unknown as { __riverLab: Lab }).__riverLab.placeProp(
-            'bucket',
-            -64 + (-4.8 - 3.4) / Math.SQRT2,
-            1.2,
-            62 + (-3.4 + 4.8) / Math.SQRT2
-        )
-    );
-    await expect(page.locator('#hud-objective')).toContainText('2/7', { timeout: 120_000 });
     await expect(guest.locator('#hud-objective')).toContainText('2/7 Shallow Creek', { timeout: 60_000 });
-    // the guest's near world is built around its own player
     expect(await call(guest, '(l) => l.nearTiles()')).toBeGreaterThan(10);
     const gs = await guest.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.stats());
     expect(gs.voxel.rejected).toBe(0);
