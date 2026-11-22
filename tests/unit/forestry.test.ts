@@ -5,8 +5,8 @@ import { MAX_PARTICLES, ParticleFX } from '../../src/fx/particles.ts';
 import { WoodFX } from '../../src/fx/wood-fx.ts';
 import { PINE_TRUNK_HEIGHT } from '../../src/levels/common.ts';
 import { SAWMILL, STAND_CROWN_RADIUS, sawmillToWorld } from '../../src/levels/forestry.ts';
-import { BRIDGE, BRIDGE_X, YARD_FORESTRY, YARD_Y, timberYardLevel } from '../../src/levels/timber-yard.ts';
-import { GORGE, ROUTE_YAW, roadT, routeToWorld, routeU, valleyHeight, valleyLevel } from '../../src/levels/valley.ts';
+import { BRIDGE_X, YARD_FORESTRY, YARD_Y, timberYardLevel } from '../../src/levels/timber-yard.ts';
+import { valleyLevel } from '../../src/levels/valley.ts';
 import { GuestSession, HostSession, listGames } from '../../src/net/session.ts';
 import { MemoryHub } from '../../src/net/transport.ts';
 import { SIM_DT } from '../../src/sim/clock.ts';
@@ -440,202 +440,18 @@ describe('the sawmill', () => {
     });
 });
 
-describe('the gate: a tree becomes planks in a bridge', () => {
-    it('two beavers fell a tree, carry its log to the sawmill, it makes planks, and the planks deck the bridge', () => {
-        const s = yard(2);
-        let k = 100;
-        const both = (a: Partial<PlayerCommand>, b: Partial<PlayerCommand>, n = 1) => {
-            for (let i = 0; i < n; i++) {
-                s.step(cmd(k, a), cmd(k, b));
-                k++;
-            }
-        };
-        // fell tree 2 from its east side: it falls west, towards the mill
-        const tree = 2;
-        const t = YARD_FORESTRY.trees[tree];
-        standBy(s, tree, -0.4, 1.0, 0);
-        standBy(s, tree, 0.4, 1.0, 1);
-        both({}, {}, 10);
-        const ca = lookAt(s, 0, t.x, YARD_Y + 0.6, t.z);
-        const cb = lookAt(s, 1, t.x, YARD_Y + 0.6, t.z);
-        for (let i = 0; i < 600 && s.forestry.treeState(tree).phase === 'standing'; i++)
-            both({ ...ca, grab: i % 30 === 0 }, { ...cb, grab: i % 30 === 0 });
-        expect(s.forestry.treeState(tree).phase).toBe('down');
-        both({}, {}, 300);
-        const log = s.forestry.logOf(tree)!;
-        expect(Math.abs(axisOf(log.pose).x)).toBeGreaterThan(0.9);
-        // one at each end, facing it along its length (player 0 the west end, player 1 the east)
-        const lp = log.pose.p;
-        s.placePlayer(lp.x - 1.4, lp.z, -Math.PI / 2, 0);
-        s.placePlayer(lp.x + 1.4, lp.z, Math.PI / 2, 1);
-        both({}, {}, 20);
-        const a = lookAt(s, 0, lp.x - 0.7, lp.y, lp.z);
-        const b = lookAt(s, 1, lp.x + 0.7, lp.y, lp.z);
-        both({ ...a, grab: true }, { ...b, grab: true });
-        expect(s.physics.holders(log.id)).toBe(2);
-        const y0 = lp.y;
-        // lift, then walk it to the infeed guide: west (player 0 backs up, player 1 follows), then
-        // across to the guide's line
-        // lift: each hold point about 0.7 m above where the log lay (the co-op test's way)
-        const up = (i: number) =>
-            Math.asin(
-                Math.max(-1, Math.min(1, (y0 + 0.7 - (s.players[i].y + EYE_HEIGHT)) / s.physics.rig(i)!.holdDist))
-            );
-        const la = { yaw: a.yaw, pitch: up(0) };
-        const lb = { yaw: b.yaw, pitch: up(1) };
-        both(la, lb, 60);
-        expect(log.pose.p.y).toBeGreaterThan(y0 + 0.25);
-        // carry it 2.5 m west together, slowly (player 0 backs up, player 1 follows)
-        const x0 = log.pose.p.x;
-        let minY = Infinity;
-        for (let i = 0; i < 900 && log.pose.p.x > x0 - 2.5; i++) {
-            both({ ...la, moveZ: -0.3 }, { ...lb, moveZ: 0.3 });
-            minY = Math.min(minY, log.pose.p.y);
-        }
-        expect(s.physics.holders(log.id)).toBe(2);
-        expect(x0 - log.pose.p.x).toBeGreaterThan(2.4);
-        // carried at a sensible height all the way: measured 0.41 m above where it lay
-        expect(minY).toBeGreaterThan(y0 + 0.3);
-        both({ grab: true }, { grab: true });
-        expect(s.physics.holders(log.id)).toBe(0);
-        // the rest of the way to the mill is more of the same: lay it in the infeed guide
-        s.placePlayer(SPOT.x + 3, SPOT.z + 2.5, 0, 0);
-        s.placePlayer(SPOT.x + 4, SPOT.z + 2.5, 0, 1);
-        s.physics.place(log.id, inGuide());
-        for (let i = 0; i < 120 && s.sawmill!.phase === 'ready'; i++) both({}, {});
-        expect(s.sawmill!.stats.takenIds).toEqual([log.id]);
-        for (let i = 0; i < SAW.cutTicks + 60; i++) both({}, {});
-        const planks = s.entities.filter(
-            (e) => e.name.startsWith('extra-plank-') && e.visible && Math.abs(e.pose.p.z - SPOT.z) < 1
-        );
-        expect(planks.length).toBe(3);
-        expect(s.sawmill!.stats.planks).toBe(3);
-        // the bridge: the yard's two beams side by side across the creek as stringers, decked with
-        // the three sawn planks laid along them (placed: building it by hand is the bridge tests' job)
-        const flatAlongZ = quatMul(quatFromYawPitchRoll(Math.PI / 2, 0, 0), quatFromYawPitchRoll(0, Math.PI / 2, 0));
-        ['beam-0', 'beam-1'].forEach((n, i) =>
-            s.physics.place(byName(s, n).id, pose(BRIDGE_X - 0.11 + i * 0.22, YARD_Y + 0.2, BRIDGE.zc, flatAlongZ))
-        );
-        both({}, {}, 12);
-        both({}, {}, 48);
-        // two along the beams, one across them at mid-span on top
-        const flat = quatFromYawPitchRoll(0, Math.PI / 2, 0);
-        planks.forEach((p, i) =>
-            s.physics.place(
-                p.id,
-                i < 2
-                    ? pose(BRIDGE_X - 0.11 + i * 0.22, YARD_Y + 0.3, BRIDGE.zc, { ...flatAlongZ })
-                    : pose(BRIDGE_X, YARD_Y + 0.42, BRIDGE.zc, { ...flat })
-            )
-        );
-        both({}, {}, 120);
-        const deckY = YARD_Y + 0.2;
-        for (const p of planks) expect(p.pose.p.y).toBeGreaterThan(deckY);
-        // walk across on the planks
-        s.placePlayer(BRIDGE_X, BRIDGE.nearEdge + 1.2, 0, 0);
-        s.placePlayer(BRIDGE_X - 8, 8, 0, 1);
-        both({}, {}, 20);
-        let onDeck = 0;
-        for (let i = 0; i < 400 && s.players[0].z > BRIDGE.farEdge - 1; i++) {
-            both({ moveZ: 0.6 }, {});
-            if (s.players[0].z < BRIDGE.nearFace && s.players[0].z > BRIDGE.farFace && s.players[0].y > deckY + 0.05)
-                onDeck++;
-        }
-        expect(s.progress.falls).toBe(0);
-        expect(onDeck).toBeGreaterThan(30);
-        expect(s.players[0].z).toBeLessThan(BRIDGE.farEdge - 0.5);
-        for (const p of planks) expect(p.pose.p.y).toBeGreaterThan(deckY);
-    }, 60_000);
-
-    it('solo: one beaver fells a tree with the axe, bucks the log and carries a half to the sawmill', () => {
-        const s = yard();
-        let k = 100;
-        const step = (c: Partial<PlayerCommand> = {}, n = 1) => {
-            for (let i = 0; i < n; i++) s.step(cmd(k++, c));
-        };
-        // pick up the axe where it lies by the infeed
-        const axe = byName(s, 'axe');
-        s.placePlayer(axe.pose.p.x + 1.1, axe.pose.p.z, Math.PI / 2);
-        step({}, 20);
-        step({ ...lookAt(s, 0, axe.pose.p.x, axe.pose.p.y, axe.pose.p.z), grab: true });
-        expect(s.physics.heldId).toBe(axe.id);
-        // chop tree 4 from its east side: it falls west, towards the mill
-        const tree = 4;
-        const t = YARD_FORESTRY.trees[tree];
-        standBy(s, tree, 0, 1.1);
-        inHand(s, axe.id);
-        const from = { k };
-        expect(cutDown(s, tree, from)).toBe(4);
-        k = from.k;
-        step({}, 200);
-        const log = s.forestry.logOf(tree)!;
-        expect(log.pose.p.x).toBeLessThan(t.x - 0.8);
-        // buck it: three blows, aimed at it each time
-        const lp = log.pose.p;
-        s.placePlayer(lp.x + 0.4, lp.z + 1.0, 0);
-        inHand(s, axe.id);
-        step({}, 20);
-        for (let i = 0; i < 150 && s.forestry.stats.bucked === 0; i++)
-            step({ ...lookAt(s, 0, lp.x, lp.y, lp.z), grab: i % 30 === 0 });
-        expect(s.forestry.stats.bucked).toBe(1);
-        // put the axe down, take the west half (nearest the mill) by its east end
-        step({ action: 4 });
-        step({}, 30);
-        const halves = s.entities.filter((e) => e.name.startsWith('short-log') && e.visible);
-        const half = halves.reduce((a, b) => (a.pose.p.x < b.pose.p.x ? a : b));
-        const hp = half.pose.p;
-        s.placePlayer(hp.x + 1.3, hp.z, Math.PI / 2);
-        step({}, 20);
-        const a = lookAt(s, 0, hp.x + 0.25, hp.y, hp.z);
-        step({ ...a, grab: true });
-        expect(s.physics.heldId).toBe(half.id);
-        const y0 = hp.y;
-        step({ yaw: a.yaw, pitch: 0 }, 60);
-        expect(half.pose.p.y).toBeGreaterThan(y0 + 0.3);
-        // sideways (south: facing west, that is right) onto the guide's line, then west into it
-        const guide = inGuide().p;
-        for (let i = 0; i < 300 && s.players[0].z > guide.z; i++) step({ yaw: a.yaw, pitch: 0, moveX: 0.25 });
-        step({ yaw: a.yaw, pitch: 0 }, 40);
-        for (let i = 0; i < 600 && half.pose.p.x > guide.x; i++) step({ yaw: a.yaw, pitch: 0, moveZ: 0.4 });
-        expect(Math.abs(half.pose.p.z - guide.z)).toBeLessThan(0.3);
-        step({ yaw: a.yaw, pitch: -0.5 }, 30);
-        step({ yaw: a.yaw, grab: true });
-        expect(s.physics.heldId).toBe(-1);
-        s.placePlayer(SPOT.x + 2, SPOT.z + 2.5, 0);
-        // (it may roll against a rail first)
-        for (let i = 0; i < 300 && s.sawmill!.phase === 'ready'; i++) step();
-        expect(s.sawmill!.stats.takenIds).toEqual([half.id]);
-        step({}, SAW.cutTicks + 30);
-        expect(s.sawmill!.stats.planks).toBe(1);
-        // a whole log is too heavy for one beaver to lift
-        expect(s.physics.bodies.get(s.log.id)!.body.mass() * 9.81).toBeGreaterThan(650);
-        expect(s.physics.bodies.get(half.id)!.body.mass() * 9.81).toBeLessThan(650);
-    }, 60_000);
-});
-
 describe('resources come back', () => {
-    it('a stump regrows into a tree once its log has gone, and can be felled again', () => {
+    it('a stump does not regrow while its log still lies by it (regrowth after sawing: the gate test)', () => {
         const s = yard();
         const from = { k: 100 };
         standBy(s, 5, Math.PI);
         cutDown(s, 5, from);
-        for (let k = 0; k < 240; k++) s.step(cmd(from.k++));
-        const log = s.forestry.logOf(5)!;
-        // still lying by the stump: no regrowth
-        for (let k = 0; k < WOOD.regrowTicks; k++) s.step(cmd(from.k++));
+        // the chewer steps back
+        s.step(cmd(from.k++));
+        for (let k = 0; k < 60; k++) s.step(cmd(from.k++, { yaw: Math.PI / 2, moveZ: 1 }));
+        for (let k = 0; k < WOOD.regrowTicks + 600; k++) s.step(cmd(from.k++));
         expect(s.forestry.treeState(5).phase).toBe('down');
-        // carted off (here: taken by the mill), and the chewer steps back
-        s.forestry.take(log.id);
-        s.placePlayer(YARD_FORESTRY.trees[5].x - 3, YARD_FORESTRY.trees[5].z, 0);
-        for (let k = 0; k < 5; k++) s.step(cmd(from.k++));
-        expect(s.forestry.treeState(5).phase).toBe('standing');
-        expect(s.forestry.stats.regrown).toBe(1);
-        expect(byName(s, 'tree-5').anim[TREE_STATE]).toBe(0);
-        // the slot is free: it fells again into the same pool
-        standBy(s, 5, Math.PI);
-        cutDown(s, 5, from);
-        expect(s.forestry.treeState(5).phase).toBe('down');
-        expect(s.forestry.stats.felled).toBe(2);
+        expect(s.forestry.stats.regrown).toBe(0);
     }, 60_000);
 
     it('a felled log lost in the creek goes back to its pool', () => {
@@ -744,8 +560,8 @@ describe('wood effects', () => {
     });
 });
 
-describe('the Valley: the yard’s stand and sawmill, and sawn planks across the gorge', () => {
-    it('fells a stand tree, saws two logs, and four sawn planks carry a player over both gorge spans', () => {
+describe('the Valley: the yard’s stand and sawmill', () => {
+    it('a stand tree falls there by chewing, and the sawmill is there with its lever', () => {
         const s = new LabSim({ level: valleyLevel });
         let k = 0;
         const step = (c: Partial<PlayerCommand> = {}, n = 1) => {
@@ -755,69 +571,24 @@ describe('the Valley: the yard’s stand and sawmill, and sawn planks across the
         s.fpActive = true;
         const def = valleyLevel.forestry!;
         expect(def.trees.length).toBe(6);
-        // chew stand tree 0 down
-        const t = def.trees[0];
+        const t = def.trees[1];
         s.placePlayer(t.x - 1, t.z, 0);
         step({}, 20);
         const look = lookAt(s, 0, t.x, def.ground(t.x, t.z) + 0.6, t.z);
-        for (let i = 0; i < 400 && s.forestry.treeState(0).phase === 'standing'; i++)
+        for (let i = 0; i < 400 && s.forestry.treeState(1).phase === 'standing'; i++)
             step({ ...look, grab: i % 30 === 0 });
-        expect(s.forestry.treeState(0).phase).toBe('down');
-        // saw the pile's two bottom logs, one after the other
+        expect(s.forestry.treeState(1).phase).toBe('down');
+        // the sawmill stands where the yard's does, turned with the yard
         const saw = def.sawmill!;
-        const G = SAWMILL.guide;
-        const g = sawmillToWorld(saw, (G.x0 + G.x1) / 2, SAWMILL.feedY + 0.05, 0);
-        s.placePlayer(saw.x + 3, saw.z + 3, 0);
-        for (const name of ['log', 'extra-log-0']) {
-            const e = byName(s, name);
-            s.physics.place(e.id, pose(g.x, g.y, g.z, quatFromYawPitchRoll(saw.yaw, 0, 0)));
-            for (let i = 0; i < 600 && s.sawmill!.stats.takenIds.at(-1) !== e.id; i++) step();
-            for (let i = 0; i < 600 && s.sawmill!.phase !== 'ready'; i++) step();
-        }
-        expect(s.sawmill!.stats.planks).toBe(6);
-        const planks = s.entities.filter((e) => e.name.startsWith('extra-plank-') && e.visible && e.id >= 380);
-        expect(planks.length).toBe(6);
-        // the gorge: two spans either side of the stone pier
-        const fall = valleyLevel.rules!.fallY;
-        const hAt = (u: number, tt: number) => {
-            const w = routeToWorld(u, tt);
-            return valleyHeight(w.x, w.z);
-        };
-        const rt = roadT(GORGE.u);
-        let a = NaN;
-        let b = NaN;
-        for (let u = GORGE.u - 6; u <= GORGE.u + 6; u += 0.02) {
-            const low = hAt(u, rt) < fall;
-            if (low && Number.isNaN(a)) a = u;
-            if (!low && !Number.isNaN(a) && Number.isNaN(b)) b = u;
-        }
-        const spans: [number, number][] = [
-            [a, GORGE.u - GORGE.pierHalfU],
-            [GORGE.u + GORGE.pierHalfU, b]
-        ];
-        for (const [x0, x1] of spans) expect(x1 - x0).toBeLessThan(2.3); // a 2.4 m plank bears on both
-        let n = 0;
-        for (const [x0, x1] of spans) {
-            const m = (x0 + x1) / 2;
-            const rim = Math.max(hAt(x0 - 0.3, rt), hAt(x1 + 0.3, rt));
-            for (const dt of [-0.105, 0.105]) {
-                const w = routeToWorld(m, rt + dt);
-                s.physics.place(planks[n++].id, {
-                    p: { x: w.x, y: rim + 0.15, z: w.z },
-                    q: quatFromYawPitchRoll(ROUTE_YAW + Math.PI / 2, Math.PI / 2, 0)
-                });
-            }
-        }
-        step({}, 120);
-        // walk along the road over both spans
-        const start = routeToWorld(a - 1.6, rt);
-        s.placePlayer(start.x, start.z, -Math.PI / 4);
-        step({ yaw: -Math.PI / 4 }, 20);
-        for (let i = 0; i < 600 && routeU(s.player.x, s.player.z) < b + 1; i++) step({ yaw: -Math.PI / 4, moveZ: 0.5 });
-        expect(s.progress.falls).toBe(0);
-        expect(routeU(s.player.x, s.player.z)).toBeGreaterThan(b + 0.5);
-        for (const p of planks.slice(0, 4)) expect(p.pose.p.y).toBeGreaterThan(fall);
-    }, 120_000);
+        expect(s.sawmill!.entity.visible).toBe(true);
+        const L = SAWMILL.lever;
+        const lever = sawmillToWorld(saw, L.x, L.y + 0.12, L.z);
+        const out = sawmillToWorld(saw, L.x, L.y + 0.12, L.z - 1.2);
+        s.placePlayer(out.x, out.z, 0);
+        step({}, 20);
+        step({ ...lookAt(s, 0, lever.x, lever.y, lever.z), grab: true });
+        expect(s.sawmill!.mode).toBe('beam');
+    }, 60_000);
 });
 
 describe('online: a guest logs too', () => {

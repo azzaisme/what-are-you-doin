@@ -99,7 +99,7 @@ export interface ForestryDef {
 /** The sawmill's layout in its own frame (m). */
 export const SAWMILL = {
     /** Infeed guide: logs lie here, along the x axis, between two low rails. */
-    guide: { x0: 1.0, x1: 3.4, halfZ: 0.42, railH: 0.1 },
+    guide: { x0: 1.0, x1: 3.4, halfZ: 0.55, railH: 0.1 },
     /** A log in the guide counts when its centre is this close to the guide's middle (along x). */
     guideSlack: 0.75,
     /** The housing over the blade: posts either side, a beam over the top (a beaver walks under it). */
