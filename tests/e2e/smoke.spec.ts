@@ -35,7 +35,14 @@ type Lab = {
         seat: number;
         nail: number;
     };
-    joints(): { connections: number; nails: number; drawn: number; preview: unknown };
+    joints(): {
+        connections: number;
+        nails: number;
+        drawn: number;
+        preview: unknown;
+        outlines: number[];
+        slot2: number;
+    };
     teleport(x: number, z: number, yaw?: number): void;
     ute(): { x: number; y: number; z: number; yaw: number; speed: number; driver: number; drivable: boolean };
     wood(): {
@@ -654,6 +661,39 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
     await page.waitForFunction(
         () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 32,
         null,
+        { timeout: 60_000 }
+    );
+    expect(problems).toEqual([]);
+});
+
+test("split screen: player 2's hammer aim shows player 2's nail outline", async ({ page }) => {
+    test.setTimeout(300_000);
+    const problems = await boot(page, '?level=yard&t=0.01&quality=low&noui#cell100');
+    await lab(page, (l) => l.action('pause'));
+    await lab(page, (l) => (l as unknown as { setPlayers(n: number): void }).setPlayers(2));
+    const slot2 = await lab(page, (l) => l.joints().slot2);
+    expect(slot2).toBeGreaterThan(0);
+    // player 1 looks at the sky; player 2 stands over a beam on the ground and looks down at it
+    const p0 = await lab(page, (l) => l.player());
+    await page.evaluate(
+        ([x, y, z, eye]) => {
+            const l = (window as unknown as { __riverLab: Lab }).__riverLab as Lab & {
+                teleport2(x: number, z: number, yaw: number): void;
+                look2(yaw: number, pitch: number): void;
+            };
+            l.look(0, 0.6);
+            l.teleport2(x + 3, z, 0);
+            l.placeProp('beam-0', x + 3, y + 0.3, z - 0.6, 0);
+            l.look2(0, -Math.atan2(eye - 0.2, 0.55));
+        },
+        [p0.x, p0.y, p0.z, p0.eyeHeight]
+    );
+    await page.waitForFunction(
+        (s2) => {
+            const o = (window as unknown as { __riverLab: Lab }).__riverLab.joints().outlines;
+            return o.length === 1 && o[0] === s2;
+        },
+        slot2,
         { timeout: 60_000 }
     );
     expect(problems).toEqual([]);

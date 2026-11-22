@@ -43,6 +43,8 @@ export class NailMarkers {
     private readonly iron = iron();
     /** Nail heads placed by the last update. */
     drawn = 0;
+    /** Player slots whose hammer outline the last update drew. */
+    outlineSlots: number[] = [];
 
     /** `layer` draws the nail heads, `overlay` (an immediate layer) the preview outline. */
     constructor(app: AppBase, layer: Layer, overlay: Layer) {
@@ -68,7 +70,7 @@ export class NailMarkers {
         ring: SnapshotRing,
         time: number,
         cell: number,
-        previews: readonly { x: number; y: number; z: number; ok: boolean }[]
+        previews: readonly { x: number; y: number; z: number; ok: boolean; slot: number }[]
     ): void {
         const snap = (v: number) => (Math.floor(v / cell) + 0.5) * cell;
         let n = 0;
@@ -85,6 +87,7 @@ export class NailMarkers {
         }
         for (let i = n; i < this.heads.length; i++) this.heads[i].enabled = false;
         this.drawn = n;
+        this.outlineSlots = previews.map((p) => p.slot);
         for (const preview of previews) {
             const h = cell * 0.56;
             const x = snap(preview.x);

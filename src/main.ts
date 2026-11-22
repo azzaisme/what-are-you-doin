@@ -1297,12 +1297,12 @@ function updateNails(time: number): void {
         marks = hostNails;
     }
     // every local player's hammer outline (split screen: player 2's too)
-    const previews: { x: number; y: number; z: number; ok: boolean }[] = [];
+    const previews: { x: number; y: number; z: number; ok: boolean; slot: number }[] = [];
     if (state.mode === 'firstPerson') {
         const slots = guestSession ? [guestSession.slot] : state.players > 1 && localSlot2 > 0 ? [0, localSlot2] : [0];
         for (const slot of slots) {
             const h = guestSession ? guestSession.hud[slot] : sim.interactionIds(slot);
-            if (h?.nailAt && h.nail > 0) previews.push({ ...h.nailAt, ok: h.nail === 1 });
+            if (h?.nailAt && h.nail > 0) previews.push({ ...h.nailAt, ok: h.nail === 1, slot });
         }
     }
     nailMarkers.update(marks, sim.ring, time, tierCellCm('base', cellCm) / 100, previews);
@@ -2228,6 +2228,10 @@ window.__riverLab = {
     input2: (c: Record<string, unknown>) => {
         p2Injected = { ...p2Injected, ...c };
     },
+    /** Split screen: puts player 2 at a spot, facing yaw. */
+    teleport2(x: number, z: number, yaw = 0) {
+        if (localSlot2 > 0) sim.placePlayer(x, z, yaw, localSlot2);
+    },
     look2(yaw: number, pitch: number) {
         sim.players[Math.max(1, localSlot2)].yaw = yaw;
         sim.players[Math.max(1, localSlot2)].pitch = pitch;
@@ -2258,6 +2262,10 @@ window.__riverLab = {
         connections: sim.joints.graph.size,
         nails: sim.joints.graph.nailCount,
         drawn: nailMarkers.drawn,
+        /** Player slots whose hammer outline was drawn this frame. */
+        outlines: nailMarkers.outlineSlots,
+        /** Split screen: player 2's slot (-1 when one player). */
+        slot2: localSlot2,
         preview: sim.nailPreview(0)
     }),
     /** Logging: each stand tree's phase and cut, and the sawmill's state and totals. */
