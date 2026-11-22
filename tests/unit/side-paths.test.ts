@@ -1,8 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { UTE_TRACK_HALF } from '../../src/assets/ute.ts';
+import { UTE_TRACK_HALF, UTE_WHEELBASE_HALF } from '../../src/assets/ute.ts';
 import { nearestPath, pathLength } from '../../src/levels/side-paths.ts';
-import type { SidePath } from '../../src/levels/side-paths.ts';
 import {
     LANDMARKS,
     SIDE_PATHS,
@@ -11,17 +10,21 @@ import {
     routeToWorld,
     routeU,
     valleyHeight,
+    valleyHeightUngraded,
     valleyLayout,
     valleyLevel
 } from '../../src/levels/valley.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
-import { LabSim } from '../../src/sim/lab-sim.ts';
-import { UteVehicle } from '../../src/sim/physics/vehicle.ts';
-import { PhysicsWorld, initPhysics } from '../../src/sim/physics/world.ts';
+import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
+import { initPhysics } from '../../src/sim/physics/world.ts';
 import { pose, quatFromYawPitchRoll } from '../../src/voxels/math.ts';
 
 beforeAll(() => initPhysics());
 
+const hUngraded = (u: number, t: number) => {
+    const w = routeToWorld(u, t);
+    return valleyHeightUngraded(w.x, w.z);
+};
 const hAt = (u: number, t: number) => {
     const w = routeToWorld(u, t);
     return valleyHeight(w.x, w.z);
@@ -60,6 +63,7 @@ describe('Valley side paths', () => {
     });
 
     it('each path leaves the road and is walkable: gentle along, level across, no steps', () => {
+        let needed = 0;
         for (const p of SIDE_PATHS) {
             const [u0, t0] = p.points[0];
             expect(Math.abs(t0 - roadT(u0))).toBeLessThan(3);
@@ -77,13 +81,25 @@ describe('Valley side paths', () => {
                     // a 0.25 m step: under a 1 in 2.5 grade, never a ledge the beaver can't step up
                     expect(Math.abs(y - prev), `${p.name} at ${u.toFixed(1)}, ${t.toFixed(1)}`).toBeLessThan(0.1);
                     prev = y;
-                    // level across the track, over the beaver's width and more (1.2 m)
-                    const a = hAt(u + xu * 0.6, t + xt * 0.6);
-                    const b = hAt(u - xu * 0.6, t - xt * 0.6);
-                    expect(Math.abs(a - b), `${p.name} across at ${u.toFixed(1)}, ${t.toFixed(1)}`).toBeLessThan(0.12);
+                    // level across, over the beaver's width and more (1.2 m): the graded cross-fall,
+                    // against the ground's own (without the track)
+                    const across = (h: (u: number, t: number) => number) =>
+                        Math.abs(h(u + xu * 0.6, t + xt * 0.6) - h(u - xu * 0.6, t - xt * 0.6));
+                    const graded = across(hAt);
+                    const natural = across(hUngraded);
+                    const where = `${p.name} across at ${u.toFixed(1)}, ${t.toFixed(1)}`;
+                    expect(graded, where).toBeLessThan(0.06);
+                    // where the ground falls away across the track, the grading takes most of it out
+                    if (natural > 0.06) {
+                        needed++;
+                        // (measured: nil along the stretches, 0.4 of it at worst where two stretches meet)
+                        expect(graded, where).toBeLessThan(natural * 0.5);
+                    }
                 }
             }
         }
+        // the hillside the tracks cross needed it in places
+        expect(needed).toBeGreaterThan(20);
     });
 
     it('no static piece stands on a path', () => {
@@ -161,52 +177,70 @@ describe('Valley side paths', () => {
         }
     }, 120_000);
 
-    it('the ute drives the logging loop end to end, all four wheels on the track', () => {
+    it('the ute fits the logging loop: driven end to end in the Valley, every wheel within the track', () => {
         const loop = SIDE_PATHS.find((q) => q.name === 'logging-track')!;
-        const pw = new PhysicsWorld();
+        const s = new LabSim({ level: valleyLevel, hazards: false });
+        let n = 0;
+        let yaw = 0;
+        let pitch = 0;
+        const step = (c: Record<string, unknown> = {}, k = 1) => {
+            for (let i = 0; i < k; i++) s.step({ ...neutralCommand(n++), yaw, pitch, ...c });
+        };
+        step({}, 30);
+        s.fpActive = true;
         const corners = loop.points.map(([u, t]) => routeToWorld(u, t));
-        const minX = Math.min(...corners.map((c) => c.x)) - 12;
-        const maxX = Math.max(...corners.map((c) => c.x)) + 12;
-        const minZ = Math.min(...corners.map((c) => c.z)) - 12;
-        const maxZ = Math.max(...corners.map((c) => c.z)) + 12;
-        pw.addTerrain(valleyHeight, minX, maxX, minZ, maxZ, 200);
-        pw.killBox = { minX, maxX, minZ, maxZ };
         const a = corners[0];
         const b = corners[1];
-        // facing along the first stretch (yaw 0 faces +z)
+        // the ute, brought to the loop's start facing along it (yaw 0 faces +z)
         const yaw0 = Math.atan2(b.x - a.x, b.z - a.z);
-        const u = new UteVehicle(pw, 1, pose(a.x, valleyHeight(a.x, a.z) + 0.1, a.z, quatFromYawPitchRoll(yaw0, 0, 0)));
+        s.physics.place(s.ute.id, pose(a.x, valleyHeight(a.x, a.z) + 0.3, a.z, quatFromYawPitchRoll(yaw0, 0, 0)));
+        step({}, 60);
+        // in at the driver's door (its right side, local -x), looking at it
+        const u0 = s.ute.pose.p;
+        const sx = -Math.cos(yaw0);
+        const sz = Math.sin(yaw0);
+        s.placePlayer(u0.x + sx * 2.2, u0.z + sz * 2.2, 0);
+        step({}, 20);
+        yaw = Math.atan2(sx, sz);
+        pitch = -Math.atan2(s.player.y + EYE_HEIGHT - (u0.y + 0.6), 1.4);
+        step({}, 5);
+        step({ grab: true });
+        expect(s.driver).toBe(0);
         const yawOf = (q: { x: number; y: number; z: number; w: number }) =>
             Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.x * q.x));
-        for (let k = 0; k < 60; k++) {
-            u.drive({ throttle: 0, steer: 0, brake: true });
-            pw.step();
-        }
         let next = 1;
         let worst = 0;
         let ticks = 0;
         for (; ticks < 60 * 60 && next < corners.length; ticks++) {
-            const p = u.pb.body.translation();
+            const p = s.ute.pose.p;
+            const q = s.ute.pose.q;
             const w = corners[next];
             if (Math.hypot(w.x - p.x, w.z - p.z) < 1.5) {
                 next++;
                 continue;
             }
-            // steer for the next corner (positive steer turns right, lowering the yaw)
-            const err = Math.atan2(
-                Math.sin(Math.atan2(w.x - p.x, w.z - p.z) - yawOf(u.pb.body.rotation())),
-                Math.cos(Math.atan2(w.x - p.x, w.z - p.z) - yawOf(u.pb.body.rotation()))
-            );
-            u.drive({ throttle: 0.35, steer: Math.max(-1, Math.min(1, -2.5 * err)), brake: false });
-            pw.step();
-            const hit = nearestPath([loop] as SidePath[], routeU(p.x, p.z), routeT(p.x, p.z), 9);
-            worst = Math.max(worst, hit ? hit.d : 9);
+            // steer for the next corner (A/D: positive turns right, lowering the yaw), gently on
+            const e = Math.atan2(w.x - p.x, w.z - p.z) - yawOf(q);
+            const err = Math.atan2(Math.sin(e), Math.cos(e));
+            step({ moveZ: 0.35, moveX: Math.max(-1, Math.min(1, -2.5 * err)) });
+            // every wheel inside the graded band
+            const uy = yawOf(q);
+            for (const [wx, wz] of [
+                [UTE_TRACK_HALF, UTE_WHEELBASE_HALF],
+                [-UTE_TRACK_HALF, UTE_WHEELBASE_HALF],
+                [UTE_TRACK_HALF, -UTE_WHEELBASE_HALF],
+                [-UTE_TRACK_HALF, -UTE_WHEELBASE_HALF]
+            ]) {
+                const x = p.x + wx * Math.cos(uy) + wz * Math.sin(uy);
+                const z = p.z - wx * Math.sin(uy) + wz * Math.cos(uy);
+                const hit = nearestPath([loop], routeU(x, z), routeT(x, z), 9);
+                worst = Math.max(worst, hit ? hit.d : 9);
+            }
             // upright
-            const q = u.pb.body.rotation();
-            expect(1 - 2 * (q.x * q.x + q.z * q.z), 'upright').toBeGreaterThan(0.8);
+            expect(1 - 2 * (q.x * q.x + q.z * q.z), 'upright').toBeGreaterThan(0.85);
         }
         expect(next, 'reached the far end of the loop').toBe(corners.length);
-        // its wheels (0.68 m either side of its middle) stay on the graded track
-        expect(worst + UTE_TRACK_HALF).toBeLessThan(loop.halfWidth + 0.2);
-    }, 120_000);
+        expect(worst, 'the farthest wheel from the centre line').toBeLessThan(loop.halfWidth);
+        expect(s.driver).toBe(0);
+    }, 180_000);
 });

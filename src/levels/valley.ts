@@ -203,10 +203,10 @@ export const SIDE_PATHS: SidePath[] = [
 ];
 
 /** Continuous ground height in the route frame. */
-function heightUT(u: number, t: number): number {
+function heightUT(u: number, t: number, paths = true): number {
     let y = naturalUT(u, t);
     // side paths: graded flat across to their centre line's own height
-    const hit = nearestPath(SIDE_PATHS, u, t, 3.2);
+    const hit = paths ? nearestPath(SIDE_PATHS, u, t, 3.2) : null;
     const pathW = hit ? 1 - smoothstep(hit.path.halfWidth, hit.path.halfWidth + 1.6, hit.d) : 0;
     if (hit && pathW > 0) y = lerp(y, naturalUT(hit.u, hit.t), pathW);
     // the valley sides are terraced into 0.3 m benches (as in the Timber Yard): fewer triangles
@@ -250,6 +250,11 @@ function naturalUT(u: number, t: number): number {
 
 export function valleyHeight(x: number, z: number): number {
     return heightUT(routeU(x, z), routeT(x, z));
+}
+
+/** The ground as it would be without the side paths' grading (tests: what the grading changed). */
+export function valleyHeightUngraded(x: number, z: number): number {
+    return heightUT(routeU(x, z), routeT(x, z), false);
 }
 
 const topCell = (x: number, z: number) => Math.floor(valleyHeight(x, z) / GRID_SIZE - 1e-9);
@@ -677,7 +682,7 @@ function valleyPieces(): StaticPiece[] {
     P.push(
         piece(
             'flower-stem',
-            { type: 'cylinder', axis: 'y', r: 0.22, half: 1.6 },
+            { type: 'cylinder', axis: 'y', r: 0.3, half: 1.6 },
             SUMMIT_U,
             fy + 1.5,
             0,
@@ -688,7 +693,7 @@ function valleyPieces(): StaticPiece[] {
     P.push(
         piece(
             'flower-leaf',
-            { type: 'ellipsoid', rx: 0.9, ry: 0.15, rz: 0.4 },
+            { type: 'ellipsoid', rx: 0.9, ry: 0.22, rz: 0.4 },
             SUMMIT_U,
             fy + 1.0,
             0.7,

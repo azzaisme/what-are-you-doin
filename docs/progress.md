@@ -9,7 +9,7 @@ for the owner's call.
 - **The old logging track** leaves the road at 11 m past the creek crossing and rejoins it at
   35.5 m, before the culvert.
     - It is a 32.7 m loop through the forest on the far side of the log dump.
-    - It is wide enough for the ute.
+    - It is wide enough for the ute, and clear of trees and scenery.
     - It gives a road closure (an Epic 8 hazard) somewhere to send you.
 - **The lookout track** climbs 1.8 m over 18.7 m, from just past the culvert flag to the foot of
   the fire lookout. It stops short of the lookout's legs.
@@ -22,10 +22,14 @@ for the owner's call.
 - **Tests** (`tests/unit/side-paths.test.ts`):
     - walking each centre line in 25 cm steps, no step rises more than 10 cm (the beaver steps
       up 32 cm);
-    - level across, measured square to each stretch of track: within 12 cm over 1.2 m;
+    - level across, measured square to each stretch of track: within 6 cm over 1.2 m, and at
+      most half the ground's own cross-fall there (nil along the stretches, 0.4 at worst where
+      two stretches meet). The test fails with the grading off;
     - a beaver walks each track end to end by input, at walking speed, never further than 30 cm
       from its edge;
-    - the ute drives the logging loop end to end with all four wheels on the graded track;
+    - in the Valley sim, a player drives the ute round the logging loop end to end, every wheel
+      within the track. The ground there is gentle enough to drive without the grading; what this
+      shows is that the ute fits and nothing is in its way;
     - the logging track starts and ends on the road, and the lookout track ends at the lookout's
       foot, clear of its legs;
     - no tree within 2 m, and no static piece, on either track.
@@ -34,7 +38,7 @@ for the owner's call.
       surface material rather than the road formula. The works' sign is the exception: its
       concrete road can't be told from the concrete yard by surface alone.
     - a left arrow is read back from the voxels too.
-- Unit tests: 438 pass (merged with Epics 6, 9 part 1 and 10).
+- Unit tests: 516 pass (merged with Epics 6, 8, 9 part 1 and 10, and the controls remapping).
 
 ## Valley performance: what costs what, and Low builds less (2026-11-22, Epic 9, owner question)
 
@@ -70,7 +74,9 @@ The near world's radius is the lever, so it now follows the quality preset
 - **Low:** 24 m. The fog starts at 18 m instead of 30 m. It is light there (linear to 260 m, a few
   percent at 24 m), so on Low the coarse far lattice can be seen beyond 24 m: that is the trade.
 - **The far lattice is not affected**, so the landmarks and the summit flower show on Low as on
-  High.
+  High. A test builds the far lattice at 40 cm, gives it the Low radius, and finds the lookout,
+  the mast and the flower in it. The flower's stem and leaf were thickened so every part survives
+  40 cm cells.
 
 The bench (`tests/unit/view-distance.test.ts`, "bench"; reproducible, run with `npm test`) settles
 the near world at a fixed camera on each preset. Meshes are what the renderer draws, one per
