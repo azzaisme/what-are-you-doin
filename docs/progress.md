@@ -35,10 +35,15 @@ Owner: "Can I have a proper settings menu please. Accessible to both keyboard, m
     - yellow L-blocks with bolts on each corner, one voxel proud of the frame, extruded in 3D: the
       face, three voxels of depth (a shaded right side and a dark underside, lit from the top left
       on every corner) and a shadow cast on the frame;
-    - a faint voxel grid behind the rows, and dotted voxel rules;
+    - the whole face is the game's grey rock (owner: "the whole face look like the grey rock, with
+      random depth across it and then inset the menu item faces"): a tileable 32×32-voxel patch
+      of plates at random depths in the Rock palette, darker the deeper, with lit and shadowed
+      step edges; the frame's bevel tints it at the edges;
+    - each row, and the key-hint strip, is a slot cut into the rock: a dark floor, shadowed top
+      and left walls, lit bottom and right ones, with rock between the slots;
     - buttons, tabs, switches, choices and sliders are blocks with stepped corners that press
       down. Focus shows as a voxel ring inside them.
-    - `scripts/voxel-frame.mjs` generates the frame and corner images (CSS data URIs).
+    - `scripts/voxel-frame.mjs` generates the frame, corner and rock images (CSS data URIs).
 - **Accessibility:** a real dialog (`role=dialog`, `aria-modal`). Tabs are `role=tab`; switches
   are `role=switch`; choices are radio groups; sliders give their value as text.
 - **Tests:**

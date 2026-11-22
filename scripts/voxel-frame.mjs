@@ -3,13 +3,15 @@
 // top-left and shaded bottom-right. Slice it 6 voxels from each edge; the middle stretches.
 //   node scripts/voxel-frame.mjs            (the frame)
 //   node scripts/voxel-frame.mjs corners    (the corner caps)
+//   node scripts/voxel-frame.mjs rock       (the rock face)
 const N = 16;
 const NOTCH = [3, 2, 1]; // voxels cut from each corner, per row
 const C = {
-    fill: '#141b22',
+    // the frame's middle is see-through and its bevel tints, so the rock face shows through
+    fill: null,
     outline: '#05080b',
-    lit: '#3b4855',
-    shade: '#0a0f14',
+    lit: 'rgba(255,255,255,0.3)',
+    shade: 'rgba(0,0,0,0.5)',
     corner: '#f2c14e',
     cornerLit: '#ffdc7a',
     cornerShade: '#b8862a'
@@ -54,7 +56,7 @@ for (let y = 0; y < N; y++) {
     }
 }
 const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${N}' height='${N}' viewBox='0 0 ${N} ${N}' shape-rendering='crispEdges'>${rects}</svg>`;
-if (process.argv[2] !== 'corners')
+if (!process.argv[2])
     console.log(
         `url("data:image/svg+xml,${encodeURIComponent(svg).replace(/%20/g, ' ').replace(/%3D/g, '=').replace(/%3A/g, ':').replace(/%2F/g, '/').replace(/%27/g, "'").replace(/%3C/g, '<').replace(/%3E/g, '>')}")`
     );
@@ -134,4 +136,93 @@ if (process.argv[2] === 'corners') {
         [true, true, 'bottom right']
     ];
     console.log(caps.map(([fx, fy, pos]) => `${enc(svgOf(capCells(fx, fy), S))} ${pos} no-repeat`).join(', '));
+}
+
+// The face (--menu-rock): a tileable 32x32-voxel patch of the game's grey rock, plates of stone at
+// random depths. Each voxel is one of the rock's four tones, darker the deeper it sits; a step up
+// towards the top-left light catches it on its top and left edges, and a step down is in shadow.
+// Printed as a PNG (an SVG of a thousand voxels would be far bigger).
+//   node scripts/voxel-frame.mjs rock
+if (process.argv[2] === 'rock') {
+    const { deflateSync } = await import('node:zlib');
+    const R = 32;
+    const ROCK = [0x8a8a84, 0x7c7c77, 0x96958e, 0x6f6f6b]; // palette.ts, Rock
+    // a fixed seed, so the tile only changes when this script does
+    let seed = 7;
+    const rand = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+    const wrap = (v) => ((v % R) + R) % R;
+    // plates: wrapped Voronoi cells, each at its own depth (0 deepest .. 3 proud)
+    const plates = Array.from({ length: 14 }, () => ({
+        x: rand() * R,
+        y: rand() * R,
+        h: Math.floor(rand() * 4),
+        tone: ROCK[Math.floor(rand() * 2)]
+    }));
+    // most voxels take their plate's tone; a few are flecks of the others
+    const fleck = Array.from({ length: R * R }, () => (rand() < 0.22 ? ROCK[Math.floor(rand() * 4)] : 0));
+    const chip = Array.from({ length: R * R }, () => rand() < 0.08);
+    const height = [];
+    const tone = [];
+    for (let y = 0; y < R; y++)
+        for (let x = 0; x < R; x++) {
+            let best = Infinity;
+            let h = 0;
+            let t = 0;
+            for (const p of plates) {
+                const dx = Math.min(Math.abs(x + 0.5 - p.x), R - Math.abs(x + 0.5 - p.x));
+                const dy = Math.min(Math.abs(y + 0.5 - p.y), R - Math.abs(y + 0.5 - p.y));
+                // a little squash, so plates are wider than tall, like bedded stone
+                const d = dx * dx + dy * dy * 1.6;
+                if (d < best) [best, h, t] = [d, p.h, p.tone];
+            }
+            height.push(Math.max(0, h - (chip[y * R + x] ? 1 : 0)));
+            tone.push(fleck[y * R + x] || t);
+        }
+    const H = (x, y) => height[wrap(y) * R + wrap(x)];
+    const rgb = [];
+    for (let y = 0; y < R; y++)
+        for (let x = 0; x < R; x++) {
+            const h = H(x, y);
+            let k = 0.56 + 0.11 * h; // deeper is darker
+            const up = Math.max(H(x - 1, y), H(x, y - 1), H(x - 1, y - 1));
+            const down = Math.min(H(x - 1, y), H(x, y - 1));
+            if (up > h)
+                k *= 0.62; // shadowed by the step above-left
+            else if (down < h) k *= 1.32; // a lit edge
+            const c = tone[y * R + x];
+            rgb.push(...[c >> 16, (c >> 8) & 255, c & 255].map((v) => Math.min(255, Math.round(v * k))));
+        }
+    // a minimal PNG: 8-bit RGB, no filtering
+    const crcTable = Array.from({ length: 256 }, (_, n) => {
+        let c = n;
+        for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+        return c >>> 0;
+    });
+    const crc = (buf) => {
+        let c = 0xffffffff;
+        for (const b of buf) c = crcTable[(c ^ b) & 255] ^ (c >>> 8);
+        return (c ^ 0xffffffff) >>> 0;
+    };
+    const chunk = (type, data) => {
+        const len = Buffer.alloc(4);
+        len.writeUInt32BE(data.length);
+        const td = Buffer.concat([Buffer.from(type), data]);
+        const c = Buffer.alloc(4);
+        c.writeUInt32BE(crc(td));
+        return Buffer.concat([len, td, c]);
+    };
+    const ihdr = Buffer.alloc(13);
+    ihdr.writeUInt32BE(R, 0);
+    ihdr.writeUInt32BE(R, 4);
+    ihdr.set([8, 2, 0, 0, 0], 8);
+    const raw = Buffer.alloc(R * (R * 3 + 1));
+    for (let y = 0; y < R; y++) raw.set(rgb.slice(y * R * 3, (y + 1) * R * 3), y * (R * 3 + 1) + 1);
+    const png = Buffer.concat([
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        chunk('IHDR', ihdr),
+        chunk('IDAT', deflateSync(raw, { level: 9 })),
+        chunk('IEND', Buffer.alloc(0))
+    ]);
+    if (process.argv[3]) (await import('node:fs')).writeFileSync(process.argv[3], png);
+    else console.log(`url("data:image/png;base64,${png.toString('base64')}")`);
 }
