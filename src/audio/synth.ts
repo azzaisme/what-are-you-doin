@@ -366,6 +366,73 @@ function snap(sr: number, seed: number): Float32Array {
     return fadeEnds(normalize(out), sr);
 }
 
+/** The handbrake creeping off: a ratchet's clicks, slowing down. */
+function ratchet(sr: number, seed: number): Float32Array {
+    const n = len(1.1, sr);
+    const out = new Float32Array(n);
+    const r = rng(seed);
+    let t = 0;
+    let gap = 0.06;
+    while (t < 0.95) {
+        const at = Math.round(t * sr);
+        const click = highpass(noise(len(0.02, sr), seed + Math.round(t * 100)), 1800, sr);
+        for (let i = 0; i < click.length && at + i < n; i++) out[at + i] += click[i] * env(i, sr, 0.0003, 0.003);
+        t += gap * (0.9 + 0.2 * r());
+        gap *= 1.12;
+    }
+    return fadeEnds(normalize(bandpass(out, 2600, 1.5, sr), 0.8), sr);
+}
+
+/** A sawmill motor and blade, running (loop; pitch follows the load, Epic 6). */
+function saw(sr: number, seed: number): Float32Array {
+    const n = len(2.4, sr);
+    const hum = 50;
+    const whine = 900;
+    const out = new Float32Array(n);
+    const grit = bandpass(noise(n, seed), 3200, 2, sr);
+    for (let i = 0; i < n; i++) {
+        const t = i / sr;
+        out[i] =
+            0.5 * Math.sin(2 * Math.PI * hum * t) +
+            0.25 * Math.sin(2 * Math.PI * hum * 2 * t) +
+            0.18 * Math.sin(2 * Math.PI * whine * t) +
+            0.08 * Math.sin(2 * Math.PI * whine * 2.01 * t) +
+            0.5 * grit[i];
+    }
+    return seamless(normalize(out, 0.75), sr, 0.2);
+}
+
+/** An axe (or teeth) biting into wood: a thock with a split. */
+function chop(sr: number, seed: number): Float32Array {
+    const n = len(0.35, sr);
+    const t = knock(sr, seed);
+    const split = highpass(noise(n, seed + 5), 1200, sr);
+    for (let i = 0; i < n; i++) split[i] *= env(i, sr, 0.0005, 0.02);
+    return fadeEnds(normalize(mix([t.slice(0, n), 1], [split, 0.7])), sr);
+}
+
+/** Water sloshing in the bucket (Epic 7). */
+function slosh(sr: number, seed: number): Float32Array {
+    const n = len(0.6, sr);
+    const s = bandpass(noise(n, seed), (i) => 500 + 700 * Math.sin((Math.PI * i) / n), 2.5, sr);
+    for (let i = 0; i < n; i++) s[i] *= Math.sin((Math.PI * i) / n) ** 1.5;
+    return fadeEnds(normalize(s, 0.6), sr);
+}
+
+/** Water pouring (loop, Epic 7: filling the bucket, pouring it on the flower). */
+function pour(sr: number, seed: number): Float32Array {
+    const n = len(3, sr);
+    const r = rng(seed);
+    const out = lowpass(highpass(noise(n, seed), 600, sr), 4000, sr);
+    for (let g = 0; g < 60; g++) {
+        const at = Math.floor(r() * (n - sr * 0.05));
+        const f = 600 + r() * 900;
+        for (let i = 0; i < len(0.04, sr); i++)
+            out[at + i] += Math.sin(2 * Math.PI * f * (1 + 3 * (i / sr)) * (i / sr)) * 0.3 * env(i, sr, 0.003, 0.012);
+    }
+    return seamless(normalize(out, 0.65), sr, 0.4);
+}
+
 /** Every sound by name. Variants (`-0`, `-1`, ...) are picked at random when played. */
 export const SOUND_NAMES = [
     'knock-0',
@@ -400,12 +467,19 @@ export const SOUND_NAMES = [
     'creak-0',
     'creak-1',
     'creak-2',
-    'snap'
+    'snap',
+    'ratchet',
+    'saw',
+    'chop',
+    'slosh',
+    'pour'
 ] as const;
 export type SoundName = (typeof SOUND_NAMES)[number];
 
 /** The loops (played continuously, their volume and pitch follow the game). */
-export const LOOPS: ReadonlySet<SoundName> = new Set<SoundName>(['engine', 'river', 'wind', 'rumble']);
+export const LOOPS: ReadonlySet<SoundName> = new Set<SoundName>(['engine', 'river', 'wind', 'rumble', 'saw', 'pour']);
+/** Loops other features start and stop through `sfx.hold` (not the game's own ambience). */
+export const HELD_LOOPS: ReadonlySet<SoundName> = new Set<SoundName>(['saw', 'pour']);
 
 export function synthesize(name: SoundName, sr = SYNTH_RATE): SynthSound {
     const v = Number(name.split('-').pop());
@@ -467,6 +541,21 @@ export function synthesize(name: SoundName, sr = SYNTH_RATE): SynthSound {
                 break;
             case 'snap':
                 samples = snap(sr, 91);
+                break;
+            case 'ratchet':
+                samples = ratchet(sr, 92);
+                break;
+            case 'saw':
+                samples = saw(sr, 93);
+                break;
+            case 'chop':
+                samples = chop(sr, 94);
+                break;
+            case 'slosh':
+                samples = slosh(sr, 95);
+                break;
+            case 'pour':
+                samples = pour(sr, 96);
                 break;
             default:
                 samples = new Float32Array(1);

@@ -1,5 +1,32 @@
 # Progress log
 
+## Epic 8, part 2: the handbrake prank, and sound for the other epics (2026-11-22)
+
+- **The handbrake prank (#75):**
+    - **When:** the ute is left parked on a slope (3.5° or more) with nobody in it for 6 s.
+    - **The tell:** a ratchet clicks, and a toast says "Get in and hold the brake".
+    - **What happens:** 2.5 s later the handbrake lets go and the ute rolls, for up to 20 s or until
+      someone takes the driver's seat. Tested on the far bank's road (about 10°): it rolls more than
+      3 m down towards the creek.
+    - **Counterplay, tested:** park on the flat (the yard: nothing happens), or get in at the
+      warning (the ute stays within 0.5 m).
+    - **Recovery:** if it ends up in the creek, the ute's usual recovery applies.
+    - **Tried and dropped:** a log as a chock does not stop the ute: its wheels roll over it. The
+      game doesn't suggest chocks.
+    - It shares the hazard budget: one hazard at a time, at most 2 pranks, 60 s apart.
+- **Sound for the other epics (`docs/sound.md`):**
+    - **New sounds:** a sawmill motor (`saw`, a loop), `chop`, `slosh`, pouring water (`pour`, a loop)
+      and the handbrake's `ratchet`.
+    - **New call:** `sfx.hold(key, name, position)` keeps a loop playing for as long as a feature
+      calls it each frame, such as a sawmill running or water pouring, and fades it out when the
+      calls stop.
+    - Epic 5 (creaks, breaks), Epic 6 (sawmill, chopping) and Epic 7 (slosh, pour) each have a line
+      to copy.
+- **Playtest kit:** the log's summary also counts handbrake pranks, and the script says what to
+  watch for and how the prank works.
+- **Tests:** 370 unit tests pass at both voxel sizes. New: three handbrake tests, and `sfx.hold` in
+  the sound API test.
+
 ## Epic 8: the world fights back, sound, and a playtest kit (2026-11-22)
 
 The Timber Yard is now a complete slice: the creek floods when you finish the bridge, the wind

@@ -48,10 +48,17 @@ export interface GustSpec {
     force: number;
 }
 
+/** The handbrake prank (#75): a ute left parked on a slope gets its handbrake let off. */
+export interface HandbrakeSpec {
+    /** Least tilt (rad) that counts as a slope: the ute parked flatter than this is left alone. */
+    slope: number;
+}
+
 export interface HazardSpec {
     seed: number;
     flood?: FloodSpec;
     gust?: GustSpec;
+    handbrake?: HandbrakeSpec;
 }
 
 /** Timings (seconds) and budgets. */
@@ -71,7 +78,9 @@ export const HAZARD = {
         nearWater: 4,
         maxMass: 30,
         minPlanks: 3
-    }
+    },
+    /** Parked (nobody driving, still) this long on a slope, the warning, how long it stays off. */
+    handbrake: { parkedS: 6, tellS: 2.5, offS: 20, cooldownS: 60, max: 2 }
 } as const;
 
 export const PHASE = { idle: 0, tell: 1, active: 2, recede: 3 } as const;
@@ -85,6 +94,8 @@ export interface HazardNet {
     /** Gust direction (rad in XZ, 0 = +X) and its target player slot. */
     gustDir: number;
     gustSlot: number;
+    /** The handbrake prank's phase (tell: the ratchet clicking; active: the brake is off). */
+    brake: number;
 }
 
 /** The parts of the simulation the director reads and acts on. */
@@ -99,6 +110,21 @@ export interface HazardHost {
     readonly bucket: { id: number; pose: { p: { x: number; y: number; z: number } } };
     readonly entities: readonly { id: number; name: string }[];
     isSlotActive(i: number): boolean;
+    /** The drivable ute (its body) and who drives it (-1: nobody). */
+    readonly vehicle: { pb: { body: { rotation(): Quat4; linvel(): Vec3 } } } | null;
+    readonly driver: number;
+}
+
+interface Quat4 {
+    x: number;
+    y: number;
+    z: number;
+    w: number;
+}
+interface Vec3 {
+    x: number;
+    y: number;
+    z: number;
 }
 
 const S = (s: number) => Math.round(s * SIM_HZ);
@@ -135,6 +161,17 @@ export class HazardDirector {
     lastGustForce = 0;
     floodMoved = 0;
     private gustOver = 0;
+    /** The handbrake prank: phase, ticks in it, count, how long the ute has stood parked. */
+    brakePhase: number = PHASE.idle;
+    brakeT = 0;
+    brakeCount = 0;
+    private brakeEnded = -1e9;
+    private parkedTicks = 0;
+
+    /** The ute's handbrake has been let off: the simulation drives it with no brake. */
+    get handbrakeOff(): boolean {
+        return this.brakePhase === PHASE.active;
+    }
 
     constructor(level: LevelDef) {
         this.spec = level.hazards;
@@ -158,11 +195,19 @@ export class HazardDirector {
         this.lastGustForce = 0;
         this.floodMoved = 0;
         this.gustOver = 0;
+        this.brakePhase = PHASE.idle;
+        this.brakeT = this.brakeCount = this.parkedTicks = 0;
+        this.brakeEnded = -1e9;
     }
 
     /** Is any hazard telling or running? */
     get busy(): boolean {
-        return this.floodPhase !== PHASE.idle || this.gustPhase !== PHASE.idle || this.floodPending >= 0;
+        return (
+            this.floodPhase !== PHASE.idle ||
+            this.gustPhase !== PHASE.idle ||
+            this.brakePhase !== PHASE.idle ||
+            this.floodPending >= 0
+        );
     }
 
     /** 0..1: the flood's strength (0 at normal level, 1 at the peak). */
@@ -177,7 +222,8 @@ export class HazardDirector {
             flood: this.floodPhase,
             gust: this.gustPhase,
             gustDir: Math.atan2(this.gustDirZ, this.gustDirX),
-            gustSlot: this.gustSlot
+            gustSlot: this.gustSlot,
+            brake: this.brakePhase
         };
     }
 
@@ -188,6 +234,7 @@ export class HazardDirector {
         const tick = h.tick;
         if (spec.flood) this.stepFlood(h, spec.flood, tick);
         if (spec.gust) this.stepGust(h, spec.gust, tick, spec.seed);
+        if (spec.handbrake) this.stepHandbrake(h, spec.handbrake, tick);
         if (this.busy) this.quietFrom = tick + S(HAZARD.safeS);
     }
 
@@ -420,6 +467,52 @@ export class HazardDirector {
         }
     }
 
+    // ------------------------------------------------------------------------------- handbrake
+
+    /**
+     * Left parked on a slope, the ute's handbrake clicks off (after a ratchet warning) and it rolls.
+     * Park on the flat, or get in (a driver ends it). It catches again after a while. (A log as a
+     * chock does not hold it: the wheels roll over it, measured.)
+     */
+    private stepHandbrake(h: HazardHost, b: HandbrakeSpec, tick: number): void {
+        const H = HAZARD.handbrake;
+        const v = h.vehicle;
+        if (!v) return;
+        const body = v.pb.body;
+        if (this.brakePhase === PHASE.idle) {
+            const q = body.rotation();
+            const upY = 1 - 2 * (q.x * q.x + q.z * q.z);
+            const lv = body.linvel();
+            const parked = h.driver < 0 && Math.hypot(lv.x, lv.y, lv.z) < 0.1;
+            this.parkedTicks = parked && upY > 0.5 && upY < Math.cos(b.slope) ? this.parkedTicks + 1 : 0;
+            if (
+                this.parkedTicks >= S(H.parkedS) &&
+                this.brakeCount < H.max &&
+                tick - this.brakeEnded >= S(H.cooldownS) &&
+                this.canStart(h, tick)
+            ) {
+                this.brakePhase = PHASE.tell;
+                this.brakeT = 0;
+                this.brakeCount++;
+                this.parkedTicks = 0;
+                this.say(h, '🔧 Click… click… click… The ute’s handbrake is creeping off! Get in and hold the brake.');
+            }
+            return;
+        }
+        this.brakeT++;
+        if (this.brakePhase === PHASE.tell && this.brakeT >= S(H.tellS)) {
+            this.brakePhase = PHASE.active;
+            this.brakeT = 0;
+            this.say(h, 'The handbrake is off! The ute is rolling.');
+        }
+        // someone at the wheel pulls it back on; or after a while it catches by itself
+        if (h.driver >= 0 || (this.brakePhase === PHASE.active && this.brakeT >= S(H.offS))) {
+            this.brakePhase = PHASE.idle;
+            this.brakeEnded = tick;
+            this.say(h, h.driver >= 0 ? 'Handbrake back on.' : 'The handbrake caught again.');
+        }
+    }
+
     /** Light pieces (planks) still out of the creek: the gust's severity budget. */
     private planksLeft(h: HazardHost): number {
         const lostY = h.level.rules?.lostY ?? this.baseY;
@@ -458,11 +551,19 @@ export function readHazardNet(v: unknown, baseY: number): HazardNet {
         flood: Math.max(0, Math.min(3, Math.round(n(a[1], 0)))),
         gust: Math.max(0, Math.min(3, Math.round(n(a[2], 0)))),
         gustDir: n(a[3], 0),
-        gustSlot: Math.round(n(a[4], -1))
+        gustSlot: Math.round(n(a[4], -1)),
+        brake: Math.max(0, Math.min(3, Math.round(n(a[5], 0))))
     };
 }
 
 /** The host's compact form of `net()`. */
 export function packHazardNet(h: HazardNet): number[] {
-    return [Math.round(h.waterY * 1000) / 1000, h.flood, h.gust, Math.round(h.gustDir * 100) / 100, h.gustSlot];
+    return [
+        Math.round(h.waterY * 1000) / 1000,
+        h.flood,
+        h.gust,
+        Math.round(h.gustDir * 100) / 100,
+        h.gustSlot,
+        h.brake
+    ];
 }

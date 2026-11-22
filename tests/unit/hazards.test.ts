@@ -8,7 +8,9 @@ import {
     YARD_Y,
     creekCenterZ,
     creekHalfWidth,
-    timberYardLevel
+    roadCenterX,
+    timberYardLevel,
+    yardHeight
 } from '../../src/levels/timber-yard.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
@@ -267,6 +269,57 @@ describe('hazard director: the gust aimed at the carried plank (#73)', () => {
     }, 60_000);
 });
 
+describe('hazard director: the handbrake prank (#75)', () => {
+    const H = HAZARD.handbrake;
+    /** The ute parked on the far bank's road where it climbs (about 10 degrees), nose uphill-away. */
+    function parkOnRoad(s: LabSim, z = -13.5): void {
+        const x = roadCenterX(z);
+        s.physics.place(s.vehicle!.id, pose(x, yardHeight(x, z) + 0.3, z, quatFromYawPitchRoll(0, 0, 0)));
+    }
+    const settle = () => S(HAZARD.graceS) - 60;
+
+    it('left parked on a slope: a ratchet warning, then the handbrake lets go and it rolls downhill', () => {
+        const s = yard();
+        parkOnRoad(s);
+        s.runTo(settle());
+        const z0 = s.ute.pose.p.z;
+        // parked long enough already: it goes as soon as the quiet start is over
+        s.runTo(S(Math.max(HAZARD.graceS, H.parkedS)) + 5);
+        expect(s.hazards.brakePhase).toBe(PHASE.tell);
+        expect(hazardTexts(s)[0]).toContain('handbrake');
+        s.runTo(s.tick + S(H.tellS) + S(3));
+        expect(s.hazards.handbrakeOff).toBe(true);
+        // rolled several metres down the road towards the creek (+z)
+        expect(s.ute.pose.p.z - z0).toBeGreaterThan(3);
+        // after a while it catches again by itself
+        s.runTo(s.tick + S(H.offS));
+        expect(s.hazards.brakePhase).toBe(PHASE.idle);
+        expect(hazardTexts(s).some((t) => t.includes('caught'))).toBe(true);
+    }, 60_000);
+
+    it('counterplay: parked on the flat yard, nothing happens', () => {
+        const s = yard();
+        s.runTo(S(HAZARD.graceS + H.parkedS + 20));
+        expect(s.hazards.brakeCount).toBe(0);
+    }, 60_000);
+
+    it('counterplay: get in at the warning, and the driver’s brake holds it', () => {
+        const s = yard();
+        parkOnRoad(s);
+        s.runTo(S(Math.max(HAZARD.graceS, H.parkedS)) + 5);
+        expect(s.hazards.brakePhase).toBe(PHASE.tell);
+        s.fpActive = true;
+        s.runTo(s.tick + 2);
+        const z0 = s.ute.pose.p.z;
+        expect(s.takeDriverSeat(0)).toBe(true);
+        let n = s.tick;
+        for (let i = 0; i < S(H.tellS + 4); i++) s.step(cmd(n++, { jump: true }));
+        expect(s.hazards.brakePhase).toBe(PHASE.idle);
+        expect(Math.abs(s.ute.pose.p.z - z0)).toBeLessThan(0.5);
+        expect(hazardTexts(s).some((t) => t.includes('back on'))).toBe(true);
+    }, 60_000);
+});
+
 describe('hazard director: determinism and the network', () => {
     it('two runs of the same commands give the same hazards and the same world', () => {
         const play = () => {
@@ -284,7 +337,7 @@ describe('hazard director: determinism and the network', () => {
     }, 60_000);
 
     it('guests read the host’s hazard state, bounded', () => {
-        const h = { waterY: 0.412, flood: 2, gust: 1, gustDir: -1.57, gustSlot: 1 };
+        const h = { waterY: 0.412, flood: 2, gust: 1, gustDir: -1.57, gustSlot: 1, brake: 2 };
         expect(readHazardNet(packHazardNet(h), CREEK_WATER_Y)).toEqual(h);
         const junk = readHazardNet(['x', 99, -4, null, 'y'], CREEK_WATER_Y);
         expect(junk.flood).toBe(3);

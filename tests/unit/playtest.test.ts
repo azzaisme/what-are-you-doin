@@ -26,7 +26,9 @@ describe('the playtest log', () => {
         expect(text).toContain('finished: yes, at 6:39');
         expect(text).toContain('most players at once: 2');
         expect(text).toContain('falls into the creek: 1');
-        expect(text).toContain('floods: 1 (timber washed downstream 1×); gusts: 1 (torn from hands 1×)');
+        expect(text).toContain(
+            'floods: 1 (timber washed downstream 1×); gusts: 1 (torn from hands 1×); handbrake pranks: 0'
+        );
         expect(text).toContain('facilitator notes: 1');
         expect(text).toContain('first grab: 0:03');
         expect(text).toContain('holding beam-0');

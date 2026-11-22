@@ -67,11 +67,15 @@ describe('sound: every sound is synthesized (original, nothing to license)', () 
     it('the sfx API is safe before the audio runs, and forwards to the game once it does', () => {
         sfx.creak({ x: 0, y: 0, z: 0 }, 0.5); // nothing installed: a no-op
         const got: [SfxName, number | undefined, number | undefined][] = [];
-        sfx.setSink({ play: (n, _at, o) => got.push([n, o?.gain, o?.pitch]) });
+        const held: string[] = [];
+        sfx.setSink({ play: (n, _at, o) => got.push([n, o?.gain, o?.pitch]), hold: (k, n) => held.push(`${k}:${n}`) });
         sfx.creak({ x: 0, y: 1, z: 0 }, 1);
         sfx.creak({ x: 0, y: 1, z: 0 }, 0);
         sfx.snap({ x: 0, y: 1, z: 0 });
+        sfx.hold('mill', 'saw', { x: 0, y: 1, z: 0 }, { pitch: 0.9 });
         sfx.setSink(null);
+        sfx.hold('mill', 'saw'); // nothing installed again: a no-op
+        expect(held).toEqual(['mill:saw']);
         expect(got[0][0]).toBe('creak');
         // more strain: louder and deeper
         expect(got[0][1]!).toBeGreaterThan(got[1][1]!);
