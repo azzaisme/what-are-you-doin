@@ -9,13 +9,13 @@
  * Default buttons (standard mapping; every button below can be rebound, see bindings.ts):
  *   left stick  move            right stick  look            L3 or LT (held)  sprint
  *   A           jump            RT           grab / release   RB               throw
- *   B           drop            Y            plank (player 1) X                ragdoll
- *   LB          nail (hammer)
- *   D-pad up/down  hold further / closer
+ *   B           drop            Y            pour the bucket you hold (again: stop)
+ *   X           ragdoll         LB           nail (hammer)
+ *   D-pad up/down  hold further / closer   D-pad right  plank (player 1, River Lab)
  *   Start (menu)   settings (any pad, joined or not; not rebindable)
  */
 
-import { ACTION_DROP, ACTION_NAIL, ACTION_NONE, ACTION_RAGDOLL, PITCH_LIMIT } from '../sim/commands.ts';
+import { ACTION_DROP, ACTION_NAIL, ACTION_NONE, ACTION_POUR, ACTION_RAGDOLL, PITCH_LIMIT } from '../sim/commands.ts';
 import type { PlayerCommand } from '../sim/commands.ts';
 
 import { PAD_ACTIONS, defaultBindings } from './bindings.ts';
@@ -35,7 +35,8 @@ export const PAD = {
     L3: 10,
     R3: 11,
     UP: 12,
-    DOWN: 13
+    DOWN: 13,
+    RIGHT: 15
 } as const;
 
 const DEADZONE = 0.18;
@@ -103,6 +104,7 @@ export class PadPlayer {
         if (edge('throw')) this.q.throw = true;
         if (edge('drop')) this.q.action = ACTION_DROP;
         if (edge('nail')) this.q.action = ACTION_NAIL;
+        if (edge('pour')) this.q.action = ACTION_POUR;
         if (edge('ragdoll')) this.q.action = ACTION_RAGDOLL;
         if (edge('reachFar')) this.q.reach += 0.25;
         if (edge('reachNear')) this.q.reach -= 0.25;

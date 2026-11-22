@@ -33,7 +33,11 @@ from snapshots, and a moving object is re-rasterized every voxel frame.
   slow start. Its starting tilt is the tree's lean (its weight: `StandTree.lean`, drawn leaning,
   up to about 6°) plus a 4° push away from the side it was cut from, so the fall is predictable and
   the toast can say where (measured: within 1.4° of the prediction from eight sides). A tree leaning
-  more than the push falls its own way. The crown is a separate non-colliding entity that
+  more than the push falls its own way. Once down (the crown has broken off) the log's spin
+  damping goes from 0.4 to 20 while it settles and whenever it lies slow (under 0.5 rad/s and
+  0.3 m/s), so it stops rolling within about 2 s instead of drifting sideways for many seconds (a
+  cylinder on flat ground has no rolling resistance); moved faster (shoved, dropped, thrown) it
+  is back to 0.4 and rolls freely. The crown is a separate non-colliding entity that
   rides the log and breaks off (a needle burst) once the trunk has tipped 62°. It is drawn on the
   coarse lattice (ADR 0011) because of its size, so it costs little for the second it exists.
 - **Pools, not spawning.** Felled logs (6, each with a crown), short logs (6) and sawn planks (15)

@@ -25,6 +25,7 @@ import { drawStand, sawmillPieces } from './forestry.ts';
 import type { ForestryDef } from './forestry.ts';
 import { rasterizePieces } from './level.ts';
 import type { LevelBuildResult, LevelDef, LevelLayout, PropPlacement, StaticPiece } from './level.ts';
+import { waterButt } from './water-butt.ts';
 
 export const YARD_BOUNDS = { minX: -28, maxX: 28, minZ: -42, maxZ: 14 };
 export const CUT_BASE_Y = -2;
@@ -523,6 +524,8 @@ export function yardPieces(): StaticPiece[] {
             { collide: false, priority: 4 }
         )
     );
+    // the water butt by the stump (Epic 7), last: earlier pieces keep their colliders' order
+    P.push(...yardButt().pieces);
     return P;
 }
 
@@ -531,6 +534,13 @@ export const WINDSOCK = { x: 4.6, z: 1.6, height: 3.2 };
 
 /** Bucket stump in the yard. */
 export const BUCKET_STUMP = { x: 5.6, z: 4.4, top: YARD_Y + 0.44 };
+/** The yard's water tank (Epic 7): its tap fills a bucket set under it (YARD_TAP). */
+export const yardButt = () => waterButt('water butt', YARD_TAP.x, YARD_TAP.z, YARD_Y, YARD_Y, Math.PI / 2, 40);
+/**
+ * Where the yard's tap fills a bucket set on the ground under it: the south-west corner of the yard,
+ * clear of the paths to the bridge, the logging stand and the sawmill (its post stands to the north).
+ */
+export const YARD_TAP = { x: -4.4, z: 10.4 };
 /** Far-bank goal area for the bucket. */
 export const YARD_GOAL = { minX: BRIDGE_X - 3.5, maxX: BRIDGE_X + 3.5, minZ: -9.5, maxZ: -5.2 };
 
@@ -770,7 +780,9 @@ export const timberYardLevel: LevelDef = {
             crossing: { x: BRIDGE_X, halfX: BRIDGE.halfWidth + 0.3, z0: BRIDGE.nearFace, z1: BRIDGE.farFace },
             washup: floodWashup()
         },
-        gust: { force: 1050 }
+        gust: { force: 1050 },
+        // parked on a slope (3.5 degrees or more) and left: the handbrake lets go
+        handbrake: { slope: 0.06 }
     },
     spawn: { x: 1.2, z: 6.2, yaw: 0.12, pitch: -0.1 },
     orbitHome: { pos: [9, 4.2, 12], focus: [-1, 0.5, 0] },
@@ -782,8 +794,10 @@ export const timberYardLevel: LevelDef = {
     props: [...yardProps(), ...yardDeckPlanks()],
     forestry: YARD_FORESTRY,
     rules: {
-        objective: 'Get the bucket across the creek to the flag',
+        objective: 'Get the bucket of water across the creek to the flag',
         goal: YARD_GOAL,
+        minLitres: 0.25,
+        waterSources: [yardButt().source],
         fallY: -0.2,
         isSafe: (x, z) => Math.abs(z - creekCenterZ(x)) > creekHalfWidth(x) + 0.9,
         lostY: CREEK_WATER_Y + 0.15

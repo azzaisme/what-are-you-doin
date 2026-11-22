@@ -54,6 +54,14 @@ export const GRAB = {
     /** Wrist spring natural frequency (Hz) and damping ratio, inertia-normalized. */
     wristFrequency: 2.2,
     wristDamping: 1.0,
+    /**
+     * A hand holding something by a fixed grab point (the bucket) moves at most this fast relative
+     * to the eye (m/s): look up from the ground and it is lifted over about two thirds of a second,
+     * and a flick of the view swings it round behind you instead of whipping it (and its water) out.
+     * Measured with a full bucket: a 180 degree turn in 0.25 s spills nothing at 1.5 m/s; at 3 m/s
+     * it spilled 1.7 L in a 0.5 s turn.
+     */
+    handSpeed: 1.5,
     /** Throw: desired speed along the view, capped by the impulse a beaver can give. */
     throwSpeed: 9,
     maxThrowImpulse: 45

@@ -420,7 +420,9 @@ describe('the gate, by player input only', () => {
         const decked = planks.filter((p) => p.pose.p.z < BRIDGE.nearFace && p.pose.p.z > BRIDGE.farFace);
         expect(decked.length).toBe(3);
 
-        // ---- player 0 walks over the bridge, over the planks, to the far bank
+        // ---- player 0 walks over the bridge, over the planks, to the far bank (player 1 first
+        // stands back further, off player 0's way to the bridge end: walked into, a player is shoved)
+        g.walkTo(1, BRIDGE_X + 3, BRIDGE.nearEdge + 5.5);
         g.walkTo(0, BRIDGE_X, BRIDGE.nearEdge + 1.2);
         g.turn(0, 0);
         let topY = 0;

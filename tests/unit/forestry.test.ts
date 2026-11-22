@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { SAW_MODE, TREE_CUT, TREE_STATE } from '../../src/assets/forestry.ts';
+import { LOG_RADIUS } from '../../src/assets/props.ts';
 import { MAX_PARTICLES, ParticleFX } from '../../src/fx/particles.ts';
 import { WoodFX } from '../../src/fx/wood-fx.ts';
 import { PINE_TRUNK_HEIGHT } from '../../src/levels/common.ts';
@@ -15,6 +16,7 @@ import type { PlayerCommand } from '../../src/sim/commands.ts';
 import { WOOD } from '../../src/sim/forestry.ts';
 import { createLabEntities } from '../../src/sim/lab-entities.ts';
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
+import { GRAB } from '../../src/sim/physics/grab.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
 import { SAW } from '../../src/sim/sawmill.ts';
 import { GRID_SIZE, cellIndexX, cellIndexZ } from '../../src/voxels/grid.ts';
@@ -84,6 +86,51 @@ function axisOf(p: Pose): { x: number; y: number; z: number } {
     return v;
 }
 
+/**
+ * Player 0 walks sideways off tree n's fall line, by input, on the side they stand (until 2.5 m
+ * from it, or 3 s): a chewer standing in the fall's path would otherwise have the log on them.
+ */
+function walkClear(s: LabSim, n: number, from: { k: number }): void {
+    const t = YARD_FORESTRY.trees[n];
+    const d = s.forestry.fallDirection(n);
+    const nx = -d.z;
+    const nz = d.x;
+    const p = s.players[0];
+    const side = (p.x - t.x) * nx + (p.z - t.z) * nz < 0 ? -1 : 1;
+    for (let k = 0; k < 180 && ((p.x - t.x) * nx + (p.z - t.z) * nz) * side < 2.5; k++)
+        s.step(cmd(from.k++, { yaw: Math.atan2(-nx * side, -nz * side), pitch: 0, moveZ: 0.8 }));
+    s.step(cmd(from.k++));
+}
+
+/** Steps until a body lies still (or `max` steps); returns the steps taken, or -1 if it never did. */
+function untilStill(s: LabSim, id: number, from: { k: number }, max = 600): number {
+    const b = s.physics.bodies.get(id)!.body;
+    for (let k = 0; k < max; k++) {
+        s.step(cmd(from.k++));
+        const v = b.linvel();
+        const w = b.angvel();
+        if (k > 30 && Math.hypot(v.x, v.y, v.z) < 0.02 && Math.hypot(w.x, w.y, w.z) < 0.05) return k + 1;
+    }
+    return -1;
+}
+
+/**
+ * Steps until a felled log has come to rest (the chewer walking out of its way first), then says
+ * how it lies: its tilt from flat (|axis.y|), and how high its end nearer the stump is above the
+ * ground there (about 0.3 if that end were up on the stump).
+ */
+function atRest(s: LabSim, tree: number, from: { k: number }): { flat: number; footUp: number } {
+    const log = s.forestry.logOf(tree)!;
+    walkClear(s, tree, from);
+    untilStill(s, log.id, from);
+    const t = YARD_FORESTRY.trees[tree];
+    const a = axisOf(log.pose);
+    const c = log.pose.p;
+    const e = (c.x - t.x) * a.x + (c.z - t.z) * a.z > 0 ? -1 : 1;
+    const foot = { x: c.x + a.x * e, y: c.y + a.y * e, z: c.z + a.z * e };
+    return { flat: Math.abs(a.y), footUp: foot.y - LOG_RADIUS - YARD_FORESTRY.ground(foot.x, foot.z) };
+}
+
 /** A pose lying in the sawmill's infeed guide, along it. */
 function inGuide(dy = 0.05): Pose {
     const G = SAWMILL.guide;
@@ -143,9 +190,12 @@ describe('forestry: the logging stand', () => {
         expect(p.y).toBeLessThan(YARD_Y + 0.6);
         expect(p.x - t.x).toBeGreaterThan(0.8);
         expect(Math.abs(p.z - t.z)).toBeLessThan(0.4);
-        // lying (its foot may rest on its own stump: up to ~15 degrees)
-        expect(Math.abs(axisOf(log.pose).y)).toBeLessThan(0.3);
         expect(Math.abs(axisOf(log.pose).x)).toBeGreaterThan(0.9);
+        // at rest it lies flat, its foot on the ground and not up on the stump (just after landing
+        // the foot may still be sliding off the stump)
+        const rest = atRest(s, tree, from);
+        expect(rest.flat).toBeLessThan(0.2);
+        expect(rest.footUp).toBeLessThan(0.05);
         // only a stump is left: a ray at chest height passes where the trunk stood
         expect(s.forestry.aimTree({ x: t.x - 1.5, y: YARD_Y + 1, z: t.z }, -Math.PI / 2, 0)).toBe(-1);
         const g = s.physics.groundY(t.x, t.z, YARD_Y + 3)!;
@@ -153,8 +203,9 @@ describe('forestry: the logging stand', () => {
         expect(g).toBeGreaterThan(YARD_Y + 0.2);
     });
 
-    it('falls the predicted way, from every side, every time (within 15 degrees)', () => {
+    it('falls the predicted way, from every side, every time (within 15 degrees), and lies flat', () => {
         const worst: number[] = [];
+        const flats: number[] = [];
         for (let side = 0; side < 8; side++) {
             const s = yard();
             const from = { k: 100 };
@@ -174,9 +225,128 @@ describe('forestry: the logging stand', () => {
             const want = Math.atan2(d.z, d.x);
             const err = Math.abs(Math.atan2(Math.sin(got - want), Math.cos(got - want)));
             worst.push((err * 180) / Math.PI);
+            // and at rest, flat, its foot on the ground and not up on the stump
+            const rest = atRest(s, tree, from);
+            flats.push(rest.flat);
+            expect(rest.footUp).toBeLessThan(0.05);
         }
         expect(Math.max(...worst)).toBeLessThan(15);
+        expect(Math.max(...flats)).toBeLessThan(0.2);
     }, 60_000);
+
+    it('a felled log stops rolling soon after it lands, near its fall line (24 fellings)', () => {
+        // every stand tree, chewed from four sides; the chewer walks out of the way as it falls
+        const still: number[] = [];
+        const off: number[] = [];
+        for (let tree = 0; tree < 6; tree++)
+            for (let side = 0; side < 8; side += 2) {
+                const s = yard();
+                const from = { k: 100 };
+                standBy(s, tree, (side / 8) * Math.PI * 2);
+                cutDown(s, tree, from);
+                const d = s.forestry.fallDirection(tree);
+                const log = s.forestry.logOf(tree)!;
+                const k0 = from.k;
+                walkClear(s, tree, from);
+                const n = untilStill(s, log.id, from, 900);
+                still.push(n < 0 ? Infinity : (from.k - k0) * SIM_DT);
+                const t = YARD_FORESTRY.trees[tree];
+                const c = log.pose.p;
+                off.push(Math.abs((c.x - t.x) * -d.z + (c.z - t.z) * d.x));
+            }
+        // (measured: 22 still within 3.6 s of starting to fall, the fall included; the other two
+        // lie partly on sloping ground at the stand's edges and creep slowly down it)
+        expect(still.filter((t) => t < 4).length).toBeGreaterThanOrEqual(22);
+        // (measured: 21 within 0.1 m of the fall line, the worst 0.57 m: tree 0, on the bank)
+        expect(off.filter((o) => o < 0.1).length).toBeGreaterThanOrEqual(20);
+        expect(Math.max(...off)).toBeLessThan(0.75);
+    }, 120_000);
+
+    it('a landed log is not sticky: a shove or a walk-in moves it about as far as an undamped log', () => {
+        // the same felling and settling twice; then the push as the game has it, and with the
+        // lying damping switched off
+        const run = (damped: boolean, push: 'shove' | 'walk') => {
+            const was = WOOD.lyingDamping;
+            try {
+                const s = yard();
+                const from = { k: 100 };
+                const tree = 1; // upright: chewed from the west, it falls east and lies east-west
+                standBy(s, tree, Math.PI);
+                cutDown(s, tree, from);
+                const log = s.forestry.logOf(tree)!;
+                walkClear(s, tree, from);
+                expect(untilStill(s, log.id, from)).toBeGreaterThan(0);
+                // (the reference: from the same resting pose, the lying damping switched off)
+                if (!damped) WOOD.lyingDamping = WOOD.fallDamping;
+                s.step(cmd(from.k++));
+                const pb = s.physics.bodies.get(log.id)!;
+                expect(pb.body.angularDamping()).toBeCloseTo(damped ? was : WOOD.fallDamping, 5);
+                const p0 = { ...log.pose.p };
+                if (push === 'shove') {
+                    // a 2 m/s shove across it (south): it rolls
+                    pb.body.setLinvel({ x: 0, y: 0, z: 2 }, true);
+                    for (let k = 0; k < 600; k++) s.step(cmd(from.k++));
+                } else {
+                    // a beaver walks into it from the north at a run, by input
+                    const p = s.players[0];
+                    const north = { x: p0.x, z: p0.z - 3 };
+                    for (let k = 0; k < 600 && Math.hypot(p.x - north.x, p.z - north.z) > 0.1; k++) {
+                        const dx = north.x - p.x;
+                        const dz = north.z - p.z;
+                        s.step(cmd(from.k++, { yaw: Math.atan2(-dx, -dz), moveZ: 1 }));
+                    }
+                    for (let k = 0; k < 120; k++) s.step(cmd(from.k++, { yaw: Math.PI, pitch: 0, moveZ: 1 }));
+                    for (let k = 0; k < 300; k++) s.step(cmd(from.k++));
+                }
+                return Math.hypot(log.pose.p.x - p0.x, log.pose.p.z - p0.z);
+            } finally {
+                WOOD.lyingDamping = was;
+            }
+        };
+        const shove = run(true, 'shove');
+        const shoveFree = run(false, 'shove');
+        const walk = run(true, 'walk');
+        const walkFree = run(false, 'walk');
+        // (measured: shoved, 5.84 m against 5.97 m undamped; walked into, 0.93 m against 1.01 m)
+        expect(shove).toBeGreaterThan(4);
+        expect(shove).toBeGreaterThan(shoveFree * 0.85);
+        expect(walk).toBeGreaterThan(0.6);
+        expect(walk).toBeGreaterThan(walkFree * 0.85);
+    }, 60_000);
+
+    it("carrying a landed log is unchanged: the grab's damping while held, the lying damping once it is down again", () => {
+        const s = yard();
+        const from = { k: 100 };
+        const tree = 1;
+        standBy(s, tree, Math.PI);
+        cutDown(s, tree, from);
+        const log = s.forestry.logOf(tree)!;
+        walkClear(s, tree, from);
+        untilStill(s, log.id, from);
+        const pb = s.physics.bodies.get(log.id)!;
+        expect(pb.body.angularDamping()).toBe(WOOD.lyingDamping);
+        // walk up to it (by input) and take it by its middle
+        const c = log.pose.p;
+        const p = s.players[0];
+        for (let k = 0; k < 600 && Math.hypot(p.x - c.x, p.z - (c.z - 1.1)) > 0.08; k++) {
+            const dx = c.x - p.x;
+            const dz = c.z - 1.1 - p.z;
+            s.step(cmd(from.k++, { yaw: Math.atan2(-dx, -dz), moveZ: Math.min(0.6, Math.hypot(dx, dz) * 1.5 + 0.1) }));
+        }
+        for (let k = 0; k < 20; k++) s.step(cmd(from.k++));
+        s.step(cmd(from.k++, { ...lookAt(s, 0, c.x, c.y, c.z), grab: true }));
+        expect(s.physics.heldIdOf(0)).toBe(log.id);
+        for (let k = 0; k < 60; k++) s.step(cmd(from.k++, lookAt(s, 0, c.x, c.y, c.z)));
+        // held: the grab's own damping, not the lying damping
+        expect([GRAB.heldAngularDamping, GRAB.hangingAngularDamping]).toContain(pb.body.angularDamping());
+        // and the base the grab restores on release is the free one (thrown, it keeps its spin)
+        expect(pb.baseAngularDamping).toBe(WOOD.fallDamping);
+        // let go: the base comes back, and lying slow it is damped hard again
+        s.step(cmd(from.k++, { grab: true }));
+        expect(s.physics.heldIdOf(0)).toBe(-1);
+        expect(untilStill(s, log.id, from)).toBeGreaterThan(0);
+        expect(pb.body.angularDamping()).toBe(WOOD.lyingDamping);
+    });
 
     it("a tree's weight biases the fall: a leaning tree falls between the push and its lean", () => {
         // tree 0 leans 0.11 rad north (more than a cut's 0.07 push): chewed from the west, the push
