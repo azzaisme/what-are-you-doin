@@ -48,7 +48,8 @@ function handle(msg: ToWorker): void {
                 msg.particleCount ?? 0,
                 msg.focus,
                 msg.nearTiles,
-                msg.nearTileSize
+                msg.nearTileSize,
+                msg.nearRadius
             );
             post({ type: 'frame', units, stats, tiles }, transferables(units));
         } else if (msg.type === 'query') {
