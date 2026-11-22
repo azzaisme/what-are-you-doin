@@ -61,7 +61,7 @@ Valley has the same stand and sawmill where the yard is.
 
 ### Test results (actual)
 
-`tests/unit/forestry.test.ts`, 19 tests, at 5 cm and 10 cm:
+`tests/unit/forestry.test.ts`, 20 tests, at 5 cm and 10 cm:
 
 | Test                                                                  | Result                                                                                       |
 | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
@@ -82,8 +82,9 @@ Valley has the same stand and sawmill where the yard is.
 | Regrowth, lost logs                                                   | regrows only after its log has gone; a log in the creek returns to its pool                  |
 | Voxel worker                                                          | felled: every tree cell gone, stump drawn, ground untouched; regrown: identical to the start |
 | Effects                                                               | 10 bites → 10 chip bursts; 1 needle burst; sawdust while sawing                              |
+| Online guest                                                          | a guest's grab presses chew a tree down on the host; its snapshots show the tree felled      |
 
-- Unit tests: 364 pass (46 files, both voxel sizes).
+- Unit tests: 366 pass (46 files, both voxel sizes).
 - Browser test: in the Timber Yard, chew tree 2 down with injected clicks, then saw a log
   (screenshots in `test-results/logging-*.png`).
 - Cost of a felling in the voxel worker (one-off, off the main thread): 83 ms to clear the tree and
