@@ -52,6 +52,8 @@ import type { RockSpot, TerrainSpec, TreeSpot } from './common.ts';
 import { pieceVolume } from './level.ts';
 import type { LevelBuildResult, LevelDef, LevelLayout, LevelStage, PropPlacement, Rect, StaticPiece } from './level.ts';
 import { routeSign } from './route-signs.ts';
+import { nearestPath } from './side-paths.ts';
+import type { SidePath } from './side-paths.ts';
 import {
     BRIDGE_X,
     BUCKET_STUMP,
@@ -167,8 +169,58 @@ function yardBlend(u: number, t: number): number {
     return (1 - smoothstep(21, 26, Math.abs(t))) * (1 - smoothstep(2.5, 6, u)) * smoothstep(-18, -15.5, u);
 }
 
+/**
+ * Side paths off the road (side-paths.ts): the old logging track loops off the forest road and back
+ * before the culvert (somewhere to go when the road is closed), and a track climbs from past the
+ * culvert to the fire lookout.
+ */
+export const SIDE_PATHS: SidePath[] = [
+    {
+        name: 'logging-track',
+        points: [
+            [11, roadT(11) + 2.2],
+            [15, 8.5],
+            [21, 12.5],
+            [28, 13],
+            [33, 9.5],
+            [35.5, roadT(35.5) + 2.2]
+        ],
+        halfWidth: 1.6
+    },
+    {
+        name: 'lookout-track',
+        points: [
+            [48, roadT(48) + 2.2],
+            [51, 9],
+            [54, 15],
+            [57.2, 21.6]
+        ],
+        halfWidth: 1.4
+    }
+];
+
 /** Continuous ground height in the route frame. */
 function heightUT(u: number, t: number): number {
+    let y = naturalUT(u, t);
+    // side paths: graded flat across to their centre line's own height
+    const hit = nearestPath(SIDE_PATHS, u, t, 3.2);
+    const pathW = hit ? 1 - smoothstep(hit.path.halfWidth, hit.path.halfWidth + 1.6, hit.d) : 0;
+    if (hit && pathW > 0) y = lerp(y, naturalUT(hit.u, hit.t), pathW);
+    // the valley sides are terraced into 0.3 m benches (as in the Timber Yard): fewer triangles
+    const terrace = smoothstep(12, 16, Math.abs(t - roadT(u))) * (1 - yardBlend(u, t)) * (1 - pathW);
+    if (terrace > 0) y = lerp(y, Math.floor(y / 0.3) * 0.3 + 1e-3, terrace);
+    // the crossings, cut right across the valley with steep walls
+    for (const c of CHANNELS) {
+        const d = Math.abs(u - c.centre(t));
+        const hw = c.hw(t);
+        if (d < hw) return c.bed + 0.15 * smoothstep(0, hw * 0.8, d);
+        if (d < hw + 0.3) y = lerp(c.bed + 0.15, y, smoothstep(hw, hw + 0.3, d));
+    }
+    return y;
+}
+
+/** Ground height before terraces, side paths and the crossings. */
+function naturalUT(u: number, t: number): number {
     const rt = roadT(u);
     const a = Math.abs(t - rt);
     const f = floorY(u, t);
@@ -190,16 +242,6 @@ function heightUT(u: number, t: number): number {
     // the Timber Yard's own ground at the start
     const yb = yardBlend(u, t);
     if (yb > 0) y = lerp(y, yardHeight(t + BRIDGE_X, creekCenterZ(BRIDGE_X) - u), yb);
-    // the valley sides are terraced into 0.3 m benches (as in the Timber Yard): fewer triangles
-    const terrace = smoothstep(12, 16, a) * (1 - yb);
-    if (terrace > 0) y = lerp(y, Math.floor(y / 0.3) * 0.3 + 1e-3, terrace);
-    // the crossings, cut right across the valley with steep walls
-    for (const c of CHANNELS) {
-        const d = Math.abs(u - c.centre(t));
-        const hw = c.hw(t);
-        if (d < hw) return c.bed + 0.15 * smoothstep(0, hw * 0.8, d);
-        if (d < hw + 0.3) y = lerp(c.bed + 0.15, y, smoothstep(hw, hw + 0.3, d));
-    }
     return y;
 }
 
@@ -228,6 +270,9 @@ function surfaceMaterial(x: number, z: number, top: number, grad: number): numbe
         if (grad > 1.5) return voxel(mountain || u > 88 ? M.HillRock : M.Rock, shade & 1);
     }
     if (a < 1.6) return voxel(u > 88 && u < 142 ? M.Concrete : M.Path, shade);
+    const side = nearestPath(SIDE_PATHS, u, t, 1.4);
+    if (side && side.d < side.path.halfWidth - 0.45 + 0.25 * fbm(x * 0.6, z * 0.6, 17))
+        return voxel(fbm(x * 0.4, z * 0.4, 19) > 0.62 ? M.GrassDry : M.Path, shade);
     if (worksWeight(u, a) > 0.5)
         return voxel(fbm(x * 0.2, z * 0.2, 13) > 0.6 ? M.Pebble : M.Concrete, shade & 1 ? 1 : 3);
     if (mountain) return voxel(y > 13.2 && a > 5 ? M.Snow : M.HillGrass, shade);
@@ -827,6 +872,7 @@ function clearSpot(u: number, t: number, r: number): boolean {
     if (Math.abs(u - WALL.u) < 2.5) return false;
     if (Math.hypot(u - SUMMIT_U, t) < 7) return false;
     for (const l of Object.values(LANDMARKS)) if (Math.hypot(u - l.u, t - l.t) < 4.5) return false;
+    if (nearestPath(SIDE_PATHS, u, t, 2.4 + r * 0.6)) return false;
     for (const c of CHECKPOINTS) if (Math.hypot(u - c.u, t - c.t) < 4) return false;
     // the timber piles
     for (const [su, st] of STAGING) if (Math.hypot(u - su, t - st) < 4.5) return false;
@@ -915,7 +961,7 @@ function scene(seed: number): Scene {
         const summit = n % 3 === 0;
         const u = summit ? SUMMIT_U - 14 + r() * 26 : 6 + r() * 76;
         const t = summit ? across(14, 2.8) : roadT(u) + across(30, 2.2);
-        if (Math.abs(t - roadT(u)) < 1.9 || channelEdge(u, t) < 0.6) continue;
+        if (Math.abs(t - roadT(u)) < 1.9 || channelEdge(u, t) < 0.6 || nearestPath(SIDE_PATHS, u, t, 1.6)) continue;
         const w = routeToWorld(u, t);
         if (!inBounds(w.x, w.z, 1)) continue;
         flowers.push([w.x, w.z, r() < 0.3 ? 2 : 0]);

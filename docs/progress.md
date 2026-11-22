@@ -1,5 +1,30 @@
 # Progress log
 
+## Side paths in the Valley (2026-11-22, Epic 9, #87)
+
+Two tracks now leave the Forest Road. Neither goes near a crossing: the Epic 5 session is
+reworking those into built bridges.
+
+- **The old logging track** leaves the road at 11 m past the creek crossing and rejoins it at
+  35.5 m, before the culvert.
+    - It is a 32.7 m loop through the forest on the far side of the log dump.
+    - It gives a road closure (an Epic 8 hazard) somewhere to send you.
+- **The lookout track** climbs 2.4 m over 21.3 m, from just past the culvert flag to the foot of
+  the fire lookout.
+- **How they're made** (`src/levels/side-paths.ts`, with the paths listed in `valley.ts`
+  `SIDE_PATHS`):
+    - the ground is graded level across each track, following its centre line's own height;
+    - the valley-side terraces are left off them;
+    - they are painted as a dirt track with a few dry tufts;
+    - trees and flowers are kept off.
+- **Tests** (`tests/unit/side-paths.test.ts`):
+    - walking each centre line in 25 cm steps, no step rises more than 10 cm (the beaver steps
+      up 32 cm);
+    - the track is level across, within 25 cm over 1.2 m;
+    - the logging track starts and ends on the road, and the lookout track ends at the lookout;
+    - no tree stands within 2 m of a track.
+- Unit tests: 342 pass.
+
 ## Valley performance: what costs what, and Low builds less (2026-11-22, Epic 9, owner question)
 
 The owner asked: could the Valley load only the current area, with a cut between areas? The
