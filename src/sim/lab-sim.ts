@@ -340,6 +340,7 @@ export class LabSim {
         pw.shoulderDrop = BODY.eyeHeight - BODY.shoulderHeight;
         pw.holdMin = BODY.holdMin;
         pw.breakDistance = BODY.breakDistance;
+        pw.breakTime = BODY.breakTime;
         pw.snapDistance = BODY.snapDistance;
         this.physics = pw;
     }

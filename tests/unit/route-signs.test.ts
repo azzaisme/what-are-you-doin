@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { rasterizePieces } from '../../src/levels/level.ts';
+import type { StaticPiece } from '../../src/levels/level.ts';
 import { SIGN_BOARD, SIGN_PIXEL, routeSign } from '../../src/levels/route-signs.ts';
 import type { SignArrow } from '../../src/levels/route-signs.ts';
-import type { StaticPiece } from '../../src/levels/level.ts';
 import { STAGE_COLOURS, roadT, routeT, routeToWorld, routeU, valleyLayout } from '../../src/levels/valley.ts';
 import { GRID_SIZE, cellIndexX, cellIndexY, cellIndexZ } from '../../src/voxels/grid.ts';
 import { M, voxelMaterial } from '../../src/voxels/palette.ts';

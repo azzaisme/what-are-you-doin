@@ -51,10 +51,11 @@ export interface PlayerBody {
     /** How far the shoulders may reach forward into what you hold (m). */
     reachMax: number;
     /**
-     * The grab lets go when what you hold is dragged this far from your hands for a moment (m), or
-     * at once beyond `snapDistance`: shorter arms hold on less far.
+     * The grab lets go when what you hold is dragged further than `breakDistance` from your hands for
+     * `breakTime` (s), or at once beyond `snapDistance` (m).
      */
     breakDistance: number;
+    breakTime: number;
     snapDistance: number;
 }
 
@@ -74,6 +75,7 @@ const BODIES: Record<BodyKind, PlayerBody> = {
         holdMin: 0.7,
         reachMax: 0.2,
         breakDistance: 1.25,
+        breakTime: 0.75,
         snapDistance: 2.2
     },
     beaver: {
@@ -91,10 +93,12 @@ const BODIES: Record<BodyKind, PlayerBody> = {
         holdReach: BEAVER_ARM_LENGTH + 0.35,
         holdMin: 0.7,
         reachMax: 0.45,
-        // a reach of 0.95 m with the lean, against a person's 1.04 m: a hard yank tears it out of
-        // the paws sooner
+        // paws, and a reach of 0.95 m with the lean (a person's is 1.04 m): a sustained yank tears
+        // things away sooner (a violent flick stretches the grab past 1.25 m for ~0.5 s; a quick
+        // turn, under 0.1 s)
         breakDistance: 1.25,
-        snapDistance: 1.8
+        breakTime: 0.4,
+        snapDistance: 2.2
     }
 };
 

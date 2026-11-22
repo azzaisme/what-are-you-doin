@@ -1,10 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { OAK, PINE_TIERS } from '../../src/levels/common.ts';
 import type * as LevelMod from '../../src/levels/level.ts';
 import type * as ValleyMod from '../../src/levels/valley.ts';
-import type * as RasterMod from '../../src/voxels/rasterizer.ts';
-import type * as WorldMod from '../../src/voxels/world.ts';
-import { OAK, PINE_TIERS } from '../../src/levels/common.ts';
 import {
     LANDMARKS,
     VALLEY_STAGES,
@@ -14,6 +12,8 @@ import {
     valleyHeight,
     valleyLayout
 } from '../../src/levels/valley.ts';
+import type * as RasterMod from '../../src/voxels/rasterizer.ts';
+import type * as WorldMod from '../../src/voxels/world.ts';
 
 /** Landmark piece names, by landmark. */
 const PARTS = {

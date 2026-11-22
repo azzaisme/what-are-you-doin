@@ -64,11 +64,13 @@ Lab's walking co-worker are beaver engineers again.
     - The arms aim from where the leaning shoulders are, so the paws land on the grip.
     - In first person, the "ready" pose (paws up in the corners) is only for empty paws. While you
       hold something, your paws are where everyone else sees them: on it.
-- **A hard yank tears things out of its paws.** The beaver's reach is shorter (0.95 m with the
-  lean, a person's is 1.04 m). So the grab lets go at once when what you hold is dragged 1.8 m
-  from your paws (2.2 m for a person). Held 1.25 m away for 0.75 s, it lets go too, as before.
-    - A violent flick drops the plank again (the original test, unchanged).
-    - Carrying while walking and turning stays under 0.45 m, well clear.
+- **A sustained yank tears things out of its paws.** The beaver's reach is shorter (0.95 m with
+  the lean, a person's is 1.04 m). The grab lets go when what you hold stays more than 1.25 m from
+  your paws for 0.4 s (0.75 s for a person), or at once beyond 2.2 m, as before.
+    - A violent flick stretches it past 1.25 m for about 0.5 s, so it drops the plank again (the
+      original test, unchanged).
+    - A sudden turn stretches it for under 0.1 s, and carrying while walking stays under 0.45 m:
+      both keep hold.
 - **Your first-person limbs** still have their own 1 cm lane that follows the camera every frame.
 
 ### Measured (`tests/unit/hands.test.ts`, now run for the beaver)

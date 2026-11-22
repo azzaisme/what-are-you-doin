@@ -249,8 +249,9 @@ export class PhysicsWorld {
     shoulderDrop = 0.2;
     /** With a finite holdReach: the nearest the eye things in your hands come (m). */
     holdMin: number = GRAB.minHold;
-    /** The grab lets go when stretched this far for GRAB.breakTime, or at once beyond snapDistance (m). */
+    /** The grab lets go when stretched beyond breakDistance (m) for breakTime (s), or at once beyond snapDistance (m). */
     breakDistance: number = GRAB.breakDistance;
+    breakTime: number = GRAB.breakTime;
     snapDistance: number = GRAB.snapDistance;
     readonly world: RAPIER.World;
     readonly bodies = new Map<number, PhysBody>();
@@ -884,7 +885,7 @@ export class PhysicsWorld {
         s.maxHeldSpeed = Math.max(s.maxHeldSpeed, Math.hypot(lv.x, lv.y, lv.z));
         // snagged or too heavy to follow: let go rather than build up energy
         r.stretchTime = f.error > this.breakDistance ? r.stretchTime + SIM_DT : 0;
-        if (r.stretchTime > GRAB.breakTime || f.error > this.snapDistance) {
+        if (r.stretchTime > this.breakTime || f.error > this.snapDistance) {
             s.grabBreaks++;
             this.release(p);
         }
