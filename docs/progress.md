@@ -1,5 +1,50 @@
 # Progress log
 
+## Weather along the Valley, and its flood (2026-11-22, Epic 9, towards #88)
+
+Each Valley area past the creek now gets its own weather once per run. It comes a seeded 4–22 s
+after the first player gets there. The hazard director runs it, so it takes turns with the flood
+and the gust: only one hazard at a time, with a 15 s quiet spell after each. Every kind has a way
+to beat it, and a test that plays it out.
+
+- **Rain on the Forest Road.** The creek, culvert and gorge water rise 0.35 m and run
+  downstream, then fall back.
+    - A plank lying in the culvert drifted 24.8 m downstream.
+    - A beam bridge over the culvert stayed 2.2 m clear of the water and did not move at all.
+    - So: bridge above the water, and don't leave timber lying in it.
+- **Mist over the gorge, and a fog bank on the mountain road.** The view closes in to 55 m in the
+  mist and 30 m in the fog.
+    - The fog only hangs over its own area. Players further up, and the summit with its flower,
+      stay clear.
+    - It never closes in nearer than the Low preset's 24 m near world, so the coarse far ground
+      behind it stays hidden.
+    - On the fog stretch, the next edge post or sign up the road is never more than 11.6 m away,
+      so you can follow the road.
+    - When the fog lifts, the view is back to the level's own.
+- **A snow squall at the crevasse.** A crosswind (up to 1000 N) pushes carried planks across the
+  road, like a weaker version of the Timber Yard's gust.
+    - Carried at chest height in one pair of hands, a plank was torn away (699 N against a 650 N
+      grip).
+    - Carried low, the push was only 200 N, and it held.
+    - Carried by two players, it held at 797 N (two grips hold 1300 N).
+- **The Timber Yard's flood now happens at Shallow Creek too.** It is the same flood on the same
+  crossing, turned with the yard. Finishing the bridge brings the siren; the water floats the
+  beams off and leaves them on the bank downstream.
+    - A test plays it out by input: fetch both beams, rebuild, carry the bucket to the far flag.
+    - The flood can leave a beam lying askew (13° in the test), so the test's player squares it
+      up before laying it, as a player would.
+- **One at a time:**
+    - a bridge finished while it rains waits for the rain and the quiet spell before it floods;
+    - rain waits out a flood;
+    - in a test yard with weather over it, the aimed gust never comes during the weather.
+- **Online:** guests get the weather's area and strength from the host along with the water
+  height (tested through real host and guest sessions).
+    - An older host sends neither, and that reads as no weather.
+    - The Timber Yard sends nothing new.
+- **On screen:** rain and snow fall round the camera as voxel particles (at most 90 cells). Mist
+  and fog are drawn with the fog alone.
+- **Timber Yard unchanged:** all its hazard tests pass untouched.
+
 ## Side paths in the Valley (2026-11-22, Epic 9, towards #87)
 
 Two tracks now leave the Forest Road. Neither goes near a crossing: the Epic 5 session is
