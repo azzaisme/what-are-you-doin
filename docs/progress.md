@@ -80,7 +80,7 @@ build a real bridge, beams plus a nailed plank deck, and drive the ute over it.
 
 - Browser test: in the Timber Yard, look at a beam, F nails it and the nail head draws; a second F
   at the same spot is refused.
-- Unit tests: 668 pass (both voxel sizes). Browser: the yard, ute, hammer, split screen and all online co-op tests
+- Unit tests: 670 pass (both voxel sizes). Browser: the yard, ute, hammer, split screen and all online co-op tests
   pass.
 
 ### Audit fixes (second review)
@@ -134,6 +134,26 @@ build a real bridge, beams plus a nailed plank deck, and drive the ute over it.
 ### Next
 
 Stress and calibrated breaking (#49), creaks and safe joint removal (#50).
+
+## Epic 8: the logging sounds and the Valley's waterfall (2026-11-22, #82, #80)
+
+The Timber Yard's logging now sounds as it looks. Before, the sounds existed but nothing played them.
+
+- **Chewing and the axe:** a chop at every bite or blow on a tree (`chop`).
+- **The tree comes down:** a heavy, low thud when the felled tree's crown breaks off.
+- **The sawmill:** its motor (`saw`, a loop) runs while the blade cuts, rising a little in pitch
+  through the cut, and fades out when the planks or the beam come out.
+- **Online:** every device works these out from the same snapshots as the chips, needles and
+  sawdust, so guests hear them too. Nothing new is sent.
+- **Tested:** in the wood-effects test, ten bites give ten chops and the crown gives one thud.
+  While a log is sawn the motor is held on every frame (over 60), its pitch rising, and it stops
+  being held once the sawmill stops.
+- **The Valley's waterfall (#80):** the outfall's water falling into the gorge now roars from
+  where it falls. It is the creek's sound, deeper and louder, heard out to about 60 m. The level
+  declares where (`valleyLevel.sounds.waterfalls`), from the same numbers as the waterfall piece:
+  tested to be within 1 cm of it.
+- **Still waiting:** the joint creaks (Epic 5) and the bucket slosh and pour (Epic 7), whose
+  mechanics aren't in yet. Their calls are in `docs/sound.md`.
 
 ## Epic 7, part 1: the bucket holds real water (2026-11-22)
 
