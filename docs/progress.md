@@ -1,5 +1,66 @@
 # Progress log
 
+## Epic 4: the ute drives (2026-11-22)
+
+You can now drive the ute in the Timber Yard and the Valley. A friend can ride along.
+
+### How to play it
+
+- **Get in:** look at the ute and click (or E, RT, touch grab).
+    - From its right side you take the driver's seat (right-hand drive).
+    - From its left side you take the passenger seat. If your seat is taken, you get the other one.
+- **Drive:**
+    - W/S throttle (throttle against the motion brakes first), A/D steer, Space brake.
+    - On a pad: the left stick drives and steers, A brakes.
+- **Get out:** click or E again. You step out beside your door.
+- **Recover:** Q (B on a pad, drop on touch) puts the ute back where it last stood level on firm ground.
+- **Parked:** with nobody driving, the handbrake holds it.
+
+### What was built
+
+- **Vehicle (#41):**
+    - A dynamic chassis on four raycast wheels (Rapier's `DynamicRayCastVehicleController`).
+    - Rear-wheel drive, top speed 10 m/s (4 m/s reversing). Steering lock eases off with speed.
+    - About 760 kg, with the ballast low.
+    - It never sleeps, because nothing would wake it when the ground under its wheel rays moves.
+- **Collision shape:** follows the voxel model: lower body, hood and cab.
+- **Cargo bed (#44):** an open bed with a floor, sides and a tailgate, so loads ride in it.
+- **Seats (#42, #43):**
+    - Driver on the right, passenger on the left, each eye under the cab roof.
+    - Your view turns with the ute.
+    - The host sends each player's seat to guests, so their prompts and view follow it too.
+- **Gate (#45), wheels load what holds them up:**
+    - Rapier pushes only the chassis.
+    - Each tick, the opposite of each wheel's suspension impulse goes into the dynamic body that wheel stands on, at the contact point.
+    - Tyre friction is shared between those bodies by wheel load.
+- **Recovery (#46):**
+    - Tipped over and still for 1.5 s, it rights itself where it lies.
+    - The driver's drop puts it back at its last safe spot.
+    - Out of the world, it goes back to its spawn.
+    - Reset props also resets it.
+
+### Test results (actual, `tests/unit/ute.test.ts`, both voxel sizes)
+
+| Test                                                       | Result                                                                                        |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Parked on a free platform                                  | All 4 wheels on it; reaction / weight = **1.000**; the platform stays pressed onto the ground |
+| Accelerating on a free platform on ice                     | The platform is pushed backwards (momentum is shared)                                         |
+| A loose deck over a gap                                    | Carries the ute and stays on its supports                                                     |
+| Two loose 20 cm beams over the Timber Yard creek           | Both take its weight out to mid-gap (over 0.3 × weight) and stay across                       |
+| Top speed and braking                                      | 8.5 m/s after 6 s; stops in 1.2 s                                                             |
+| A ~30 kg crate in the bed, after a 3 s run and a hard stop | Still in the bed: it slid forward to the cab end under braking                                |
+| Rolled onto its roof                                       | Back on its wheels in 1.05 s                                                                  |
+| Dropped nose-down in the creek, driver presses drop        | Back at its safe spot, upright, driver still seated                                           |
+
+- Browser test: get in, drive with the keyboard, get out, in the Timber Yard.
+- Unit tests: 326 pass.
+
+### Known limits
+
+- **Crossing loose 20 cm beams all the way:** past mid-gap, the tyres' sideways push walks an unfastened beam out from under a wheel. Fastening comes in Epic 5.
+- **The cab is a solid box:** the seat view is placed inside it. Passengers can't walk inside the cab.
+- **Not tried on a real phone or pad.** Driving with touch and pads is covered by the prompts and command mapping, not by a hands-on test.
+
 ## Your limbs stay with the camera (2026-11-22, owner report from a phone)
 
 Owner: "The biggest problem is the player character being out of sync with the player camera."
