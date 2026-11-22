@@ -240,6 +240,8 @@ test('settings menu: mouse, keyboard and gamepad reach every setting, and it is 
     const selected = page.locator('.settings-tabs [aria-selected=true]');
     await expect(selected).toHaveText('Video');
     await press(5);
+    await expect(selected).toHaveText('Sound');
+    await press(5);
     await expect(selected).toHaveText('Interface');
     await press(5);
     await press(5);
@@ -475,6 +477,14 @@ test('the Timber Yard fights back: the finished bridge brings the flood, with it
     const a = await lab(page, (l) => l.audio());
     expect(a.recent).toContain('siren');
     expect(a.context).toBe('running');
+    // the playtest log recorded it; a facilitator's note goes in with its time
+    await page.locator('.settings-chip').click();
+    await page.locator('.settings-row button', { hasText: 'Playtest log' }).click();
+    const logText = page.locator('.playtest textarea');
+    await expect(logText).toHaveValue(/Playtest summary[\s\S]*floods: 1[\s\S]*siren/);
+    await page.locator('.playtest input').fill('saw the siren');
+    await page.locator('.playtest form button').click();
+    await expect(logText).toHaveValue(/note +saw the siren/);
     expect(problems).toEqual([]);
 });
 

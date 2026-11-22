@@ -15,16 +15,24 @@ export interface PlaytestPanelHost {
 }
 
 export class PlaytestPanel {
-    private readonly el: HTMLDivElement;
-    private readonly area: HTMLTextAreaElement;
-    private readonly input: HTMLInputElement;
+    private el!: HTMLDivElement;
+    private area!: HTMLTextAreaElement;
+    private input!: HTMLInputElement;
     private readonly host: PlaytestPanelHost;
     private showingPrevious = false;
+    private built = false;
 
     constructor(host: PlaytestPanelHost) {
         this.host = host;
+    }
+
+    /** The dialog is only made the first time it opens (the page has one dialog until then). */
+    private build(): void {
+        if (this.built) return;
+        this.built = true;
+        const host = this.host;
         const el = document.createElement('div');
-        el.className = 'settings-backdrop playtest-backdrop';
+        el.className = 'playtest-backdrop';
         el.hidden = true;
         el.innerHTML = `
           <div class="settings playtest" role="dialog" aria-modal="true" aria-labelledby="playtest-title">
@@ -73,10 +81,11 @@ export class PlaytestPanel {
     }
 
     get isOpen(): boolean {
-        return !this.el.hidden;
+        return this.built && !this.el.hidden;
     }
 
     open(): void {
+        this.build();
         this.showingPrevious = false;
         this.el.hidden = false;
         this.refresh();
@@ -84,7 +93,7 @@ export class PlaytestPanel {
     }
 
     close(): void {
-        if (this.el.hidden) return;
+        if (!this.isOpen) return;
         this.el.hidden = true;
         this.host.closed();
     }

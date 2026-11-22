@@ -1411,7 +1411,19 @@ body.has-pad .settings-foot .foot-pad {
 
 /* ---- the playtest log viewer (Settings → Game → Playtest log) ---------------------------------- */
 .playtest-backdrop {
+    position: fixed;
+    inset: 0;
     z-index: 110;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: #05080bb0;
+    zoom: var(--ui-scale);
+}
+
+.playtest-backdrop[hidden] {
+    display: none;
 }
 
 .playtest {

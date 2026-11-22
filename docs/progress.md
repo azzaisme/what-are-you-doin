@@ -42,6 +42,9 @@ tested) and guests see exactly what the host sees.
     - nothing in the first 20 s of a run, and nothing after the goal;
     - at most 2 floods (75 s apart), and none once the bucket is across;
     - at most 3 gusts (40 s apart), and only while 3 or more planks are still out of the creek.
+- **Screenshots:** the crossing with the bridge just laid
+  (`docs/screenshots/epic8/01-flood-before.jpg`), and the same view at the flood's peak, with the
+  loose beams afloat (`02-flood-peak.jpg`).
 - **Online:** the host sends the water level and the hazard phases with each snapshot. A guest's
   river rises with the host's (browser test: the drawn water is within 5 cm of the simulation's).
 
