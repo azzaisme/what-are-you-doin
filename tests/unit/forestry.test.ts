@@ -727,6 +727,21 @@ describe('wood effects', () => {
         run({}, SAW.settleTicks + 10 + 120, from);
         expect(fx.spawned.sawdust).toBeGreaterThan(5);
         expect(fx.count).toBeLessThanOrEqual(MAX_PARTICLES);
+        // and none once the cut is done, even while the pieces wait to come out (every sawn plank
+        // already lies about: the pool is used up, so the output waits with the blade still)
+        for (
+            let n = 0;
+            s.forestry.spawnPlank(pose(-20 + (n % 5) * 0.5, YARD_Y + 0.1 + Math.floor(n / 5) * 0.12, 9), 'plank');
+            n++
+        );
+        for (let n = 0; n < SAW.cutTicks && s.sawmill!.phase === 'cutting' && s.sawmill!.progress < 1; n++)
+            run({}, 1, from);
+        run({}, 5, from);
+        expect(s.sawmill!.phase).toBe('output');
+        const cut = fx.spawned.sawdust;
+        run({}, 120, from);
+        expect(s.sawmill!.phase).toBe('output');
+        expect(fx.spawned.sawdust).toBe(cut);
     });
 });
 

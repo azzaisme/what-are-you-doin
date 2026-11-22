@@ -8,7 +8,7 @@
  * the pose), and the sawmill's state is in its own channels. Nothing extra is networked.
  */
 
-import { SAW_CUTTING, SAW_STATE } from '../assets/forestry.ts';
+import { SAW_CUTTING, SAW_PROGRESS, SAW_STATE } from '../assets/forestry.ts';
 import { SAWMILL, sawmillToWorld } from '../levels/forestry.ts';
 import type { SawmillSpot } from '../levels/forestry.ts';
 import { ANIM_MAX } from '../sim/snapshots.ts';
@@ -60,7 +60,10 @@ export class WoodFX {
         }
         if (this.spot && ring.sample(this.slots.sawmill, time, this.p, this.anim)) {
             const k = Math.floor(time / SAWDUST_EVERY);
-            if (Math.round(this.anim[SAW_STATE]) === SAW_CUTTING && k !== this.lastPuff) {
+            // only while the blade is in the wood: the state stays "cutting" while the pieces come
+            // out (progress 1), which can be a while when the rack or the plank pool is full
+            const sawing = Math.round(this.anim[SAW_STATE]) === SAW_CUTTING && this.anim[SAW_PROGRESS] < 1;
+            if (sawing && k !== this.lastPuff) {
                 // out of the blade's back, low over the outfeed side
                 const w = sawmillToWorld(this.spot, -0.35, SAWMILL.feedY + 0.1, 0);
                 burst('sawdust', w.x, w.y, w.z);
