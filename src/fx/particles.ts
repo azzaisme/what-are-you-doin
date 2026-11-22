@@ -97,8 +97,12 @@ export class ParticleFX {
     /** Effects spawned (cumulative, for tests and the debug panel). */
     readonly spawned = { dust: 0, chips: 0, splash: 0 };
 
+    /** The water surface now (it rises in a flood). */
+    waterY: number;
+
     constructor(level: LevelDef, watched: WatchedEntity[]) {
         this.level = level;
+        this.waterY = level.water.y;
         this.wind = level.wind ?? CALM;
         this.watched = watched;
         const trees: TreeSpot[] = level.layout(1).trees.filter((t) => t.kind === 'oak');
@@ -164,14 +168,15 @@ export class ParticleFX {
             let z = z0 + d.z * 0.8 + 0.18 * Math.cos(fallAge * 2.3 + fl);
             let y = y0 - vs * fallAge;
             const g = this.level.terrainHeight(cellCentre(x), cellCentre(z));
-            const inWater = g < water.y && Math.abs(x - water.cx) < water.halfX && Math.abs(z - water.cz) < water.halfZ;
+            const inWater =
+                g < this.waterY && Math.abs(x - water.cx) < water.halfX && Math.abs(z - water.cz) < water.halfZ;
             if (age >= landAge || y <= restY(g)) {
                 if (inWater) {
                     // float on the creek and keep drifting slowly downwind
                     const d2 = windTravel(tSpawn + landAge, t, this.wind, 0.5);
                     x += d2.x * 0.15;
                     z += d2.z * 0.15;
-                    y = water.y + 0.01;
+                    y = this.waterY + 0.01;
                 } else {
                     y = restY(g);
                 }
@@ -212,14 +217,14 @@ export class ParticleFX {
                     this.spawn(t, x, restY(g), z, w.timber ? 'chips' : 'dust', w.timber ? 14 : 10);
                 // dropped into the water
                 const inWaterArea =
-                    Math.abs(x - water.cx) < water.halfX && Math.abs(z - water.cz) < water.halfZ && g < water.y;
+                    Math.abs(x - water.cx) < water.halfX && Math.abs(z - water.cz) < water.halfZ && g < this.waterY;
                 if (
                     inWaterArea &&
-                    prev.y - (w.eyeHeight ? 0 : w.bottom) > water.y &&
-                    y - (w.eyeHeight ? 0 : w.bottom) <= water.y &&
+                    prev.y - (w.eyeHeight ? 0 : w.bottom) > this.waterY &&
+                    y - (w.eyeHeight ? 0 : w.bottom) <= this.waterY &&
                     prev.vy < -0.8
                 ) {
-                    this.spawn(t, x, water.y, z, 'splash', w.eyeHeight ? 26 : 18);
+                    this.spawn(t, x, this.waterY, z, 'splash', w.eyeHeight ? 26 : 18);
                 }
                 this.prev.set(w.slot, { y, vy, vx: 0, vz: 0, visible: true });
             } else {

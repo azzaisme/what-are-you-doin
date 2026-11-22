@@ -5,6 +5,7 @@
  */
 
 import type { WindSpec } from '../fx/wind.ts';
+import type { HazardSpec } from '../sim/hazards.ts';
 import type { Pose } from '../voxels/math.ts';
 import type { RasterStats, SamplingPolicy } from '../voxels/rasterizer.ts';
 import { box, cylinder, ellipsoid } from '../voxels/volumes.ts';
@@ -117,6 +118,8 @@ export interface LevelDef {
     sun: { elevation: number; azimuth: number };
     /** Wind (forces on light bodies, leaves, water ripples); calm when absent. */
     wind?: WindSpec;
+    /** The hazard director's authored events (§2.9, src/sim/hazards.ts); none when absent. */
+    hazards?: HazardSpec;
     /** A windsock on a pole (the wind's visible tell, §2.9). */
     windsock?: { x: number; z: number; height: number };
     spawn: { x: number; z: number; yaw: number; pitch: number };

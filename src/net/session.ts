@@ -12,6 +12,8 @@
 import { SIM_HZ } from '../sim/clock.ts';
 import { ACTION_DROP, ACTION_NONE, ACTION_RAGDOLL, neutralCommand } from '../sim/commands.ts';
 import type { PlayerCommand } from '../sim/commands.ts';
+import { packHazardNet, readHazardNet } from '../sim/hazards.ts';
+import type { HazardNet } from '../sim/hazards.ts';
 import type { LabSim } from '../sim/lab-sim.ts';
 
 import { SnapshotDecoder, encodeSnapshot, fromBase64Chunks, snapshotTick, toBase64Chunks } from './codec.ts';
@@ -223,7 +225,8 @@ export class HostSession {
             hud: huds,
             goal: sim.progress.goalReached,
             step: sim.progress.step,
-            ev: this.recent
+            ev: this.recent,
+            hz: packHazardNet(sim.hazards.net())
         });
     }
 
@@ -283,6 +286,8 @@ export class GuestSession {
     /** The host's tutorial step. */
     step = 0;
     events: NetEvent[] = [];
+    /** The host's hazards (water height, flood and gust phases). */
+    hazard: HazardNet;
     hostGone = false;
     /** Snapshots applied (for the debug panel). */
     received = 0;
@@ -295,6 +300,7 @@ export class GuestSession {
         this.hostId = hostId;
         this.now = now;
         this.decoder = new SnapshotDecoder(sim.entities.length);
+        this.hazard = readHazardNet(null, sim.level.water.y);
         sim.ring.clear();
         this.unsub = ch.onChange(() => this.receive());
         ch.setState({ role: 'guest', v: NET_PROTOCOL, in: this.input });
@@ -328,6 +334,7 @@ export class GuestSession {
         this.slot = typeof mine === 'number' && mine >= 1 && mine < this.sim.players.length ? mine : -1;
         this.goal = st.goal === true;
         this.step = num(st.step);
+        this.hazard = readHazardNet(st.hz, this.sim.level.water.y);
         if (Array.isArray(st.hud)) {
             this.hud = (st.hud as unknown[]).map((x) => {
                 const a = Array.isArray(x) ? x : [];

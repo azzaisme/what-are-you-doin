@@ -563,6 +563,12 @@ class LabDirector extends Script {
         windAt(renderTime, level.wind ?? CALM, windNow);
         scene.water.rippleSpeed = 0.03 + 0.012 * windNow.speed;
         scene.water.bumpiness = 0.26 + 0.03 * windNow.speed;
+        // the flood (Epic 8): the river's surface follows the host's water level
+        const hz = guestSession ? guestSession.hazard : sim.hazards.net();
+        if (hz.waterY !== fx.waterY) {
+            scene.waterEntity.setLocalPosition(level.water.cx, hz.waterY, level.water.cz);
+            fx.waterY = hz.waterY;
+        }
 
         // ---- debug overlay uniform
         const g = state.gridLines ? 1 : 0;
@@ -1136,7 +1142,10 @@ function showToast(text: string, kind = 'info'): void {
     toast.textContent = text;
     toast.className = `toast show toast-${kind}`;
     clearTimeout(toastTimer);
-    toastTimer = window.setTimeout(() => (toast.className = 'toast'), kind === 'goal' ? 6000 : 3500);
+    toastTimer = window.setTimeout(
+        () => (toast.className = 'toast'),
+        kind === 'goal' ? 6000 : kind === 'hazard' ? 5000 : 3500
+    );
 }
 
 function updateObjective(): void {

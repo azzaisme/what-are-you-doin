@@ -211,7 +211,7 @@ describe('level 1: the timber yard', () => {
         expect(s.player.z).toBeGreaterThan(BRIDGE.nearFace); // the player never crossed
     }, 60_000);
 
-    it('finishable with inputs only by building the bridge: shoulder both beams over, carry the bucket across', () => {
+    it('finishable with inputs only by building the bridge: shoulder both beams over, run the bucket across before the flood peaks', () => {
         const s = yard();
         let n = 0;
         let yaw = 0;
@@ -225,10 +225,14 @@ describe('level 1: the timber yard', () => {
                 step();
             }
         };
-        const goTo = (x: number, zStop: number) => {
+        const goTo = (x: number, zStop: number, run = false) => {
+            const fast = run ? 1 : 0.4;
             for (let i = 0; i < 900 && Math.abs(s.player.x - x) > 0.05; i++)
-                step({ moveX: s.player.x > x ? -0.4 : 0.4 });
-            for (let i = 0; i < 900 && s.player.z > zStop; i++) step({ moveZ: 0.5 });
+                step({
+                    moveX: (s.player.x > x ? -1 : 1) * Math.min(fast, Math.abs(s.player.x - x) * 2 + 0.1),
+                    sprint: run
+                });
+            for (let i = 0; i < 900 && s.player.z > zStop; i++) step({ moveZ: run ? 1 : 0.5, sprint: run });
             step({}, 30);
         };
         step({}, 60);
@@ -271,12 +275,14 @@ describe('level 1: the timber yard', () => {
         step({}, 3);
         step({ grab: true });
         expect(s.physics.heldId).toBe(bucket.id);
+        // the finished bridge set off the flood (Epic 8): the siren has gone, so run
+        expect(s.events.some((e) => e.kind === 'hazard' && e.text.includes('siren'))).toBe(true);
         pitch = 0;
-        goTo(BRIDGE_X, (YARD_GOAL.minZ + YARD_GOAL.maxZ) / 2);
+        goTo(BRIDGE_X, (YARD_GOAL.minZ + YARD_GOAL.maxZ) / 2, true);
         expect(s.progress.falls).toBe(0);
         expect(s.player.z).toBeLessThan(BRIDGE.farEdge);
         step({ grab: true });
-        step({}, 90);
+        step({}, 240);
         expect(s.progress.goalReached).toBe(true);
     }, 120_000);
 });

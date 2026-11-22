@@ -452,6 +452,14 @@ body.ui-hidden .inspector-hint {
     font-weight: 600;
 }
 
+/* the world fighting back (Epic 8): a warning, never colour alone (the text says what to do) */
+.toast-hazard {
+    background: #5a1f12eb;
+    border: 2px solid #f26a1b;
+    font-size: 17px;
+    font-weight: 600;
+}
+
 body.ui-hidden .toast {
     display: none;
 }
