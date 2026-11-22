@@ -385,7 +385,7 @@ body.ui-hidden .inspector-hint {
 /* touch: at least 40 px targets */
 @media (max-width: 700px), (pointer: coarse) {
     .debug-chip,
-    .cell-size button,
+    .online-chip,
     .debug-grid button,
     .debug-control select {
         min-height: 40px;

@@ -185,8 +185,10 @@ test('settings menu: mouse, keyboard and gamepad reach every setting, and it is 
         (window as unknown as { __pad: typeof pad }).__pad = pad;
         navigator.getGamepads = () => [pad as unknown as Gamepad];
     });
-    // live (no ?t= seek, which pauses): opening the menu pauses solo play, closing resumes it
-    const problems = await boot(page, '?level=yard&quality=low#cell100');
+    const problems = await boot(page, '?level=yard&t=1&quality=low#cell100');
+    // run live from here (?t= seeks and pauses): opening the menu pauses solo play, closing resumes it
+    await lab(page, (l) => l.action('pause'));
+    expect(await lab(page, (l) => (l as unknown as { paused(): boolean }).paused())).toBe(false);
     const backdrop = page.locator('.settings-backdrop');
     const press = async (b: number) => {
         await page.evaluate(
