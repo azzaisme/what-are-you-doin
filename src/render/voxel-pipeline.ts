@@ -215,7 +215,8 @@ export class VoxelClient {
                 this.nearTiles.clear();
                 this.nearTileSize = r.tiles.size;
                 const t = r.tiles.tiles;
-                for (let n = 0; n + 1 < t.length; n += 2) this.nearTiles.add((t[n] + 32768) * 65536 + (t[n + 1] + 32768));
+                for (let n = 0; n + 1 < t.length; n += 2)
+                    this.nearTiles.add((t[n] + 32768) * 65536 + (t[n + 1] + 32768));
                 tilesChanged = true;
             }
         });

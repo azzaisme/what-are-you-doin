@@ -2039,6 +2039,8 @@ window.__riverLab = {
     teleport: (x: number, z: number, yaw?: number) => sim.placePlayer(x, z, yaw ?? sim.player.yaw, 0),
     /** Streamed levels: near tiles built so far. */
     nearTiles: () => pipeline.nearTiles.size,
+    /** Streamed levels: whether the near world is built over a square around (x, z). */
+    nearBuiltAt: (x: number, z: number, half = 3) => pipeline.nearCovers(x - half, x + half, z - half, z + half),
     level: level.id,
     progress: () => ({ ...sim.progress, events: sim.events.map((e) => e.kind), stepText: sim.stepText }),
     /** Places a named prop at a pose (tests and the evidence capture), as a teleport. */

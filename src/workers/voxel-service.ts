@@ -10,6 +10,7 @@
 
 import { parseLevelData, levelFromData } from '../levels/data.ts';
 import { getLevel } from '../levels/index.ts';
+import type { LevelDef } from '../levels/level.ts';
 import { createLabEntities } from '../sim/lab-entities.ts';
 import type { SimEntity } from '../sim/lab-entities.ts';
 import { ANIM_MAX } from '../sim/snapshots.ts';
@@ -27,7 +28,6 @@ import type { PartInstance } from '../voxels/world.ts';
 
 import { PARTICLE_OBJECT_ID, STATE_STRIDE } from './protocol.ts';
 import type { BuildInfo, ClassMesh, FrameStats, TileReport, UnitMesh } from './protocol.ts';
-import type { LevelDef } from '../levels/level.ts';
 
 /** How far from the origin this lattice's chunks reach (m), with a margin for object size. */
 const LATTICE_REACH = CHUNK_COORD_LIMIT * CHUNK_SIZE * GRID_SIZE - 4;
@@ -130,8 +130,7 @@ export class VoxelService {
         if (far && def.stream) {
             this.far = { def, seed, holes: new Map() };
             this.world.tileCells = STATIC_REGION.x;
-        }
-        else if (withWorld && def.stream) {
+        } else if (withWorld && def.stream) {
             // streamed: the tiles around the start now, the rest as the cameras move
             const t0 = performance.now();
             this.world.tileCells = STATIC_REGION.x;
@@ -191,7 +190,10 @@ export class VoxelService {
                 Math.abs(states[o + 2]) < LATTICE_REACH_Y &&
                 Math.abs(states[o + 3]) < LATTICE_REACH;
             const visible =
-                !reference && states[o] > 0.5 && inRange && (cull === 0 || this.nearFocus(states[o + 1], states[o + 3], cull));
+                !reference &&
+                states[o] > 0.5 &&
+                inRange &&
+                (cull === 0 || this.nearFocus(states[o + 1], states[o + 3], cull));
             if (!visible) {
                 if (this.world.objectCellCount(t.id) > 0) this.world.clearObject(t.id);
                 continue;
@@ -339,7 +341,8 @@ export class VoxelService {
         if (size <= 0) return;
         const key = (ti: number, tk: number) => (ti + 32768) * 65536 + (tk + 32768);
         const want = new Map<number, { ti: number; tk: number }>();
-        for (let n = 0; n + 1 < tiles.length; n += 2) want.set(key(tiles[n], tiles[n + 1]), { ti: tiles[n], tk: tiles[n + 1] });
+        for (let n = 0; n + 1 < tiles.length; n += 2)
+            want.set(key(tiles[n], tiles[n + 1]), { ti: tiles[n], tk: tiles[n + 1] });
         // columns whose centres lie inside the near tile
         const cols = (t: { ti: number; tk: number }) => ({
             i0: Math.ceil((t.ti * size) / GRID_SIZE - 0.5),

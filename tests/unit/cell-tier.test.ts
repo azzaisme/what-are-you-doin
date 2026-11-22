@@ -18,14 +18,15 @@ describe('per-item cell sizes', () => {
             expect(assetTier(byName(n).asset), n).toBe('base');
     });
 
-    it('lattice sizes: fine 1 cm, coarse twice the base up to 20 cm', () => {
+    it('lattice sizes: fine 1 cm, coarse twice the base up to 20 cm, far lattices up to 80 cm', () => {
         expect(tierCellCm('fine', 5)).toBe(1);
         expect(tierCellCm('base', 5)).toBe(5);
         expect(tierCellCm('coarse', 5)).toBe(10);
         expect(tierCellCm('coarse', 10)).toBe(20);
         expect(clampLatticeCm(1)).toBe(1);
         expect(clampLatticeCm(0.2)).toBe(1);
-        expect(clampLatticeCm(40)).toBe(20);
+        expect(clampLatticeCm(40)).toBe(40);
+        expect(clampLatticeCm(200)).toBe(80);
     });
 
     it('a lattice service draws only its own objects, and nothing beyond its reach', () => {

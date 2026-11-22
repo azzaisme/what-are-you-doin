@@ -436,6 +436,50 @@ test('level 1, the Timber Yard: starts in first person with the objective, and t
     expect(problems).toEqual([]);
 });
 
+test('the Valley: one streamed map, stages advance in order and the world follows the player', async ({ page }) => {
+    const problems = await boot(page, '?level=valley&t=0.01&quality=low#cell100');
+    expect(await lab(page, (l) => l.level)).toBe('valley');
+    await expect(page.locator('#hud-objective')).toContainText('1/7 Timber Yard');
+    type V = Lab & { teleport(x: number, z: number, yaw?: number): void; nearTiles(): number };
+    const v = <T>(fn: (l: V) => T) => lab(page, fn as unknown as (l: Lab) => T);
+    const tilesAtStart = await v((l) => l.nearTiles());
+    expect(tilesAtStart).toBeGreaterThan(10);
+    // stage 1: the bucket by the flag at the old bridge (route frame u -4.8, t -3.4)
+    await lab(page, (l) => l.action('pause'));
+    const at = (u: number, t: number) => ({ x: -64 + (u + t) / Math.SQRT2, z: 62 + (t - u) / Math.SQRT2 });
+    const g = at(-4.8, -3.4);
+    await page.evaluate(
+        (p) => (window as unknown as { __riverLab: Lab }).__riverLab.placeProp('bucket', p.x, 1.2, p.z),
+        g
+    );
+    await expect(page.locator('#hud-objective')).toContainText('2/7 Shallow Creek', { timeout: 120_000 });
+    await expect(page.locator('.toast')).toContainText('Timber Yard done');
+    // walk (teleport) up to the gorge: the near world streams in around the player
+    const gorge = at(80, 0);
+    await page.evaluate(
+        (p) =>
+            (
+                window as unknown as { __riverLab: { teleport(x: number, z: number, yaw: number): void } }
+            ).__riverLab.teleport(p.x, p.z, -Math.PI / 4),
+        gorge
+    );
+    await page.waitForFunction(
+        (p) => {
+            const l = (
+                window as unknown as {
+                    __riverLab: { player(): { x: number; z: number }; nearBuiltAt(x: number, z: number): boolean };
+                }
+            ).__riverLab;
+            return Math.hypot(l.player().x - p.x, l.player().z - p.z) < 2 && l.nearBuiltAt(p.x, p.z);
+        },
+        gorge,
+        { timeout: 180_000 }
+    );
+    const s = await lab(page, (l) => l.stats());
+    expect(s.voxel.rejected).toBe(0);
+    expect(problems).toEqual([]);
+});
+
 test('local co-op: split screen renders both views, player 2 moves with their own commands', async ({ page }) => {
     const problems = await boot(page, '?level=yard&t=0.01&quality=low&noui#cell100');
     await lab(page, (l) => l.action('pause'));
@@ -610,6 +654,70 @@ for (const transport of ['local', 'p2p'] as const)
         expect(problems).toEqual([]);
         expect(guestProblems).toEqual([]);
     });
+
+test("online co-op in the Valley: the guest streams its own world and follows the host's stages", async ({
+    page,
+    context
+}) => {
+    const query = '?level=valley&t=0.01&quality=low&net=local#cell100';
+    const problems = await boot(page, query);
+    const guest = await context.newPage();
+    const guestProblems: string[] = [];
+    guest.on('pageerror', (e) => guestProblems.push(e.message));
+    await guest.goto(`/${query}`);
+    await guest.waitForFunction(() => (window as unknown as { __riverLab?: Lab }).__riverLab?.ready === true, null, {
+        timeout: 150_000
+    });
+    const call = (p: Page, src: string, arg?: unknown) =>
+        p.evaluate(
+            ([s, a]) =>
+                new Function('l', 'a', `return (${s})(l, a)`)(
+                    (window as unknown as { __riverLab: unknown }).__riverLab,
+                    a
+                ),
+            [src, arg] as const
+        );
+    await lab(page, (l) => l.action('pause'));
+    await Promise.all([call(page, '(l) => l.net.connect()'), call(guest, '(l) => l.net.connect()')]);
+    await call(page, '(l) => l.net.host()');
+    const code = ((await call(page, '(l) => l.net.status()')) as { hosting: string }).hosting;
+    await guest.waitForFunction(
+        (c) =>
+            (window as unknown as { __riverLab: { net: { games(): { code: string }[] } } }).__riverLab.net
+                .games()
+                .some((g) => g.code === c),
+        code,
+        { timeout: 120_000 }
+    );
+    await call(guest, '(l, c) => l.net.join(c)', code);
+    await guest.waitForFunction(
+        () =>
+            ((
+                window as unknown as { __riverLab: { net: { status(): { guest: { received: number } | null } } } }
+            ).__riverLab.net.status().guest?.received ?? 0) > 5,
+        null,
+        { timeout: 120_000 }
+    );
+    await expect(guest.locator('#hud-objective')).toContainText('1/7 Timber Yard');
+    // the host's sim completes stage 1; the guest's objective follows
+    await page.evaluate(() =>
+        (window as unknown as { __riverLab: Lab }).__riverLab.placeProp(
+            'bucket',
+            -64 + (-4.8 - 3.4) / Math.SQRT2,
+            1.2,
+            62 + (-3.4 + 4.8) / Math.SQRT2
+        )
+    );
+    await expect(page.locator('#hud-objective')).toContainText('2/7', { timeout: 120_000 });
+    await expect(guest.locator('#hud-objective')).toContainText('2/7 Shallow Creek', { timeout: 60_000 });
+    // the guest's near world is built around its own player
+    expect(await call(guest, '(l) => l.nearTiles()')).toBeGreaterThan(10);
+    const gs = await guest.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.stats());
+    expect(gs.voxel.rejected).toBe(0);
+    await call(guest, '(l) => l.net.leave()');
+    expect(problems).toEqual([]);
+    expect(guestProblems).toEqual([]);
+});
 
 test('a first visit starts the tutorial: step-by-step objective, the Levels menu lists the rest', async ({ page }) => {
     const problems = await boot(page, '?t=0.01&quality=low#cell100');

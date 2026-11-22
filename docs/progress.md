@@ -1,5 +1,53 @@
 # Progress log
 
+## The Valley: the rest of the levels as one big map (2026-11-22, owner request)
+
+Owner: "Let's do the rest of the levels (one big map). Make sure it works for multiplayer and
+single player", with the world map (seven numbered areas).
+
+- **One 224 × 224 m map** (`src/levels/valley.ts`), on the Levels menu as "The Valley · the whole
+  journey". The route climbs from the yard to the summit, with a crossing that needs timber
+  between areas:
+    1. **Timber Yard:** the yard as it was, turned to face up the valley.
+    2. **Shallow Creek:** the old bridge gap (2.4 m), the yard's own crossing.
+    3. **Forest Road:** about 500 more trees, a log dump with three beams, and a culvert ditch
+       (2.6 m at the road).
+    4. **Gorge:** a 5.6 m gorge with a stone pier in the middle (two spans of 2.2 m), a snapped
+       trestle, and a waterfall from the works' outfall.
+    5. **Old Industrial Works:** a brick hall, a chimney, tanks, pipes, a tower crane with a hanging
+       crate, and a 1.5 m retaining wall up to the upper yard. Six crates are there to stack.
+    6. **Mountain Approach:** the road climbs in two pitches with a level bench at a crevasse
+       (2.4 m), and there is snow above 13 m.
+    7. **Flower Summit:** the giant flower in a ring of stones.
+- **Stages:** the objective shows "k/7 Area · what to do". A flag in the stage's colour marks each
+  goal, and a signpost marks each area. A bucket lost in a crossing comes back at the current
+  stage's start, and players who fall with no safe ground near go back there too.
+- **Streaming (ADR 0013):**
+    - near tiles are built around each local camera at the player's voxel size;
+    - a coarse 40 cm far lattice draws the rest of the map under fog;
+    - tiles far behind are released, so memory stays bounded.
+- **Multiplayer:**
+    - the host runs the whole map's physics;
+    - each guest streams around its own player, and the stage count travels in the host state;
+    - a guest joining from another level reloads into the Valley.
+- **Fixed on the way:** props more than 30 m from the yard's centre were silently sent back to their
+  spawn by a fixed physics safety box. The box now covers the level.
+- **Tests:**
+    - `tests/unit/valley.test.ts`:
+        - the route frame;
+        - crossings run right across the valley;
+        - a beam laid over each gap rests on both banks and the pier;
+        - a tile builds the same alone and among neighbours;
+        - streaming lets go of what it leaves;
+        - stages complete only in order;
+        - lost-bucket recovery;
+        - every prop at rest;
+        - snapshot positions far from the origin.
+    - e2e:
+        - single player: the Valley boots, stage 1 completes, and a teleport to the gorge streams the
+          world in;
+        - two tabs over the local transport: the guest's objective follows the host's stage.
+
 ## Settings menu (2026-11-22, owner request)
 
 Owner: "Can I have a proper settings menu please. Accessible to both keyboard, mouse/gamepad/touch".

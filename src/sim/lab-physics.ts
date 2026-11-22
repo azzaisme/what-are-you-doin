@@ -108,8 +108,19 @@ export function buildLabPhysics(level: LevelDef): PhysicsWorld {
     const B = level.bounds;
     const ground = level.terrainHeight;
     // the same spacing (about 0.223 m) whatever the level's size: the Valley needs about 1,000 cells
-    const cells = Math.max(TERRAIN_CELLS, Math.round((TERRAIN_CELLS * Math.max(B.maxX - B.minX, B.maxZ - B.minZ)) / 56));
+    const cells = Math.max(
+        TERRAIN_CELLS,
+        Math.round((TERRAIN_CELLS * Math.max(B.maxX - B.minX, B.maxZ - B.minZ)) / 56)
+    );
     pw.addTerrain(ground, B.minX, B.maxX, B.minZ, B.maxZ, cells);
+    // the safety box covers the level (with a margin), never less than the default box
+    const k = pw.killBox;
+    pw.killBox = {
+        minX: Math.min(k.minX, B.minX - 2),
+        maxX: Math.max(k.maxX, B.maxX + 2),
+        minZ: Math.min(k.minZ, B.minZ - 2),
+        maxZ: Math.max(k.maxZ, B.maxZ + 2)
+    };
 
     // trees: trunk cylinder plus the four needle cones (the same layout the voxel build uses)
     const layout = level.layout(1);

@@ -217,7 +217,8 @@ export class VoxelRenderer {
     /** Shows a static unit only where `show` says so (re-evaluated now and for new units). */
     setStaticFilter(show: ((minX: number, maxX: number, minZ: number, maxZ: number) => boolean) | null): void {
         this.staticFilter = show;
-        for (const u of this.staticUnits.values()) u.entity.enabled = show ? show(u.minX, u.maxX, u.minZ, u.maxZ) : true;
+        for (const u of this.staticUnits.values())
+            u.entity.enabled = show ? show(u.minX, u.maxX, u.minZ, u.maxZ) : true;
     }
 
     setDynamicVisible(v: boolean): void {

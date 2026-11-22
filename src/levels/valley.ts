@@ -104,7 +104,7 @@ function fromYard(p: Pose): Pose {
 const creekU = (t: number) => yardU(creekCenterZ(t + BRIDGE_X));
 const creekHW = (t: number) => creekHalfWidth(t + BRIDGE_X);
 /** The washed-out culvert on the forest road. */
-export const DITCH = { u: 40, hw: 1.35 };
+export const DITCH = { u: 40, hw: 1.2 };
 const ditchU = (t: number) => DITCH.u + 0.6 * Math.sin(0.11 * t);
 /** The gorge, with the old stone pier in the middle of the crossing. */
 export const GORGE = { u: 85, hw: 2.8, pierHalfU: 0.6, pierHalfT: 1.3 };
@@ -112,7 +112,7 @@ const gorgeU = (t: number) => GORGE.u + 1.2 * Math.sin(0.06 * t);
 /** The works' retaining wall: the lower yard at 3.8 m, the upper at 5.3 m. */
 export const WALL = { u: 118, low: 3.8, high: 5.3 };
 /** The crevasse across the mountain road. */
-export const CREVASSE = { u: 170, hw: 1.3, bed: -0.35 };
+export const CREVASSE = { u: 170, hw: 1.2, bed: -0.35 };
 const crevasseU = (t: number) => CREVASSE.u + 0.8 * Math.sin(0.07 * t);
 /** The flower on the summit. */
 export const SUMMIT_U = 202;
@@ -148,7 +148,9 @@ export function roadT(u: number): number {
 
 /** Height of the road (and the valley floor) along the route. */
 function floorY(u: number, t: number): number {
-    if (u >= WALL.u) return WALL.high + 7.2 * smoothstep(142, 190, u) - 3 * smoothstep(214, 244, u);
+    // the mountain climbs in two pitches with a level bench at the crevasse (both lips the same height)
+    const climb = 0.55 * smoothstep(142, 164, u) + 0.45 * smoothstep(176, 192, u);
+    if (u >= WALL.u) return WALL.high + 7.2 * climb - 3 * smoothstep(214, 244, u);
     if (u >= gorgeU(t)) return WALL.low;
     if (u >= -16) return 0.5 + 3.3 * smoothstep(6, 80, u);
     return 0.5 + 0.6 * smoothstep(-16, -24, u);
@@ -304,7 +306,8 @@ function flag(u: number, t: number, colour: number): StaticPiece[] {
             u,
             y + 2.15,
             t + 0.39,
-            (x, yy) => voxel((Math.floor((x + 0.35) / 0.1) + Math.floor((yy + 0.2) / 0.1)) & 1 ? colour : M.HiVisStripe, 0),
+            (x, yy) =>
+                voxel((Math.floor((x + 0.35) / 0.1) + Math.floor((yy + 0.2) / 0.1)) & 1 ? colour : M.HiVisStripe, 0),
             { priority: 3 }
         )
     ];
@@ -334,7 +337,7 @@ export const CHECKPOINTS = [
     { u: 46, t: roadT(46) }, // 3: past the culvert
     { u: 93, t: 0 }, // 4: across the gorge
     { u: 124, t: 0 }, // 5: the works' upper yard
-    { u: 177, t: roadT(177) }, // 6: past the crevasse
+    { u: 174.2, t: roadT(174.2) }, // 6: past the crevasse, on the level bench
     { u: SUMMIT_U, t: 0 } // 7: the flower
 ];
 const STAGE_COLOURS = [M.HiVis, M.TestOrange, M.Grass, M.TestBlue, M.Brick, M.Snow, M.Flower];
@@ -359,8 +362,26 @@ function valleyPieces(): StaticPiece[] {
         })
     );
     for (const side of [-1, 1]) {
-        P.push(piece('culvert-post', boxS(0.06, 0.55, 0.06), du - side * 2.0, groundUT(du - side * 2, dt - 1.9) + 0.55, dt - 1.9, solid(M.HiVis, 0)));
-        P.push(piece('culvert-post', boxS(0.06, 0.55, 0.06), du - side * 2.0, groundUT(du - side * 2, dt + 1.9) + 0.55, dt + 1.9, solid(M.HiVis, 0)));
+        P.push(
+            piece(
+                'culvert-post',
+                boxS(0.06, 0.55, 0.06),
+                du - side * 2.0,
+                groundUT(du - side * 2, dt - 1.9) + 0.55,
+                dt - 1.9,
+                solid(M.HiVis, 0)
+            )
+        );
+        P.push(
+            piece(
+                'culvert-post',
+                boxS(0.06, 0.55, 0.06),
+                du - side * 2.0,
+                groundUT(du - side * 2, dt + 1.9) + 0.55,
+                dt + 1.9,
+                solid(M.HiVis, 0)
+            )
+        );
     }
     // the log dump where the long beams wait, with a stack of logs (scenery)
     const lu = 24;
@@ -370,8 +391,8 @@ function valleyPieces(): StaticPiece[] {
             piece(
                 'dump-log',
                 { type: 'cylinder', axis: 'z', r: 0.22, half: 1.6 },
-                lu + 2.2,
-                groundUT(lu + 2.2, lt) + 0.22 + (n === 2 ? 0.38 : 0),
+                lu - 1.2,
+                groundUT(lu - 1.2, lt) + 0.22 + (n === 2 ? 0.38 : 0),
                 lt - 0.5 + (n === 2 ? 0.22 : n * 0.45),
                 darkTimber
             )
@@ -393,7 +414,11 @@ function valleyPieces(): StaticPiece[] {
             { priority: 3 }
         )
     );
-    P.push(piece('pier-cap', boxS(GORGE.pierHalfT + 0.05, 0.05, GORGE.pierHalfU + 0.05), gu, rim + 0.05, 0, stone(13), { priority: 3 }));
+    P.push(
+        piece('pier-cap', boxS(GORGE.pierHalfT + 0.05, 0.05, GORGE.pierHalfU + 0.05), gu, rim + 0.05, 0, stone(13), {
+            priority: 3
+        })
+    );
     for (const side of [-1, 1]) {
         const eu = gu + side * (GORGE.hw + 0.25);
         P.push(piece('gorge-cap', boxS(1.4, 0.06, 0.25), eu, rim + 0.06, 0, stone(15 + side), { priority: 3 }));
@@ -404,17 +429,34 @@ function valleyPieces(): StaticPiece[] {
     // the outfall: a concrete pipe end in the far wall, and the water falling from it
     const wt = 15;
     const wu = gorgeU(wt) + GORGE.hw;
-    P.push(piece('outfall', { type: 'cylinder', axis: 'z', r: 0.7, half: 0.6 }, wu + 0.3, rim - 0.6, wt, concrete, { priority: 3 }));
     P.push(
-        piece('waterfall', boxS(0.55, (rim - 0.6 - CREEK_WATER_Y) / 2, 0.12), wu - 0.35, (rim - 0.6 + CREEK_WATER_Y) / 2, wt, (x, y, z) =>
-            voxel(M.Splash, latticeShade(x, y * 0.3, z, 0.15, 21) & 3),
+        piece('outfall', { type: 'cylinder', axis: 'z', r: 0.7, half: 0.6 }, wu + 0.3, rim - 0.6, wt, concrete, {
+            priority: 3
+        })
+    );
+    P.push(
+        piece(
+            'waterfall',
+            boxS(0.55, (rim - 0.6 - CREEK_WATER_Y) / 2, 0.12),
+            wu - 0.35,
+            (rim - 0.6 + CREEK_WATER_Y) / 2,
+            wt,
+            (x, y, z) => voxel(M.Splash, latticeShade(x, y * 0.3, z, 0.15, 21) & 3),
             { collide: false, priority: 3 }
         )
     );
     P.push(
-        piece('waterfall-foam', { type: 'ellipsoid', rx: 1.2, ry: 0.25, rz: 1.0 }, wu - 1.0, CREEK_WATER_Y + 0.05, wt, solid(M.Splash, 2), {
-            collide: false
-        })
+        piece(
+            'waterfall-foam',
+            { type: 'ellipsoid', rx: 1.2, ry: 0.25, rz: 1.0 },
+            wu - 1.0,
+            CREEK_WATER_Y + 0.05,
+            wt,
+            solid(M.Splash, 2),
+            {
+                collide: false
+            }
+        )
     );
     // the timber pile at the gorge
     P.push(...signpost(70, roadT(70) - 2.6, STAGE_COLOURS[3]));
@@ -428,7 +470,12 @@ function valleyPieces(): StaticPiece[] {
         [WALL.u - 1.5, 2.4, 0.2],
         [WALL.u - 0.7, 5.1, 0.22]
     ] as const)
-        P.push(piece('rubble', boxS(s * 1.4, s * 0.6, s), ru, WALL.low + s * 0.55, rtt, concrete, { yaw: ru, collide: true }));
+        P.push(
+            piece('rubble', boxS(s * 1.4, s * 0.6, s), ru, WALL.low + s * 0.55, rtt, concrete, {
+                yaw: ru,
+                collide: true
+            })
+        );
     // the brick hall with a galvanised roof
     const hu = 129;
     const ht = 13;
@@ -441,36 +488,99 @@ function valleyPieces(): StaticPiece[] {
             hu,
             hy + 5.35,
             ht,
-            (x, y, z) => voxel(M.Galvanised, Math.floor((x + 5.4) / 0.3) & 1 ? 0 : 2 + (latticeShade(x, y, z, 0.3, 2) & 1)),
+            (x, y, z) =>
+                voxel(M.Galvanised, Math.floor((x + 5.4) / 0.3) & 1 ? 0 : 2 + (latticeShade(x, y, z, 0.3, 2) & 1)),
             { priority: 3 }
         )
     );
     for (const wu2 of [-2.6, 0, 2.6])
-        P.push(piece('hall-window', boxS(0.04, 0.6, 1.0), hu + wu2, hy + 3.4, ht - 5.02, solid(M.Glass, 1), { priority: 4, yaw: Math.PI / 2 }));
-    P.push(piece('hall-door', boxS(1.2, 1.3, 0.04), hu - 4.52, hy + 1.3, ht, solid(M.Rust, 1), { priority: 4, yaw: Math.PI / 2 }));
+        P.push(
+            piece('hall-window', boxS(0.04, 0.6, 1.0), hu + wu2, hy + 3.4, ht - 5.02, solid(M.Glass, 1), {
+                priority: 4,
+                yaw: Math.PI / 2
+            })
+        );
+    P.push(
+        piece('hall-door', boxS(1.2, 1.3, 0.04), hu - 4.52, hy + 1.3, ht, solid(M.Rust, 1), {
+            priority: 4,
+            yaw: Math.PI / 2
+        })
+    );
     // the chimney (the works' landmark from down the valley)
-    P.push(piece('chimney', { type: 'cylinder', axis: 'y', r: 0.85, half: 5.5 }, hu + 3.2, hy + 5.5, ht + 6.5, brick, { priority: 3 }));
-    P.push(piece('chimney-top', { type: 'cylinder', axis: 'y', r: 1.0, half: 0.2 }, hu + 3.2, hy + 11.1, ht + 6.5, solid(M.UteTrim, 0), { priority: 3 }));
+    P.push(
+        piece('chimney', { type: 'cylinder', axis: 'y', r: 0.85, half: 5.5 }, hu + 3.2, hy + 5.5, ht + 6.5, brick, {
+            priority: 3
+        })
+    );
+    P.push(
+        piece(
+            'chimney-top',
+            { type: 'cylinder', axis: 'y', r: 1.0, half: 0.2 },
+            hu + 3.2,
+            hy + 11.1,
+            ht + 6.5,
+            solid(M.UteTrim, 0),
+            { priority: 3 }
+        )
+    );
     // tanks and a pipe run
     for (const [tu, tt] of [
         [136, 8],
         [136, 12.5]
     ] as const) {
-        P.push(piece('tank', { type: 'cylinder', axis: 'y', r: 1.8, half: 2.0 }, tu, hy + 2.0, tt, solid(M.Galvanised, 1), { priority: 3 }));
-        P.push(piece('tank-band', { type: 'cylinder', axis: 'y', r: 1.85, half: 0.08 }, tu, hy + 3.1, tt, rust, { priority: 4 }));
+        P.push(
+            piece(
+                'tank',
+                { type: 'cylinder', axis: 'y', r: 1.8, half: 2.0 },
+                tu,
+                hy + 2.0,
+                tt,
+                solid(M.Galvanised, 1),
+                { priority: 3 }
+            )
+        );
+        P.push(
+            piece('tank-band', { type: 'cylinder', axis: 'y', r: 1.85, half: 0.08 }, tu, hy + 3.1, tt, rust, {
+                priority: 4
+            })
+        );
     }
-    P.push(piece('pipe', { type: 'cylinder', axis: 'x', r: 0.25, half: 4.5 }, 133.5, hy + 3.4, 4.2, rust, { priority: 3, collide: false }));
-    for (const pt of [0.6, 3.6, 6.6])
-        P.push(piece('pipe-leg', boxS(0.07, 1.6, 0.07), 133.5, hy + 1.6, pt, rust));
+    P.push(
+        piece('pipe', { type: 'cylinder', axis: 'x', r: 0.25, half: 4.5 }, 133.5, hy + 3.4, 4.2, rust, {
+            priority: 3,
+            collide: false
+        })
+    );
+    for (const pt of [0.6, 3.6, 6.6]) P.push(piece('pipe-leg', boxS(0.07, 1.6, 0.07), 133.5, hy + 1.6, pt, rust));
     // the tower crane over the lower yard, a crate hanging from it
     const cu = 108;
     const ct = -12;
     P.push(piece('crane-mast', boxS(0.45, 6.5, 0.45), cu, WALL.low + 6.5, ct, crane, { priority: 3 }));
-    P.push(piece('crane-jib', boxS(0.3, 0.3, 8.5), cu - 4.5, WALL.low + 13.2, ct, crane, { priority: 3, collide: false }));
-    P.push(piece('crane-counter', boxS(0.8, 0.5, 1.0), cu + 4.6, WALL.low + 12.9, ct, concrete, { priority: 3, collide: false }));
-    P.push(piece('crane-cab', boxS(0.7, 0.6, 0.7), cu, WALL.low + 12.2, ct + 0.9, solid(M.Glass, 1), { priority: 4, collide: false }));
-    P.push(piece('crane-cable', boxS(0.02, 4.2, 0.02), cu - 10, WALL.low + 8.8, ct, solid(M.UteTrim, 0), { collide: false }));
-    P.push(piece('crane-crate', boxS(0.5, 0.4, 0.5), cu - 10, WALL.low + 4.2, ct, grain(M.Timber, 'x', 0.15, 3), { collide: false }));
+    P.push(
+        piece('crane-jib', boxS(0.3, 0.3, 8.5), cu - 4.5, WALL.low + 13.2, ct, crane, { priority: 3, collide: false })
+    );
+    P.push(
+        piece('crane-counter', boxS(0.8, 0.5, 1.0), cu + 4.6, WALL.low + 12.9, ct, concrete, {
+            priority: 3,
+            collide: false
+        })
+    );
+    P.push(
+        piece('crane-cab', boxS(0.7, 0.6, 0.7), cu, WALL.low + 12.2, ct + 0.9, solid(M.Glass, 1), {
+            priority: 4,
+            collide: false
+        })
+    );
+    P.push(
+        piece('crane-cable', boxS(0.02, 4.2, 0.02), cu - 10, WALL.low + 8.8, ct, solid(M.UteTrim, 0), {
+            collide: false
+        })
+    );
+    P.push(
+        piece('crane-crate', boxS(0.5, 0.4, 0.5), cu - 10, WALL.low + 4.2, ct, grain(M.Timber, 'x', 0.15, 3), {
+            collide: false
+        })
+    );
     P.push(...signpost(96, -2.6, STAGE_COLOURS[4]));
     P.push(...flag(CHECKPOINTS[4].u, CHECKPOINTS[4].t - 2.4, STAGE_COLOURS[4]));
 
@@ -478,27 +588,67 @@ function valleyPieces(): StaticPiece[] {
     const vu = CREVASSE.u;
     const vt = roadT(vu);
     for (const side of [-1, 1]) {
-        P.push(piece('crevasse-post', boxS(0.06, 0.55, 0.06), vu - side * 1.9, groundUT(vu - side * 1.9, vt - 1.9) + 0.55, vt - 1.9, solid(M.HiVis, 0)));
-        P.push(piece('crevasse-post', boxS(0.06, 0.55, 0.06), vu - side * 1.9, groundUT(vu - side * 1.9, vt + 1.9) + 0.55, vt + 1.9, solid(M.HiVis, 0)));
+        P.push(
+            piece(
+                'crevasse-post',
+                boxS(0.06, 0.55, 0.06),
+                vu - side * 1.9,
+                groundUT(vu - side * 1.9, vt - 1.9) + 0.55,
+                vt - 1.9,
+                solid(M.HiVis, 0)
+            )
+        );
+        P.push(
+            piece(
+                'crevasse-post',
+                boxS(0.06, 0.55, 0.06),
+                vu - side * 1.9,
+                groundUT(vu - side * 1.9, vt + 1.9) + 0.55,
+                vt + 1.9,
+                solid(M.HiVis, 0)
+            )
+        );
     }
     // the road's edge posts on the way up
     for (let u = 146; u < 190; u += 6) {
         if (Math.abs(u - vu) < 4) continue;
         const t = roadT(u) + 2.6;
-        P.push(piece('road-post', boxS(0.05, 0.4, 0.05), u, groundUT(u, t) + 0.4, t, (_x, y) => voxel(y > 0.25 ? M.HiVis : M.HiVisStripe, 0)));
+        P.push(
+            piece('road-post', boxS(0.05, 0.4, 0.05), u, groundUT(u, t) + 0.4, t, (_x, y) =>
+                voxel(y > 0.25 ? M.HiVis : M.HiVisStripe, 0)
+            )
+        );
     }
     P.push(...signpost(146, roadT(146) - 2.6, STAGE_COLOURS[5]));
     P.push(...flag(CHECKPOINTS[5].u, CHECKPOINTS[5].t - 2.4, STAGE_COLOURS[5]));
 
     // ---- 7: the flower on the summit: the goal of the whole journey
     const fy = groundUT(SUMMIT_U, 0);
-    P.push(piece('flower-stem', { type: 'cylinder', axis: 'y', r: 0.22, half: 1.6 }, SUMMIT_U, fy + 1.5, 0, solid(M.Grass, 2), { collide: false }));
     P.push(
-        piece('flower-leaf', { type: 'ellipsoid', rx: 0.9, ry: 0.15, rz: 0.4 }, SUMMIT_U, fy + 1.0, 0.7, solid(M.Grass, 0), {
-            collide: false,
-            yaw: 0.3,
-            roll: 0.4
-        })
+        piece(
+            'flower-stem',
+            { type: 'cylinder', axis: 'y', r: 0.22, half: 1.6 },
+            SUMMIT_U,
+            fy + 1.5,
+            0,
+            solid(M.Grass, 2),
+            { collide: false }
+        )
+    );
+    P.push(
+        piece(
+            'flower-leaf',
+            { type: 'ellipsoid', rx: 0.9, ry: 0.15, rz: 0.4 },
+            SUMMIT_U,
+            fy + 1.0,
+            0.7,
+            solid(M.Grass, 0),
+            {
+                collide: false,
+                yaw: 0.3,
+                roll: 0.4
+            }
+        )
     );
     for (let n = 0; n < 6; n++) {
         const a = (n / 6) * Math.PI * 2;
@@ -515,17 +665,30 @@ function valleyPieces(): StaticPiece[] {
         );
     }
     P.push(
-        piece('flower-centre', { type: 'ellipsoid', rx: 0.55, ry: 0.55, rz: 0.4 }, SUMMIT_U - 0.25, fy + 3.4, 0, solid(M.HiVis, 1), {
-            collide: false,
-            priority: 4
-        })
+        piece(
+            'flower-centre',
+            { type: 'ellipsoid', rx: 0.55, ry: 0.55, rz: 0.4 },
+            SUMMIT_U - 0.25,
+            fy + 3.4,
+            0,
+            solid(M.HiVis, 1),
+            {
+                collide: false,
+                priority: 4
+            }
+        )
     );
     // a ring of stones around it, where the bucket goes
     for (let n = 0; n < 10; n++) {
         const a = (n / 10) * Math.PI * 2;
         const su = SUMMIT_U + Math.cos(a) * 2.1;
         const st = Math.sin(a) * 2.1;
-        P.push(piece('summit-stone', boxS(0.16, 0.08, 0.12), su, groundUT(su, st) + 0.04, st, stone(30 + n), { yaw: a, collide: false }));
+        P.push(
+            piece('summit-stone', boxS(0.16, 0.08, 0.12), su, groundUT(su, st) + 0.04, st, stone(30 + n), {
+                yaw: a,
+                collide: false
+            })
+        );
     }
     P.push(...signpost(192, -2.6, STAGE_COLOURS[6]));
     return P;
@@ -568,7 +731,7 @@ function clearSpot(u: number, t: number, r: number): boolean {
 
 /** Where each area's timber waits (route frame), for keeping trees off it. */
 const STAGING: [number, number][] = [
-    [26, roadT(24) + 4.6],
+    [27, roadT(24) + 4.6],
     [76, roadT(76) + 4.4],
     [108, -4],
     [160, roadT(160) + 4.4]
@@ -624,7 +787,8 @@ function scene(seed: number): Scene {
         rocks.push({ ...t, x: w.x, z: w.z });
     }
     for (let n = 0; n < 30; n++) addRock(6 + r() * 76, across(30, 4), 0.35 + r() * 0.4);
-    for (let n = 0; n < 24; n++) addRock(gorgeU(0) + (r() < 0.5 ? -1 : 1) * (4 + r() * 4), across(40, 2), 0.4 + r() * 0.5);
+    for (let n = 0; n < 24; n++)
+        addRock(gorgeU(0) + (r() < 0.5 ? -1 : 1) * (4 + r() * 4), across(40, 2), 0.4 + r() * 0.5);
     for (let n = 0; n < 50; n++) addRock(142 + r() * 70, across(30, 3.5), 0.4 + r() * 0.7);
 
     const pieces = valleyPieces();
@@ -634,7 +798,9 @@ function scene(seed: number): Scene {
         const ditch = n % 3 === 0;
         const t = -90 + r() * 180;
         const side = r() < 0.5 ? -1 : 1;
-        const u = ditch ? ditchU(t) + side * (DITCH.hw + 0.3 + r() * 0.7) : creekU(t) + side * (creekHW(t) + 0.35 + r() * 0.8);
+        const u = ditch
+            ? ditchU(t) + side * (DITCH.hw + 0.3 + r() * 0.7)
+            : creekU(t) + side * (creekHW(t) + 0.35 + r() * 0.8);
         if (Math.abs(t - roadT(u)) < 2.4 || yardBlend(u, t) > 0.3) continue;
         const w = routeToWorld(u, t);
         if (!inBounds(w.x, w.z, 1)) continue;
@@ -762,21 +928,23 @@ export const VALLEY_PROPS = { planks: 12, beams: 12, crates: 6 };
 
 function valleyProps(): PropPlacement[] {
     const P: PropPlacement[] = yardProps().map((p) => ({ name: p.name, pose: fromYard(p.pose) }));
-    // forest road: three long beams at the log dump, side by side (long axis along the road)
+    // forest road: three long beams at the log dump, side by side (long axis across the road)
     const [lu, lt] = STAGING[0];
-    for (let n = 0; n < 3; n++) P.push({ name: `beam-${2 + n}`, pose: atUT(lu, lt - 0.6 + n * 0.42, 0.08, 0, FLAT) });
+    for (let n = 0; n < 3; n++) P.push({ name: `beam-${2 + n}`, pose: atUT(lu - 0.45 + n * 0.45, lt, 0.08, 0, FLAT) });
     // the gorge: four beams and four planks on a pile before the edge
     const [gu, gt] = STAGING[1];
-    for (let n = 0; n < 4; n++) P.push({ name: `beam-${5 + n}`, pose: atUT(gu, gt - 0.6 + n * 0.42, 0.08, 0, FLAT) });
-    for (let n = 0; n < 4; n++) P.push({ name: `extra-plank-${5 + n}`, pose: atUT(gu - 3, gt + 0.4, 0.06 + n * 0.105, 0, FLAT) });
+    for (let n = 0; n < 4; n++) P.push({ name: `beam-${5 + n}`, pose: atUT(gu - 0.7 + n * 0.45, gt, 0.08, 0, FLAT) });
+    for (let n = 0; n < 4; n++)
+        P.push({ name: `extra-plank-${5 + n}`, pose: atUT(gu - 3, gt + 0.4, 0.06 + n * 0.105, 0, FLAT) });
     // the works: six crates in the lower yard
     const [cu, ct] = STAGING[2];
     for (let n = 0; n < 6; n++)
         P.push({ name: `crate-${n}`, pose: atUT(cu + (n % 3) * 0.7, ct + Math.floor(n / 3) * 0.8, 0.26, n * 0.3) });
     // the mountain: three beams and three planks
     const [mu, mt] = STAGING[3];
-    for (let n = 0; n < 3; n++) P.push({ name: `beam-${9 + n}`, pose: atUT(mu, mt - 0.5 + n * 0.42, 0.08, 0, FLAT) });
-    for (let n = 0; n < 3; n++) P.push({ name: `extra-plank-${9 + n}`, pose: atUT(mu - 3, mt + 0.3, 0.06 + n * 0.105, 0, FLAT) });
+    for (let n = 0; n < 3; n++) P.push({ name: `beam-${9 + n}`, pose: atUT(mu - 0.45 + n * 0.45, mt, 0.08, 0, FLAT) });
+    for (let n = 0; n < 3; n++)
+        P.push({ name: `extra-plank-${9 + n}`, pose: atUT(mu - 3, mt + 0.3, 0.06 + n * 0.105, 0, FLAT) });
     return P;
 }
 
@@ -843,8 +1011,8 @@ export const VALLEY_STAGES: LevelStage[] = [
         name: 'Flower Summit',
         objective: 'Set the bucket down by the flower',
         goal: square(SUMMIT_U, 0, 2.0),
-        start: restart(181, roadT(181)),
-        bucket: bucketAt(181, roadT(181) + 0.8)
+        start: restart(175, roadT(175)),
+        bucket: bucketAt(175, roadT(175) + 0.8)
     }
 ];
 

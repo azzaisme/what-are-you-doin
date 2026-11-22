@@ -227,6 +227,13 @@ export function handsHold(reach: number, drop: number, pitch: number): number {
 }
 
 export class PhysicsWorld {
+    /** Bodies outside this box (or below LIMITS.killY) go back to their spawn; levels may widen it. */
+    killBox: { minX: number; maxX: number; minZ: number; maxZ: number } = {
+        minX: LIMITS.minX,
+        maxX: LIMITS.maxX,
+        minZ: LIMITS.minZ,
+        maxZ: LIMITS.maxZ
+    };
     /**
      * How far from the shoulders held things are carried (m): in the player's hands. Things grabbed
      * from further away are drawn in to it. Infinity keeps the grab distance (the beavers).
@@ -913,10 +920,10 @@ export class PhysicsWorld {
             const lost =
                 !Number.isFinite(p.x + p.y + p.z) ||
                 p.y < LIMITS.killY ||
-                p.x < LIMITS.minX ||
-                p.x > LIMITS.maxX ||
-                p.z < LIMITS.minZ ||
-                p.z > LIMITS.maxZ;
+                p.x < this.killBox.minX ||
+                p.x > this.killBox.maxX ||
+                p.z < this.killBox.minZ ||
+                p.z > this.killBox.maxZ;
             if (lost) {
                 this.place(pb.id, pb.spawn);
                 s.recovered++;
