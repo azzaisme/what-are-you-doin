@@ -42,10 +42,12 @@ export const BEAVER_ANIM_CHANNELS = 10;
 
 export const BEAVER_HEIGHT = 1.4;
 /**
- * Shoulder to paw tip (m). A little long for a real beaver, so a carried plank or beam sits in its
- * paws in front of the belly rather than floating beyond them.
+ * Shoulder to paw tip (m). Long for a real beaver, so with a lean into it the paws reach things
+ * carried well out in front (src/sim/player-anim.ts).
  */
-export const BEAVER_ARM_LENGTH = 0.44;
+export const BEAVER_ARM_LENGTH = 0.5;
+/** Reaching shoulders (BEAVER_ARM_REACH) also rise by this much of the reach. */
+export const REACH_RISE = 0.15;
 
 const rig = new Rig([
     { name: 'pelvis', parent: -1, x: 0, y: 0.34, z: 0 },
@@ -252,7 +254,7 @@ function poseRig(root: Pose, anim: ArrayLike<number>): void {
     const keep = SHOULDER_ABOVE_SPINE * Math.tan(Math.max(0, -spinePitch)) * raised;
     rig.setShift(J.spine, 0, 0, fp ? FP_SPINE_Z : 0);
     const sz = (ready ? FP_SHOULDER.z : 0) - (fp ? FP_SPINE_Z : 0) + reach + keep;
-    const sy = (ready ? FP_SHOULDER.y : 0) + 0.3 * Math.max(0, reach);
+    const sy = (ready ? FP_SHOULDER.y : 0) + REACH_RISE * Math.max(0, reach);
     rig.setShift(J.shoulderL, ready ? -FP_SHOULDER.x : 0, sy, sz);
     rig.setShift(J.shoulderR, ready ? FP_SHOULDER.x : 0, sy, sz);
     // raised arms stop swinging; hanging arms swing fully

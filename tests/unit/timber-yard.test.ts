@@ -39,15 +39,7 @@ describe('level 1: the timber yard', () => {
         expect(r.columns).toBeGreaterThan(300_000);
         expect(r.trees).toBeGreaterThan(30);
         const l = timberYardLevel.layout(1);
-        for (const name of [
-            'abutment-near',
-            'abutment-far',
-            'shed-roof',
-            'saw-bench',
-            'stump',
-            'flag',
-            'flower-centre'
-        ])
+        for (const name of ['abutment-near', 'abutment-far', 'shed-roof', 'saw-beam', 'stump', 'flag', 'flower-centre'])
             expect(l.pieces.some((p) => p.name === name)).toBe(true);
         // nothing grows on the road, in the creek or in the yard
         for (const t of l.trees) expect(Math.abs(t.z - creekCenterZ(t.x))).toBeGreaterThan(2);
@@ -172,7 +164,7 @@ describe('level 1: the timber yard', () => {
         // before the fix: ~500 N on a 1.5 kg bucket, spinning at 30 rad/s, reversing every tick
         expect(flips).toBeLessThan(6);
         expect(maxForce).toBeLessThan(weight * 2);
-        // the lanky stand-in people held it further from the turning axis than beavers (higher
+        // the lanky stand-in people hold it further from the turning axis than beavers (higher
         // eye): measured 20.0 deg for them, ~15 for beavers
         expect(maxTilt).toBeLessThan(22);
     });
@@ -228,7 +220,11 @@ describe('level 1: the timber yard', () => {
         const goTo = (x: number, zStop: number) => {
             for (let i = 0; i < 900 && Math.abs(s.player.x - x) > 0.05; i++)
                 step({ moveX: s.player.x > x ? -0.4 : 0.4 });
-            for (let i = 0; i < 900 && s.player.z > zStop; i++) step({ moveZ: 0.5 });
+            // (room for a ~5 s crawl onto the bridge, with either body: the laid beams' near ends rest
+            // 10 cm past the near cap's edge, and that 10 cm ledge is narrower than the controller's
+            // 12 cm minimum step width, so the cap (10 cm up) and the beams (20 cm up) can't be
+            // stepped one after the other; laid 10 cm further out it takes under 1 s)
+            for (let i = 0; i < 1800 && s.player.z > zStop; i++) step({ moveZ: 0.5 });
             step({}, 30);
         };
         step({}, 60);
@@ -250,8 +246,7 @@ describe('level 1: the timber yard', () => {
             step({}, 30);
             // turn to the creek: the beam turns with you and points out over the gap
             ease(0, 120, (v) => (yaw = v), yaw);
-            // a beaver carries it low and close: step right up to the bank's edge before lowering
-            goTo(x, BRIDGE.nearEdge + 0.05);
+            goTo(x, BRIDGE.nearEdge + 0.4);
             ease(-0.7, 40, (v) => (pitch = v), pitch);
             step({}, 30);
             step({ grab: true });

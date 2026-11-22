@@ -49,6 +49,8 @@ import {
     smoothstep
 } from './common.ts';
 import type { RockSpot, TerrainSpec, TreeSpot } from './common.ts';
+import { STAND_CROWN_RADIUS, drawStandTree } from './forestry.ts';
+import type { ForestryDef } from './forestry.ts';
 import { pieceVolume } from './level.ts';
 import type { LevelBuildResult, LevelDef, LevelLayout, LevelStage, PropPlacement, Rect, StaticPiece } from './level.ts';
 import { routeSign } from './route-signs.ts';
@@ -64,6 +66,7 @@ import {
     creekCenterZ,
     creekHalfWidth,
     yardHeight,
+    YARD_FORESTRY,
     yardLayout,
     yardPieces,
     yardProps,
@@ -387,7 +390,7 @@ export const CHECKPOINTS = [
     { u: 174.2, t: roadT(174.2) }, // 6: past the crevasse, on the level bench
     { u: SUMMIT_U, t: 0 } // 7: the flower
 ];
-const STAGE_COLOURS = [M.HiVis, M.TestOrange, M.Grass, M.TestBlue, M.Brick, M.Snow, M.Flower];
+export const STAGE_COLOURS = [M.HiVis, M.TestOrange, M.Grass, M.TestBlue, M.Brick, M.Snow, M.Flower];
 
 function valleyPieces(): StaticPiece[] {
     const P: StaticPiece[] = [];
@@ -743,8 +746,8 @@ function valleyPieces(): StaticPiece[] {
 }
 
 /**
- * Distant landmarks: a silhouette for each area that reads from far down the valley, chunky enough
- * (40 cm and up) to survive the far lattice. The works have their chimney and crane, the gorge its
+ * Distant landmarks: a silhouette for each area that reads from far down the valley. Every part is
+ * at least 42 cm thick, so it survives the 40 cm far lattice (tests/unit/landmarks.test.ts). The works have their chimney and crane, the gorge its
  * waterfall and the summit its flower; these add the forest's fire lookout on the ridge and the
  * mountain's radio mast.
  */
@@ -767,7 +770,7 @@ function landmarkPieces(): StaticPiece[] {
             [1.3, 1.3]
         ] as const)
             P.push(
-                piece('lookout-leg', boxS(0.16, legH / 2, 0.16), u + du, y + legH / 2, t + dt, darkTimber, {
+                piece('lookout-leg', boxS(0.22, legH / 2, 0.22), u + du, y + legH / 2, t + dt, darkTimber, {
                     roll: -dt * 0.03,
                     pitch: du * 0.03
                 })
@@ -786,7 +789,7 @@ function landmarkPieces(): StaticPiece[] {
                 [0.9, 0.7]
             ] as const)
                 P.push(
-                    piece('lookout-brace', boxS(0.08, 0.08, 1.9), u + du, y + legH * h, t + dt, darkTimber, {
+                    piece('lookout-brace', boxS(0.21, 0.21, 1.9), u + du, y + legH * h, t + dt, darkTimber, {
                         yaw,
                         pitch: tilt,
                         collide: false
@@ -797,12 +800,14 @@ function landmarkPieces(): StaticPiece[] {
                 priority: 3
             })
         );
-        P.push(piece('lookout-band', boxS(1.55, 0.2, 1.55), u, y + legH + 1.35, t, solid(M.HiVis, 0), { priority: 4 }));
+        P.push(
+            piece('lookout-band', boxS(1.55, 0.21, 1.55), u, y + legH + 1.35, t, solid(M.HiVis, 0), { priority: 4 })
+        );
         for (let n = 0; n < 3; n++)
             P.push(
                 piece(
                     'lookout-roof',
-                    boxS(1.8 - n * 0.55, 0.2, 1.8 - n * 0.55),
+                    boxS(1.8 - n * 0.55, 0.21, 1.8 - n * 0.55),
                     u,
                     y + legH + 2.2 + n * 0.4,
                     t,
@@ -825,8 +830,8 @@ function landmarkPieces(): StaticPiece[] {
         P.push(
             piece(
                 'mast-dish',
-                { type: 'cylinder', axis: 'z', r: 0.7, half: 0.12 },
-                u + 0.5,
+                { type: 'cylinder', axis: 'z', r: 0.8, half: 0.22 },
+                u + 0.6,
                 y + H * 0.7,
                 t,
                 solid(M.Galvanised, 2),
@@ -1011,6 +1016,12 @@ function buildScenery(
         trees++;
     });
     let rocks = 0;
+    // the Timber Yard's logging stand (felled trees: the voxel worker follows the sim)
+    VALLEY_FORESTRY.trees.forEach((t, n) => {
+        if (!hit(t.x, t.z, STAND_CROWN_RADIUS)) return;
+        drawStandTree(world, t, n, surfaceY(t.x, t.z), stats);
+        trees++;
+    });
     sc.layout.rocks.forEach((k, n) => {
         if (!hit(k.x, k.z, sc.rockR[n])) return;
         rock(world, k.x, k.z, surfaceY(k.x, k.z), k.rx, k.ry, k.rz, k.yaw, stats, n + 5);
@@ -1072,6 +1083,27 @@ function atUT(u: number, t: number, lift: number, yaw = 0, pitch = 0, roll = 0):
     const w = routeToWorld(u, t);
     return pose(w.x, groundUT(u, t) + lift, w.z, quatFromYawPitchRoll(ROUTE_YAW + yaw, pitch, roll));
 }
+
+/** The Timber Yard's logging stand and sawmill, where the yard is (area 1). */
+const VALLEY_FORESTRY: ForestryDef = (() => {
+    const y = YARD_FORESTRY;
+    const saw = y.sawmill!;
+    const w = yardToWorld(saw.x, saw.z);
+    return {
+        // positions and leans turned with the yard
+        trees: y.trees.map((t) => ({
+            ...yardToWorld(t.x, t.z),
+            yaw: t.yaw + ROUTE_YAW,
+            lean: t.lean && {
+                x: t.lean.x * Math.cos(ROUTE_YAW) + t.lean.z * Math.sin(ROUTE_YAW),
+                z: -t.lean.x * Math.sin(ROUTE_YAW) + t.lean.z * Math.cos(ROUTE_YAW)
+            }
+        })),
+        sawmill: { x: w.x, z: w.z, yaw: saw.yaw + ROUTE_YAW, y: saw.y },
+        axe: y.axe ? fromYard(y.axe) : null,
+        ground: surfaceY
+    };
+})();
 
 /** How many of each prop the Valley uses (sim/lab-entities.ts sizes its pools from these). */
 export const VALLEY_PROPS = { planks: 12, beams: 12, crates: 6 };
@@ -1210,6 +1242,7 @@ export const valleyLevel: LevelDef = {
         ute: { mode: 'drivable', pose: yardActors.ute }
     },
     props: valleyProps(),
+    forestry: VALLEY_FORESTRY,
     rules: {
         objective: 'Deliver the bucket to the flower on the summit',
         goal: VALLEY_STAGES[VALLEY_STAGES.length - 1].goal,

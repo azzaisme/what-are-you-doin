@@ -8,7 +8,10 @@
  * finished buffers. The main thread only uploads them, all at once.
  */
 
+import { TREE_STATE } from '../assets/forestry.ts';
 import { parseLevelData, levelFromData } from '../levels/data.ts';
+import { clearStandTree, drawStandTree, drawStump } from '../levels/forestry.ts';
+import type { ForestryDef } from '../levels/forestry.ts';
 import { getLevel } from '../levels/index.ts';
 import type { LevelDef } from '../levels/level.ts';
 import { createLabEntities } from '../sim/lab-entities.ts';
@@ -16,7 +19,7 @@ import type { SimEntity } from '../sim/lab-entities.ts';
 import { ANIM_MAX } from '../sim/snapshots.ts';
 import { DYNAMIC_REGION, STATIC_REGION, collectDirty, unpackRegion } from '../voxels/dirty.ts';
 import type { DirtyWork } from '../voxels/dirty.ts';
-import { CHUNK_COORD_LIMIT, CHUNK_SIZE, CHUNK_Y_LIMIT, GRID_SIZE } from '../voxels/grid.ts';
+import { CHUNK_COORD_LIMIT, CHUNK_SIZE, CHUNK_Y_LIMIT, GRID_SIZE, cellIndexX, cellIndexZ } from '../voxels/grid.ts';
 import { pose } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
 import { MeshOutput, meshRegionBlocked } from '../voxels/mesher.ts';
@@ -73,6 +76,12 @@ export class VoxelService {
      * (their columns are cleared here, and rebuilt when the near tile goes).
      */
     private far: { def: LevelDef; seed: number; holes: Map<number, { ti: number; tk: number }> } | null = null;
+    /**
+     * Logging (Epic 6): the level's stand trees, and per tree the stand marker it is read from
+     * (tracked index) and whether the static layer shows it felled. The sim publishes each tree's
+     * state in its marker's channels; a change re-draws that tree's static voxels (tree or stump).
+     */
+    private wood: { def: ForestryDef; markers: number[]; drawnDown: boolean[] } | null = null;
     /** Cameras the near world follows (x, z pairs), from the last frame request. */
     private focus: Float32Array | null = null;
     /**
@@ -125,6 +134,12 @@ export class VoxelService {
         // designer levels arrive as data (validated again here: the worker trusts nothing)
         const def = data ? levelFromData(parseLevelData(data)) : getLevel(level);
         this.withWorld = withWorld && !far;
+        this.wood = null;
+        if (def.forestry && this.withWorld) {
+            const ents = createLabEntities().entities.filter((e) => e.asset.parts.length > 0);
+            const markers = def.forestry.trees.map((_, k) => ents.findIndex((e) => e.name === `tree-${k}`));
+            this.wood = { def: def.forestry, markers, drawnDown: markers.map(() => false) };
+        }
         let r = { columns: 0, staticCells: 0, trees: 0, ms: 0 };
         if (far || (withWorld && !def.stream)) r = def.build(this.world, seed);
         if (far && def.stream) {
@@ -181,6 +196,7 @@ export class VoxelService {
         if (this.stream && nearRadius !== undefined && nearRadius > 0) this.stream.radius = nearRadius;
         if (this.stream && this.focus) this.updateTiles(this.focus, this.tileBudgetMs, this.stream.radius);
         if (this.far && nearTiles) this.updateHoles(nearTiles, nearTileSize);
+        if (this.wood) this.updateStand(states);
         // objects beyond the near world are not drawn (their ground is not built there either)
         const cull = this.stream && this.focus ? this.stream.radius + 4 : 0;
         for (let n = 0; n < this.tracked.length; n++) {
@@ -331,9 +347,49 @@ export class VoxelService {
             }
             st.built.set(key(w.ti, w.tk), { ti: w.ti, tk: w.tk });
             st.changed = true;
+            // a fresh tile draws its stand trees standing
+            if (this.wood)
+                this.wood.def.trees.forEach((t, k) => {
+                    const i = cellIndexX(t.x);
+                    const kk = cellIndexZ(t.z);
+                    if (i >= r.i0 && i <= r.i1 && kk >= r.k0 && kk <= r.k1) this.wood!.drawnDown[k] = false;
+                });
             if (performance.now() - t0 > budgetMs || ++n >= maxTiles) break;
         }
         if (want.length > 0) this.world.finalizeStatic();
+    }
+
+    /**
+     * Stand trees whose state changed in the snapshots: a felled one leaves the static layer (a
+     * stump stays), a regrown one comes back. Only where the world is built (streamed levels: the
+     * tree's tile).
+     */
+    private updateStand(states: Float64Array): void {
+        const w = this.wood!;
+        let changed = false;
+        for (let k = 0; k < w.markers.length; k++) {
+            const n = w.markers[k];
+            if (n < 0) continue;
+            const o = n * STATE_STRIDE;
+            // a hidden marker says nothing (no snapshot yet)
+            if (!(states[o] > 0.5)) continue;
+            const down = states[o + 8 + TREE_STATE] > 0.5;
+            if (down === w.drawnDown[k]) continue;
+            const t = w.def.trees[k];
+            if (this.stream) {
+                const T = this.world.tileCells;
+                const tk = (ti: number, tkk: number) => (ti + 32768) * 65536 + (tkk + 32768);
+                if (!this.stream.built.has(tk(Math.floor(cellIndexX(t.x) / T), Math.floor(cellIndexZ(t.z) / T))))
+                    continue;
+            }
+            const g = w.def.ground(t.x, t.z);
+            clearStandTree(this.world, t, k, g, this.raster);
+            if (down) drawStump(this.world, t, g, this.raster);
+            else drawStandTree(this.world, t, k, g, this.raster);
+            w.drawnDown[k] = down;
+            changed = true;
+        }
+        if (changed) this.world.finalizeStatic();
     }
 
     /**
