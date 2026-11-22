@@ -138,8 +138,22 @@ const sim = new LabSim({ level, props: params.get('props') === 'scripted' ? 'scr
 const tiersOn = params.get('tiers') !== 'off';
 const tierObjects = new Map<CellTier, number[]>(CELL_TIERS.map((t) => [t, []]));
 for (const e of sim.entities)
-    if (e.asset.parts.length > 0) tierObjects.get(tiersOn ? assetTier(e.asset) : 'base')!.push(e.id);
+    if (e.asset.parts.length > 0 && !(tiersOn && e.id === sim.fpBody.id))
+        tierObjects.get(tiersOn ? assetTier(e.asset) : 'base')!.push(e.id);
 const lanes: LaneSpec[] = [];
+// your own first-person limbs get a 1 cm lane to themselves, so it can be moved with the camera
+// between voxel frames (VoxelClient.lockBody) without moving anything else
+if (tiersOn)
+    lanes.push({
+        worker: new Worker(new URL('./workers/voxel-worker.ts', import.meta.url), {
+            type: 'module',
+            name: 'voxels-self'
+        }),
+        renderer: new VoxelRenderer(app, scene.worldLayer, tierCellCm(assetTier(sim.fpBody.asset), cellCm) / 100),
+        cellCm: tierCellCm(assetTier(sim.fpBody.asset), cellCm),
+        objects: [sim.fpBody.id],
+        world: false
+    });
 for (const tier of CELL_TIERS) {
     const objects = tierObjects.get(tier)!;
     if (tier !== 'base' && objects.length === 0) continue;
@@ -532,14 +546,13 @@ class LabDirector extends Script {
             pipeline.request(frame, voxelClock.timeOf(frame));
         }
         // apply a finished voxel frame (all its meshes at once) before this frame renders
-        if (pipeline.poll()) {
-            // how late voxel frames reach the screen: shown from now until the next one lands
-            const lead = Math.min(
-                0.25,
-                Math.max(0, renderTime - (pipeline.lastStats?.time ?? renderTime) + 0.5 / voxelClock.hz)
-            );
-            pipeline.firstPersonLead += (lead - pipeline.firstPersonLead) * 0.2;
-        }
+        pipeline.poll();
+        // your own limbs stay with the camera between voxel frames
+        let bodyNow: { x: number; y: number; z: number; yaw: number } | null = null;
+        if (pipeline.firstPersonSlot >= 0 && sim.ring.sample(pipeline.firstPersonSlot, renderTime, bodyPose, bodyAnim))
+            // the beaver's root faces the other way from the look (its yaw is the look's + pi)
+            bodyNow = { x: bodyPose.p.x, y: bodyPose.p.y, z: bodyPose.p.z, yaw: fpInput.yaw + Math.PI };
+        pipeline.lockBody(sim.fpBody.id, bodyNow);
         reference.update(renderTime);
         if (state.colliders) drawColliders();
         // gusts stir the water

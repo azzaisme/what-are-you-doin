@@ -625,14 +625,17 @@ for (const transport of ['local', 'p2p'] as const)
             );
         const before = await where();
         expect(before.visible).toBe(true);
-        // keep walking until player 2 has moved on the host (slow CI runners simulate less per second)
+        // hold W on the guest until player 2 has moved on the host: a held key reaches every guest
+        // command, however few frames a slow CI runner draws (one-tick inputs barely moved it)
+        await net(guest, '(l) => l.look(3.14, -0.1)');
+        await guest.keyboard.down('KeyW');
         let moved = 0;
-        for (let i = 0; i < 300 && moved <= 0.3; i++) {
-            await net(guest, '(l) => { l.look(3.14, -0.1); l.input({ moveZ: 1 }); }');
+        for (let i = 0; i < 200 && moved <= 0.3; i++) {
             await guest.waitForTimeout(300);
             const after = await where();
             moved = Math.hypot(after.x - before.x, after.z - before.z);
         }
+        await guest.keyboard.up('KeyW');
         expect(moved).toBeGreaterThan(0.3);
         // the guest renders the host's world: both beaver bodies and every prop, all on the grid
         // (voxel frames lag the snapshots in software GL, so wait for the frame that has both beavers)

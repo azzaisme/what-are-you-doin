@@ -45,6 +45,12 @@ export const GRAB = {
      * level; held 0.3 m off it (24 kg: 71 N m of twist) it starts to sag; held by the end it tips.
      */
     maxTorque: 70,
+    /**
+     * A beam is shouldered rather than held in the hands: braced, the grip holds it level even by
+     * its end (36 kg, 1.6 m off the balance point: 565 N m), so one player can push it out over a
+     * gap and lay it across. Planks keep the hand wrist and still tip when held off balance.
+     */
+    braceTorque: 700,
     /** Wrist spring natural frequency (Hz) and damping ratio, inertia-normalized. */
     wristFrequency: 2.2,
     wristDamping: 1.0,

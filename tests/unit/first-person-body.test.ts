@@ -4,6 +4,7 @@ import type { VoxelAsset } from '../../src/assets/asset.ts';
 import { BEAVER_ARM_RAISE, BEAVER_FIRST_PERSON, beaverAsset, beaverFirstPersonAsset } from '../../src/assets/beaver.ts';
 import { assetTier } from '../../src/assets/cell-tier.ts';
 import { PERSON_ARM_LENGTH, PERSON_EYE_HEIGHT, personAsset, personFirstPersonAsset } from '../../src/assets/person.ts';
+import { bodyLockOffset } from '../../src/render/voxel-pipeline.ts';
 import { pose } from '../../src/voxels/math.ts';
 
 interface Body {
@@ -115,5 +116,38 @@ describe.each(BODIES)('your own body in first person ($name)', (b) => {
                 1e-12
             );
         });
+    });
+});
+
+describe('first-person limbs stay with the camera between voxel frames', () => {
+    // an entity turned by yaw about Y (PlayCanvas Euler Y): x' = c x + s z, z' = -s x + c z
+    const turn = (yaw: number, x: number, z: number) => [
+        Math.cos(yaw) * x + Math.sin(yaw) * z,
+        -Math.sin(yaw) * x + Math.cos(yaw) * z
+    ];
+    it('a limb point built at one pose lands where the same point is at the pose now', () => {
+        const cases: [[number, number, number, number], { x: number; y: number; z: number; yaw: number }][] = [
+            [[1, 0.4, -2, 0.3], { x: 1.6, y: 0.5, z: -2.7, yaw: 1.9 }],
+            [[-40, 6, 12, -2.5], { x: -39.2, y: 6.1, z: 11.4, yaw: 2.9 }],
+            [[0, 0, 0, 0], { x: 0, y: 0, z: 0, yaw: 0 }]
+        ];
+        for (const [built, now] of cases) {
+            const o = bodyLockOffset(built, now);
+            for (const [rx, ry, rz] of [
+                [0.2, -0.3, -0.4],
+                [-0.15, -0.9, 0.05]
+            ]) {
+                // the point on the body, in the world, as the limbs were built
+                const [bx, bz] = turn(built[3], rx, rz);
+                const w = [built[0] + bx, built[1] + ry, built[2] + bz];
+                // moved by the lane's offset (turn, then shift)
+                const [mx, mz] = turn(o[3], w[0], w[2]);
+                const moved = [mx + o[0], w[1] + o[1], mz + o[2]];
+                // the same body point at the pose now
+                const [nx, nz] = turn(now.yaw, rx, rz);
+                const want = [now.x + nx, now.y + ry, now.z + nz];
+                for (let k = 0; k < 3; k++) expect(moved[k]).toBeCloseTo(want[k], 9);
+            }
+        }
     });
 });

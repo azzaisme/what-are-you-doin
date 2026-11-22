@@ -1,5 +1,36 @@
 # Progress log
 
+## Your limbs stay with the camera (2026-11-22, owner report from a phone)
+
+Owner: "The biggest problem is the player character being out of sync with the player camera."
+
+- **Cause:** your first-person limbs are voxelized in a worker and only reach the screen when every
+  lane has finished the voxel frame. The camera moves every render frame. On a phone, and in the
+  Valley while the base lane builds tiles (up to 500–700 ms a frame in the container), the limbs
+  fell behind the camera. The old fix sampled them up to 250 ms ahead, which can't cover a longer
+  wait or a turn of the look.
+- **Fix:** the limbs get a 1 cm lane of their own (`voxels-self`). Every render frame that lane is
+  moved as one rigid piece, from the pose the limbs were built at to where you are now with your
+  look's yaw (`VoxelClient.lockBody`, `bodyLockOffset`). Their animation (walk, reach) still
+  updates with voxel frames. The look-ahead sampling is gone.
+- **Tests:** a unit test that a limb point built at one pose lands where it should at the pose now;
+  302 unit tests pass; the grid, first-person, Timber Yard, Valley and split-screen browser tests
+  pass.
+
+## Beams are shouldered: level 1's bridge can be built (2026-11-22, owner request)
+
+Owner asked whether the Timber Yard is finishable. Played through with player inputs only, it
+was, but only by throwing the bucket over: no beam could be laid across. Held by its end, a 36 kg
+3.2 m beam needs 565 N m to stay level and the wrist gives 70, so it hung straight down; toppling it,
+carrying it by the middle or sliding it out all fell short of the far abutment.
+
+- **Fix:** beams are braced on the shoulder: their wrist strength is `GRAB.braceTorque` (700 N m,
+  per body via `BodyOptions.wristTorque`). Take a beam by its end, turn to the creek (it turns with
+  you), stop 0.35–0.6 m back from the bank, look down to lower it and let go: it lies across on both
+  abutments. Planks keep the hand wrist and still tip when held off balance.
+- **Tests:** two new input-only playthroughs of the yard: building the bridge with both beams and
+  carrying the bucket across to the flag, and the bucket-throw shortcut. 300 unit tests pass.
+
 ## The Valley: the rest of the levels as one big map (2026-11-22, owner request)
 
 Owner: "Let's do the rest of the levels (one big map). Make sure it works for multiplayer and
