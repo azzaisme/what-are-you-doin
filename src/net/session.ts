@@ -41,6 +41,11 @@ export const REJOIN_GRACE_TICKS = 60 * SIM_HZ;
  * place of its own (a duplicated tab carries the same token, and never takes a live player).
  */
 export const TOKEN_WAIT_TICKS = 10 * SIM_HZ;
+/**
+ * Round trips up to this long are measured (longer reads as unknown). Generous: a guest page busy
+ * building its world (a phone, or software GL) can take seconds to apply and echo a snapshot.
+ */
+export const LAG_WINDOW_MS = 30_000;
 /** A guest waits this long for a host that went quiet before leaving the game. */
 export const HOST_GRACE_MS = 20_000;
 
@@ -139,7 +144,7 @@ export class HostSession {
     private readonly waiting = new Map<string, number>();
     /** guest peer id -> newest snapshot tick that guest applied */
     private readonly acks = new Map<string, number>();
-    /** snapshot tick -> when it was published (this.now() ms), for the last 10 s */
+    /** snapshot tick -> when it was published (this.now() ms), for the last LAG_WINDOW_MS */
     private readonly sentAt = new Map<number, number>();
     private readonly now: () => number;
     private readonly unsub: () => void;
@@ -285,7 +290,7 @@ export class HostSession {
         for (const [id, s] of this.slots) {
             if (s !== slot) continue;
             const ak = this.acks.get(id);
-            // an echo of a snapshot never sent (or sent over 10 s ago) is nonsense, or a stalled guest
+            // an echo of a snapshot never sent (or sent over LAG_WINDOW_MS ago) is nonsense, or a stalled guest
             const at = ak === undefined ? undefined : this.sentAt.get(ak);
             return at === undefined ? null : Math.round(this.now() - at);
         }
@@ -353,7 +358,7 @@ export class HostSession {
         this.lastSnapshotBytes = bytes.length;
         const now = this.now();
         this.sentAt.set(sim.tick, now);
-        for (const [t, at] of this.sentAt) if (now - at > 10_000 || t > sim.tick) this.sentAt.delete(t);
+        for (const [t, at] of this.sentAt) if (now - at > LAG_WINDOW_MS || t > sim.tick) this.sentAt.delete(t);
         const huds: [number, number, number, number][] = [];
         for (let s = 0; s < sim.players.length; s++) {
             const h = hud(s);

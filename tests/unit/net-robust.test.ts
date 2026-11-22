@@ -175,6 +175,17 @@ describe('online play under 100-300 ms latency and 10 % loss', { timeout: 30_000
         expect(lag).toBeLessThan(1200);
     });
 
+    it('still measures a round trip of many seconds (a guest page too busy to answer quickly)', async () => {
+        const g = await new Game({ latencyMs: 6000, jitterMs: 0, loss: 0 }).start();
+        g.msPerTick = 100;
+        const gs = await g.join('guest');
+        g.until(() => gs.slot === 1 && gs.received > 0);
+        g.run(200);
+        expect(g.hs.lagMs(1)).toBeGreaterThanOrEqual(12_000);
+        expect(g.hs.lagMs(1)).toBeLessThan(13_000);
+        expect(gs.lagMs).not.toBeNull();
+    });
+
     it('a host and a guest lift the 113 kg log together, and the guest can let go', async () => {
         const g = await new Game(BAD).start();
         const gs = await g.join('guest');
