@@ -1,9 +1,8 @@
 /**
  * A header tank with a tap (Epic 7): the clean refill point levels place on purpose. A timber
  * barrel with steel hoops up on a slim post, out of everyone's way (players walk under it), and a
- * pipe down to a tap over the spot where a bucket stands to be filled. Scenery only (no colliders):
- * the tank is over everyone's heads and the post is a 12 cm pole, so nothing in the yard moves
- * differently for it. The spot is the level's
+ * pipe down to a tap over the spot where a bucket stands to be filled. The post and the barrel are
+ * solid; the pipe and the tap are not (a hanging bucket swings under them). The spot is the level's
  * water source (an upright bucket there fills while the tank has water).
  */
 
@@ -61,7 +60,7 @@ export function waterButt(
             shape: { type: 'cylinder', axis: 'y', r: 0.06, half: (LIFT + 0.08) / 2 },
             pose: pose(bx, groundY - 0.08 + (LIFT + 0.08) / 2, bz, q),
             field: (sx, sy, sz) => voxel(M.LogBark, latticeShade(sx, sy, sz, 0.2, 7) & 1),
-            collide: false,
+            collide: true,
             priority: 2
         },
         {
@@ -69,7 +68,7 @@ export function waterButt(
             shape: { type: 'cylinder', axis: 'y', r: R, half: HALF },
             pose: pose(bx, base + HALF, bz, q),
             field: staves,
-            collide: false,
+            collide: true,
             priority: 2
         },
         {

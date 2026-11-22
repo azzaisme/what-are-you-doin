@@ -6,7 +6,15 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { BUCKET_LITRES } from '../../src/assets/props.ts';
-import { BUCKET_STUMP, YARD_GOAL, timberYardLevel } from '../../src/levels/timber-yard.ts';
+import {
+    BRIDGE,
+    BRIDGE_X,
+    BUCKET_STUMP,
+    YARD_GOAL,
+    YARD_TAP,
+    YARD_Y,
+    timberYardLevel
+} from '../../src/levels/timber-yard.ts';
 import { SUMMIT_U, VALLEY_STAGES, roadT, routeToWorld, valleyHeight, valleyLevel } from '../../src/levels/valley.ts';
 import { GuestSession, HostSession, listGames } from '../../src/net/session.ts';
 import { MemoryHub } from '../../src/net/transport.ts';
@@ -15,7 +23,7 @@ import type { PlayerCommand } from '../../src/sim/commands.ts';
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
 import { WATER } from '../../src/sim/water.ts';
-import { pose } from '../../src/voxels/math.ts';
+import { pose, quatFromYawPitchRoll, quatMul } from '../../src/voxels/math.ts';
 
 import { Player } from './play.ts';
 
@@ -36,10 +44,27 @@ function pickUp(s: LabSim): Player {
     return pl;
 }
 
-/** Walks to just north of the stump (the tank's post stands east of it) and faces the tap. */
+/** Walks to just east of the yard's tap (its post stands south of it) and faces the tap. */
 function toTap(pl: Player): void {
-    pl.walkTo(BUCKET_STUMP.x - 0.3, BUCKET_STUMP.z + 1.6);
-    pl.lookAt(BUCKET_STUMP.x, pl.s.player.y + EYE_HEIGHT - 0.6, BUCKET_STUMP.z, 30);
+    pl.walkTo(YARD_TAP.x + 3, YARD_TAP.z + 0.3);
+    pl.walkTo(YARD_TAP.x + 1.6, YARD_TAP.z + 0.1);
+    pl.lookAt(YARD_TAP.x, pl.s.player.y + EYE_HEIGHT - 0.6, YARD_TAP.z, 30);
+}
+
+/** Holds the bucket under the yard's tap until it is full (or `ticks` pass). */
+function fillAtTap(pl: Player, ticks = 1200): void {
+    pl.holdOver(YARD_TAP.x, YARD_TAP.z, YARD_Y + 0.5, ticks, () => pl.s.water.volume >= WATER.capacity - 1e-9);
+}
+
+/** Lays the yard's two beams across the creek (the bridge; Epic 3's tests build it by play). */
+function bridgeBeams(s: LabSim): void {
+    const flatAlongZ = quatMul(quatFromYawPitchRoll(Math.PI / 2, 0, 0), quatFromYawPitchRoll(0, Math.PI / 2, 0));
+    ['beam-0', 'beam-1'].forEach((n, i) =>
+        s.physics.place(
+            s.entities.find((e) => e.name === n)!.id,
+            pose(BRIDGE_X - 0.105 + i * 0.21, YARD_Y + 0.12, BRIDGE.zc, flatAlongZ)
+        )
+    );
 }
 
 /** Pours the held bucket out until (nearly) empty, then stops. */
@@ -52,7 +77,7 @@ function pourOut(pl: Player): void {
 }
 
 describe('refilling, played (#63)', () => {
-    it('pour it out, hold it under the yard tap: it fills from the butt, to full, once per fill', () => {
+    it('pour it out, carry it to the yard tank and hold it under the tap: it fills, to full, once per fill', () => {
         const s = yard();
         const pl = pickUp(s);
         const butt = s.water.sources[0];
@@ -67,13 +92,7 @@ describe('refilling, played (#63)', () => {
         expect(s.water.volume).toBeCloseTo(before, 6);
         // back to the stump: hold it under the tap
         toTap(pl);
-        pl.holdOver(
-            BUCKET_STUMP.x,
-            BUCKET_STUMP.z,
-            BUCKET_STUMP.top + 0.5,
-            1200,
-            () => s.water.volume >= WATER.capacity - 1e-9
-        );
+        fillAtTap(pl);
         expect(s.physics.heldIdOf(0)).toBe(s.bucket.id);
         expect(s.water.volume).toBeCloseTo(WATER.capacity, 6);
         expect(butt.litres).toBeCloseTo(40 - (WATER.capacity - before), 6);
@@ -81,7 +100,7 @@ describe('refilling, played (#63)', () => {
         pl.step({}, 2);
         expect(s.events.filter((e) => e.text.startsWith('Filled up'))).toHaveLength(1);
         const left = butt.litres;
-        pl.holdOver(BUCKET_STUMP.x, BUCKET_STUMP.z, BUCKET_STUMP.top + 0.5, 120);
+        pl.holdOver(YARD_TAP.x, YARD_TAP.z, YARD_Y + 0.5, 120);
         expect(butt.litres).toBe(left);
         expect(Math.abs(s.water.imbalance)).toBeLessThan(1e-9);
     }, 120_000);
@@ -95,13 +114,7 @@ describe('refilling, played (#63)', () => {
             pl.walkTo(BUCKET_STUMP.x - 3, BUCKET_STUMP.z + 2);
             pourOut(pl);
             toTap(pl);
-            pl.holdOver(
-                BUCKET_STUMP.x,
-                BUCKET_STUMP.z,
-                BUCKET_STUMP.top + 0.5,
-                1200,
-                () => s.water.volume >= WATER.capacity - 1e-9
-            );
+            fillAtTap(pl);
             expect(s.water.volume).toBeCloseTo(WATER.capacity, 6);
             expect(Math.abs(s.water.imbalance)).toBeLessThan(1e-9);
         }
@@ -169,26 +182,49 @@ describe('setting it down (#61)', () => {
 });
 
 describe('never unwinnable (#63, #64)', () => {
-    it('lose five buckets in the creek: every spare fills under the tap, and the yard can still be won', () => {
+    it('lose five buckets in the creek: each spare is back on the stump, and the sixth is filled, carried over the bridge and delivered by play', () => {
         const s = yard();
         s.step(neutralCommand(0));
         let n = 1;
         for (let k = 0; k < 5; k++) {
-            // lost: it goes over the bank into the creek
+            // lost (setup): it goes over the bank into the creek
             const at = s.progress.recoveries;
             s.physics.place(s.bucket.id, pose(BUCKET_STUMP.x - 8, -0.1, -2.2));
             for (let i = 0; i < 600 && s.progress.recoveries === at; i++) s.step(neutralCommand(n++));
             expect(s.progress.recoveries).toBe(at + 1);
-            // the spare is back on its stump, under the tap, and fills
-            for (let i = 0; i < 300; i++) s.step(neutralCommand(n++));
-            expect(s.water.volume).toBeCloseTo(WATER.capacity, 6);
+            // the spare is back on its stump, empty; every tank is full again
+            for (let i = 0; i < 60; i++) s.step(neutralCommand(n++));
+            expect(Math.hypot(s.bucket.pose.p.x - BUCKET_STUMP.x, s.bucket.pose.p.z - BUCKET_STUMP.z)).toBeLessThan(
+                0.3
+            );
+            expect(s.water.volume).toBe(0);
+            expect(s.water.sources[0].litres).toBe(40);
             expect(Math.abs(s.water.imbalance)).toBeLessThan(1e-9);
         }
-        // the sixth bucket still makes it
-        s.physics.place(s.bucket.id, pose((YARD_GOAL.minX + YARD_GOAL.maxX) / 2, 0.8, -7));
-        for (let i = 0; i < 180; i++) s.step(neutralCommand(n++));
+        bridgeBeams(s);
+        // the sixth: picked up from the stump, filled at the tank, carried over the bridge, set down
+        s.fpActive = true;
+        s.placePlayer(BUCKET_STUMP.x, BUCKET_STUMP.z + 1, 0);
+        const pl = new Player(s);
+        pl.step({}, 20);
+        expect(pl.grabBucket()).toBe(true);
+        pl.lookAt(BUCKET_STUMP.x, s.player.y + EYE_HEIGHT, BUCKET_STUMP.z - 3, 30);
+        toTap(pl);
+        fillAtTap(pl);
+        expect(s.water.volume).toBeCloseTo(WATER.capacity, 6);
+        // look up from the tap (carry it at a comfortable height) and head for the bridge at half pace
+        pl.lookAt(BRIDGE_X, s.player.y + EYE_HEIGHT, BRIDGE.nearFace, 30);
+        expect(pl.walkTo(BRIDGE_X, BRIDGE.nearFace + 1.2, 0.3, 3000, 0.5)).toBe(true);
+        // over the beams, also at half pace (as the yard's own played delivery crosses)
+        expect(pl.walkTo(BRIDGE_X, (YARD_GOAL.minZ + YARD_GOAL.maxZ) / 2, 0.4, 3000, 0.5)).toBe(true);
+        expect(s.progress.falls).toBe(0);
+        pl.step({ grab: true });
+        pl.step({}, 240);
+        expect(s.physics.heldIdOf(0)).toBe(-1);
         expect(s.progress.goalReached).toBe(true);
-    }, 120_000);
+        expect(s.water.volume).toBeGreaterThan(9);
+        expect(Math.abs(s.water.imbalance)).toBeLessThan(1e-9);
+    }, 300_000);
 });
 
 describe('the flower, played (#64)', () => {

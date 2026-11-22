@@ -10,7 +10,7 @@ The bucket now carries water the game keeps track of. Carry it steadily and it s
 - **Carry it gently.** Walking, stopping and turning are fine. A sprint that you stop dead slops some out. So does a drop, a hard hit or a big tilt.
 - **Set it down:** click (E, RT, Grab) to let go and the bucket is lowered to the ground first, so it keeps its water. Q (B, Drop) drops it from your hands and it splashes.
 - **Pour:** while holding the bucket, press R (Y on a pad, the Pour button on touch). (The River Lab's pad carry-plank toggle moved from Y to d-pad right.) The bucket tips forward, mouth towards where you look. Press again to stop. Letting go also stops it.
-- **Refill:** hold or stand the bucket under a water tank's tap. On the Timber Yard stump, the tap is right above it. It fills at 4 L/s, and says so once when the bucket is full (or a second after you take it away).
+- **Refill:** hold or stand the bucket under a water tank's tap. The Timber Yard's tank stands in the north-west corner of the yard; in the Valley there are tanks at the works and on the summit road. It fills at 4 L/s, and says so once when the bucket is full (or a second after you take it away).
     - Each butt holds a fixed amount: the yard's 40 L, the Valley works tank 30 L, the mountain spring butt 20 L.
     - While the level's goal is still open, a butt always keeps at least a bucketful (topping itself up), so the run can't become unwinnable. After the goal it can run dry.
     - Losing the bucket or resetting the props refills every butt.
@@ -20,7 +20,7 @@ The bucket now carries water the game keeps track of. Carry it steadily and it s
     - At least 0.25 L has to land inside the ring.
     - The stage completes once the pour stops, and says how much the flower drank, with praise for more.
     - The win fires once.
-- **A lost bucket:** the spare comes back empty. Its water went into the creek. In the yard the spare reappears on its stump under the tap, so it refills by itself. In the Valley there are butts at the works and on the summit road.
+- **A lost bucket:** the spare comes back empty. Its water went into the creek. In the yard the spare reappears on its stump: carry it to the tank to fill it. In the Valley the spares at the works and on the summit road wait under those tanks' taps.
 
 ### What was built
 
@@ -47,7 +47,7 @@ The bucket now carries water the game keeps track of. Carry it steadily and it s
     - The 1 cm water in the bucket follows the volume and tilts with the surface.
     - When water leaves, blue voxel droplets fall from the rim. When it fills, a stream falls from the tap.
     - The droplets are drawn from a fixed pool of particles and are decoration only. They never decide the volume.
-- **Water tanks:** a timber barrel with hoops up on a slim post, over everyone's heads, with a pipe down to an orange tap (`src/levels/water-butt.ts`). They are scenery only (no colliders), so nothing else in the yard moves differently for them.
+- **Water tanks:** a timber barrel with hoops up on a slim post, over everyone's heads, with a pipe down to an orange tap (`src/levels/water-butt.ts`). The post and the barrel are solid; the pipe and tap are not. The yard's tank stands in its north-west corner, away from the paths to the bridge, the logging stand and the sawmill.
 - **Pouring tips the bucket all the way:** the pour turns the bucket's mouth forward and down whichever way it faces, with the wrist sized for turning about the hand.
 - **Steadier bucket handling:** a hanging bucket's hand now moves at most 1.5 m/s relative to your eye.
     - So a flick of the view swings the bucket round instead of whipping it.
@@ -55,26 +55,27 @@ The bucket now carries water the game keeps track of. Carry it steadily and it s
 
 ### Test results (actual)
 
-| Test                                                               | Result                                                                                |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| Still bucket, 60 s                                                 | 10.00 L, surface level                                                                |
-| Two laps of the yard carrying it (walk, stop, 180° turns in 0.5 s) | **10.00 L** kept                                                                      |
-| Timber Yard by the bridge, inputs only                             | 10.00 L over the bridge, 10.00 L after setting it down at the flag                    |
-| Tipped 60° and held                                                | keeps exactly what fits under the rim                                                 |
-| Dropped at 4 m/s / swung into a wall at 4 m/s                      | 0.63 L / 1.14 L splashed out                                                          |
-| In the ute's bed: gentle drive / full throttle then a hard stop    | 10.00 L / 9.27 L                                                                      |
-| Pouring                                                            | below 9 L in 0.7 s, empty within 2 s                                                  |
-| Pour it out and hold it under the yard tap (commands only)         | fills at 4 L/s to exactly 10 L, announced once, then takes nothing more               |
-| Five pour-and-refill rounds at the yard butt                       | four from its 40 L, then a recorded top-up: never dry while the goal is open          |
-| The Valley's works tank and summit-road butt (commands only)       | each refills an emptied bucket held under its tap to 10 L                             |
-| Set down (click) / dropped (Q)                                     | 10.00 L / 8.53 L kept                                                                 |
-| Lose five buckets in the creek                                     | every spare refills under the tap; the sixth bucket still wins the yard               |
-| Valley flower, played: carried up the summit road and poured       | arrived with 10.00 L; one win; a second bucket poured later adds water, no second win |
-| Garbage input (NaN, infinities) for 600 ticks                      | every value finite, volume within 0–10 L                                              |
-| Online: a guest picks up and pours the bucket                      | the host drains it; the guest's HUD and own snapshots show the host's litres          |
-| Droplets during a 3 s spill and a fill                             | within the particle pool's limit; all gone within a second after it stops             |
+| Test                                                               | Result                                                                                                                                                                                 |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Still bucket, 60 s                                                 | 10.00 L, surface level                                                                                                                                                                 |
+| Two laps of the yard carrying it (walk, stop, 180° turns in 0.5 s) | **10.00 L** kept                                                                                                                                                                       |
+| Timber Yard by the bridge, inputs only                             | 10.00 L over the bridge, 10.00 L after setting it down at the flag                                                                                                                     |
+| Tipped 60° and held                                                | keeps exactly what fits under the rim                                                                                                                                                  |
+| Dropped at 4 m/s / swung into a wall at 4 m/s                      | 0.63 L / 1.14 L splashed out                                                                                                                                                           |
+| In the ute's bed: gentle drive / full throttle then a hard stop    | 10.00 L / 9.27 L                                                                                                                                                                       |
+| Pouring                                                            | below 9 L in 0.7 s; empty within 1 s whichever way the bucket faces in the hand (0, 90, 180°)                                                                                          |
+| Pour it out and hold it under the yard tap (commands only)         | fills at 4 L/s to exactly 10 L, announced once, then takes nothing more                                                                                                                |
+| Five pour-and-refill rounds at the yard butt                       | four from its 40 L, then a recorded top-up: never dry while the goal is open                                                                                                           |
+| The Valley's works tank and summit-road butt (commands only)       | each refills an emptied bucket held under its tap to 10 L                                                                                                                              |
+| Set down (click) / dropped (Q)                                     | 10.00 L / 8.53 L kept                                                                                                                                                                  |
+| Lose five buckets in the creek                                     | each spare is back on the stump, the tank is full again; the sixth is picked up, filled at the tank, carried over the bridge and set down by the flag (commands only): the yard is won |
+| Walk into the yard tank's post                                     | stopped against it                                                                                                                                                                     |
+| Valley flower, played: carried up the summit road and poured       | arrived with 10.00 L; one win; the same bucket, refilled at the summit tank and poured again, adds water, no second win                                                                |
+| Garbage input (NaN, infinities) for 600 ticks                      | every value finite, volume within 0–10 L                                                                                                                                               |
+| Online: a guest picks up and pours the bucket                      | the host drains it; the guest's HUD and own snapshots show the host's litres                                                                                                           |
+| Droplets during a 3 s spill and a fill                             | within the particle pool's limit; all gone within a second after it stops                                                                                                              |
 
-- Unit tests: 368 runs pass (every test runs at both the 5 cm and the 10 cm voxel size). The played tests are in `tests/unit/water-play.test.ts`.
+- Unit tests: 450 runs pass (every test runs at both the 5 cm and the 10 cm voxel size). The played tests are in `tests/unit/water-play.test.ts`.
 - Browser tests pass: the Timber Yard objective and delivery, the Valley stages, online co-op in the Valley (the guest's HUD shows the host's litres), and UI boxes don't overlap.
 
 ### Changed on purpose
@@ -87,6 +88,7 @@ The bucket now carries water the game keeps track of. Carry it steadily and it s
 ### Known limits
 
 - **Q drops the bucket from your hands**, which splashes about 1.5 L out. Click to set it down instead.
+- **Hurrying spills.** Carried at a full walk down the yard's bank to the bridge, a full bucket lost about 2.5 L in a test; at half pace, none.
 - **Tuned by feel.** The water's damping is set well above real water's so a swinging carry doesn't build up waves. Owner playtesting should set how forgiving it is: the thresholds are in `WATER` in `src/sim/water.ts`.
 - **Not tried on a real phone.** The Pour touch button only appears while you hold the bucket.
 

@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import { BUCKET_LITRES, BUCKET_SLOPE_X, bucketAsset } from '../../src/assets/props.ts';
 import { MAX_PARTICLES, ParticleFX } from '../../src/fx/particles.ts';
-import { BRIDGE_X, BUCKET_STUMP, timberYardLevel } from '../../src/levels/timber-yard.ts';
+import { BRIDGE_X, BUCKET_STUMP, YARD_TAP, timberYardLevel } from '../../src/levels/timber-yard.ts';
 import { ACTION_POUR, ACTION_RESET_PROPS, neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
 import { propBody } from '../../src/sim/lab-physics.ts';
@@ -262,20 +262,52 @@ describe('the bucket in the level (#61, #63)', () => {
         expect(Math.abs(s.water.imbalance)).toBeLessThan(1e-9);
     });
 
-    it('a spare bucket after a fall is empty and fills on the stump; nothing is counted twice', () => {
+    it('a spare bucket after a fall is empty and back on its stump; the tank is refilled; nothing is counted twice', () => {
         const s = new LabSim({ level: timberYardLevel });
         s.step(cmd(0));
         s.physics.place(s.bucket.id, pose(BRIDGE_X + 3, -0.1, -2.3));
         let n = 1;
         for (; n < 400 && s.progress.recoveries === 0; n++) s.step(cmd(n));
         expect(s.progress.recoveries).toBe(1);
-        expect(s.water.volume).toBeLessThan(0.01);
-        for (let i = 0; i < 300; i++) s.step(cmd(n++));
-        // back on its stump, under the tap
-        expect(s.water.volume).toBeCloseTo(10, 6);
-        expect(s.water.sources[0].litres).toBeCloseTo(30, 6);
+        for (let i = 0; i < 120; i++) s.step(cmd(n++));
+        expect(Math.hypot(s.bucket.pose.p.x - BUCKET_STUMP.x, s.bucket.pose.p.z - BUCKET_STUMP.z)).toBeLessThan(0.3);
+        expect(s.water.volume).toBe(0);
+        expect(s.water.sources[0].litres).toBe(40);
         expect(s.water.lost + s.water.spilled).toBeCloseTo(10, 6);
         expect(Math.abs(accounted(s))).toBeLessThan(1e-9);
+    }, 60_000);
+
+    it('the yard tank’s post is solid: a player walking into it is stopped', () => {
+        const s = new LabSim({ level: timberYardLevel });
+        s.step(cmd(0));
+        s.fpActive = true;
+        const post = { x: YARD_TAP.x, z: YARD_TAP.z - 0.9 };
+        // 1.5 m east of the post, facing west (yaw pi/2 looks along -x), walking straight at it
+        s.placePlayer(post.x + 1.5, post.z, Math.PI / 2);
+        for (let i = 0; i < 180; i++) s.step(cmd(1 + i, { moveZ: 1, yaw: Math.PI / 2 }));
+        const p = s.player;
+        // stopped against it (capsule 0.3 m + post 0.06 m), not walked through or round it
+        expect(p.x).toBeGreaterThan(post.x + 0.3);
+        expect(p.x).toBeLessThan(post.x + 0.45);
+        expect(Math.abs(p.z - post.z)).toBeLessThan(0.2);
+    });
+
+    it('pouring tips and empties the bucket whichever way it faces in the hand (0, 90 and 180 degrees)', () => {
+        for (const yaw of [0, Math.PI / 2, Math.PI]) {
+            const s = new LabSim({ level: timberYardLevel });
+            s.step(cmd(0));
+            // the bucket turned on its stump before it is picked up (setup)
+            const b = s.bucket.pose.p;
+            s.physics.place(s.bucket.id, pose(b.x, b.y, b.z, quatFromYawPitchRoll(yaw, 0, 0)));
+            const step = holdBucket(s, 1);
+            step({ action: ACTION_POUR });
+            step({}, 60);
+            expect(s.water.volume, `bucket yawed ${yaw.toFixed(2)}`).toBeLessThan(0.3);
+            // mouth forward (yaw 0 looks along -z) and down
+            const q = s.bucket.pose.q;
+            const upZ = 2 * (q.y * q.z + q.w * q.x);
+            expect(upZ).toBeLessThan(-0.5);
+        }
     }, 60_000);
 
     it('is deterministic: the same commands give the same water', () => {

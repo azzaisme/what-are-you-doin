@@ -54,8 +54,8 @@ export class Player {
         }
     }
 
-    /** Walks to (x, z), turning towards it as it goes; returns whether it got within `near`. */
-    walkTo(x: number, z: number, near = 0.3, maxTicks = 3000): boolean {
+    /** Walks to (x, z) at `speed` (0-1 of a walk), turning towards it as it goes; returns whether it got within `near`. */
+    walkTo(x: number, z: number, near = 0.3, maxTicks = 3000, speed = 1): boolean {
         for (let i = 0; i < maxTicks; i++) {
             const p = this.p;
             const dx = x - p.x;
@@ -67,7 +67,7 @@ export class Player {
             d = Math.atan2(Math.sin(d), Math.cos(d));
             // turn at most ~3 rad/s, and walk only once roughly facing the way
             this.yaw += Math.max(-0.05, Math.min(0.05, d));
-            this.step({ moveZ: Math.abs(d) < 0.6 ? Math.min(1, dist) : 0 });
+            this.step({ moveZ: Math.abs(d) < 0.6 ? Math.min(speed, dist) : 0 });
         }
         this.step({}, 30);
         return Math.hypot(x - this.p.x, z - this.p.z) < near + 0.1;
