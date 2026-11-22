@@ -185,6 +185,7 @@ test('default voxel size is 5 cm with the slider range 5-10 cm', async ({ page }
 });
 
 test('settings menu: mouse, keyboard and gamepad reach every setting, and it is saved', async ({ page }) => {
+    test.setTimeout(600_000); // two boots of the game page (with Epic 6's stand, ~4.5 min in software GL here)
     // a stand-in gamepad the page reads through navigator.getGamepads
     await page.addInitScript(() => {
         const buttons = Array.from({ length: 17 }, () => ({ pressed: false, touched: false, value: 0 }));
