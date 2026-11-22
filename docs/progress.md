@@ -1,5 +1,42 @@
 # Progress log
 
+## Route signs and distant landmarks in the Valley (2026-11-22, Epic 9, #16)
+
+### Route signs
+
+Each area from the Forest Road on starts with a route sign beside the road.
+
+- **What it shows:** the area's number in big pixel digits and an arrow for the way on, on a band
+  of the area's colour.
+    - The arrow bears left or right where the road bends ahead.
+    - The sign faces players coming up the road.
+    - They replace the plain coloured signposts.
+- **Readable at both voxel sizes:** one glyph pixel is 10 cm. The board stands square to the world
+  grid, snapped to 10 cm lines, so every pixel is whole cells at 5 cm and at 10 cm.
+- **The code:** `src/levels/route-signs.ts`. Other levels can use it.
+
+### Distant landmarks
+
+Each area now has a silhouette you can head for.
+
+- **New:**
+    - **Forest Road:** a fire lookout on the ridge. It is a timber cabin with a hi-vis band, on 11 m
+      braced legs, and it stands over the pines. You can see it from the Timber Yard.
+    - **Mountain Approach:** an 18 m radio mast, banded orange and white, with a dish and a hut.
+- **Already there:** the gorge's waterfall, the works' chimney and crane, and the summit flower.
+- **Far away:** everything is 40 cm or thicker, so it still shows in the coarse far lattice.
+- **Trees** are kept off both landmarks.
+
+### Tests
+
+- `tests/unit/route-signs.test.ts` voxelizes a sign facing each of the four ways, at 5 and 10 cm,
+  and reads the digit and arrow back cell by cell.
+- It checks the board's height and that the posts reach the ground.
+- It checks that the Valley has its five signs.
+- Unit tests: 332 pass.
+- The Valley's streaming tests pass with the new pieces, including "a tile builds the same whether
+  its neighbours are built or not".
+
 ## The beavers are back (2026-11-22, Epic 9, #90)
 
 The tall people that stood in for the beavers are gone. Players, online avatars and the River
