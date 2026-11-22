@@ -22,9 +22,10 @@ import { ANIM_MAX } from '../sim/snapshots.ts';
 import type { SnapshotRing } from '../sim/snapshots.ts';
 import { pose } from '../voxels/math.ts';
 
+import { HeldLoops } from './held-loops.ts';
 import { sfx } from './sfx.ts';
 import type { SfxName, SfxOptions, SfxSink, Vec3Like } from './sfx.ts';
-import { LOOPS, SOUND_NAMES, SYNTH_RATE, synthesize } from './synth.ts';
+import { HELD_LOOPS, LOOPS, SOUND_NAMES, SYNTH_RATE, synthesize } from './synth.ts';
 import type { SoundName } from './synth.ts';
 
 export interface AudioVolumes {
@@ -95,6 +96,18 @@ export class GameAudio implements SfxSink {
     private nextEmitter = 0;
     private flat: Entity | null = null;
     private readonly loops = new Map<SoundName, { e: Entity; gain: number; target: number; pitch: number }>();
+    /** Loops held on by other features (`sfx.hold`), by their key (src/audio/held-loops.ts). */
+    private readonly holds = new HeldLoops<Entity>(
+        (key, name, positional) => {
+            const e = this.emitter(`SfxHold-${key}`, positional);
+            const asset = this.assets.get(name as SoundName)!;
+            e.sound!.addSlot(name, { asset: asset.id, loop: true, volume: 0, autoPlay: false });
+            e.sound!.play(name);
+            return e;
+        },
+        (e) => e.destroy()
+    );
+    private prevBrake = 0;
     private readonly tracks = new Map<number, Track>();
     private readonly eyeTracks: Track[] = [];
     private readonly stepDist: number[] = [];
@@ -162,7 +175,7 @@ export class GameAudio implements SfxSink {
         this.app.assets.add(asset);
         this.assets.set(name, asset);
         this.pending = this.pending.filter((n) => n !== name);
-        if (LOOPS.has(name)) {
+        if (LOOPS.has(name) && !HELD_LOOPS.has(name)) {
             const positional = name === 'river' || name === 'engine';
             const e = this.emitter(`SfxLoop-${name}`, positional);
             e.sound!.addSlot(name, { asset: asset.id, loop: true, volume: 0, autoPlay: false });
@@ -213,6 +226,16 @@ export class GameAudio implements SfxSink {
         this.played++;
         this.recent.push(sound);
         if (this.recent.length > 24) this.recent.shift();
+    }
+
+    /** A loop that sounds while it is held on (called every frame), and fades when let go. */
+    hold(key: string, name: SfxName, at: Vec3Like | null, opts: SfxOptions = {}): void {
+        if (!this.started) return;
+        const sound = name as SoundName;
+        const asset = this.build(sound);
+        if (!asset) return;
+        const e = this.holds.hold(key, sound, !!at, opts.gain ?? 1, opts.pitch ?? 1, performance.now());
+        if (at) e.setPosition(at.x, at.y, at.z);
     }
 
     /** A level event (a step done, the goal). */
@@ -385,6 +408,12 @@ export class GameAudio implements SfxSink {
         const hz = f.hazard;
         const w = this.world.level.water;
         if (hz.flood === PHASE.tell && this.prevFlood === PHASE.idle) this.play('siren', null, { gain: 0.75 });
+        // the handbrake prank: the ratchet creeping off, from the ute
+        if (hz.brake !== this.prevBrake && hz.brake !== PHASE.idle) {
+            const at = this.ute.seen ? { x: this.ute.x, y: this.ute.y + 0.8, z: this.ute.z } : null;
+            this.play(hz.brake === PHASE.tell ? 'ratchet' : 'clank', at, { gain: hz.brake === PHASE.tell ? 1 : 0.6 });
+        }
+        this.prevBrake = hz.brake;
         if (hz.gust !== this.prevGust && hz.gust !== PHASE.idle) {
             // from upwind of the player it is aimed at
             const tr = this.eyeTracks[hz.gustSlot];
@@ -449,6 +478,13 @@ export class GameAudio implements SfxSink {
             const bus = name === 'engine' ? this.volumes.effects : this.volumes.ambience;
             slot.volume = l.gain * bus;
             slot.pitch = l.pitch;
+        }
+        // held loops: let go (not held for a moment) they fade out, then stop
+        for (const h of this.holds.update(performance.now(), k * 3)) {
+            const slot = h.e.sound!.slot(h.name);
+            if (!slot) continue;
+            slot.volume = h.volume * this.volumes.effects;
+            slot.pitch = h.pitch;
         }
     }
 

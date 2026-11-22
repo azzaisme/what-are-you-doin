@@ -99,13 +99,14 @@ export class PlaytestLog {
         const gusts = hazardLines.filter((e) => e.text.includes('gust is coming')).length;
         const torn = hazardLines.filter((e) => e.text.includes('tore')).length;
         const washed = hazardLines.filter((e) => e.text.includes('left')).length;
+        const brakes = hazardLines.filter((e) => e.text.includes('creeping off')).length;
         const first = (k: string) => (this.firsts.has(k) ? mins(this.firsts.get(k)!) : '—');
         return [
             `Playtest summary (${this.meta.level ?? '?'})`,
             `  length: ${mins(dur)}; most players at once: ${this.maxPlayers}`,
             `  finished: ${this.goalAt >= 0 ? `yes, at ${mins(this.goalAt)}` : 'no'}`,
             `  falls into the creek: ${this.count('fell')}; bucket recoveries: ${this.count('recovered')}`,
-            `  floods: ${floods} (timber washed downstream ${washed}×); gusts: ${gusts} (torn from hands ${torn}×)`,
+            `  floods: ${floods} (timber washed downstream ${washed}×); gusts: ${gusts} (torn from hands ${torn}×); handbrake pranks: ${brakes}`,
             `  restarts: ${this.count('restart')}; settings opened: ${this.count('menu')}; facilitator notes: ${this.count('note')}`,
             `  first grab: ${first('grab')}; first stage step: ${first('step')}; first hazard: ${first('hazard')}`
         ].join('\n');
