@@ -342,7 +342,7 @@ export const CHECKPOINTS = [
     { u: 174.2, t: roadT(174.2) }, // 6: past the crevasse, on the level bench
     { u: SUMMIT_U, t: 0 } // 7: the flower
 ];
-const STAGE_COLOURS = [M.HiVis, M.TestOrange, M.Grass, M.TestBlue, M.Brick, M.Snow, M.Flower];
+export const STAGE_COLOURS = [M.HiVis, M.TestOrange, M.Grass, M.TestBlue, M.Brick, M.Snow, M.Flower];
 
 function valleyPieces(): StaticPiece[] {
     const P: StaticPiece[] = [];
@@ -698,8 +698,8 @@ function valleyPieces(): StaticPiece[] {
 }
 
 /**
- * Distant landmarks: a silhouette for each area that reads from far down the valley, chunky enough
- * (40 cm and up) to survive the far lattice. The works have their chimney and crane, the gorge its
+ * Distant landmarks: a silhouette for each area that reads from far down the valley. Every part is
+ * at least 42 cm thick, so it survives the 40 cm far lattice (tests/unit/landmarks.test.ts). The works have their chimney and crane, the gorge its
  * waterfall and the summit its flower; these add the forest's fire lookout on the ridge and the
  * mountain's radio mast.
  */
@@ -722,7 +722,7 @@ function landmarkPieces(): StaticPiece[] {
             [1.3, 1.3]
         ] as const)
             P.push(
-                piece('lookout-leg', boxS(0.16, legH / 2, 0.16), u + du, y + legH / 2, t + dt, darkTimber, {
+                piece('lookout-leg', boxS(0.22, legH / 2, 0.22), u + du, y + legH / 2, t + dt, darkTimber, {
                     roll: -dt * 0.03,
                     pitch: du * 0.03
                 })
@@ -741,7 +741,7 @@ function landmarkPieces(): StaticPiece[] {
                 [0.9, 0.7]
             ] as const)
                 P.push(
-                    piece('lookout-brace', boxS(0.08, 0.08, 1.9), u + du, y + legH * h, t + dt, darkTimber, {
+                    piece('lookout-brace', boxS(0.21, 0.21, 1.9), u + du, y + legH * h, t + dt, darkTimber, {
                         yaw,
                         pitch: tilt,
                         collide: false
@@ -780,8 +780,8 @@ function landmarkPieces(): StaticPiece[] {
         P.push(
             piece(
                 'mast-dish',
-                { type: 'cylinder', axis: 'z', r: 0.7, half: 0.12 },
-                u + 0.5,
+                { type: 'cylinder', axis: 'z', r: 0.8, half: 0.22 },
+                u + 0.6,
                 y + H * 0.7,
                 t,
                 solid(M.Galvanised, 2),

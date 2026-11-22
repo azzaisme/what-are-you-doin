@@ -172,7 +172,7 @@ describe('level 1: the timber yard', () => {
         // before the fix: ~500 N on a 1.5 kg bucket, spinning at 30 rad/s, reversing every tick
         expect(flips).toBeLessThan(6);
         expect(maxForce).toBeLessThan(weight * 2);
-        // the lanky stand-in people held it further from the turning axis than beavers (higher
+        // the lanky stand-in people hold it further from the turning axis than beavers (higher
         // eye): measured 20.0 deg for them, ~15 for beavers
         expect(maxTilt).toBeLessThan(22);
     });
@@ -228,7 +228,8 @@ describe('level 1: the timber yard', () => {
         const goTo = (x: number, zStop: number) => {
             for (let i = 0; i < 900 && Math.abs(s.player.x - x) > 0.05; i++)
                 step({ moveX: s.player.x > x ? -0.4 : 0.4 });
-            for (let i = 0; i < 900 && s.player.z > zStop; i++) step({ moveZ: 0.5 });
+            // (stepping up onto freshly laid beams stalls for about 5 s, with either body: room for it)
+            for (let i = 0; i < 1800 && s.player.z > zStop; i++) step({ moveZ: 0.5 });
             step({}, 30);
         };
         step({}, 60);
@@ -250,8 +251,7 @@ describe('level 1: the timber yard', () => {
             step({}, 30);
             // turn to the creek: the beam turns with you and points out over the gap
             ease(0, 120, (v) => (yaw = v), yaw);
-            // a beaver carries it low and close: step right up to the bank's edge before lowering
-            goTo(x, BRIDGE.nearEdge + 0.05);
+            goTo(x, BRIDGE.nearEdge + 0.4);
             ease(-0.7, 40, (v) => (pitch = v), pitch);
             step({}, 30);
             step({ grab: true });

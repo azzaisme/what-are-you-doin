@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import { PLAYER_BODY } from '../../src/assets/player-body.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
@@ -66,18 +67,25 @@ function tilt(q: Quat): number {
     return (Math.atan2(Math.abs(ay), Math.hypot(ax, az)) * 180) / Math.PI;
 }
 
-/** The lowest corner of the 2.4 x 0.2 x 0.1 m plank (world y). */
-function plankLowest(q: Quat, p: { y: number }): number {
-    let low = Infinity;
+/** The plank's lowest corner (world), for whether it rests on the ground. */
+function lowestCorner(q: Quat, p: { x: number; y: number; z: number }) {
+    let low = { x: 0, y: Infinity, z: 0 };
     for (const sx of [-1.2, 1.2])
         for (const sy of [-0.1, 0.1])
             for (const sz of [-0.05, 0.05]) {
-                // y row of the rotation matrix
+                const x =
+                    (1 - 2 * (q.y * q.y + q.z * q.z)) * sx +
+                    2 * (q.x * q.y - q.w * q.z) * sy +
+                    2 * (q.x * q.z + q.w * q.y) * sz;
                 const y =
                     2 * (q.x * q.y + q.w * q.z) * sx +
                     (1 - 2 * (q.x * q.x + q.z * q.z)) * sy +
                     2 * (q.y * q.z - q.w * q.x) * sz;
-                low = Math.min(low, p.y + y);
+                const z =
+                    2 * (q.x * q.z - q.w * q.y) * sx +
+                    2 * (q.y * q.z + q.w * q.x) * sy +
+                    (1 - 2 * (q.x * q.x + q.y * q.y)) * sz;
+                if (p.y + y < low.y) low = { x: p.x + x, y: p.y + y, z: p.z + z };
             }
     return low;
 }
@@ -105,10 +113,12 @@ function holdPlankAt(offset: number) {
     const dist = Math.hypot(eye - grip.y, 1.4);
     s.physics.grabById(pl.id, grip, dist, 0);
     expect(s.physics.heldId).toBe(pl.id);
-    // lift it to about chest height in front
+    // lift it up in front: a person to chest height (looking a little down), a beaver as high as
+    // it carries things, looking ahead (its paws at its eye, 1.2 m)
+    const liftPitch = PLAYER_BODY === 'beaver' ? 0 : -0.35;
     let maxLoad = 0;
     for (let n = 0; n < 120; n++) {
-        s.step(cmd(210 + n, { pitch: -0.35 }));
+        s.step(cmd(210 + n, { pitch: liftPitch }));
         maxLoad = Math.max(maxLoad, s.physics.rig(0)!.wristLoad);
     }
     expect(s.physics.heldId).toBe(pl.id);
@@ -119,10 +129,14 @@ function holdPlankAt(offset: number) {
         tipped: tilt(pl.pose.q),
         lifted: pl.pose.p.y - c.y,
         gripAbove: info.y - pl.pose.p.y,
-        // the plank's lowest corner above the ground under the player (m)
-        lowest: plankLowest(pl.pose.q, pl.pose.p) - s.player.y,
         load: s.physics.rig(0)!.wristLoad,
-        maxLoad
+        maxLoad,
+        // its lowest corner, and the ground under that corner (m)
+        lowest: lowestCorner(pl.pose.q, pl.pose.p).y,
+        groundUnder: (() => {
+            const l = lowestCorner(pl.pose.q, pl.pose.p);
+            return s.level.terrainHeight(l.x, l.z);
+        })()
     };
 }
 
@@ -140,10 +154,14 @@ describe('balance: where you pick something up decides how it hangs', () => {
         const end = holdPlankAt(1.0);
         expect(Math.abs(near.tipped - near.before)).toBeLessThan(6);
         expect(mid.tipped).toBeGreaterThan(near.tipped + 20);
-        // further out it tips more, unless its far end comes to rest on the ground first (a beaver
-        // holds things lower than a tall person)
-        if (end.lowest > 0.05) expect(end.tipped).toBeGreaterThan(mid.tipped + 5);
-        else expect(end.tipped).toBeGreaterThan(near.tipped + 15);
+        // further out it tips more while it hangs free; a 2.4 m plank gripped by its end hangs 2.2 m
+        // below the hand, further than a 1.4 m beaver can lift it, so there it comes to rest with its
+        // far end on the ground (and only on it: never sunk into it)
+        expect(mid.lowest - mid.groundUnder).toBeGreaterThan(0.02);
+        const endResting = end.lowest - end.groundUnder < 0.05;
+        if (endResting) expect(end.tipped).toBeGreaterThan(near.tipped + 20);
+        else expect(end.tipped).toBeGreaterThan(mid.tipped + 5);
+        for (const r of [near, mid, end]) expect(r.lowest - r.groundUnder).toBeGreaterThan(-0.04);
         // gripped by the end, it hangs below the hand, and the wrist is past what it can hold
         expect(end.gripAbove).toBeGreaterThan(0.3);
         expect(end.maxLoad).toBeGreaterThan(1);

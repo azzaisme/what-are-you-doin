@@ -24,16 +24,24 @@ Each area now has a silhouette you can head for.
       braced legs, and it stands over the pines. You can see it from the Timber Yard.
     - **Mountain Approach:** an 18 m radio mast, banded orange and white, with a dish and a hut.
 - **Already there:** the gorge's waterfall, the works' chimney and crane, and the summit flower.
-- **Far away:** everything is 40 cm or thicker, so it still shows in the coarse far lattice.
+- **Far away:** every part is at least 42 cm thick, so it still shows in the coarse 40 cm far lattice.
 - **Trees** are kept off both landmarks.
 
 ### Tests
 
-- `tests/unit/route-signs.test.ts` voxelizes a sign facing each of the four ways, at 5 and 10 cm,
-  and reads the digit and arrow back cell by cell.
-- It checks the board's height and that the posts reach the ground.
-- It checks that the Valley has its five signs.
-- Unit tests: 332 pass.
+- `tests/unit/route-signs.test.ts`:
+    - voxelizes a sign facing each of the four ways, at 5 and 10 cm, and reads the digit and arrow
+      back cell by cell;
+    - checks the board's height and that the posts reach the ground;
+    - for each of the Valley's five signs, checks it reads its area's number, its arrow points
+      where the road bends, and it faces down the route and towards the road.
+- `tests/unit/landmarks.test.ts`:
+    - voxelizes every part of the lookout and the mast at the far lattice's 40 cm, and each writes
+      cells;
+    - checks no tree stands within 4.5 m of either;
+    - checks the sight line from the bucket stump to the lookout cabin clears the ground and every
+      tree's crown.
+- Unit tests: 342 pass.
 - The Valley's streaming tests pass with the new pieces, including "a tile builds the same whether
   its neighbours are built or not".
 
@@ -46,47 +54,56 @@ Lab's walking co-worker are beaver engineers again.
 
 - **The switch:** `PLAYER_BODY` in `src/assets/player-body.ts` is `'beaver'` again. The person body
   is still in the code and still passes every test, should you want it back.
-- **Things sit in the beaver's paws:** when the people came in they learned to carry things at
-  arm's length, with both hands on the grip. The beaver now does the same.
-    - Its arms are a little longer: 44 cm instead of 34. They still hang to the knee and read as a
-      beaver.
-    - A held thing is carried just past the paws, with the shoulders leaning in up to 20 cm.
-      From the eye that is 0.50 m looking straight ahead, 0.61 m looking a little down and 0.81 m
-      looking well down. A person held things about 0.9 m away.
-    - The arms now aim from where the leaning shoulders are, so the paws land on the grip.
-    - In first person, the "ready" pose (paws up in the corners) is only for empty paws. While
-      you hold something, your paws are where everyone else sees them: on it.
+- **Things sit in the beaver's paws, out in front, where a person carried them.** When the people
+  came in they learned to carry things at arm's length, with both hands on the grip. The beaver now
+  does the same.
+    - Its arms are longer: 50 cm instead of 34. They hang to its knees.
+    - To reach out, it leans in: its shoulders come forward up to 45 cm.
+    - A held thing is carried 0.76 m from the eye looking ahead, 0.90 m looking a little down and
+      1.08 m looking well down. A person held things 0.9–1.05 m away.
+    - The arms aim from where the leaning shoulders are, so the paws land on the grip.
+    - In first person, the "ready" pose (paws up in the corners) is only for empty paws. While you
+      hold something, your paws are where everyone else sees them: on it.
+- **A hard yank tears things out of its paws.** The beaver's reach is shorter (0.95 m with the
+  lean, a person's is 1.04 m). So the grab lets go at once when what you hold is dragged 1.8 m
+  from your paws (2.2 m for a person). Held 1.25 m away for 0.75 s, it lets go too, as before.
+    - A violent flick drops the plank again (the original test, unchanged).
+    - Carrying while walking and turning stays under 0.45 m, well clear.
 - **Your first-person limbs** still have their own 1 cm lane that follows the camera every frame.
-  The longer arms go into it unchanged.
 
 ### Measured (`tests/unit/hands.test.ts`, now run for the beaver)
 
 - Plank looking straight, a little down and well down, the crate and the bucket: both paw tips
-  are within 5 cm of the grip's height and 3 cm of its depth, one either side of it. That holds in
+  are within 4 cm of the grip's height and 3 cm of its depth, one either side of it. That holds in
   your own view and as others see you. The test's limits are 10 cm and 8 cm.
 
 ### What playing feels like now
 
-- **The Timber Yard bridge:** a beaver carries a beam lower and closer. To lay one across, walk
-  right up to the bank's edge before you look down and let go. The playthrough test now stops
-  there and gets both beams onto both abutments, centred.
-- **Throwing the bucket over the creek** works again from the near abutment.
-- **Held planks:** grip a plank by its end and its far end rests on the ground, because a beaver
-  holds it lower. A violent flick no longer breaks a close hold, but it still can't fling the
-  plank (it stays under 15 m/s).
-- **The ute:** look less far down at the door to get in. The seats were already set for a sitting
-  beaver.
+- **The Timber Yard bridge** plays as before: stop 0.35–0.6 m back from the bank, look down, let
+  go. The playthrough test is unchanged, with one exception.
+    - Stepping up onto freshly laid beams stalls for about 5 s, with either body. It is a step-up
+      issue in the character controller, and Epic 5's approach ramps will replace the bare beam ends.
+    - The test's walk now allows for that stall (1,800 ticks instead of 900).
+- **Throwing the bucket over the creek** works from the near abutment, as before.
+- **Planks gripped off centre** tip about your paws, more the further out you grip them, while they
+  hang free.
+    - A 2.4 m plank held by its end hangs 2.2 m below your paws, further than a 1.4 m beaver can
+      lift it. So its far end comes to rest on the ground (at 35°; held 0.45 m out it hangs free
+      at 41°).
+    - The test checks it rests on the ground and never sinks in. A person holds it clear, as before.
+- **The ute:** look less far down at the door to get in (your eye is 1.22 m up, not 1.86 m). The
+  seats were already set for a sitting beaver.
 
 ### Tests
 
-- Unit tests: 326 pass with the beaver, and 326 with the person.
-- Updated for the beaver's height:
-    - the beam-laying stop point;
-    - a plank gripped by its end may rest on the ground;
-    - the close-hold flick;
-    - the G-plank distance;
-    - the ute door's look angle in the browser test.
-- Browser tests: first person, the Timber Yard, the ute, the Valley and split screen all pass.
+- Unit tests pass with the beaver, and with the person.
+- The flick, the G-plank distance (0.6 m), the bucket throw and the beam-laying stand-off are
+  back to their original numbers.
+- Two animation checks now compute what the arms should do from the body's reach, instead of the
+  old fixed 0.26 m and "exactly level".
+- The balance test lifts the plank as each body carries it. Its end case allows resting on the
+  ground, and checks nothing sinks into it.
+- Browser tests: see the PR.
 
 ## Epic 4: the ute drives (2026-11-22)
 

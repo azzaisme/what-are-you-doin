@@ -48,6 +48,14 @@ export interface PlayerBody {
     holdReach: number;
     /** The nearest the eye a thing in your hands is carried (m). */
     holdMin: number;
+    /** How far the shoulders may reach forward into what you hold (m). */
+    reachMax: number;
+    /**
+     * The grab lets go when what you hold is dragged this far from your hands for a moment (m), or
+     * at once beyond `snapDistance`: shorter arms hold on less far.
+     */
+    breakDistance: number;
+    snapDistance: number;
 }
 
 const BODIES: Record<BodyKind, PlayerBody> = {
@@ -63,7 +71,10 @@ const BODIES: Record<BodyKind, PlayerBody> = {
         armInward: PERSON_ARM_INWARD,
         // arm's length and a little reach into it
         holdReach: PERSON_ARM_LENGTH + 0.06,
-        holdMin: 0.7
+        holdMin: 0.7,
+        reachMax: 0.2,
+        breakDistance: 1.25,
+        snapDistance: 2.2
     },
     beaver: {
         asset: beaverAsset,
@@ -75,10 +86,15 @@ const BODIES: Record<BodyKind, PlayerBody> = {
         stride: 0.95,
         shoulderHalfWidth: 0.3,
         armInward: BEAVER_ARM_INWARD,
-        // the short arms and a lean into it: the shoulders reach forward up to 0.2 m
-        holdReach: BEAVER_ARM_LENGTH + 0.16,
-        // the eye sits 38 cm above the shoulders, so held things come closer to it than a person's
-        holdMin: 0.5
+        // short arms, so the beaver leans in and reaches out with its shoulders to carry things
+        // well out in front, about where a person holds them
+        holdReach: BEAVER_ARM_LENGTH + 0.35,
+        holdMin: 0.7,
+        reachMax: 0.45,
+        // a reach of 0.95 m with the lean, against a person's 1.04 m: a hard yank tears it out of
+        // the paws sooner
+        breakDistance: 1.25,
+        snapDistance: 1.8
     }
 };
 
