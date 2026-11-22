@@ -51,12 +51,14 @@ import {
     quatSlerp,
     vec3
 } from '../voxels/math.ts';
+import type { Vec3 } from '../voxels/math.ts';
 
 import { BucketWaterState } from './bucket-water.ts';
 import { SIM_DT } from './clock.ts';
 import {
     ACTION_DROP,
     ACTION_DROP_TEST,
+    ACTION_NAIL,
     ACTION_POUR,
     ACTION_RAGDOLL,
     ACTION_RESET_PROPS,
@@ -66,6 +68,9 @@ import {
 import type { PlayerCommand } from './commands.ts';
 import { Forestry } from './forestry.ts';
 import { HazardDirector, PHASE } from './hazards.ts';
+import { GROUND, nailCode } from './joints/graph.ts';
+import { JointSystem } from './joints/joints.ts';
+import type { NailPreview } from './joints/joints.ts';
 import { MAX_PLAYERS, MAX_STRESS, createLabEntities } from './lab-entities.ts';
 import type { SimEntity } from './lab-entities.ts';
 import { addDummy, addLabKinematics, buildLabPhysics, launchDummy, propBody, stressDef } from './lab-physics.ts';
@@ -134,6 +139,8 @@ export class LabSim {
     private beaverTheta = 0;
     private uteTheta = 0;
     private uteSpin = 0;
+    /** What is nailed to what (Epic 5), rebuilt with the physics world. */
+    joints!: JointSystem;
     /** The drivable ute's physics (levels whose ute is 'drivable'), or null. */
     vehicle: UteVehicle | null = null;
     /** Recovery: the last place the ute stood level on solid ground, and how long it has lain tipped. */
@@ -281,6 +288,8 @@ export class LabSim {
         this.lastLookYaw = null;
         this.jumped = false;
         this.events.length = 0;
+        // (tick starts again at 0: a hint given before the reset must not hold the next one back)
+        this.looseHintTick = -Infinity;
         this.lostTicks = this.goalTicks = 0;
         this.water.reset();
         // the first snapshot already shows a full bucket
@@ -333,6 +342,7 @@ export class LabSim {
         const drivable = ute.mode === 'drivable' && this.physicsProps;
         addLabKinematics(pw, this.beaver.id, drivable ? -1 : this.ute.id, this.beaver.pose, this.ute.pose);
         this.vehicle = drivable ? new UteVehicle(pw, this.ute.id, ute.pose) : null;
+        this.joints = new JointSystem(pw);
         this.seats.fill(-1);
         this.uteSafeSet = false;
         this.uteTipped = 0;
@@ -530,6 +540,7 @@ export class LabSim {
         pw.step();
         this.readPhysics();
         this.readVehicle();
+        this.looseBeamHint();
         this.stepWater();
         this.watchUte();
         if (this.physicsProps) this.stepWood();
@@ -602,6 +613,7 @@ export class LabSim {
         if (cmd.action === ACTION_POUR) this.pouring[i] = pw.setPour(!this.pouring[i], i);
         const eye = { x: p.x, y: p.y + EYE_HEIGHT, z: p.z };
         if (cmd.action === ACTION_DROP) pw.release(i);
+        if (cmd.action === ACTION_NAIL) this.joints.nail(eye, cmd.yaw, cmd.pitch, i, this.tick);
         if (cmd.throw) {
             if (pw.heldIdOf(i) >= 0) ev.thrown = true;
             pw.throwHeld(cmd.yaw, cmd.pitch, i);
@@ -1005,6 +1017,31 @@ export class LabSim {
         quatRotate({ x: -q.x, y: -q.y, z: -q.z, w: q.w }, eye.x - u.p.x, 0, eye.z - u.p.z, _v);
         const want = _v.x < 0 ? 0 : 1;
         return this.takeSeat(i, this.seats[want] < 0 ? want : 1 - want);
+    }
+
+    /** Tick the loose-beam hint was last given (it repeats at most every 30 s). */
+    private looseHintTick = -Infinity;
+
+    /**
+     * Driving onto a beam that is nailed down nowhere (Epic 5): one line saying a bare beam bridge
+     * wants nailing. Loose, the wheels shove a beam aside where it meets the bank's lip.
+     */
+    private looseBeamHint(): void {
+        const v = this.vehicle;
+        if (!v || this.driver < 0 || this.tick - this.looseHintTick < 30 * 60) return;
+        for (const id of v.groundIds) {
+            if (id < 0) continue;
+            const e = this.entities.find((x) => x.id === id);
+            if (!e || !/^beam-\d+$/.test(e.name)) continue;
+            if (this.joints.graph.of(id).some((c) => c.b === GROUND)) continue;
+            this.looseHintTick = this.tick;
+            this.events.push({
+                tick: this.tick,
+                kind: 'ute',
+                text: 'Loose beams shift under the ute: nail each beam down at both ends to drive across.'
+            });
+            return;
+        }
     }
 
     /** Puts a player in the driver's seat (if it is free); also for tests and scripted starts. */
@@ -1482,6 +1519,7 @@ export class LabSim {
         shared: boolean;
         driving: boolean;
         seat: number;
+        nail: number;
     } {
         const ids = this.interactionIds(i);
         const name = (id: number) => (id < 0 ? null : (this.entities.find((e) => e.id === id)?.name ?? null));
@@ -1490,8 +1528,16 @@ export class LabSim {
             target: name(ids.target),
             shared: ids.shared,
             driving: ids.driving,
-            seat: ids.seat
+            seat: ids.seat,
+            nail: ids.nail
         };
+    }
+
+    /** What a hammer blow by player i would do now (read-only; a 'none' refusal with a >= 0 means it holds). */
+    nailPreview(i = 0): NailPreview | null {
+        if (!this.playerActive(i) || !this.physicsProps || this.seatOf(i) >= 0) return null;
+        const p = this.players[i];
+        return this.joints.preview({ x: p.x, y: p.y + EYE_HEIGHT, z: p.z }, p.yaw, p.pitch, i);
     }
 
     /**
@@ -1499,8 +1545,17 @@ export class LabSim {
      * prompts. The target is what a grab would do: a grabbable thing, or the ute (get in) when its
      * driver's seat is free.
      */
-    interactionIds(i: number): { held: number; target: number; shared: boolean; driving: boolean; seat: number } {
-        const none = { held: -1, target: -1, shared: false, driving: false, seat: -1 };
+    interactionIds(i: number): {
+        held: number;
+        target: number;
+        shared: boolean;
+        driving: boolean;
+        seat: number;
+        /** The hammer (nailCode) and where its nail would go. */
+        nail: number;
+        nailAt: Vec3 | null;
+    } {
+        const none = { held: -1, target: -1, shared: false, driving: false, seat: -1, nail: 0, nailAt: null };
         if (!this.playerActive(i) || !this.physicsProps) return none;
         const seat = this.seatOf(i);
         if (seat >= 0) return { ...none, driving: seat === 0, seat };
@@ -1521,7 +1576,16 @@ export class LabSim {
             pw.probeAny(eye, p.yaw, p.pitch, i) === this.ute.id
         )
             target = this.ute.id;
-        return { held, target, shared: held >= 0 && pw.holders(held) > 1, driving: false, seat: -1 };
+        const pv = this.nailPreview(i);
+        return {
+            held,
+            target,
+            shared: held >= 0 && pw.holders(held) > 1,
+            driving: false,
+            seat: -1,
+            nail: pv ? nailCode(pv.a, pv.refusal) : 0,
+            nailAt: pv && pv.a >= 0 && pv.refusal !== 'not-timber' ? { ...pv.head } : null
+        };
     }
 
     /** True when the voxelized dummy is in the world. */

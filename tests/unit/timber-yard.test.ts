@@ -215,7 +215,7 @@ describe('level 1: the timber yard', () => {
         expect(s.player.z).toBeGreaterThan(BRIDGE.nearFace); // the player never crossed
     }, 60_000);
 
-    it('finishable with inputs only by building the bridge: shoulder both beams over, walk back for the bucket and carry it across at a normal pace', () => {
+    it('finishable by building the bridge (placed setup: the player is put beside each piece): shoulder both beams over, walk back for the bucket and carry it across at a normal pace', () => {
         const s = yard();
         let n = 0;
         let yaw = 0;

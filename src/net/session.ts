@@ -20,10 +20,13 @@
  */
 
 import { SIM_HZ } from '../sim/clock.ts';
-import { ACTION_DROP, ACTION_NONE, ACTION_POUR, ACTION_RAGDOLL, neutralCommand } from '../sim/commands.ts';
+import { ACTION_DROP, ACTION_NAIL, ACTION_NONE, ACTION_POUR, ACTION_RAGDOLL, neutralCommand } from '../sim/commands.ts';
 import type { PlayerCommand } from '../sim/commands.ts';
 import { packHazardNet, readHazardNet } from '../sim/hazards.ts';
 import type { HazardNet } from '../sim/hazards.ts';
+import type { JointGraph } from '../sim/joints/graph.ts';
+import { decodeNails, encodeNails, nailMarks } from '../sim/joints/wire.ts';
+import type { NailMark } from '../sim/joints/wire.ts';
 import { MAX_PLAYERS } from '../sim/lab-entities.ts';
 import type { LabSim } from '../sim/lab-sim.ts';
 
@@ -109,6 +112,10 @@ export interface HudSlot {
     driving: boolean;
     /** The ute seat this player sits in (0 driver, 1 passenger), or -1. */
     seat: number;
+    /** The hammer: nailCode (0 no timber in view, 1 a nail would hold, 2+ why not). */
+    nail: number;
+    /** Where the nail would go (world), or null. */
+    nailAt: { x: number; y: number; z: number } | null;
 }
 
 export interface NetEvent {
@@ -175,6 +182,9 @@ export class HostSession {
     private recent: NetEvent[] = [];
     /** Bytes of the last snapshot (for the debug panel). */
     lastSnapshotBytes = 0;
+    /** The joint graph (and its version) last sent. */
+    private sentGraph: JointGraph | null = null;
+    private sentGraphVersion = -1;
     /** How long a dropped guest's player is kept (tests shorten it). */
     rejoinGraceTicks = REJOIN_GRACE_TICKS;
     /** Slots that got a new guest, slots freed, slots whose guest dropped (held for a rejoin), slots rejoined. */
@@ -352,10 +362,13 @@ export class HostSession {
                 jump: input.j > prev.j,
                 grab: input.g > prev.g,
                 throw: input.t > prev.t,
-                // guests may only drop, pour or launch the dummy (no scene resets or drop tests)
+                // guests may only drop, pour, nail or launch the dummy (no scene resets or drop tests)
                 action:
                     input.an > prev.an &&
-                    (input.a === ACTION_DROP || input.a === ACTION_RAGDOLL || input.a === ACTION_POUR)
+                    (input.a === ACTION_DROP ||
+                        input.a === ACTION_RAGDOLL ||
+                        input.a === ACTION_POUR ||
+                        input.a === ACTION_NAIL)
                         ? input.a
                         : ACTION_NONE
             };
@@ -382,12 +395,26 @@ export class HostSession {
         const now = this.now();
         this.sentAt.set(sim.tick, now);
         for (const [t, at] of this.sentAt) if (now - at > LAG_WINDOW_MS || t > sim.tick) this.sentAt.delete(t);
-        const huds: [number, number, number, number][] = [];
+        const huds: number[][] = [];
+        const cm = (v: number) => Math.round(v * 100);
         for (let s = 0; s < sim.players.length; s++) {
             const h = hud(s);
-            huds.push([h.held, h.target, h.shared ? 1 : 0, h.seat + 1]);
+            const row = [h.held, h.target, h.shared ? 1 : 0, h.seat + 1, h.nail];
+            if (h.nailAt) row.push(cm(h.nailAt.x), cm(h.nailAt.y), cm(h.nailAt.z));
+            huds.push(row);
+        }
+        // the nails ride in the same update, only when they changed (presence keeps the last value)
+        const graph = sim.joints.graph;
+        const extra: Record<string, unknown> = {};
+        if (graph !== this.sentGraph || graph.version !== this.sentGraphVersion) {
+            this.sentGraph = graph;
+            this.sentGraphVersion = graph.version;
+            const index = new Map(sim.entities.map((e, i) => [e.id, i]));
+            const marks = nailMarks(graph, (id) => index.get(id) ?? -1);
+            extra.jg = toBase64Chunks(encodeNails(marks));
         }
         this.ch.setState({
+            ...extra,
             s: toBase64Chunks(bytes),
             hud: huds,
             goal: sim.progress.goalReached,
@@ -465,6 +492,9 @@ export class GuestSession {
     /** This guest's player slot (-1 until the host assigns one, e.g. while the game is full). */
     slot = -1;
     hud: HudSlot[] = [];
+    /** The host's nails (display only). */
+    nails: NailMark[] = [];
+    private lastNails = '';
     goal = false;
     /** The host's tutorial step. */
     step = 0;
@@ -562,14 +592,27 @@ export class GuestSession {
             this.hud = (st.hud as unknown[]).map((x) => {
                 const a = Array.isArray(x) ? x : [];
                 const seat = num(a[3], 0) - 1;
+                const at = a.length >= 8 ? { x: num(a[5]) / 100, y: num(a[6]) / 100, z: num(a[7]) / 100 } : null;
                 return {
                     held: num(a[0], -1),
                     target: num(a[1], -1),
                     shared: a[2] === 1,
                     driving: seat === 0,
-                    seat: seat === 0 || seat === 1 ? seat : -1
+                    seat: seat === 0 || seat === 1 ? seat : -1,
+                    nail: Math.max(0, Math.trunc(num(a[4]))),
+                    nailAt: at
                 };
             });
+        }
+        const jg = Array.isArray(st.jg) ? (st.jg as unknown[]).filter((c): c is string => typeof c === 'string') : null;
+        const jgKey = jg ? jg.join('') : '';
+        if (jg && jgKey !== this.lastNails) {
+            this.lastNails = jgKey;
+            try {
+                this.nails = decodeNails(fromBase64Chunks(jg), this.sim.entities.length) ?? this.nails;
+            } catch {
+                // malformed: keep the last good nails
+            }
         }
         if (Array.isArray(st.ev)) {
             this.events = (st.ev as unknown[])

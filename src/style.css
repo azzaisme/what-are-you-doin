@@ -724,6 +724,11 @@ body.touch-play .cell-size {
     background: #2a5a3aa6;
 }
 
+.touch-buttons .touch-nail {
+    grid-column: 2;
+    background: #3a3f48a6;
+}
+
 .touch-buttons .touch-grab {
     background: #6a4a1aa6;
 }

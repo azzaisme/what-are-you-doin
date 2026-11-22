@@ -53,6 +53,7 @@ import type { GameAd } from './net/session.ts';
 import { localTransport, roomTransport } from './net/transport.ts';
 import type { NetTransport } from './net/transport.ts';
 import { PLAYTEST_STORAGE_KEY, PlaytestLog } from './playtest/telemetry.ts';
+import { NailMarkers } from './render/nail-markers.ts';
 import { ReferenceRenderer } from './render/reference.ts';
 import { QUALITY, createLabScene } from './render/scene.ts';
 import type { Quality } from './render/scene.ts';
@@ -63,6 +64,8 @@ import { FixedStepClock, SIM_DT, VOXEL_RATES, VoxelClock } from './sim/clock.ts'
 import type { VoxelRate } from './sim/clock.ts';
 import { ACTION_DROP_TEST, ACTION_RAGDOLL, ACTION_RESET_PROPS, neutralCommand } from './sim/commands.ts';
 import type { PlayerCommand } from './sim/commands.ts';
+import { nailMarks } from './sim/joints/wire.ts';
+import type { NailMark } from './sim/joints/wire.ts';
 import { EYE_HEIGHT, LabSim, MAX_PLAYERS } from './sim/lab-sim.ts';
 import type { PropsMode } from './sim/lab-sim.ts';
 import { initPhysics } from './sim/physics/world.ts';
@@ -70,6 +73,7 @@ import { ANIM_MAX } from './sim/snapshots.ts';
 import { WATER } from './sim/water.ts';
 import { weatherCovers, weatherFog } from './sim/weather.ts';
 import type { CameraControlsApi } from './types/engine-scripts.ts';
+import { withHammer } from './ui/hammer-hud.ts';
 import { OnlinePanel } from './ui/online-panel.ts';
 import { PlaytestPanel } from './ui/playtest-panel.ts';
 import { controlNames, interactionPrompt } from './ui/prompts.ts';
@@ -237,6 +241,7 @@ const tUpload = performance.now();
 pipeline.applyStatic();
 const staticUploadMs = performance.now() - tUpload;
 const reference = new ReferenceRenderer(app, sim, scene.worldLayer, scene.immediateLayer);
+const nailMarkers = new NailMarkers(app, scene.worldLayer, scene.viewLayers);
 const fpInput = new FirstPersonInput(canvas);
 // remappable controls (#98): one table shared by the keyboard, the pads and the settings menu
 const bindings = loadBindings(settingsStorage);
@@ -698,6 +703,7 @@ class LabDirector extends Script {
             bodyNow = { x: bodyPose.p.x, y: bodyPose.p.y, z: bodyPose.p.z, yaw: fpInput.yaw + Math.PI };
         pipeline.lockBody(sim.fpBody.id, bodyNow);
         reference.update(renderTime);
+        updateNails(renderTime);
         if (state.colliders) drawColliders();
         // gusts stir the water
         windAt(renderTime, level.wind ?? CALM, windNow);
@@ -1285,7 +1291,7 @@ function updateHud(): void {
         state.mode === 'orbit'
             ? `Drag to orbit · right-drag to pan · wheel to zoom${hotkey('KeyV', 'first person')}${hotkey('KeyH', 'hide UI')}`
             : sim.physicsProps
-              ? `Click to look · ${kbd(moveKeys())} move · ${kbd(keysText(bindings, 'sprint'))} run · ${kbd(keysText(bindings, 'jump'))} jump · ${kbd(keysText(bindings, 'grab'))} grab / release · ${kbd(keysText(bindings, 'throw'))} throw · ${kbd(keyVerb('reachFar'))} reach · ${kbd(keysText(bindings, 'drop'))} drop · ${kbd(keysText(bindings, 'pour'))} pour · ${kbd(keysText(bindings, 'plank'))} plank · ${kbd(keysText(bindings, 'ragdoll'))} ragdoll · <kbd>Esc</kbd> release mouse${hotkey('KeyV', 'orbit')}`
+              ? `Click to look · ${kbd(moveKeys())} move · ${kbd(keysText(bindings, 'sprint'))} run · ${kbd(keysText(bindings, 'jump'))} jump · ${kbd(keysText(bindings, 'grab'))} grab / release · ${kbd(keysText(bindings, 'throw'))} throw · ${kbd(keyVerb('reachFar'))} reach · ${kbd(keysText(bindings, 'drop'))} drop · ${kbd(keysText(bindings, 'pour'))} pour · ${kbd(keysText(bindings, 'nail'))} nail · ${kbd(keysText(bindings, 'plank'))} plank · ${kbd(keysText(bindings, 'ragdoll'))} ragdoll · <kbd>Esc</kbd> release mouse${hotkey('KeyV', 'orbit')}`
               : `Click to look · ${kbd(moveKeys())} move · ${kbd(keysText(bindings, 'sprint'))} run · ${kbd(keysText(bindings, 'jump'))} jump · ${kbd(keysText(bindings, 'plank'))} carry plank · <kbd>Esc</kbd> release mouse${hotkey('KeyV', 'orbit')}`;
     const short =
         state.mode === 'orbit'
@@ -1434,9 +1440,12 @@ const { keyVerb, lower, moveKeys, kbd, hotkey } = names;
 
 function interactionText(i: number, pad: boolean): string {
     const it = guestInteraction() ?? sim.interaction(i);
-    return interactionPrompt(it, pad, names, propLabel, (n) =>
+    const base = interactionPrompt(it, pad, names, propLabel, (n) =>
         woodPrompt(it, pad ? 'pad' : 'mouse', treeCut, sawBeams(), n)
     );
+    // the hammer's hint, on foot (src/ui/hammer-hud.ts)
+    if (it.driving || it.seat >= 0 || it.target === 'ute') return base;
+    return withHammer(base, it.nail, pad ? names.padVerb('nail') : keyVerb('nail'));
 }
 
 /** A stand tree's cut so far, from the newest snapshot (the same for host and guests). */
@@ -1462,12 +1471,49 @@ function guestInteraction(): {
     shared: boolean;
     driving: boolean;
     seat: number;
+    nail: number;
 } | null {
     if (!guestSession) return null;
     const h = guestSession.hud[guestSession.slot];
-    if (!h) return { holding: null, target: null, shared: false, driving: false, seat: -1 };
+    if (!h) return { holding: null, target: null, shared: false, driving: false, seat: -1, nail: 0 };
     const name = (id: number) => (id < 0 ? null : (sim.entities.find((e) => e.id === id)?.name ?? null));
-    return { holding: name(h.held), target: name(h.target), shared: h.shared, driving: h.driving, seat: h.seat };
+    return {
+        holding: name(h.held),
+        target: name(h.target),
+        shared: h.shared,
+        driving: h.driving,
+        seat: h.seat,
+        nail: h.nail
+    };
+}
+
+/** Nail heads (the host's graph, or what it sent a guest) and this view's hammer preview. */
+let hostNails: NailMark[] = [];
+let hostNailsKey: unknown = null;
+let hostNailsVersion = -1;
+function updateNails(time: number): void {
+    let marks: NailMark[];
+    if (guestSession) marks = guestSession.nails;
+    else {
+        const g = sim.joints.graph;
+        if (g !== hostNailsKey || g.version !== hostNailsVersion) {
+            hostNailsKey = g;
+            hostNailsVersion = g.version;
+            const index = new Map(sim.entities.map((e, i) => [e.id, i]));
+            hostNails = nailMarks(g, (id) => index.get(id) ?? -1);
+        }
+        marks = hostNails;
+    }
+    // every local player's hammer outline, each in its own view (split screen: player 2's below)
+    const previews: { x: number; y: number; z: number; ok: boolean; slot: number; view: number }[] = [];
+    if (state.mode === 'firstPerson') {
+        const slots = guestSession ? [guestSession.slot] : state.players > 1 && localSlot2 > 0 ? [0, localSlot2] : [0];
+        for (const [view, slot] of slots.entries()) {
+            const h = guestSession ? guestSession.hud[slot] : sim.interactionIds(slot);
+            if (h?.nailAt && h.nail > 0) previews.push({ ...h.nailAt, ok: h.nail === 1, slot, view });
+        }
+    }
+    nailMarkers.update(marks, sim.ring, time, tierCellCm('base', cellCm) / 100, previews);
 }
 
 /** The ute's yaw last render frame, per local view (NaN when that view's player isn't in it). */
@@ -1509,12 +1555,10 @@ function updatePrompt(): void {
                   : it.seat >= 0
                     ? 'Riding along · grab to get out'
                     : it.holding
-                      ? `Holding ${propLabel(it.holding)}${it.shared ? ' together' : ''}`
+                      ? withHammer(`Holding ${propLabel(it.holding)}${it.shared ? ' together' : ''}`, it.nail, 'Nail')
                       : it.target === 'ute'
                         ? 'Grab to drive the ute'
-                        : it.target
-                          ? `Grab ${propLabel(it.target)}`
-                          : '';
+                        : withHammer(it.target ? `Grab ${propLabel(it.target)}` : '', it.nail, 'Nail');
         } else if (!fpInput.locked && !pads.players[0]) t = 'Click to look around';
         else t = interactionText(0, !fpInput.locked);
     }
@@ -2505,6 +2549,10 @@ window.__riverLab = {
     input2: (c: Record<string, unknown>) => {
         p2Injected = { ...p2Injected, ...c };
     },
+    /** Split screen: puts player 2 at a spot, facing yaw. */
+    teleport2(x: number, z: number, yaw = 0) {
+        if (localSlot2 > 0) sim.placePlayer(x, z, yaw, localSlot2);
+    },
     look2(yaw: number, pitch: number) {
         sim.players[Math.max(1, localSlot2)].yaw = yaw;
         sim.players[Math.max(1, localSlot2)].pitch = pitch;
@@ -2535,6 +2583,21 @@ window.__riverLab = {
     /** Turns weather zone `n` on at full strength now (host only; tests and screenshots). */
     weather: (n: number) => !guestSession && sim.hazards.startWeatherNow(sim, n),
     interaction: () => sim.interaction(),
+    /** The joint graph: connections, nails, and nail heads drawn this frame. */
+    joints: () => ({
+        connections: sim.joints.graph.size,
+        nails: sim.joints.graph.nailCount,
+        drawn: nailMarkers.drawn,
+        /** Per local view (0 top / full screen, 1 player 2's), the slots whose hammer outline it drew. */
+        outlines: nailMarkers.outlineSlots,
+        /** The per-view outline layers each camera renders (main camera, player 2's camera). */
+        viewLayers: [scene.camera, scene.camera2].map((c) =>
+            scene.viewLayers.filter((l) => c.camera!.layers.includes(l.id)).map((l) => l.name)
+        ),
+        /** Split screen: player 2's slot (-1 when one player). */
+        slot2: localSlot2,
+        preview: sim.nailPreview(0)
+    }),
     /** The hazards (Epic 8): water level, phases, and the rendered water plane's height. */
     hazards: () => ({
         ...(guestSession ? guestSession.hazard : sim.hazards.net()),
@@ -2547,6 +2610,10 @@ window.__riverLab = {
     playtestLog: () => playtest.text(performance.now()),
     /** The sound: locked until a gesture, then what has played. */
     audio: () => audio.status(),
+    /** Tests: show or hide the hammer outlines. */
+    showNailOutlines: (on: boolean) => {
+        nailMarkers.showOutlines = on;
+    },
     /** Logging: each stand tree's phase and cut, and the sawmill's state and totals. */
     wood: () => ({
         trees: Array.from({ length: sim.forestry.treeCount }, (_, n) => sim.forestry.treeState(n)),

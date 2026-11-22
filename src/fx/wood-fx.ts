@@ -70,14 +70,16 @@ export class WoodFX {
             this.lastNeedles = c;
         }
         if (this.spot && ring.sample(this.slots.sawmill, time, this.p, this.anim)) {
-            // the blade runs while cutting (the output phase also reads SAW_CUTTING, at progress 1)
+            // the blade is in the wood while cutting: the state stays "cutting" while the pieces
+            // come out (progress 1), which can be a while when the rack or the plank pool is full
             const progress = this.anim[SAW_PROGRESS];
-            if (Math.round(this.anim[SAW_STATE]) === SAW_CUTTING && progress < 1) {
+            const sawing = Math.round(this.anim[SAW_STATE]) === SAW_CUTTING && progress < 1;
+            if (sawing) {
                 const at = sawmillToWorld(this.spot, 0, SAWMILL.feedY, 0);
                 sfx.hold(`sawmill-${this.slots.sawmill}`, 'saw', at, { gain: 0.8, pitch: 0.92 + 0.12 * progress });
             }
             const k = Math.floor(time / SAWDUST_EVERY);
-            if (Math.round(this.anim[SAW_STATE]) === SAW_CUTTING && k !== this.lastPuff) {
+            if (sawing && k !== this.lastPuff) {
                 // out of the blade's back, low over the outfeed side
                 const w = sawmillToWorld(this.spot, -0.35, SAWMILL.feedY + 0.1, 0);
                 burst('sawdust', w.x, w.y, w.z);

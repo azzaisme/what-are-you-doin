@@ -7,6 +7,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import { timberYardLevel } from '../../src/levels/timber-yard.ts';
 import { valleyLevel } from '../../src/levels/valley.ts';
+import { SnapshotDecoder, encodeSnapshot } from '../../src/net/codec.ts';
 import { VirtualClock, degradedTransport, parseConditions } from '../../src/net/netsim.ts';
 import type { NetConditions } from '../../src/net/netsim.ts';
 import {
@@ -14,6 +15,7 @@ import {
     HOST_GRACE_MS,
     HostSession,
     NET_PROTOCOL,
+    SNAPSHOT_EVERY,
     layoutHash,
     listGames
 } from '../../src/net/session.ts';
@@ -24,7 +26,7 @@ import { ACTION_DROP_TEST, ACTION_RESET_PROPS, neutralCommand } from '../../src/
 import type { PlayerCommand } from '../../src/sim/commands.ts';
 import type { SimEntity } from '../../src/sim/lab-entities.ts';
 import { EYE_HEIGHT, LabSim, MAX_PLAYERS } from '../../src/sim/lab-sim.ts';
-import { initPhysics } from '../../src/sim/physics/world.ts';
+import { CHARACTER, GRAVITY, initPhysics } from '../../src/sim/physics/world.ts';
 import { pose } from '../../src/voxels/math.ts';
 
 beforeAll(() => initPhysics());
@@ -493,12 +495,25 @@ describe('eight players', { timeout: 30_000 }, () => {
         g.until(() => guests.every((x) => x.slot > 0 && x.received > 0));
         expect(new Set(guests.map((x) => x.slot)).size).toBe(MAX_PLAYERS - 1);
         expect(g.sim.playerCount).toBe(MAX_PLAYERS);
-        // everyone walks forward together, the way player 1 faces
+        // steady play on open, flat ground (the yard between the shed and the sawmill, clear of the
+        // stump, the beams and the creek bank): everyone in a block, walking at full speed and turning
+        // all the while, so the block goes round a 1.5 m circle and stays on the flat. Jumps across a
+        // lost update have their own test below.
+        const radius = 1.5;
+        const spin = CHARACTER.walk / radius; // rad/s
+        // the block starts radius east of the circle's centre (0.5, 9), heading -z, turning left
+        for (let s = 0; s < MAX_PLAYERS; s++)
+            g.sim.placePlayer(0.5 + radius - 1.3 + 1.3 * (s % 3), 9 - 1.3 + 1.3 * Math.floor(s / 3), 0, s);
+        g.run(30);
         const start = g.sim.players.map((p) => ({ x: p.x, z: p.z }));
-        const yaw = timberYardLevel.spawn.yaw;
-        for (const x of guests) g.inputs.set(x, cmd(0, { moveZ: 1, yaw }));
-        g.hostCmd = cmd(0, { moveZ: 1, yaw });
-        g.run(180);
+        let walked = 0;
+        const walk = () => {
+            const yaw = (spin * walked++) / 60;
+            for (const x of guests) g.inputs.set(x, cmd(0, { moveZ: 1, yaw }));
+            g.hostCmd = cmd(0, { moveZ: 1, yaw });
+        };
+        // about half a circle, over 2 m from where each started (late inputs included)
+        g.run(120, walk);
         for (let s = 0; s < MAX_PLAYERS; s++)
             expect(Math.hypot(g.sim.players[s].x - start[s].x, g.sim.players[s].z - start[s].z)).toBeGreaterThan(2);
         // what the host publishes: the room capability allows 4 KiB per participant
@@ -524,9 +539,7 @@ describe('eight players', { timeout: 30_000 }, () => {
         const out = pose();
         const anim = new Float64Array(64);
         g.run(240, (k) => {
-            // turn and jump now and then, so the poses don't just run in straight lines
-            const yaw2 = yaw + Math.sin(k / 40);
-            for (const x of guests) g.inputs.set(x, cmd(0, { moveZ: 1, yaw: yaw2, jump: k % 90 === 30 }));
+            walk();
             record();
             if (k < 60 || k % 20 !== 0) return;
             for (const x of guests) {
@@ -548,8 +561,8 @@ describe('eight players', { timeout: 30_000 }, () => {
             `guest poses vs host at 8 players on a bad network: ${checks} checks, worst ${worst.toFixed(4)} m`
         );
         expect(checks).toBeGreaterThan(7 * 9 * 5);
-        // the codec is good to 4 mm; the rest is the straight line drawn between 20 Hz snapshots across a
-        // jump's take-off or landing (a kink in the path: about 5 m/s x 0.05 s / 4 at worst, 6 cm)
+        // the codec is good to 4 mm; the rest is the straight line drawn between 20 Hz snapshots along
+        // a turning walk (and across the odd lost update)
         expect(worst).toBeLessThan(0.05);
 
         // one more is told the game is full and watches
@@ -557,5 +570,66 @@ describe('eight players', { timeout: 30_000 }, () => {
         g.run(60);
         expect(late.slot).toBe(-1);
         expect(late.received).toBeGreaterThan(0);
+    });
+});
+
+describe('a jump across a lost update', () => {
+    /**
+     * A guest draws each player on the straight line between the host's 20 Hz snapshots. A jump is a
+     * kink in the path: the vertical speed goes from 0 to CHARACTER.jump in one tick. Between two
+     * snapshots T apart, the straight line misses a kink of speed change dv by at most dv x T / 4
+     * (the kink half way between them), and misses the parabola of the flight by g x T^2 / 8. With
+     * the codec's 4 mm:
+     *   every update arrives (T = 0.05 s):  4.2 x 0.05 / 4 + 9.81 x 0.05^2 / 8 + 0.004 = 0.0595 m (6 cm)
+     *   one lost update (T = 0.1 s):        4.2 x 0.1 / 4 + 9.81 x 0.1^2 / 8 + 0.004  = 0.121 m
+     * Fed straight into the guest's decoder at fixed ticks (no random network), so it never swings
+     * with the world.
+     */
+    function jumpError(dropped: boolean): { worst: number; bound: number } {
+        const host = new LabSim({ level: timberYardLevel });
+        const guest = new LabSim({ level: timberYardLevel });
+        guest.ring.clear();
+        const decoder = new SnapshotDecoder(host.entities.length);
+        host.fpActive = true;
+        const eye = host.eyes[0].slot;
+        const history = new Map<number, { x: number; y: number; z: number }>();
+        const T = (dropped ? 2 : 1) * SNAPSHOT_EVERY;
+        // the take-off lands half way between the snapshots either side of it
+        const jumpTick = 120 + Math.ceil(T / 2);
+        const lost = dropped ? 120 + SNAPSHOT_EVERY : -1;
+        for (let n = 1; n <= 200; n++) {
+            host.step(cmd(n, { jump: n === jumpTick }));
+            const p = host.entities[eye].pose.p;
+            history.set(host.tick, { x: p.x, y: p.y, z: p.z });
+            if (host.tick % SNAPSHOT_EVERY === 0 && host.tick !== lost)
+                decoder.apply(encodeSnapshot(host.tick, host.entities), guest.ring);
+        }
+        const out = pose();
+        const anim = new Float64Array(64);
+        let worst = 0;
+        for (let t = 110; t < 190; t++) {
+            if (!guest.ring.sample(eye, t / 60, out, anim)) continue;
+            const want = history.get(t)!;
+            worst = Math.max(worst, Math.hypot(out.p.x - want.x, out.p.y - want.y, out.p.z - want.z));
+        }
+        const dt = T / 60;
+        const bound = (CHARACTER.jump * dt) / 4 + (GRAVITY * dt * dt) / 8 + 0.004;
+        return { worst, bound };
+    }
+
+    it('every update arrives: within 6 cm; one lost: within the bound for the doubled interval', () => {
+        const ok = jumpError(false);
+        const lost = jumpError(true);
+        console.info(
+            `jump kink: all updates ${ok.worst.toFixed(4)} m (bound ${ok.bound.toFixed(4)}), one lost ${lost.worst.toFixed(4)} m (bound ${lost.bound.toFixed(4)})`
+        );
+        expect(ok.bound).toBeLessThan(0.06);
+        expect(ok.worst).toBeLessThan(ok.bound);
+        expect(lost.worst).toBeLessThan(lost.bound);
+        // the case is really exercised: the lost update costs more than the clean one, and both come
+        // close to their bound
+        expect(lost.worst).toBeGreaterThan(ok.worst);
+        expect(ok.worst).toBeGreaterThan(0.5 * ok.bound);
+        expect(lost.worst).toBeGreaterThan(0.5 * lost.bound);
     });
 });
