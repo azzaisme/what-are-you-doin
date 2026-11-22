@@ -565,7 +565,9 @@ describe('placed setup: the player, put beside each beam, shoulders it onto a wh
         }
         beams.forEach((b, i) => {
             const d = Math.hypot(b.pose.p.x - before[i].x, b.pose.p.y - before[i].y, b.pose.p.z - before[i].z);
-            console.log(`inputs-only bridge: beam ${i} moved ${(d * 1000).toFixed(1)} mm under a 400 N shove`);
+            console.log(
+                `placed setup, beams nailed with F: beam ${i} moved ${(d * 1000).toFixed(1)} mm under a 400 N shove`
+            );
             expect(d).toBeLessThan(0.01);
         });
     }, 120_000);

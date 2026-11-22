@@ -69,8 +69,8 @@ build a real bridge, beams plus a nailed plank deck, and drive the ute over it.
 | **Gate, inputs only:** walk to each beam and stack, lay and nail beams and an 11-plank deck, drive the ute from where it is parked | 4 anchors, 22 deck joints, 28 nails; planks landed within 0.1 cm of the deck plane and 2.9 cm of their spots (pass: 2 cm, 5 cm); two floods during the build moved it at most 0.2 cm; the ute crossed the start line 1.5 cm off the bridge's line and reached the far bank, never lower than 0.28 m above the yard |
 | The same deck, nails pulled just before the ute sets off                                                                           | Planks shoved up to **361 cm** (the same at the 5 cm and 10 cm voxel sizes: the simulation does not depend on them), the ute does not reach the far bank; nailed, they moved **0.1 cm** (pass: under 3 cm vs over 10 cm)                                                                                           |
 | Timber to timber (0.8 stiffness): 300 N at a plank's tip                                                                           | One nail turns 5.06 mrad (load / stiffness predicts 5.16), four nails 1.23 (1.29)                                                                                                                                                                                                                                  |
-| Beams nailed to both abutments (placed), ute driven across                                                                         | Reaches the far bank; beams moved **2 mm**                                                                                                                                                                                                                                                                         |
-| 400 N sideways for 1 s after a crossing                                                                                            | Loose beams move **102 mm**, nailed ones **0.2 mm**                                                                                                                                                                                                                                                                |
+| Placed setup: beams nailed to both abutments, ute driven across                                                                    | Reaches the far bank; beams moved **2 mm and 3 mm**                                                                                                                                                                                                                                                                |
+| 400 N sideways for 1 s after a crossing                                                                                            | Loose beams move **201 mm**, nailed ones **0.2 mm**                                                                                                                                                                                                                                                                |
 | Joint stiffness: 300 N sideways at a beam's tip                                                                                    | One nail turns 4.18 mrad (load / stiffness predicts 4.27), four nails 1.05 (1.07); twice the load, about twice the turn                                                                                                                                                                                            |
 | Square on                                                                                                                          | 33° holds, 37° is refused                                                                                                                                                                                                                                                                                          |
 | Refusals                                                                                                                           | Gap, too thick, not timber, sliding, nothing behind, kinematic, ute, stone that isn't timber, tree, joint full, 64-nail limit                                                                                                                                                                                      |
@@ -80,7 +80,7 @@ build a real bridge, beams plus a nailed plank deck, and drive the ute over it.
 
 - Browser test: in the Timber Yard, look at a beam, F nails it and the nail head draws; a second F
   at the same spot is refused.
-- Unit tests: 670 pass (both voxel sizes). Browser: the yard, ute, hammer, split screen and all online co-op tests
+- Unit tests: 672 pass (both voxel sizes). Browser: the yard, ute, hammer, split screen and all online co-op tests
   pass.
 
 ### Audit fixes (second review)
@@ -98,7 +98,8 @@ build a real bridge, beams plus a nailed plank deck, and drive the ute over it.
     - Found on the way: drawn on a layer after the shared Immediate one, lines covered the whole
       screen in split screen, so an outline showed in the wrong half. The per-view layers now sit
       before it.
-- **A sawn plank from the sawmill nails down** onto the abutment (new test).
+- **A sawn plank nails down:** the saw cuts the yard's log, and the player takes a plank off the rack,
+  carries it and nails it into the ground, by input (see below).
 - **Online 8-player steady test** is back at full walking speed, turning: worst guest pose 4.15 cm
   (limit 5 cm).
 - **The flood and the gusts (after Epic 8):** the gate now plays through both, by input only.
@@ -931,20 +932,23 @@ purpose.
 
 Unit tests, 100–300 ms one way with 10 % loss (`tests/unit/net-robust.test.ts`, both voxel sizes):
 
-| Test                                                                       | Result                                                                                                       |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Join and walk; three one-frame jump presses                                | Exactly 3 jumps on the host                                                                                  |
-| Host and guest lift the 113 kg log together                                | Both hold it, it rises over 0.4 m; the guest's one release press lets go                                     |
-| Garbage input (NaN, 1e300, strings, reset requests)                        | Every position stays finite, no reset or drop test runs, lag reads "unknown"                                 |
-| A guest drops, reloads, comes back                                         | Same player, within 0.3 m of where it stood; a newcomer meanwhile got a different place                      |
-| A guest drops while carrying the bucket                                    | The bucket is let go at once; the place frees after the grace period                                         |
-| 8 players walking, turning and jumping                                     | All 8 move; what each guest draws (every player, the bucket) matches the host to 2.8 cm, worst of 567 checks |
-| A host that goes quiet, then comes back                                    | "Reconnecting", then reconnected and receiving again; gone for good, the guest gives up after 20 s           |
-| A guest of a build with other entities                                     | Applies no snapshot and says it's another version                                                            |
-| Largest host state: the Valley, 8 players, every entity drawn, long events | 2,841 bytes (the room allows 4,096)                                                                          |
+| Test                                                                                              | Result                                                                                                                     |
+| ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Join and walk; three one-frame jump presses                                                       | Exactly 3 jumps on the host                                                                                                |
+| Host and guest lift the 113 kg log together                                                       | Both hold it, it rises over 0.4 m; the guest's one release press lets go                                                   |
+| Garbage input (NaN, 1e300, strings, reset requests)                                               | Every position stays finite, no reset or drop test runs, lag reads "unknown"                                               |
+| A guest drops, reloads, comes back                                                                | Same player, within 0.3 m of where it stood; a newcomer meanwhile got a different place                                    |
+| A guest drops while carrying the bucket                                                           | The bucket is let go at once; the place frees after the grace period                                                       |
+| 8 players walking and turning (after Epic 5's audit: full speed round a 1.5 m circle on the flat) | All 8 move; what each guest draws (every player, the bucket) matches the host to 4.15 cm, worst of 567 checks (bound 5 cm) |
+| A jump across 20 Hz snapshots (its own test since Epic 5's audit)                                 | 4.37 cm with every update (bound 5.96 cm), 8.36 cm with one update lost (bound 12.1 cm)                                    |
+| A host that goes quiet, then comes back                                                           | "Reconnecting", then reconnected and receiving again; gone for good, the guest gives up after 20 s                         |
+| A guest of a build with other entities                                                            | Applies no snapshot and says it's another version                                                                          |
+| Largest host state: the Valley, 8 players, every entity drawn, long events                        | 2,841 bytes (the room allows 4,096)                                                                                        |
 
-The 2.8 cm is the straight line drawn between 20 Hz snapshots across a jump's take-off or landing;
-the codec itself is good to 4 mm.
+Across a jump's take-off or landing, the guest draws the straight line between 20 Hz snapshots:
+that is the jump row's error, against its derived bound dv·T/4 + g·T²/8 + 4 mm. The codec itself is
+good to 4 mm. (This entry first said 2.8 cm for walking and jumping together; Epic 5's audit split
+them.)
 
 Host cost per tick with everyone walking (`node scripts/bench-net-host.ts`, Node on this container's
 CPU; the budget is 16.7 ms). The host's published state peaked at 1,875–1,896 bytes in the Valley at 8 (two runs).
@@ -1011,16 +1015,16 @@ You can now drive the ute in the Timber Yard and the Valley. A friend can ride a
 
 ### Test results (actual, `tests/unit/ute.test.ts`, both voxel sizes)
 
-| Test                                                       | Result                                                                                                                                      |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Parked on a free platform                                  | All 4 wheels on it; reaction / weight = **1.000**; the platform stays pressed onto the ground                                               |
-| Accelerating on a free platform on ice                     | The platform is pushed backwards (momentum is shared)                                                                                       |
-| A loose deck over a gap                                    | Carries the ute and stays on its supports                                                                                                   |
-| Two loose 20 cm beams over the Timber Yard creek           | Both take its weight out to mid-gap (over 0.3 × weight) and stay across (since Epic 5 the test nails them at both ends and the ute crosses) |
-| Top speed and braking                                      | 8.5 m/s after 6 s; stops in 1.2 s                                                                                                           |
-| A ~30 kg crate in the bed, after a 3 s run and a hard stop | Still in the bed: it slid forward to the cab end under braking                                                                              |
-| Rolled onto its roof                                       | Back on its wheels in 1.05 s                                                                                                                |
-| Dropped nose-down in the creek, driver presses drop        | Back at its safe spot, upright, driver still seated                                                                                         |
+| Test                                                                    | Result                                                                                                                                                                                                                                |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Parked on a free platform                                               | All 4 wheels on it; reaction / weight = **1.000**; the platform stays pressed onto the ground                                                                                                                                         |
+| Accelerating on a free platform on ice                                  | The platform is pushed backwards (momentum is shared)                                                                                                                                                                                 |
+| A loose deck over a gap                                                 | Carries the ute and stays on its supports                                                                                                                                                                                             |
+| Two loose 20 cm beams over the Timber Yard creek (before Epic 5's lips) | Both took its weight out to mid-gap (over 0.3 × weight) and stayed across. Now, with the lips: loose, they are shoved aside and the ute stops at mid-gap (z -1.99); nailed at both ends, it reaches the far bank and they move 2–3 mm |
+| Top speed and braking                                                   | 8.5 m/s after 6 s; stops in 1.2 s                                                                                                                                                                                                     |
+| A ~30 kg crate in the bed, after a 3 s run and a hard stop              | Still in the bed: it slid forward to the cab end under braking                                                                                                                                                                        |
+| Rolled onto its roof                                                    | Back on its wheels in 1.05 s                                                                                                                                                                                                          |
+| Dropped nose-down in the creek, driver presses drop                     | Back at its safe spot, upright, driver still seated                                                                                                                                                                                   |
 
 - Browser test: get in, drive with the keyboard, get out, in the Timber Yard.
 - Unit tests: 326 pass.

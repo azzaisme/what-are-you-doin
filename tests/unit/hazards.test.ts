@@ -914,7 +914,7 @@ describe('hazard director: online, through real host and guest sessions', () => 
 });
 
 describe('hazard director: the level stays winnable', () => {
-    it('after the flood washes the bridge away: fetch both beams from downstream, rebuild, carry the bucket over (player inputs only)', () => {
+    it('after the flood washes the bridge away: fetch both beams from downstream, rebuild, carry the bucket over (placed setup: the player is put at the start, then plays by input)', () => {
         const s = yard();
         s.runTo(S(HAZARD.graceS) + 10);
         bridgeBeams(s);

@@ -2,6 +2,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { UTE_WHEEL_RADIUS } from '../../src/assets/ute.ts';
+import type { LabSim } from '../../src/sim/lab-sim.ts';
 import { NO_DRIVE, UteVehicle } from '../../src/sim/physics/vehicle.ts';
 import type { DriveInput } from '../../src/sim/physics/vehicle.ts';
 import { PhysicsWorld, initPhysics } from '../../src/sim/physics/world.ts';
@@ -106,7 +107,7 @@ describe('the ute drives (Epic 4)', () => {
     });
 });
 
-describe('wheels load what holds them up (Epic 4 gate)', () => {
+describe('wheels load what holds them up (Epic 4)', () => {
     it("a ute parked on a free platform puts its weight on it (the platform's support sees it)", () => {
         const pw = world();
         // a 4 x 0.2 x 6 m platform resting on the ground
@@ -402,7 +403,7 @@ describe('ute recovery (#46)', () => {
     }, 60_000);
 });
 
-describe('the ute crosses a beam bridge (Epic 4 gate)', () => {
+describe('placed setup: the ute crosses a beam bridge (Epic 4)', () => {
     // Since Epic 5 the yard's banks have a stone lip at deck height behind each seat, and a centred
     // beam leaves a 0.3 m gap to it: climbing out of that gap, the wheels shove loose bare beams
     // aside. Nailed down at both ends (as the yard bridge is built now), two bare beams carry it.
@@ -482,13 +483,12 @@ describe('the ute crosses a beam bridge (Epic 4 gate)', () => {
         expect(s.events.some((e) => /Loose beams/.test(e.text))).toBe(false);
     }, 60_000);
 
-    it('onto the same beams left loose, the game says to nail them down', async () => {
-        const { LabSim } = await import('../../src/sim/lab-sim.ts');
-        const { timberYardLevel, BRIDGE, BRIDGE_X, YARD_Y } = await import('../../src/levels/timber-yard.ts');
+    /** Lays the two beams loose, puts the ute on the yard bank lined up with them, takes the seat. */
+    async function looseBeams(s: LabSim, from: number) {
+        const { BRIDGE, BRIDGE_X, YARD_Y } = await import('../../src/levels/timber-yard.ts');
         const { neutralCommand } = await import('../../src/sim/commands.ts');
         const { quatMul } = await import('../../src/voxels/math.ts');
         const { UTE_TRACK_HALF } = await import('../../src/assets/ute.ts');
-        const s = new LabSim({ level: timberYardLevel });
         const flatAlongZ = quatMul(quatFromYawPitchRoll(Math.PI / 2, 0, 0), quatFromYawPitchRoll(0, Math.PI / 2, 0));
         ['beam-0', 'beam-1'].forEach((name, i) =>
             s.physics.place(
@@ -496,23 +496,67 @@ describe('the ute crosses a beam bridge (Epic 4 gate)', () => {
                 pose(BRIDGE_X + (i === 0 ? -1 : 1) * UTE_TRACK_HALF, YARD_Y + 0.3, BRIDGE.zc, flatAlongZ)
             )
         );
-        let n = 0;
-        for (; n < 60; n++) s.step(neutralCommand(n));
+        let n = from;
+        for (let k = 0; k < 60; k++) s.step(neutralCommand(n++));
         s.physics.place(
             s.vehicle!.id,
             pose(BRIDGE_X, YARD_Y + 0.25, BRIDGE.nearEdge + 3.2, quatFromYawPitchRoll(Math.PI, 0, 0))
         );
-        for (; n < 120; n++) s.step(neutralCommand(n));
+        for (let k = 0; k < 60; k++) s.step(neutralCommand(n++));
         s.fpActive = true;
         s.step(neutralCommand(n++));
         expect(s.takeDriverSeat(0)).toBe(true);
-        const hint = () => s.events.find((e) => /Loose beams/.test(e.text));
-        // on the yard bank: nothing to say yet
-        for (let k = 0; k < 60; k++) s.step({ ...neutralCommand(n++, Math.PI) });
-        expect(hint()).toBeUndefined();
-        for (let k = 0; k < 60 * 6 && !hint(); k++)
+        /** One tick easing forward along the bridge's line. */
+        const drive = () =>
             s.step({ ...neutralCommand(n++, Math.PI), moveZ: 0.35, moveX: 4 * (BRIDGE_X - s.ute.pose.p.x) });
-        expect(hint()?.text).toBe('Loose beams shift under the ute: nail each beam down at both ends to drive across.');
+        const idle = () => s.step({ ...neutralCommand(n++, Math.PI) });
+        return { drive, idle, tick: () => n };
+    }
+    const HINT = 'Loose beams shift under the ute: nail each beam down at both ends to drive across.';
+
+    it('onto the same beams left loose, the game says to nail them down (and again after a reset)', async () => {
+        const { LabSim } = await import('../../src/sim/lab-sim.ts');
+        const { timberYardLevel } = await import('../../src/levels/timber-yard.ts');
+        const s = new LabSim({ level: timberYardLevel });
+        const hint = () => s.events.find((e) => /Loose beams/.test(e.text));
+        let r = await looseBeams(s, 0);
+        // on the yard bank: nothing to say yet
+        for (let k = 0; k < 60; k++) r.idle();
+        expect(hint()).toBeUndefined();
+        for (let k = 0; k < 60 * 6 && !hint(); k++) r.drive();
+        expect(hint()?.text).toBe(HINT);
         expect(hint()?.kind).toBe('ute');
+        // a reset starts the clock again: the hint is not held back by the one before it
+        s.reset();
+        expect(hint()).toBeUndefined();
+        r = await looseBeams(s, 0);
+        for (let k = 0; k < 60 * 6 && !hint(); k++) r.drive();
+        expect(hint()?.text).toBe(HINT);
+    }, 60_000);
+
+    it('online, the loose-beam hint reaches the guest as a toast (host drives)', async () => {
+        const { LabSim } = await import('../../src/sim/lab-sim.ts');
+        const { timberYardLevel } = await import('../../src/levels/timber-yard.ts');
+        const { GuestSession, HostSession, listGames } = await import('../../src/net/session.ts');
+        const { MemoryHub } = await import('../../src/net/transport.ts');
+        const host = new LabSim({ level: timberYardLevel });
+        const hub = new MemoryHub();
+        const hs = await HostSession.start(hub.transport('host'), host, 'yard', 'hint');
+        const ad = listGames(hub.channel('lobby', 'watcher'))[0];
+        const guest = await GuestSession.join(hub.transport('g0'), new LabSim({ level: timberYardLevel }), ad);
+        expect(guest.slot).toBe(1);
+        // the host's steps, with the session publishing after each
+        const hostStep = host.step.bind(host);
+        host.step = ((cmd: Parameters<typeof host.step>[0]) => {
+            hostStep(cmd, hs.commandFor(1), [hs.commandFor(2), hs.commandFor(3)]);
+            hs.afterStep((slot) => host.interactionIds(slot));
+        }) as typeof host.step;
+        const r = await looseBeams(host, host.tick);
+        const seen = () => guest.events.find((e) => e.text === HINT);
+        for (let k = 0; k < 60 * 8 && !seen(); k++) r.drive();
+        expect(host.events.some((e) => e.text === HINT)).toBe(true);
+        expect(seen()?.kind).toBe('ute');
+        guest.leave();
+        hs.stop();
     }, 60_000);
 });

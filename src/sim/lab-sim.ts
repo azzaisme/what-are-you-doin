@@ -288,6 +288,8 @@ export class LabSim {
         this.lastLookYaw = null;
         this.jumped = false;
         this.events.length = 0;
+        // (tick starts again at 0: a hint given before the reset must not hold the next one back)
+        this.looseHintTick = -Infinity;
         this.lostTicks = this.goalTicks = 0;
         this.water.reset();
         // the first snapshot already shows a full bucket

@@ -612,7 +612,7 @@ describe('the sawmill', () => {
 });
 
 describe('resources come back', () => {
-    it('a stump does not regrow while its log still lies by it (regrowth after sawing: the gate test)', () => {
+    it('a stump does not regrow while its log still lies by it (regrowth after sawing is played through in forestry-gate.test.ts)', () => {
         const s = yard();
         const from = { k: 100 };
         standBy(s, 5, Math.PI);
