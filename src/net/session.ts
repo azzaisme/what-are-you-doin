@@ -14,8 +14,9 @@
  * Only a dropped player can be reclaimed, never one whose guest is still connected. Guests wait
  * HOST_GRACE_MS for a host that went quiet before they give up on the game.
  *
- * Lag (observability): guests echo the newest snapshot tick they applied (`ak`); the host's tick
- * minus that echo is the round trip, which the host shows and sends back to each guest.
+ * Lag (observability): guests echo the newest snapshot tick they applied (`ak`); the host's clock
+ * now minus when it published that snapshot is the round trip (wall time: a host falling behind
+ * real time runs fewer ticks than the clock), which the host shows and sends back to each guest.
  */
 
 import { SIM_HZ } from '../sim/clock.ts';
@@ -130,6 +131,9 @@ export class HostSession {
     private readonly tokens = new Map<string, string>();
     /** guest peer id -> newest snapshot tick that guest applied */
     private readonly acks = new Map<string, number>();
+    /** snapshot tick -> when it was published (this.now() ms), for the last 10 s */
+    private readonly sentAt = new Map<number, number>();
+    private readonly now: () => number;
     private readonly unsub: () => void;
     private readonly levelId: string;
     private lastEventCount = 0;
@@ -141,8 +145,16 @@ export class HostSession {
     /** Slots that got a new guest, slots freed, slots whose guest dropped (held for a rejoin), slots rejoined. */
     onGuestsChanged: (joined: number[], left: number[], dropped: number[], back: number[]) => void = () => undefined;
 
-    private constructor(sim: LabSim, ch: NetChannel, lobby: NetChannel, code: string, levelId: string) {
+    private constructor(
+        sim: LabSim,
+        ch: NetChannel,
+        lobby: NetChannel,
+        code: string,
+        levelId: string,
+        now: () => number
+    ) {
         this.sim = sim;
+        this.now = now;
         this.ch = ch;
         this.lobby = lobby;
         this.code = code;
@@ -151,10 +163,16 @@ export class HostSession {
         this.advertise();
     }
 
-    static async start(transport: NetTransport, sim: LabSim, levelId: string, code = makeCode()): Promise<HostSession> {
+    static async start(
+        transport: NetTransport,
+        sim: LabSim,
+        levelId: string,
+        code = makeCode(),
+        now: () => number = () => performance.now()
+    ): Promise<HostSession> {
         const ch = await transport.join(`ue-${code}`);
         ch.setState({ role: 'host', v: NET_PROTOCOL, level: levelId, slots: {} });
-        return new HostSession(sim, ch, transport.lobby, code, levelId);
+        return new HostSession(sim, ch, transport.lobby, code, levelId, now);
     }
 
     private advertise(): void {
@@ -250,9 +268,9 @@ export class HostSession {
         for (const [id, s] of this.slots) {
             if (s !== slot) continue;
             const ak = this.acks.get(id);
-            // an echo from the future, or older than 10 s, is nonsense (or a stalled guest): unknown
-            if (ak === undefined || ak > this.sim.tick || this.sim.tick - ak > 10 * SIM_HZ) return null;
-            return Math.round(((this.sim.tick - ak) * 1000) / SIM_HZ);
+            // an echo of a snapshot never sent (or sent over 10 s ago) is nonsense, or a stalled guest
+            const at = ak === undefined ? undefined : this.sentAt.get(ak);
+            return at === undefined ? null : Math.round(this.now() - at);
         }
         return null;
     }
@@ -319,6 +337,9 @@ export class HostSession {
         if (sim.tick % SNAPSHOT_EVERY !== 0) return;
         const bytes = encodeSnapshot(sim.tick, sim.entities);
         this.lastSnapshotBytes = bytes.length;
+        const now = this.now();
+        this.sentAt.set(sim.tick, now);
+        for (const [t, at] of this.sentAt) if (now - at > 10_000 || t > sim.tick) this.sentAt.delete(t);
         const huds: [number, number, number, number][] = [];
         for (let s = 0; s < sim.players.length; s++) {
             const h = hud(s);

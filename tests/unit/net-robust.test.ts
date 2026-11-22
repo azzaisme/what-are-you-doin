@@ -33,6 +33,8 @@ class Game {
     readonly inputs = new Map<GuestSession, PlayerCommand>();
     hostCmd: PlayerCommand = cmd(0);
     n = 0;
+    /** Real time per host tick: more than 1/60 s is a host falling behind (a slow page). */
+    msPerTick = TICK_MS;
     private seed = 1;
 
     constructor(readonly cond: NetConditions | null) {}
@@ -45,7 +47,7 @@ class Game {
     async start(): Promise<this> {
         this.sim.step(cmd(0));
         this.sim.fpActive = true;
-        this.hs = await HostSession.start(this.net('host'), this.sim, 'yard', 'abcd');
+        this.hs = await HostSession.start(this.net('host'), this.sim, 'yard', 'abcd', () => this.clock.now());
         return this;
     }
 
@@ -71,7 +73,7 @@ class Game {
         // edge-triggered requests are one tick long
         this.hostCmd = { ...this.hostCmd, grab: false, jump: false, throw: false, action: 0 };
         this.hs.afterStep((s) => this.sim.interactionIds(s));
-        this.clock.advance(TICK_MS);
+        this.clock.advance(this.msPerTick);
         this.n++;
     }
 
@@ -158,6 +160,18 @@ describe('online play under 100-300 ms latency and 10 % loss', () => {
         expect(lag).toBeLessThan(1000);
         expect(gs.lagMs).not.toBeNull();
         expect(Math.abs(gs.lagMs! - lag)).toBeLessThan(500);
+    });
+
+    it('measures the round trip in real time, even on a host falling behind (one tick per 50 ms)', async () => {
+        const g = await new Game({ latencyMs: 150, jitterMs: 100, loss: 0.1 }).start();
+        g.msPerTick = 50;
+        const gs = await g.join('guest');
+        g.until(() => gs.slot === 1 && gs.received > 0);
+        g.run(120);
+        const lag = g.hs.lagMs(1)!;
+        // two one-way trips of 150-250 ms each
+        expect(lag).toBeGreaterThanOrEqual(300);
+        expect(lag).toBeLessThan(1200);
     });
 
     it('a host and a guest lift the 113 kg log together, and the guest can let go', async () => {
