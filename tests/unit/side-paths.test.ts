@@ -1,7 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { UTE_TRACK_HALF } from '../../src/assets/ute.ts';
-
 import { nearestPath, pathLength } from '../../src/levels/side-paths.ts';
 import type { SidePath } from '../../src/levels/side-paths.ts';
 import {

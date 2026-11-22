@@ -110,6 +110,73 @@ Measured once by hand in the browser (method above), the JS heap went from 525 /
 - A Valley test: after switching to Low no tile is left beyond 1.35 × 24 m, and the ground under
   you is always built.
 
+## Remappable controls (2026-11-22, Epic 10)
+
+You can now choose your own keys, mouse buttons and gamepad buttons. Settings has two new
+sections: **Keys** and **Pad**.
+
+### How to use it
+
+- Open Settings (Esc, the ⚙ button, or Start on a pad), go to **Keys** or **Pad**.
+- Each action has two slots. Press a slot, then the key, mouse button, wheel turn or pad button you
+  want there.
+    - **Esc** cancels (Start on a pad). **Backspace** or **Delete** empties the slot.
+    - A key does one thing: put W on Jump and it comes off Move forward. The menu says so ("W was
+      Move forward: that is now unbound there").
+- **Reset keys to defaults** and **Reset gamepad buttons to defaults** put each set back.
+  **Reset all settings** (Interface) resets them too.
+- Saved per browser (only what you changed), so a later change to the defaults still reaches you.
+- The control hints and prompts follow your keys: the hint reads "F jump" with jump on F, and the
+  prompt reads "E to grab …" with grab on E.
+
+### What can be remapped
+
+- **Keys:** move (4 directions), run, jump, grab / release / use, throw, drop, ragdoll, carry
+  plank, and hold further / closer.
+- **Pad:** the same, except moving and looking, which stay on the sticks. Their speed and
+  inversion are settings.
+- **Not remappable**, so you can always get back to the menu: Esc, Start, F3 (debug panel) and Tab.
+- A key bound to an action wins over the game's own hotkeys (V, P, C, L, H): bind V to jump and V
+  jumps. The hint then stops offering "V orbit".
+- Keys are by position on the keyboard (`KeyboardEvent.code`), so the defaults sit in the same
+  place on AZERTY or Dvorak keyboards.
+
+### Tests (actual)
+
+- Unit (`tests/unit/bindings.test.ts`, both voxel sizes):
+    - every default key and button does exactly one thing;
+    - rebinding takes a key off its old action and names it;
+    - Esc, F3, Tab and Start can't be bound;
+    - saving stores only changes and loads back exactly;
+    - junk, unknown actions, prototype keys and duplicate keys in storage are cleaned up;
+    - a remapped pad button does the action and its old button no longer does.
+- Browser test, rebinding in Settings:
+    - Jump goes to F, and W goes onto Jump (taken off Move forward, and the menu says so);
+    - Esc cancels a capture, Backspace clears a slot;
+    - a pad press puts X on the pad's Jump (taken off the ragdoll).
+    - In the game, F jumps and Space no longer does. The hint reads "F jump".
+    - After a reload both are still there, and Reset puts the keys back.
+- Unit (`tests/unit/prompts.test.ts`): prompts read as before with the defaults. They name a rebound
+  key or button the moment it changes ("R to grab the bucket", "RB to grab", "ZASD"). The axe
+  prompt says the rebound grab and drop ("F to chop the pine · X to put the axe down"). A hotkey's
+  hint disappears while its key is bound to an action.
+- Browser test, continued: V bound to Jump jumps and stays in first person, and the hint drops
+  "V orbit". Reset keys, Reset gamepad buttons and Reset all settings each clear what they cover.
+- UI layout test: now also at 360 × 740. With the Keys section open, nothing in it sticks out of
+  the dialog, and the current section tab is fully in view (also after switching to Interface and
+  back to Game).
+- The settings, UI-layout, first-person, Timber Yard, ute, split-screen and logging browser tests
+  pass.
+
+### Known limits
+
+- **On a phone the six Settings sections don't all fit:** the section row scrolls sideways and
+  keeps the current section in view.
+- **Touch controls aren't remappable.** The on-screen buttons stay where they are.
+- **A pad joins with A**, whatever A is bound to (the joining press is not also an action).
+- **Analogue triggers count from part way down** (40 %). Bound to an action, they press it like a
+  button.
+
 ## Epic 8: the world fights back, sound, and a playtest kit (2026-11-22)
 
 The Timber Yard is now a complete slice: the creek floods when you finish the bridge, the wind
@@ -520,7 +587,7 @@ The 2.8 cm is the straight line drawn between 20 Hz snapshots across a jump's ta
 the codec itself is good to 4 mm.
 
 Host cost per tick with everyone walking (`node scripts/bench-net-host.ts`, Node on this container's
-CPU; the budget is 16.7 ms). The host's published state peaked at 1,875 bytes in the Valley at 8.
+CPU; the budget is 16.7 ms). The host's published state peaked at 1,875–1,896 bytes in the Valley at 8 (two runs).
 
 | Level       | 1 player           | 4 players          | 8 players          | Snapshot at 8 |
 | ----------- | ------------------ | ------------------ | ------------------ | ------------- |
