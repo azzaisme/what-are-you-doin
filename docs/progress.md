@@ -95,6 +95,110 @@ The bucket now carries water the game keeps track of. Carry it steadily and it s
 - **Tuned by feel.** The water's damping is set well above real water's so a swinging carry doesn't build up waves. Owner playtesting should set how forgiving it is: the thresholds are in `WATER` in `src/sim/water.ts`.
 - **Not tried on a real phone.** The Pour touch button only appears while you hold the bucket.
 
+## Epic 6 follow-ups: beams by hand, felled logs lie still, a determinism check (2026-11-22)
+
+### What changed in the game
+
+- **A felled log stops where it lands, and still moves when pushed.** A round log on flat
+  ground has nothing in the physics to stop it rolling, so a felled log could roll on sideways for
+  many seconds after it landed. Now, while it settles from its fall and whenever it lies slow
+  (turning slower than 0.5 rad/s and moving slower than 0.3 m/s), it gets strong spin damping:
+  bark on the ground. Moved faster than that (shoved, walked into, dropped, thrown) it rolls and
+  tumbles as freely as before, then settles again. Carrying is unchanged: a held log has the
+  grab's own damping, and letting go restores the log's.
+    - **Settling** (a test fells every tree from four sides, 24 fellings, the chewer walking out of
+      the way): 22 lie still within 3.6 s of the trunk starting to fall, the fall included. The
+      other two lie partly on sloping ground at the stand's edges and creep slowly down it.
+      21 of the 24 lie within 0.1 m of the line the toast predicted; the worst is 0.57 m (the
+      hard-leaning tree, whose top lands on the bank north of the stand).
+    - **Not sticky** (a test against the same log with the lying damping switched off): a 2 m/s
+      shove rolls it 5.84 m (5.97 m undamped), and a beaver running into it moves it 0.93 m
+      (1.01 m undamped).
+
+### What the tests now prove
+
+- **Beams by player input only:**
+    - A beaver walks to the sawmill and pulls its lever: the mill is set to beams.
+    - Two beavers fell two trees and carry each whole log into the guide; each comes out as one
+      beam (`beam-12`, `beam-13`) and no planks.
+    - One beaver shoulders the two sawn beams across the creek as the bridge's stringers. The yard's
+      own beams are never touched. (A beaver carries a beam lower than the old person did: low
+      enough to catch the creek's warning sign by the bridge, so the route goes north just west
+      of it.)
+    - The other decks them with three planks from the yard's stack, and a player walks over to the
+      far bank without falling in.
+- **Determinism of sawing and regrowth:**
+    - Every command of a two-beaver run is recorded: fell tree 2, carry the log in, saw it into three
+      planks, wait for the stump to regrow.
+    - The recording is played into a fresh game with nothing steering it. At five points (felled,
+      taken, half sawn, planks out, regrown) the sawmill's state and counts, every tree's state and
+      cut, and every object's pose, visibility and animation match exactly.
+    - The test also replays the recording with ten ticks of one player's input changed, and checks
+      that the result differs, so the comparison does catch a difference.
+- **Logs lie flat, back to the 0.2 tolerance:**
+    - The old 0.3 allowance was there because the test looked 2 s after the fall, while the log
+      could still be sliding its foot off the stump.
+    - The tests now wait until the log is still (the chewer walking out of its way first), then
+      check that it lies within 0.2 of flat and that its foot is on the ground, not up on the
+      stump. This is checked for the chewing test and for all eight sides of the fall-direction
+      test. No log was left resting on its stump, so no "kick off the stump" was needed.
+    - Worst measured: 0.073 (about 4°), the hard-leaning tree whose top rests on the bank; the
+      other seven are at most 0.03. Every foot lies on the ground, within 3 mm.
+
+## Epic 8, part 2: the handbrake prank, and sound for the other epics (2026-11-22)
+
+- **The handbrake prank (#75):**
+    - **When:** the ute is left parked on a slope (3.5° or more) with nobody in it for 6 s.
+    - **The tell:** a ratchet clicks, and a toast says "Get in and hold the brake, or chock a
+      downhill wheel".
+    - **What happens:** 2.5 s later the handbrake lets go and the ute rolls, for up to 20 s or until
+      someone takes the driver's seat. Tested by driving the ute up the far bank's road (about 10°),
+      braking, getting out: it rolls more than 3 m back down towards the creek.
+    - **Counterplay, each tested:**
+        - park on the flat (the yard: nothing happens);
+        - get in at the warning: look at the door and grab, as a player does (the ute stays within
+          0.5 m);
+        - chock a downhill wheel: the cube against the front wheel, or a beam on its edge across the
+          front tyres, holds it (asserted under 5 cm in 5 s with the handbrake off; measured 0 mm),
+          against more than 3 m unchocked. A plank lying flat (0.1 m) is a step the wheel climbs: no
+          chock. Chocks are a rule, not physics: the wheels are rays that would roll over a prop, so
+          the game checks for one standing at least 0.13 m high from under a tyre's centre to 0.4 m
+          past its downhill face (out to the bumper), and while it stands there the brake stays on.
+          Pull the chock out during the prank and the ute rolls (tested: more than 3 m in 4 s).
+    - **Fixed on the way (an Epic 4 bug):** a parked ute with its handbrake on crept down a slope,
+      2.5 cm a second on the far bank's road, because the wheel brake is a capped friction impulse
+      that gravity wins back a little of every tick. Now a parked ute that is nearly still and
+      standing on its wheels on fixed ground is held where it stands, gravity off while it holds,
+      until something moves it faster than 0.1 m/s. Any sideways push lets go of it for half a
+      second, so players can still shove a parked ute against its brake as before. Tested: parked
+      on that slope for 30 s it moves under 2 cm (measured 0 mm); two beavers pushing it on the flat
+      move it (measured 4.9 m in 3 s) and it holds again when they stop; a slow steady push of
+      3.5 m/s² still moves it (measured 5 cm in 2 s, where a lock that swallowed it gave 0). The ute's driving, braking, deck and platform tests pass unchanged;
+      on a deck or beam that can move it rides along as before.
+    - **Recovery:** if it ends up in the creek, the ute's usual recovery applies.
+    - **Budget, tested:** one hazard at a time (no flood or gust during a prank, and no prank during
+      a flood or a gust, each then waiting out the 15 s quiet), at most 2 pranks, 60 s apart.
+    - **Online, tested:** the guest gets the toast and the brake phase, and sees the ute roll in the
+      host's snapshots (within 5 cm of the host's).
+    - #75 can close except for tying it off (there are no ropes yet).
+- **Sound for the other epics (`docs/sound.md`):**
+    - **New sounds:** a sawmill motor (`saw`, a loop), `chop`, `slosh`, pouring water (`pour`, a loop)
+      and the handbrake's `ratchet`.
+    - **New call:** `sfx.hold(key, name, position)` keeps a loop playing for as long as a feature
+      calls it each frame, such as a sawmill running or water pouring. A quarter of a second after
+      the calls stop it fades out (under a second), then it is stopped and removed (tested).
+    - Epic 5 (creaks, breaks), Epic 6 (sawmill, chopping) and Epic 7 (slosh, pour) each have a line
+      to copy.
+- **Playtest kit:** the log's summary also counts handbrake pranks (tested with a real prank fed in
+  as the game feeds it), and the script says what to watch for and how the prank works.
+- **Tests:** unit tests pass at both voxel sizes, on top of `epics-5-10` (67cdc30, with Epic 9
+  part 2). New:
+    - the prank: driven onto the slope and parked, a braked ute holding for 30 s, the flat yard,
+      getting in at the warning, the cube and the beam chocks, the flat plank that isn't one, the budget, one hazard at a time
+      both ways round, and online;
+    - `sfx.hold`'s fade, stop and removal;
+    - the playtest log counting a real prank.
+
 ## Side paths in the Valley (2026-11-22, Epic 9, towards #87)
 
 Two tracks now leave the Forest Road. Neither goes near a crossing: the Epic 5 session is
