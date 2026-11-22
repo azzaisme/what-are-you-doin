@@ -45,6 +45,12 @@ export interface FloodSpec {
     crossing: { x: number; halfX: number; z0: number; z1: number; yaw?: number };
     /** Where timber the flood carried off is left when the water goes down (in order). */
     washup: { x: number; y: number; z: number }[];
+    /**
+     * Where the water's lift and current act (default: the whole water area). A level whose water
+     * area covers more than the river (the Valley's covers the map) keeps its flood in the
+     * channel, so the banks stay dry though the water rises above them.
+     */
+    channel?: (x: number, z: number) => boolean;
 }
 
 export interface GustSpec {
@@ -101,7 +107,9 @@ export const HAZARD = {
         minPlanks: 3
     },
     /** Parked (nobody driving, still) this long on a slope, the warning, how long it stays off. */
-    handbrake: { parkedS: 6, tellS: 2.5, offS: 20, cooldownS: 60, max: 2 }
+    handbrake: { parkedS: 6, tellS: 2.5, offS: 20, cooldownS: 60, max: 2 },
+    /** In the rain (Epic 9), a grip gives this much less force at full strength: 650 N to about 400 N. */
+    wetGrip: 0.38
 } as const;
 
 export const PHASE = { idle: 0, tell: 1, active: 2, recede: 3 } as const;
@@ -299,7 +307,7 @@ export class HazardDirector {
             tick >= S(HAZARD.graceS) &&
             tick >= this.quietFrom &&
             !this.busy &&
-            !this.weather?.busy
+            !this.weather?.hazardBusy
         );
     }
 
@@ -379,7 +387,7 @@ export class HazardDirector {
                 pw,
                 area,
                 { y: this.waterY, vx: f.current.x, vz: f.current.z, strength },
-                h.level.terrainHeight,
+                this.waterFloor(h),
                 1 / SIM_HZ
             );
             const feet = h.players.filter((p, i) => h.isSlotActive(i) && p.grounded && h.seatOf(i) < 0);
@@ -393,6 +401,7 @@ export class HazardDirector {
                     p.y < this.waterY + 0.1 &&
                     Math.abs(p.x - area.cx) < area.halfX &&
                     Math.abs(p.z - area.cz) < area.halfZ &&
+                    (!f.channel || f.channel(p.x, p.z)) &&
                     Math.hypot(v.x, v.z) > 0.4
                 )
                     this.floodTouched.add(pb.id);
@@ -557,7 +566,7 @@ export class HazardDirector {
             rand: (k) => rand(this.seed, k, 0)
         });
         if (said) this.say(h, said);
-        if (w.busy) this.quietFrom = tick + S(HAZARD.safeS);
+        if (w.hazardBusy) this.quietFrom = tick + S(HAZARD.safeS);
         const pw = h.physics;
         // the river (never at the same time as a flood: one hazard at a time)
         if (this.floodPhase === PHASE.idle && this.floodPending < 0) {
@@ -569,10 +578,17 @@ export class HazardDirector {
                     pw,
                     h.level.water,
                     { y: this.waterY, vx: cur.x, vz: cur.z, strength: w.strength },
-                    h.level.terrainHeight,
+                    this.waterFloor(h),
                     1 / SIM_HZ
                 );
             }
+        }
+        // the rain: wet timber slips (players under it grip with less force, with the rain's strength)
+        const wet = w.kind === WEATHER.rain ? w.spec.zones[w.zone] : undefined;
+        for (let i = 0; i < h.players.length; i++) {
+            const p = h.players[i];
+            const k = wet && h.isSlotActive(i) && wet.contains(p.x, p.z) ? w.strength : 0;
+            pw.gripScale[i] = 1 - HAZARD.wetGrip * k;
         }
         // the snow's crosswind, on carried planks of players in the zone
         const wind = w.wind;
@@ -668,6 +684,26 @@ export class HazardDirector {
             this.brakeEnded = tick;
             this.say(h, h.driver >= 0 ? 'Handbrake back on.' : 'The handbrake caught again.');
         }
+    }
+
+    /** The ground under the water, for its lift: outside the flood's channel there is none. */
+    private waterFloor(h: HazardHost): (x: number, z: number) => number {
+        const ch = this.spec?.flood?.channel;
+        const g = h.level.terrainHeight;
+        return ch ? (x, z) => (ch(x, z) ? g(x, z) : Infinity) : g;
+    }
+
+    /**
+     * Weather zone `n` now, at full strength (the debug hook: tests and screenshots). It is refused
+     * while another hazard runs, any weather is on, or after the goal; it skips the grace period and
+     * the quiet spell, which in a software-rendered browser (about 4 ticks a second) would make
+     * each screenshot wait for minutes.
+     */
+    startWeatherNow(h: HazardHost, n: number): boolean {
+        const w = this.weather;
+        if (!w || n < 0 || n >= w.spec.zones.length || this.busy || w.busy || h.progress.goalReached) return false;
+        w.startNow(n, SIM_HZ);
+        return true;
     }
 
     /** Light pieces (planks) still out of the creek: the gust's severity budget. */

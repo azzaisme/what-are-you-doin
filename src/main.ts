@@ -705,9 +705,10 @@ class LabDirector extends Script {
         scene.water.bumpiness = 0.26 + 0.03 * windNow.speed;
         // the flood (Epic 8): the river's surface follows the host's water level
         const hz = guestSession ? guestSession.hazard : sim.hazards.net();
-        if (hz.waterY !== fx.waterY) {
-            scene.waterEntity.setLocalPosition(level.water.cx, hz.waterY, level.water.cz);
-            fx.waterY = hz.waterY;
+        const drawY = Math.min(hz.waterY, level.water.drawMaxY ?? Infinity);
+        if (drawY !== fx.waterY) {
+            scene.waterEntity.setLocalPosition(level.water.cx, drawY, level.water.cz);
+            fx.waterY = drawY;
         }
         // the aimed gust's warning: leaves stream past the player it is aimed at
         if (hz.gust === 1 && prevGustPhase === 0 && hz.gustSlot >= 0 && hz.gustSlot < sim.eyes.length) {
@@ -730,7 +731,13 @@ class LabDirector extends Script {
             const under = weatherCovers(wSpec, wz, c.x, c.z) ? 1 : 0;
             weatherUnder += (under - weatherUnder) * Math.min(1, dt * 0.6);
             const k = (hz.weather ?? 0) * weatherUnder;
-            const f = weatherFog(wSpec, wz, k, { start: baseFogStart, end: level.stream.fog.end });
+            const f = weatherFog(
+                wSpec,
+                wz,
+                k,
+                { start: baseFogStart, end: level.stream.fog.end },
+                pipeline.nearRadius ?? level.stream.radius
+            );
             scene.app.scene.fog.start = f.start;
             scene.app.scene.fog.end = f.end;
             const zone = wz >= 0 ? wSpec.zones[wz] : undefined;
@@ -2526,11 +2533,7 @@ window.__riverLab = {
         return true;
     },
     /** Turns weather zone `n` on at full strength now (host only; tests and screenshots). */
-    weather: (n: number) => {
-        if (guestSession || !sim.hazards.weather) return false;
-        sim.hazards.weather.startNow(n, 60);
-        return true;
-    },
+    weather: (n: number) => !guestSession && sim.hazards.startWeatherNow(sim, n),
     interaction: () => sim.interaction(),
     /** The hazards (Epic 8): water level, phases, and the rendered water plane's height. */
     hazards: () => ({

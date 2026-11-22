@@ -1245,6 +1245,13 @@ export const VALLEY_STAGES: LevelStage[] = [
 
 // ------------------------------------------------------------------------------- hazards and weather
 
+/** In the creek's channel (and a hand's width over its lip), anywhere along it. */
+function inCreek(x: number, z: number): boolean {
+    const u = routeU(x, z);
+    const t = routeT(x, z);
+    return Math.abs(u - creekU(t)) < creekHW(t) + 0.3;
+}
+
 /** Along the route (u) from `u0` to `u1`: a weather area. */
 const alongRoute =
     (u0: number, u1: number) =>
@@ -1259,10 +1266,12 @@ const DOWNSTREAM = { x: Math.SQRT1_2, z: Math.SQRT1_2 };
  * The weather along the journey (src/sim/weather.ts, Epic 9 #88), one kind per area, each once a
  * run, a seeded moment after the first player gets there; the hazard director keeps it one hazard
  * at a time with the flood. Counterplay (tests/unit/valley-weather.test.ts):
- * - rain on the forest road: the river rises 0.35 m and runs; a bridge on its banks stays well
- *   clear of it, what lies in the water drifts off downstream;
- * - mist over the gorge and a fog bank on the mountain road: the view closes in (only for players
- *   in that area), with the road's signs and edge posts close enough to follow;
+ * - rain on the forest road: wet timber slips (a grip gives less force, HAZARD.wetGrip): a heavy beam
+ *   carried alone slips out; carry it together. (The river rises a little too: atmosphere, it
+ *   reaches no bridge.)
+ * - mist over the gorge: atmosphere only (not a hazard: no budget, no toast); the view closes in;
+ * - a fog bank on the mountain road: the view closes in to the near world's edge at most (only for
+ *   players in that area); the road's edge posts are close enough to steer by;
  * - a snow squall at the crevasse: a crosswind on carried planks, more than one grip holds at
  *   chest height; carry them low or together.
  */
@@ -1279,8 +1288,8 @@ export const VALLEY_WEATHER_ZONES: WeatherZone[] = [
         riverRise: 0.35,
         current: { x: DOWNSTREAM.x * 0.6, z: DOWNSTREAM.z * 0.6 },
         fogEnd: 150,
-        tell: '🌧 Clouds roll in over the forest. Rain: the creek and the culvert will rise a little.',
-        clear: 'The rain eases off. The water goes back down.'
+        tell: '🌧 Rain on the forest road! Wet timber slips: carry it low or together.',
+        clear: 'The rain eases off. Grips are dry again.'
     },
     {
         name: 'Gorge',
@@ -1292,8 +1301,11 @@ export const VALLEY_WEATHER_ZONES: WeatherZone[] = [
         delayS: 6,
         delayJitterS: 6,
         fogEnd: 55,
-        tell: 'Spray off the waterfall: a mist closes in over the gorge.',
-        clear: 'The mist lifts off the gorge.'
+        // atmosphere, not a hazard: nothing to beat, so it takes no part in the budget and says nothing
+        atmosphere: true,
+        veil: true,
+        tell: '',
+        clear: ''
     },
     {
         name: 'Mountain Approach',
@@ -1305,6 +1317,7 @@ export const VALLEY_WEATHER_ZONES: WeatherZone[] = [
         delayS: 4,
         delayJitterS: 6,
         fogEnd: 30,
+        veil: true,
         tell: '🌫 A fog bank rolls down the mountain. Keep to the road: follow the edge posts.',
         clear: 'The fog thins and lifts off the road.'
     },
@@ -1344,7 +1357,10 @@ export const VALLEY_HAZARDS: HazardSpec = (() => {
             peakY: FLOOD_PEAK_Y,
             current: { x: cur.x - c0.x, z: cur.z - c0.z },
             crossing: { x: n.x, halfX: BRIDGE.halfWidth + 0.3, z0: n.z, z1: f.z, yaw },
-            washup: floodWashup().map((w) => ({ ...yardToWorld(w.x, w.z), y: w.y }))
+            washup: floodWashup().map((w) => ({ ...yardToWorld(w.x, w.z), y: w.y })),
+            // the creek's channel only: the Valley's water area covers the map, and the banks
+            // (the yard at 0.4 m) are lower than the flood's peak
+            channel: inCreek
         },
         weather: { zones: VALLEY_WEATHER_ZONES }
     };
@@ -1382,7 +1398,9 @@ export const valleyLevel: LevelDef = {
     name: 'The Valley',
     bounds: VALLEY_BOUNDS,
     playArea: { minX: -109, maxX: 109, minZ: -109, maxZ: 109 },
-    water: { y: CREEK_WATER_Y, cx: 0, cz: 0, halfX: 112, halfZ: 112 },
+    // (the water area is the whole map; floods keep to the creek's channel, and the drawn surface
+    // stops just under the Timber Yard's banks)
+    water: { y: CREEK_WATER_Y, cx: 0, cz: 0, halfX: 112, halfZ: 112, drawMaxY: YARD_Y - 0.02 },
     sounds: { waterfalls: [valleyWaterfall()] },
     terrainHeight: valleyHeight,
     layout: valleyLayout,

@@ -40,9 +40,19 @@ export interface WeatherZone {
     fogEnd?: number;
     /** At full strength: the crosswind's push on a carried piece (N), and its direction (rad, 0 = +X). */
     wind?: { force: number; dir: number };
-    /** Said when it starts gathering, and when it clears. */
+    /** Said when it starts gathering, and when it clears (not for atmosphere). */
     tell: string;
     clear: string;
+    /**
+     * Atmosphere, not a hazard: it comes whatever else is going on, takes no part in the hazard
+     * director's one-at-a-time budget (nothing waits for it), and says nothing.
+     */
+    atmosphere?: boolean;
+    /**
+     * A veil (mist, a fog bank): at full strength the fog closes in to the near world's edge at
+     * most, so the coarse far lattice behind it never shows through (see `weatherFog`).
+     */
+    veil?: boolean;
 }
 
 export interface WeatherSpec {
@@ -91,6 +101,11 @@ export class WeatherScheduler {
 
     get busy(): boolean {
         return this.phase !== W_PHASE.idle;
+    }
+
+    /** Busy with weather that is a hazard (atmosphere does not count). */
+    get hazardBusy(): boolean {
+        return this.busy && !this.spec.zones[this.zone]?.atmosphere;
     }
 
     /** 0..1: how strong the weather is now (rises through the tell, holds, falls as it clears). */
@@ -149,17 +164,18 @@ export class WeatherScheduler {
         }
         const S = (s: number) => Math.round(s * i.hz);
         if (this.phase === W_PHASE.idle) {
-            if (!i.canStart) return null;
             for (let n = 0; n < zones.length; n++) {
                 if (this.done[n] || this.reached[n] < 0) continue;
                 const z = zones[n];
+                // a hazard waits for the director's budget; atmosphere does not
+                if (!z.atmosphere && !i.canStart) continue;
                 const wait = S(z.delayS + z.delayJitterS * i.rand(401 + n));
                 if (i.tick - this.reached[n] < wait) continue;
                 this.zone = n;
                 this.phase = W_PHASE.tell;
                 this.t = 0;
                 this.done[n] = true;
-                return z.tell;
+                return z.atmosphere ? null : z.tell;
             }
             return null;
         }
@@ -171,7 +187,7 @@ export class WeatherScheduler {
         } else if (this.phase === W_PHASE.active && this.t >= S(z.activeS)) {
             this.phase = W_PHASE.clear;
             this.t = 0;
-            return z.clear;
+            return z.atmosphere ? null : z.clear;
         } else if (this.phase === W_PHASE.clear && this.t >= S(z.clearS)) {
             this.phase = W_PHASE.idle;
             this.t = 0;
@@ -185,19 +201,28 @@ export class WeatherScheduler {
  * The fog for a weather state, as one viewer sees it: the level's own (`base`), closing in to the
  * zone's `fogEnd` at full strength. `strength` is the weather's times how far the viewer is inside
  * its zone (0..1; see `weatherCovers`), so mist and fog hang over their own area only: the summit
- * stays clear while the road below it is in fog. The start keeps its share of the end.
+ * stays clear while the road below it is in fog. A veil closes in to `nearRadius` at most (the
+ * near world's edge on this device's preset), so at full strength the edge is fully fogged and the
+ * coarse far lattice never shows through; the start keeps its share of the end.
  */
 export function weatherFog(
     spec: WeatherSpec | undefined,
     zone: number,
     strength: number,
-    base: { start: number; end: number }
+    base: { start: number; end: number },
+    nearRadius = Infinity
 ): { start: number; end: number } {
     const z = spec && zone >= 0 ? spec.zones[zone] : undefined;
     const k = Math.max(0, Math.min(1, strength));
     if (!z?.fogEnd || k === 0) return { start: base.start, end: base.end };
-    const end = base.end + (Math.min(base.end, z.fogEnd) - base.end) * k;
+    const target = Math.min(base.end, z.fogEnd, z.veil ? nearRadius : Infinity);
+    const end = base.end + (target - base.end) * k;
     return { start: (base.start * end) / base.end, end };
+}
+
+/** Linear fog's opacity at distance `d` (0 clear, 1 the fog colour), as the renderer draws it. */
+export function fogOpacity(f: { start: number; end: number }, d: number): number {
+    return Math.max(0, Math.min(1, (d - f.start) / Math.max(1e-6, f.end - f.start)));
 }
 
 /** Is a viewer at (x, z) under a zone's weather? */

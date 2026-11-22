@@ -8,13 +8,13 @@ import {
     CREEK_WATER_Y,
     YARD_Y,
     creekCenterZ,
+    creekHalfWidth,
     roadCenterX,
     timberYardLevel,
     yardHeight
 } from '../../src/levels/timber-yard.ts';
 import {
     CHECKPOINTS,
-    DITCH,
     ROUTE_YAW,
     SUMMIT_U,
     VALLEY_HAZARDS,
@@ -23,24 +23,25 @@ import {
     routeT,
     routeToWorld,
     routeU,
-    valleyHeight,
     valleyLayout,
     valleyLevel,
     yardToWorld
 } from '../../src/levels/valley.ts';
+import { viewDistance } from '../../src/levels/view-distance.ts';
 import { GuestSession, HostSession, listGames } from '../../src/net/session.ts';
 import { MemoryHub } from '../../src/net/transport.ts';
+import { SIM_HZ } from '../../src/sim/clock.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
 import { HAZARD, PHASE, crossingFrame, packHazardNet, readHazardNet } from '../../src/sim/hazards.ts';
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
-import { W_PHASE, WEATHER, WeatherScheduler, weatherCovers, weatherFog } from '../../src/sim/weather.ts';
+import { W_PHASE, WEATHER, WeatherScheduler, fogOpacity, weatherCovers, weatherFog } from '../../src/sim/weather.ts';
 import { pose, quatFromYawPitchRoll, quatMul } from '../../src/voxels/math.ts';
 
 beforeAll(() => initPhysics());
 
-const S = (s: number) => Math.round(s * 60);
+const S = (s: number) => Math.round(s * SIM_HZ);
 const cmd = (n: number, c: Partial<PlayerCommand> = {}): PlayerCommand => ({ ...neutralCommand(n), ...c });
 const byName = (s: LabSim, n: string) => s.entities.find((e) => e.name === n)!;
 const hazardTexts = (s: LabSim) => s.events.filter((e) => e.kind === 'hazard').map((e) => e.text);
@@ -80,6 +81,85 @@ const yardPose = (x: number, y: number, z: number, q: { x: number; y: number; z:
     return out;
 };
 
+const RAIN = () => zoneOf(WEATHER.rain);
+
+/**
+ * Carriers pick up beam-2 at the log dump by its road-side end (by input: look at it, grab, lift),
+ * turn up the road and walk 12 m along it. `send` steps the simulation with one command per
+ * player slot (undefined: that slot's neutral command). Returns where the beam was dropped (m
+ * walked; -1 never) and how many still hold it at the end.
+ */
+function carryUpTheRoad(
+    s: LabSim,
+    slots: number[],
+    send: (cmds: (Partial<PlayerCommand> | undefined)[]) => void
+): { dropAt: number; holders: number; beam: { x: number; y: number; z: number }; dropU: number } {
+    const beam = byName(s, 'beam-2');
+    const b0 = beam.pose.p;
+    const bu = routeU(b0.x, b0.z);
+    const bt = routeT(b0.x, b0.z);
+    const offs = slots.length > 1 ? [-0.35, 0.35] : [0];
+    const along = ROUTE_YAW - Math.PI / 2; // facing +t, along the beam
+    const look = slots.map(() => ({ yaw: along, pitch: 0 }));
+    slots.forEach((slot, i) => {
+        const at = routeToWorld(bu + offs[i], bt - 1.6 - 1.7);
+        s.placePlayer(at.x, at.z, along, slot);
+    });
+    const step = (extra: Partial<PlayerCommand>[] = [], k = 1) => {
+        for (let n = 0; n < k; n++) {
+            const cmds: (Partial<PlayerCommand> | undefined)[] = [];
+            slots.forEach((slot, i) => (cmds[slot] = { ...look[i], ...(extra[i] ?? {}) }));
+            send(cmds);
+        }
+    };
+    const ease = (to: (i: number) => { yaw?: number; pitch?: number }, k: number) => {
+        const from = look.map((l) => ({ ...l }));
+        for (let n = 1; n <= k; n++) {
+            look.forEach((l, i) => {
+                const t = to(i);
+                if (t.yaw !== undefined) l.yaw = from[i].yaw + ((t.yaw - from[i].yaw) * n) / k;
+                if (t.pitch !== undefined) l.pitch = from[i].pitch + ((t.pitch - from[i].pitch) * n) / k;
+            });
+            step();
+        }
+    };
+    step([], 20);
+    // look at the top face near the end, each at their own spot on it
+    slots.forEach((slot, i) => {
+        const e = routeToWorld(bu + offs[i] * 0.15, bt - 1.6 + 0.25 + i * 0.2);
+        const p = s.players[slot];
+        look[i].yaw = Math.atan2(-(e.x - p.x), -(e.z - p.z));
+        look[i].pitch = -Math.atan2(p.y + EYE_HEIGHT - (beam.pose.p.y + 0.07), Math.hypot(e.x - p.x, e.z - p.z));
+    });
+    step([], 10);
+    step(slots.map(() => ({ grab: true })));
+    expect(s.physics.holders(beam.id), 'picked up by each carrier').toBe(slots.length);
+    ease(() => ({ yaw: along }), 20);
+    ease(() => ({ pitch: -0.25 }), 40);
+    // turn up the road (+u)
+    ease(() => ({ yaw: ROUTE_YAW }), 90);
+    expect(s.physics.holders(beam.id), 'still held, facing up the road').toBe(slots.length);
+    const lead = slots[0];
+    const u0 = routeU(s.players[lead].x, s.players[lead].z);
+    let dropAt = -1;
+    let dropU = NaN;
+    for (let n = 0; n < 900 && routeU(s.players[lead].x, s.players[lead].z) < u0 + 12; n++) {
+        step(
+            slots.map((slot) => {
+                const p = s.players[slot];
+                const u = routeU(p.x, p.z);
+                return { moveZ: 1, moveX: Math.max(-1, Math.min(1, (routeT(p.x, p.z) - roadT(u)) * 0.8)) };
+            })
+        );
+        if (dropAt < 0 && s.physics.holders(beam.id) < slots.length) {
+            const p = s.players[lead];
+            dropAt = routeU(p.x, p.z) - u0;
+            dropU = routeU(p.x, p.z);
+        }
+    }
+    return { dropAt, holders: s.physics.holders(beam.id), beam: { ...beam.pose.p }, dropU };
+}
+
 describe('the Valley’s flood at Shallow Creek (the Timber Yard’s, turned with the yard)', () => {
     it('the crossing’s frame lines up with the creek: a bridge across it counts, one along the bank does not', () => {
         const c = VALLEY_HAZARDS.flood!.crossing;
@@ -114,6 +194,14 @@ describe('the Valley’s flood at Shallow Creek (the Timber Yard’s, turned wit
         runUntil(s, () => s.hazards.floodPhase === PHASE.idle, FLOOD_TICKS);
         expect(s.hazards.floodMoved).toBe(2);
         s.runTo(s.tick + 60);
+        // both beams really were carried off: left downstream on the near bank, out of the creek
+        for (const n of ['beam-0', 'beam-1']) {
+            const p = byName(s, n).pose.p;
+            const y = toYard(p);
+            expect(y.x, n).toBeGreaterThan(BRIDGE_X + 4);
+            expect(y.z - creekCenterZ(y.x), n).toBeGreaterThan(creekHalfWidth(y.x));
+            expect(p.y, n).toBeGreaterThan(YARD_Y - 0.1);
+        }
         s.fpActive = true;
         // the yard test's moves (tests/unit/hazards.test.ts), in the yard's frame
         let yaw = 0;
@@ -231,24 +319,81 @@ describe('the Valley’s flood at Shallow Creek (the Timber Yard’s, turned wit
         expect(s.progress.falls).toBe(0);
         expect(s.progress.step).toBe(2);
     }, 180_000);
+    /** Both beams across the abutments in the Valley (dropped onto the caps). */
+    function bridgeValley(s: LabSim): void {
+        const flat = quatMul(quatFromYawPitchRoll(Math.PI / 2, 0, 0), quatFromYawPitchRoll(0, Math.PI / 2, 0));
+        ['beam-0', 'beam-1'].forEach((n, i) =>
+            s.physics.place(byName(s, n).id, yardPose(BRIDGE_X - 0.105 + i * 0.21, YARD_Y + 0.35, BRIDGE.zc, flat))
+        );
+    }
+
+    it('the flood keeps to the creek’s channel: what lies in the Timber Yard (its ground is under the peak) never moves', () => {
+        const s = valley();
+        s.runTo(S(HAZARD.graceS) + 10);
+        const inYard = s.entities.filter((e) => {
+            const pb = s.physics.bodies.get(e.id);
+            if (!pb || pb.kind !== 'dynamic' || e.name.startsWith('beam-0') || e.name === 'beam-1') return false;
+            const y = toYard(e.pose.p);
+            // lying on the yard's ground (0.4 m, under the flood's 0.6 m peak), off the creek
+            return (
+                Math.abs(y.x) < 20 &&
+                y.z - creekCenterZ(y.x) > creekHalfWidth(y.x) + 0.5 &&
+                e.pose.p.y < VALLEY_HAZARDS.flood!.peakY + 0.2
+            );
+        });
+        expect(inYard.length).toBeGreaterThan(3);
+        const before = inYard.map((e) => ({ ...e.pose.p }));
+        bridgeValley(s);
+        runUntil(s, () => s.hazards.floodPhase === PHASE.tell, TO_SIREN);
+        let peak = -Infinity;
+        runUntil(
+            s,
+            () => {
+                peak = Math.max(peak, s.hazards.waterY);
+                return s.hazards.floodPhase === PHASE.idle;
+            },
+            FLOOD_TICKS
+        );
+        expect(peak).toBeCloseTo(VALLEY_HAZARDS.flood!.peakY, 2);
+        inYard.forEach((e, i) =>
+            expect(Math.hypot(e.pose.p.x - before[i].x, e.pose.p.z - before[i].z), e.name).toBeLessThan(0.05)
+        );
+        // the drawn surface stops under the banks
+        expect(valleyLevel.water.drawMaxY!).toBeLessThan(YARD_Y);
+    }, 120_000);
+
+    it('in the channel it is as strong as before: it floats the bridge off as soon as it did over the whole map', () => {
+        /** Ticks from the siren until both beams are off the abutments. */
+        const offAfter = (level: LevelDef) => {
+            const s = new LabSim({ level });
+            s.runTo(S(HAZARD.graceS) + 10);
+            bridgeValley(s);
+            runUntil(s, () => s.hazards.floodPhase === PHASE.tell, TO_SIREN);
+            const on = (n: string) => {
+                const b = byName(s, n).pose.p;
+                const y = toYard(b);
+                return Math.abs(y.x - BRIDGE_X) < BRIDGE.halfWidth && Math.abs(y.z - BRIDGE.zc) < 0.4 && b.y > YARD_Y;
+            };
+            return runUntil(s, () => !on('beam-0') && !on('beam-1'), FLOOD_TICKS);
+        };
+        const channel = offAfter(valleyLevel);
+        const everywhere = offAfter({
+            ...valleyLevel,
+            hazards: { ...VALLEY_HAZARDS, flood: { ...VALLEY_HAZARDS.flood!, channel: undefined } }
+        });
+        expect(channel).toBeLessThan(FLOOD_TICKS);
+        expect(Math.abs(channel - everywhere)).toBeLessThanOrEqual(Math.max(30, everywhere * 0.1));
+    }, 120_000);
 });
 
 describe('weather along the Valley (#88): each comes with its counterplay', () => {
-    it('one kind per area, in route order, the fog and mist never closing in nearer than the Low preset’s near world', () => {
+    it('one kind per area, in route order, and none over the summit (the flower stays in sight)', () => {
         expect(VALLEY_WEATHER_ZONES.map((z) => z.kind)).toEqual([
             WEATHER.rain,
             WEATHER.mist,
             WEATHER.fog,
             WEATHER.snow
         ]);
-        const low = valleyLevel.stream!.lowRadius!;
-        for (const z of VALLEY_WEATHER_ZONES) {
-            // (past the near world's edge the coarse far lattice shows: fog thick there hides its edge)
-            expect(z.fogEnd!, z.name).toBeGreaterThan(low);
-            const f = weatherFog({ zones: [z] }, 0, 1, { start: 18, end: valleyLevel.stream!.fog.end });
-            expect(f.start).toBeLessThan(f.end);
-        }
-        // no weather over the summit, so the flower stays in sight
         const top = routeToWorld(SUMMIT_U, 0);
         for (const [n, z] of VALLEY_WEATHER_ZONES.entries()) {
             expect(z.contains(top.x, top.z), z.name).toBe(false);
@@ -256,77 +401,102 @@ describe('weather along the Valley (#88): each comes with its counterplay', () =
         }
     });
 
-    it('rain on the forest road: the water rises and runs; a beam bridge over the culvert stays put, a plank in the water drifts off', () => {
+    it('no seam at the near world’s edge: a veil fogs it out fully on both presets; rain and snow never show it more than clear weather does', () => {
+        const stream = valleyLevel.stream!;
+        for (const preset of ['low', 'high'] as const) {
+            const v = viewDistance(stream, preset);
+            const base = { start: v.fogStart, end: stream.fog.end };
+            const clear = fogOpacity(base, v.radius);
+            for (const [n, z] of VALLEY_WEATHER_ZONES.entries()) {
+                const f = weatherFog(VALLEY_HAZARDS.weather, n, 1, base, v.radius);
+                expect(f.start, `${z.name} ${preset}`).toBeLessThan(f.end);
+                const edge = fogOpacity(f, v.radius);
+                if (z.veil)
+                    expect(edge, `${z.name} on ${preset}: fog at the ${v.radius} m edge`).toBeGreaterThanOrEqual(0.95);
+                else expect(edge, `${z.name} on ${preset}`).toBeGreaterThanOrEqual(clear);
+            }
+        }
+        // the veils are the mist and the fog bank
+        expect(VALLEY_WEATHER_ZONES.filter((z) => z.veil).map((z) => z.kind)).toEqual([WEATHER.mist, WEATHER.fog]);
+    });
+
+    it('the gorge mist is atmosphere, not a hazard: it comes during another hazard, says nothing and holds up nothing', () => {
+        const mist = zoneOf(WEATHER.mist);
+        expect(VALLEY_WEATHER_ZONES[mist].atmosphere).toBe(true);
+        const w = new WeatherScheduler(VALLEY_HAZARDS.weather!);
+        const gorge = routeToWorld(80, roadT(80));
+        const said: string[] = [];
+        // the director's budget says no all the way through
+        for (let tick = 0; tick < S(80); tick++) {
+            const m = w.step({ tick, hz: SIM_HZ, players: [gorge], canStart: false, rand: () => 0.5 });
+            if (m) said.push(m);
+            if (w.busy) expect(w.hazardBusy).toBe(false);
+        }
+        expect(said).toEqual([]);
+        expect(w.phase).toBe(W_PHASE.idle);
+    });
+
+    // ---- rain: wet timber slips
+
+    /** A Valley sim with the rain on the forest road at full strength (it came on its own). */
+    function inTheRain(players = 1): LabSim {
+        const s = valley();
+        s.fpActive = true;
+        if (players > 1) s.setSlotActive(1, true);
+        const road = routeToWorld(20, roadT(20));
+        for (let i = 0; i < players; i++) s.placePlayer(road.x, road.z + i, ROUTE_YAW, i);
+        runUntil(
+            s,
+            () => s.hazards.weather!.zone === RAIN() && s.hazards.weather!.strength > 0.99,
+            S(HAZARD.graceS) + weatherTicks(RAIN()).wait + S(20)
+        );
+        expect(s.hazards.weather!.zone).toBe(RAIN());
+        expect(hazardTexts(s).at(-1)).toContain('Wet timber slips: carry it low or together');
+        return s;
+    }
+
+    const hostSend = (s: LabSim) => (c: (Partial<PlayerCommand> | undefined)[]) =>
+        s.step(cmd(s.tick, c[0] ?? {}), c[1] ? cmd(s.tick, c[1]) : undefined);
+
+    it('rain on the forest road: wet timber slips; a heavy beam carried alone slips out on the way up the road', () => {
+        const s = inTheRain();
+        const r = carryUpTheRoad(s, [0], hostSend(s));
+        expect(s.physics.gripScale[0]).toBeCloseTo(1 - HAZARD.wetGrip, 3);
+        expect(r.dropAt, 'it slipped').toBeGreaterThan(0);
+        expect(r.dropAt).toBeLessThan(12);
+        expect(r.holders).toBe(0);
+        // where: on the forest road, in the rain, and it fell there (not flung)
+        const dropped = routeToWorld(r.dropU, roadT(r.dropU));
+        expect(VALLEY_WEATHER_ZONES[RAIN()].contains(dropped.x, dropped.z)).toBe(true);
+        expect(Math.abs(routeU(r.beam.x, r.beam.z) - r.dropU)).toBeLessThan(4);
+    }, 180_000);
+
+    it('counterplay: carried together, two beavers hold it all the way in the rain', () => {
+        const s = inTheRain(2);
+        const r = carryUpTheRoad(s, [0, 1], hostSend(s));
+        expect(r.dropAt).toBe(-1);
+        expect(r.holders).toBe(2);
+    }, 180_000);
+
+    it('the control: the same carry alone without rain holds all the way (the rain made it slip)', () => {
         const s = valley();
         s.fpActive = true;
         s.step(cmd(0));
-        const rain = zoneOf(WEATHER.rain);
-        const t = roadT(DITCH.u);
-        // the culvert's gap along the road, and its banks
-        const fall = valleyLevel.rules!.fallY;
-        const hAt = (u: number, tt: number) => valleyHeight(routeToWorld(u, tt).x, routeToWorld(u, tt).z);
-        let a = NaN;
-        let b = NaN;
-        for (let u = DITCH.u - 6; u <= DITCH.u + 6; u += 0.02)
-            if (hAt(u, t) < fall) {
-                if (Number.isNaN(a)) a = u;
-                b = u;
-            }
-        const rim = Math.max(hAt(a - 0.3, t), hAt(b + 0.3, t));
-        const mid = routeToWorld((a + b) / 2, t);
-        const beam = byName(s, 'beam-2');
-        s.physics.place(beam.id, {
-            p: { x: mid.x, y: rim + 0.2, z: mid.z },
-            q: quatFromYawPitchRoll(ROUTE_YAW + Math.PI / 2, Math.PI / 2, 0)
-        });
-        // a plank in the culvert's water, off to the side of the road
-        const plank = byName(s, 'extra-plank-5');
-        const pIn = routeToWorld((a + b) / 2, t - 3);
-        s.physics.place(
-            plank.id,
-            pose(pIn.x, CREEK_WATER_Y - 0.2, pIn.z, quatFromYawPitchRoll(ROUTE_YAW, Math.PI / 2, 0))
-        );
-        // a player walks onto the forest road
-        const at = routeToWorld(20, roadT(20));
-        s.placePlayer(at.x, at.z, ROUTE_YAW);
-        runUntil(s, () => s.tick > 120, 200);
-        const beamAt = { ...beam.pose.p };
-        const plankT = routeT(plank.pose.p.x, plank.pose.p.z);
-        const w = weatherTicks(rain);
-        runUntil(s, () => s.hazards.weather!.phase === W_PHASE.tell, S(HAZARD.graceS) + w.wait);
-        expect(s.hazards.weather!.zone).toBe(rain);
-        expect(hazardTexts(s).at(-1)).toContain('Rain');
-        let maxY = -Infinity;
-        runUntil(
-            s,
-            () => {
-                maxY = Math.max(maxY, s.hazards.waterY);
-                return s.hazards.weather!.phase === W_PHASE.idle;
-            },
-            w.all
-        );
-        // the water rose and went back down
-        expect(maxY).toBeCloseTo(CREEK_WATER_Y + VALLEY_WEATHER_ZONES[rain].riverRise!, 2);
-        expect(s.hazards.waterY).toBeCloseTo(CREEK_WATER_Y, 6);
-        // the bridge stood well clear of it and never moved
-        expect(rim - maxY).toBeGreaterThan(1);
-        expect(Math.hypot(beam.pose.p.x - beamAt.x, beam.pose.p.z - beamAt.z)).toBeLessThan(0.05);
-        expect(Math.abs(beam.pose.p.y - beamAt.y)).toBeLessThan(0.05);
-        // what was lying in the water was carried off downstream (+t)
-        expect(routeT(plank.pose.p.x, plank.pose.p.z) - plankT).toBeGreaterThan(2);
-        // and it comes once
-        expect(s.hazards.weather!.phase).toBe(W_PHASE.idle);
-        runUntil(s, () => false, S(30));
-        expect(s.hazards.weather!.phase).toBe(W_PHASE.idle);
+        const r = carryUpTheRoad(s, [0], hostSend(s));
+        // (over before the rain can come: no weather yet)
+        expect(s.hazards.weather!.busy).toBe(false);
+        expect(s.physics.gripScale[0] ?? 1).toBe(1);
+        expect(r.dropAt).toBe(-1);
+        expect(r.holders).toBe(1);
     }, 180_000);
 
-    it('fog on the mountain road: the road’s edge posts and signs stay close enough to follow, and the view clears after', () => {
-        const fog = zoneOf(WEATHER.fog);
-        const z = VALLEY_WEATHER_ZONES[fog];
+    // ---- fog
+
+    it('fog on the mountain road, a layout check: the edge posts and signs are close together along the stretch', () => {
+        const z = VALLEY_WEATHER_ZONES[zoneOf(WEATHER.fog)];
         const markers = valleyLayout(1)
             .pieces.filter((p) => /^(road-post|route-sign|flag-pole)$/.test(p.name))
             .map((p) => ({ u: routeU(p.pose.p.x, p.pose.p.z), t: routeT(p.pose.p.x, p.pose.p.z) }));
-        // walking up the road through the fog: the next marker ahead is always well inside the fog's end
         let worst = 0;
         for (let u = 0; u < SUMMIT_U; u += 0.5) {
             const r = routeToWorld(u, roadT(u));
@@ -338,41 +508,90 @@ describe('weather along the Valley (#88): each comes with its counterplay', () =
             worst = Math.max(worst, ahead);
         }
         expect(worst).toBeGreaterThan(0);
-        expect(worst).toBeLessThan(z.fogEnd! * 0.5);
-        // the fog comes, holds and goes: back to the level's own afterwards
-        const base = { start: 18, end: valleyLevel.stream!.fog.end };
+        // well inside the fog's end on the Low preset
+        expect(worst).toBeLessThan(valleyLevel.stream!.lowRadius! * 0.5);
+    });
+
+    it('counterplay, played: in the fog a beaver walks the stretch by input, steering only by the edge posts they can see, and stays on the road', () => {
+        const s = valley();
+        s.fpActive = true;
+        const fog = zoneOf(WEATHER.fog);
+        const start = routeToWorld(138.5, roadT(138.5));
+        s.placePlayer(start.x, start.z, ROUTE_YAW);
+        s.step(cmd(s.tick, { yaw: ROUTE_YAW }));
+        expect(s.hazards.startWeatherNow(s, fog)).toBe(true);
+        // what can be seen: as far as the fog's end on the Low preset (the nearest it closes in)
+        const v = viewDistance(valleyLevel.stream!, 'low');
+        const seeing = weatherFog(
+            VALLEY_HAZARDS.weather,
+            fog,
+            1,
+            { start: v.fogStart, end: valleyLevel.stream!.fog.end },
+            v.radius
+        ).end;
+        expect(seeing).toBeLessThanOrEqual(v.radius);
+        const posts = valleyLayout(1)
+            .pieces.filter((p) => p.name === 'road-post')
+            .map((p) => ({ x: p.pose.p.x, z: p.pose.p.z }));
+        let yaw = ROUTE_YAW;
+        let worstOff = 0;
+        let steered = 0;
+        for (let n = 0; n < 2400 && routeU(s.player.x, s.player.z) < 166; n++) {
+            const p = s.player;
+            const fx = -Math.sin(yaw);
+            const fz = -Math.cos(yaw);
+            // the nearest edge post ahead (within 60 degrees of the view) that the fog lets you see
+            const seen = posts
+                .map((q) => ({ q, dx: q.x - p.x, dz: q.z - p.z }))
+                .map((o) => ({ ...o, d: Math.hypot(o.dx, o.dz) }))
+                .filter((o) => o.d > 2 && o.d <= seeing && (o.dx * fx + o.dz * fz) / o.d > 0.5)
+                .sort((a, b) => a.d - b.d)[0];
+            if (seen) {
+                // the posts mark the road's right-hand edge: aim 2.6 m to the left of the next one
+                const lx = seen.dz / seen.d;
+                const lz = -seen.dx / seen.d;
+                const tx = seen.q.x + lx * 2.6;
+                const tz = seen.q.z + lz * 2.6;
+                yaw = Math.atan2(-(tx - p.x), -(tz - p.z));
+                steered++;
+            }
+            s.step(cmd(s.tick, { yaw, moveZ: 1 }));
+            const u = routeU(s.player.x, s.player.z);
+            worstOff = Math.max(worstOff, Math.abs(routeT(s.player.x, s.player.z) - roadT(u)));
+        }
+        expect(s.hazards.weather!.zone).toBe(fog);
+        expect(routeU(s.player.x, s.player.z)).toBeGreaterThanOrEqual(166);
+        expect(steered).toBeGreaterThan(100);
+        expect(s.progress.falls).toBe(0);
+        expect(s.progress.recoveries).toBe(0);
+        // on the road all the way (the posts stand 2.6 m out from its middle)
+        expect(worstOff).toBeLessThan(2.2);
+    }, 180_000);
+
+    it('the fog comes, holds and goes: back to the level’s own afterwards', () => {
+        const z = VALLEY_WEATHER_ZONES[zoneOf(WEATHER.fog)];
+        const v = viewDistance(valleyLevel.stream!, 'low');
+        const base = { start: v.fogStart, end: valleyLevel.stream!.fog.end };
         const w = new WeatherScheduler(VALLEY_HAZARDS.weather!);
         const inFog = routeToWorld(150, roadT(150));
         const ends: number[] = [];
         for (let tick = 0; tick < S(200); tick++) {
-            w.step({ tick, hz: 60, players: [inFog], canStart: true, rand: () => 0.5 });
+            w.step({ tick, hz: SIM_HZ, players: [inFog], canStart: true, rand: () => 0.5 });
             const k = weatherCovers(VALLEY_HAZARDS.weather, w.zone, inFog.x, inFog.z) ? w.strength : 0;
-            ends.push(weatherFog(VALLEY_HAZARDS.weather, w.zone, k, base).end);
+            ends.push(weatherFog(VALLEY_HAZARDS.weather, w.zone, k, base, v.radius).end);
         }
-        expect(Math.min(...ends)).toBeCloseTo(z.fogEnd!, 3);
+        expect(Math.min(...ends)).toBeCloseTo(Math.min(z.fogEnd!, v.radius), 3);
         expect(ends[ends.length - 1]).toBe(base.end);
         expect(w.phase).toBe(W_PHASE.idle);
-        expect(weatherFog(VALLEY_HAZARDS.weather, w.zone, w.strength, base)).toEqual(base);
+        expect(weatherFog(VALLEY_HAZARDS.weather, w.zone, w.strength, base, v.radius)).toEqual(base);
     });
+
+    // ---- snow
 
     /** Where player `slot` waits at the crevasse (side by side across the road, facing up it). */
     const SNOW_U = 167.2;
-    const snowSpot = (slot: number) => routeToWorld(SNOW_U, roadT(SNOW_U) - 0.65 + slot * 1.3);
-
-    /**
-     * Player 1 at the crevasse in the snow holding a plank in front of them at chest height, across
-     * their front (along t, the way the squall blows; the yard's gust test turned onto the route).
-     */
-    function carryInSnow(s: LabSim): number {
-        const plank = byName(s, 'extra-plank-9');
-        const at = snowSpot(0);
-        s.placePlayer(at.x, at.z, ROUTE_YAW, 0);
-        const y = s.players[0].y + EYE_HEIGHT - 0.45;
-        const c = routeToWorld(SNOW_U + 1.1, roadT(SNOW_U) - 0.35);
-        s.physics.place(plank.id, pose(c.x, y, c.z, quatFromYawPitchRoll(ROUTE_YAW, Math.PI / 2, 0)));
-        s.physics.grabById(plank.id, { x: c.x, y, z: c.z }, 1.2, 0);
-        return plank.id;
-    }
+    const snowT = (slot: number) => roadT(SNOW_U) - 0.65 + slot * 1.3;
+    const snowSpot = (slot: number) => routeToWorld(SNOW_U, snowT(slot));
 
     /** Runs a Valley sim until the snow is gathering, players waiting at the crevasse. */
     function untilSnow(s: LabSim, players = 1): void {
@@ -386,26 +605,64 @@ describe('weather along the Valley (#88): each comes with its counterplay', () =
             s,
             () => s.hazards.weather!.phase === W_PHASE.tell,
             S(HAZARD.graceS) + w.wait,
-            () => ({
-                yaw: ROUTE_YAW
-            })
+            () => ({ yaw: ROUTE_YAW })
         );
         expect(s.hazards.weather!.zone).toBe(snow);
         expect(hazardTexts(s).at(-1)).toContain('Snow');
     }
 
+    /**
+     * A plank laid on the ground in front of the players, across them (along t, the way the squall
+     * blows); each player in `slots` looks at it in front of them, picks it up and lifts it (input).
+     */
+    function pickUpInSnow(s: LabSim, slots: number[]): number {
+        const plank = byName(s, 'extra-plank-9');
+        const mid = slots.reduce((a, slot) => a + snowT(slot), 0) / slots.length;
+        const c = routeToWorld(SNOW_U + 1.0, mid);
+        const g = valleyLevel.terrainHeight(c.x, c.z);
+        s.physics.place(plank.id, pose(c.x, g + 0.12, c.z, quatFromYawPitchRoll(ROUTE_YAW, Math.PI / 2, 0)));
+        const look = slots.map(() => ({ yaw: ROUTE_YAW, pitch: 0 }));
+        const step = (extra: Partial<PlayerCommand> = {}, k = 1) => {
+            for (let n = 0; n < k; n++) {
+                const c1 = slots.includes(0) ? cmd(s.tick, { ...look[slots.indexOf(0)], ...extra }) : cmd(s.tick);
+                const c2 = slots.includes(1) ? cmd(s.tick, { ...look[slots.indexOf(1)], ...extra }) : undefined;
+                s.step(c1, c2);
+            }
+        };
+        step({}, 40);
+        slots.forEach((slot, i) => {
+            const pl = plank.pose.p;
+            const e = routeToWorld(SNOW_U + 1.0, snowT(slot) + (slots.length > 1 ? 0 : 0));
+            const p = s.players[slot];
+            look[i].yaw = Math.atan2(-(e.x - p.x), -(e.z - p.z));
+            look[i].pitch = -Math.atan2(p.y + EYE_HEIGHT - (pl.y + 0.05), Math.hypot(e.x - p.x, e.z - p.z));
+        });
+        step({}, 10);
+        step({ grab: true });
+        expect(s.physics.holders(plank.id), 'picked up by each player').toBe(slots.length);
+        // face up the road again and lift it to the chest
+        for (let n = 1; n <= 40; n++) {
+            look.forEach((l) => {
+                l.yaw += (ROUTE_YAW - l.yaw) / (41 - n);
+                l.pitch += (0 - l.pitch) / (41 - n);
+            });
+            step();
+        }
+        expect(s.physics.holders(plank.id)).toBe(slots.length);
+        return plank.id;
+    }
+
     function runSnow(s: LabSim, c: Partial<PlayerCommand>, c2?: Partial<PlayerCommand>): void {
         const z = VALLEY_WEATHER_ZONES[zoneOf(WEATHER.snow)];
-        for (let i = 0; i < S(z.tellS + z.activeS * 0.5); i++) {
+        for (let i = 0; i < S(z.tellS + z.activeS * 0.5); i++)
             s.step(cmd(s.tick, { yaw: ROUTE_YAW, ...c }), c2 ? cmd(s.tick, { yaw: ROUTE_YAW, ...c2 }) : undefined);
-        }
     }
 
     it('the snow squall at the crevasse: a plank carried high in one pair of hands is torn away across the road', () => {
         const s = valley();
         s.fpActive = true;
         untilSnow(s);
-        const id = carryInSnow(s);
+        const id = pickUpInSnow(s, [0]);
         const p0 = s.physics.bodies.get(id)!.body.translation();
         const t0 = routeT(p0.x, p0.z);
         runSnow(s, {});
@@ -421,25 +678,18 @@ describe('weather along the Valley (#88): each comes with its counterplay', () =
         const s = valley();
         s.fpActive = true;
         untilSnow(s);
-        const id = carryInSnow(s);
+        const id = pickUpInSnow(s, [0]);
         runSnow(s, { pitch: -1.05 });
         expect(s.physics.heldIdOf(0)).toBe(id);
         expect(s.hazards.lastWindForce).toBeLessThan(650);
     }, 120_000);
 
-    it('counterplay: carried together, two grips hold it through the squall', () => {
+    it('counterplay: carried together (both pick it up by input), two grips hold it through the squall', () => {
         const s = valley();
         s.fpActive = true;
         s.setSlotActive(1, true);
         untilSnow(s, 2);
-        const id = carryInSnow(s);
-        // the second player takes the other end (0.8 m along it, the way they stand)
-        const t = s.physics.bodies.get(id)!.body.translation();
-        const b = snowSpot(1);
-        s.placePlayer(b.x, b.z, ROUTE_YAW, 1);
-        const along = { x: Math.SQRT1_2 * 0.8, z: Math.SQRT1_2 * 0.8 };
-        s.physics.grabById(id, { x: t.x + along.x, y: t.y, z: t.z + along.z }, 1.2, 1);
-        expect(s.physics.holders(id)).toBe(2);
+        const id = pickUpInSnow(s, [0, 1]);
         runSnow(s, {}, {});
         expect(s.physics.holders(id)).toBe(2);
         expect(s.hazards.lastWindForce).toBeGreaterThan(650);
@@ -550,10 +800,10 @@ describe('weather and the one-hazard-at-a-time budget', () => {
         expect(s.hazards.gustCount).toBe(0);
     }, 120_000);
 
-    it('and with the handbrake prank (the same yard, mist over it): each waits for the other and its quiet spell', () => {
+    it('and with the handbrake prank (the same yard, the fog bank over it): each waits for the other and its quiet spell', () => {
         const H = HAZARD.handbrake;
         const mist = {
-            ...VALLEY_WEATHER_ZONES[zoneOf(WEATHER.mist)],
+            ...VALLEY_WEATHER_ZONES[zoneOf(WEATHER.fog)],
             contains: () => true,
             delayS: 0,
             delayJitterS: 0
@@ -569,7 +819,7 @@ describe('weather and the one-hazard-at-a-time budget', () => {
         };
         const both = (s: LabSim) => s.hazards.weather!.busy && s.hazards.brakePhase !== PHASE.idle;
 
-        // the weather first: the ute parked on the slope while the mist is down waits for it
+        // the weather first: the ute parked on the slope while the fog is down waits for it
         const a = new LabSim({ level: misty() });
         a.fpActive = true;
         runUntil(a, () => a.hazards.weather!.busy, S(HAZARD.graceS) + 10);
@@ -590,7 +840,7 @@ describe('weather and the one-hazard-at-a-time budget', () => {
         expect(a.hazards.brakePhase).toBe(PHASE.tell);
         expect(a.tick - clear).toBeGreaterThanOrEqual(S(HAZARD.safeS) - 1);
 
-        // the prank first: parked from the start, it goes at the end of the grace period; the mist
+        // the prank first: parked from the start, it goes at the end of the grace period; the fog
         // (due straight away) waits for it and its quiet spell
         const b = new LabSim({ level: misty() });
         b.fpActive = true;
@@ -639,9 +889,17 @@ describe('weather online: guests get it from the host', () => {
         expect(packHazardNet(old)).toHaveLength(6);
         // and a level without weather sends none
         expect(new LabSim({ level: timberYardLevel }).hazards.net().weatherZone).toBeUndefined();
+        // a host from before the prank too: five fields, read as no prank and no weather
+        const older = readHazardNet([-0.45, 2, 0, 0.5, 1], CREEK_WATER_Y);
+        expect(older).toEqual({ waterY: -0.45, flood: 2, gust: 0, gustDir: 0.5, gustSlot: 1, brake: 0 });
+        // out of range: clamped
         const wild = readHazardNet([-0.45, 0, 0, 0, -1, 0, 1e9, -5], CREEK_WATER_Y);
-        expect(wild.weatherZone).toBeLessThan(64);
+        expect(wild.weatherZone).toBe(63);
         expect(wild.weather).toBe(0);
+        expect(readHazardNet([-0.45, 0, 0, 0, -1, 0, -7, 9], CREEK_WATER_Y)).toMatchObject({
+            weatherZone: -1,
+            weather: 1
+        });
     });
 
     it('the host’s rain reaches the guest: its zone, its strength and the water height', async () => {
@@ -678,4 +936,44 @@ describe('weather online: guests get it from the host', () => {
         gs.leave();
         hs.stop();
     }, 120_000);
+    it('a guest’s carry slips in the rain: the host decides their grip as it does everyone’s', async () => {
+        const hub = new MemoryHub();
+        const host = valley();
+        const road = routeToWorld(20, roadT(20));
+        host.placePlayer(road.x, road.z, ROUTE_YAW);
+        host.fpActive = true;
+        const hs = await HostSession.start(hub.transport('host'), host, 'valley', 'wetg');
+        const ad = listGames(hub.channel('lobby', 'watcher'))[0];
+        let clock = 0;
+        const gs = await GuestSession.join(hub.transport('guest'), valley(), ad, { now: () => clock });
+        const send = (c: (Partial<PlayerCommand> | undefined)[]) => {
+            gs.sendInput(cmd(host.tick, c[1] ?? {}));
+            host.step(cmd(host.tick, c[0] ?? { yaw: ROUTE_YAW }), hs.commandFor(1), [
+                hs.commandFor(2),
+                hs.commandFor(3)
+            ]);
+            hs.afterStep((slot) => host.interactionIds(slot));
+            clock += 1000 / 60;
+        };
+        expect(host.isSlotActive(1)).toBe(true);
+        // the guest waits on the forest road for the rain
+        const g0 = routeToWorld(21, roadT(21));
+        host.placePlayer(g0.x, g0.z, ROUTE_YAW, 1);
+        const rain = zoneOf(WEATHER.rain);
+        for (
+            let i = 0;
+            i < S(HAZARD.graceS) + weatherTicks(rain).wait + S(20) &&
+            !(host.hazards.weather!.zone === rain && host.hazards.weather!.strength > 0.99);
+            i++
+        )
+            send([]);
+        expect(host.hazards.weather!.strength).toBeGreaterThan(0.99);
+        // the guest alone carries the heavy beam up the road
+        const r = carryUpTheRoad(host, [1], send);
+        expect(host.physics.gripScale[1]).toBeCloseTo(1 - HAZARD.wetGrip, 3);
+        expect(r.dropAt).toBeGreaterThan(0);
+        expect(host.physics.heldIdOf(1)).toBe(-1);
+        gs.leave();
+        hs.stop();
+    }, 180_000);
 });
