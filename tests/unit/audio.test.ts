@@ -4,20 +4,34 @@ import { soundBodies } from '../../src/audio/game-audio.ts';
 import { sfx } from '../../src/audio/sfx.ts';
 import type { SfxName } from '../../src/audio/sfx.ts';
 import { LOOPS, SOUND_NAMES, SYNTH_RATE, synthesize } from '../../src/audio/synth.ts';
+import type { SoundName, SynthSound } from '../../src/audio/synth.ts';
+
+/** Each sound synthesized once for all the tests here (about 0.2 s in all). */
+const cache = new Map<SoundName, SynthSound>();
+const synth = (n: SoundName) => {
+    let s = cache.get(n);
+    if (!s) {
+        s = synthesize(n);
+        cache.set(n, s);
+    }
+    return s;
+};
 
 describe('sound: every sound is synthesized (original, nothing to license)', () => {
     it('each sound is finite, in range, audible and not too long', () => {
         for (const name of SOUND_NAMES) {
-            const { samples } = synthesize(name);
+            const { samples } = synth(name);
             expect(samples.length, name).toBeGreaterThan(SYNTH_RATE * 0.1);
             expect(samples.length, name).toBeLessThan(SYNTH_RATE * 7);
             let peak = 0;
             let energy = 0;
+            let finite = true;
             for (const x of samples) {
-                expect(Number.isFinite(x), name).toBe(true);
+                finite &&= Number.isFinite(x);
                 peak = Math.max(peak, Math.abs(x));
                 energy += x * x;
             }
+            expect(finite, name).toBe(true);
             expect(peak, name).toBeLessThanOrEqual(0.91);
             expect(peak, name).toBeGreaterThan(0.3);
             expect(Math.sqrt(energy / samples.length), name).toBeGreaterThan(0.01);
@@ -31,7 +45,7 @@ describe('sound: every sound is synthesized (original, nothing to license)', () 
 
     it('one-shots start and end silent (no clicks); loops join without a jump', () => {
         for (const name of SOUND_NAMES) {
-            const { samples, loop } = synthesize(name);
+            const { samples, loop } = synth(name);
             const first = samples[0];
             const last = samples[samples.length - 1];
             if (loop) {
@@ -46,8 +60,8 @@ describe('sound: every sound is synthesized (original, nothing to license)', () 
             }
         }
         expect(LOOPS.has('river')).toBe(true);
-        expect(synthesize('river').loop).toBe(true);
-        expect(synthesize('siren').loop).toBe(false);
+        expect(synth('river').loop).toBe(true);
+        expect(synth('siren').loop).toBe(false);
     });
 
     it('the sfx API is safe before the audio runs, and forwards to the game once it does', () => {
