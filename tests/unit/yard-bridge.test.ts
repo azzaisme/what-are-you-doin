@@ -78,18 +78,40 @@ function buildAndCross(pullPlankNails = false) {
             falls = s.progress.falls;
         const gw = s.hazards.gustPhase;
         rawStep(...args);
+        if (process.env.GATE_DEBUG && s.tick % 10 === 0 && s.tick > 60 * 255 && s.tick < 60 * 330) {
+            const pl = s.entities.find((e) => e.id === 310)!;
+            log.push(
+                `PTRACE t ${(s.tick / 60).toFixed(2)} plank (${pl.pose.p.x.toFixed(3)}, ${pl.pose.p.y.toFixed(3)}, ${pl.pose.p.z.toFixed(3)}) held ${s.physics.heldId} player (${s.player.x.toFixed(2)}, ${s.player.y.toFixed(2)}, ${s.player.z.toFixed(2)}) gust ${s.hazards.gustPhase}`
+            );
+        }
+        if (process.env.GATE_DEBUG && s.tick % 15 === 0 && s.tick < 60 * 26)
+            for (const c of s.joints.graph.connections()) {
+                if (c.id !== 1) continue;
+                const q = s.physics.bodies.get(c.a)!.body.rotation();
+                const r = c.rel;
+                const dq = Math.abs(q.x * r.x + q.y * r.y + q.z * r.z + q.w * r.w);
+                const be = s.entities.find((e) => e.id === c.a)!;
+                log.push(
+                    `TRACE t ${(s.tick / 60).toFixed(2)} tip ${(2 * Math.acos(Math.min(1, dq)) * 1000).toFixed(2)} mrad beam (${be.pose.p.x.toFixed(3)}, ${be.pose.p.y.toFixed(3)}, ${be.pose.p.z.toFixed(3)}) held ${s.physics.heldId} player (${s.player.x.toFixed(2)}, ${s.player.y.toFixed(2)}, ${s.player.z.toFixed(2)}) u ${(s.joints.health.states.get(1)?.util ?? 0).toFixed(2)}`
+                );
+            }
         if (process.env.GATE_DEBUG)
             for (const c of s.joints.graph.connections()) {
                 const h = s.joints.health.states.get(c.id);
                 const l = s.joints.stress.loads.get(c.id);
                 if (!h || !l || h.util < 0.5) continue;
-                const ps = (id: number) => {
-                    const e = s.entities.find((x) => x.id === id);
-                    if (!e) return 'g';
-                    const q = e.pose.q;
-                    return `${e.name}@y${e.pose.p.y.toFixed(4)} q(${q.x.toFixed(4)},${q.y.toFixed(4)},${q.z.toFixed(4)},${q.w.toFixed(4)})`;
-                };
-                log.push(`POSE ${ps(c.a)} ${ps(c.b)} ${ps(320)} ${ps(321)}`);
+                if (c.b === GROUND) {
+                    const q = s.physics.bodies.get(c.a)!.body.rotation();
+                    const r = c.rel;
+                    const dq = Math.abs(q.x * r.x + q.y * r.y + q.z * r.z + q.w * r.w);
+                    // the tip since nailing (rad), and its axis in the world
+                    const ex = r.w * q.x - r.x * q.w - r.y * q.z + r.z * q.y;
+                    const ey = r.w * q.y + r.x * q.z - r.y * q.w - r.z * q.x;
+                    const ez = r.w * q.z - r.x * q.y + r.y * q.x - r.z * q.w;
+                    log.push(
+                        `TIP c${c.id} ${(2 * Math.acos(Math.min(1, dq)) * 1000).toFixed(3)} mrad axis (${ex.toFixed(5)}, ${ey.toFixed(5)}, ${ez.toFixed(5)}) beam y ${s.entities.find((e) => e.id === c.a)!.pose.p.y.toFixed(4)}`
+                    );
+                }
                 log.push(
                     `STRAIN t ${(s.tick / 60).toFixed(2)} c${c.id} ${c.a}>${c.b} age ${s.tick - c.tick}: u ${h.util.toFixed(2)} raw ${h.raw.toFixed(2)} shear ${l.shear.toFixed(0)} pull ${l.pull.toFixed(0)} bearing ${l.bearing.toFixed(0)} moment ${l.moment.toFixed(0)} f (${l.fx.toFixed(0)},${l.fy.toFixed(0)},${l.fz.toFixed(0)}) held ${s.physics.heldId} player (${s.player.x.toFixed(2)},${s.player.y.toFixed(2)},${s.player.z.toFixed(2)})`
                 );
@@ -250,7 +272,14 @@ function buildAndCross(pullPlankNails = false) {
         step({}, 120);
         // into the capstone, well back from the beam's end
         const end = beam.pose.p.z + 1.6;
-        for (const dz of [0.07, 0.14]) nail(onBeam(beam, end - dz), `beam ${b} near end`);
+        // four nails, spread along it and across it: nailed at this end only until the deck is
+        // down, it must not swing round when a gust or the flood comes (two nails 8 cm apart in a
+        // row hold a turn by their couple alone; a gust's 300 N m on the beam put 3.75 kN on each)
+        for (const dz of [0.07, 0.15])
+            for (const dx of [-0.05, 0.05]) {
+                const at = onBeam(beam, end - dz);
+                nail({ ...at, x: at.x + dx }, `beam ${b} near end`);
+            }
     }
     // the beams span the gap: the flood comes. Back off the crossing into the yard and wait it out:
     // the beams are nailed down at their near ends
@@ -373,7 +402,11 @@ function buildAndCross(pullPlankNails = false) {
     waitForSafe(60);
     // ---- 3. out on the deck: nail both beams' far ends into the far capstone
     walkTo(BRIDGE_X, deck[deck.length - 2] + 0.5);
-    for (let b = 0; b < 2; b++) nail(onBeam(beams[b], farNailZ), `beam ${b} far end`, deck[deck.length - 2]);
+    for (let b = 0; b < 2; b++)
+        for (const dx of [-0.05, 0.05]) {
+            const at = onBeam(beams[b], farNailZ);
+            nail({ ...at, x: at.x + dx }, `beam ${b} far end`, deck[deck.length - 2]);
+        }
     walkTo(BRIDGE_X, deck[deck.length - 2] + 1.2);
     layPlank(deck[deck.length - 1]);
     phase('to the ute');

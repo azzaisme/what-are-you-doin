@@ -36,6 +36,8 @@ const FRICTION_PREFERENCE = 1000;
 const MIN_REACH = 0.02;
 /** Friction of the faces a joint presses together (timber on timber or stone, static). */
 export const FRICTION = 0.5;
+/** The time a connection's load is averaged over, for what it carries asleep (s). */
+const REST_MEAN = 0.25;
 
 export interface JointLoad {
     /** Force the nails carry (N): their shear and withdrawal together. */
@@ -161,6 +163,10 @@ export class StressMeter {
     private readonly states = new Map<number, BodyState>();
     /** Load per connection id from the last step. */
     readonly loads = new Map<number, JointLoad>();
+    /** Each connection's load averaged over its last REST_MEAN (what it keeps asleep). */
+    private readonly mean = new Map<number, JointLoad>();
+    /** Jointed pieces whose loads are still settling: kept awake (before). */
+    private readonly unsettled = new Set<number>();
 
     constructor(pw: PhysicsWorld, graph: JointGraph) {
         this.pw = pw;
@@ -187,10 +193,13 @@ export class StressMeter {
         if (this.graph.size === 0) return;
         for (const pb of this.jointed()) {
             const b = pb.body;
-            // kept awake while it is jointed: asleep, Rapier neither integrates it nor solves its
-            // contacts, so its load could not be measured (a beam that settled and slept kept the
-            // load of its last settling step: 7 % short of its weight)
-            if (b.isSleeping()) b.wakeUp();
+            // asleep, Rapier neither moves it nor solves its contacts: it keeps the load it last
+            // carried (JointHealth). Kept awake, a seated beam rattled on in a 0.011 rad/s limit
+            // cycle of its springs and contacts that walked a loose plank off it at 1.5 cm/s
+            // so a piece is kept awake while its joints' loads are still settling, and let sleep once
+            // they are steady
+            if (b.isSleeping() && this.unsettled.has(pb.id)) b.wakeUp();
+            if (b.isSleeping()) continue;
             const v = b.linvel();
             const w = b.angvel();
             const I = b.effectiveAngularInertia();
@@ -210,6 +219,14 @@ export class StressMeter {
     after(): void {
         // connections gone since: forget them
         for (const id of [...this.loads.keys()]) if (!this.graph.get(id)) this.loads.delete(id);
+        for (const id of [...this.mean.keys()]) if (!this.graph.get(id)) this.mean.delete(id);
+        // asleep, a connection carries what it carried on average as it came to rest (its last
+        // step alone may be a settling wobble: a cantilever that slept on one read 11 % short)
+        for (const c of this.graph.connections()) {
+            if (this.states.has(c.a) || this.states.has(c.b)) continue;
+            const m = this.mean.get(c.id);
+            if (m) this.loads.set(c.id, { ...m });
+        }
         if (this.graph.size === 0 || this.states.size === 0) return;
         // groups of joined bodies (ground does not join groups)
         const seen = new Set<number>();
@@ -344,7 +361,19 @@ export class StressMeter {
         });
         if (capped) x = this.solve(rows, r, index, com, conns, frictions, frictionFixed);
         conns.forEach((c, k) => {
-            this.loads.set(c.id, this.split(c, x, 6 * k));
+            const l = this.split(c, x, 6 * k);
+            this.loads.set(c.id, l);
+            this.average(c.id, l);
+            // still changing (by 2 % of the piece's weight from its mean)? keep its pieces awake
+            const m = this.mean.get(c.id)!;
+            const w = 0.02 * (this.pw.bodies.get(c.a)?.body.mass() ?? 1) * GRAVITY;
+            const steady =
+                Math.hypot(l.fx - m.fx, l.fy - m.fy, l.fz - m.fz) < w && Math.abs(l.moment - m.moment) < 0.1 * w;
+            for (const id of [c.a, c.b])
+                if (id !== GROUND) {
+                    if (steady) this.unsettled.delete(id);
+                    else this.unsettled.add(id);
+                }
         });
     }
 
@@ -434,6 +463,18 @@ export class StressMeter {
             }
         }
         return best;
+    }
+
+    /** Folds a step's load into the connection's running mean (time constant REST_MEAN). */
+    private average(id: number, l: JointLoad): void {
+        const m = this.mean.get(id);
+        if (!m) {
+            this.mean.set(id, { ...l });
+            return;
+        }
+        const k = 1 - Math.exp(-SIM_DT / REST_MEAN);
+        for (const f of ['force', 'shear', 'pull', 'bearing', 'moment', 'fx', 'fy', 'fz'] as const)
+            m[f] += (l[f] - m[f]) * k;
     }
 
     /** r_i -= the wrench of an impulse f applied at q (about body i's centre of mass). */
@@ -581,7 +622,7 @@ function rotate(q: RAPIER.Rotation, x: number, y: number, z: number): [number, n
 }
 
 /** The collider of a body nearest a point (a piece of several boxes bears on the one there). */
-function nearestCollider(cols: RAPIER.Collider[], p: [number, number, number]): RAPIER.Collider | null {
+export function nearestCollider(cols: RAPIER.Collider[], p: [number, number, number]): RAPIER.Collider | null {
     let best: RAPIER.Collider | null = null;
     let bd = Infinity;
     for (const c of cols) {
@@ -596,7 +637,7 @@ function nearestCollider(cols: RAPIER.Collider[], p: [number, number, number]): 
 }
 
 /** How far a collider reaches from p along unit u (a box's support; anything else: unbounded). */
-function support(col: RAPIER.Collider | null, p: [number, number, number], u: [number, number, number]): number {
+export function support(col: RAPIER.Collider | null, p: [number, number, number], u: [number, number, number]): number {
     if (!col) return 0;
     const sh = col.shape as RAPIER.Shape & { halfExtents?: RAPIER.Vector };
     const e = sh.halfExtents;

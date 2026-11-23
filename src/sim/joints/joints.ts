@@ -29,7 +29,7 @@ import { JointHealth } from './breaking.ts';
 import type { JointEvent } from './breaking.ts';
 import { GROUND, JointGraph, NAIL, angularStiffness, linearStiffness, twistStiffness } from './graph.ts';
 import type { Connection, NailRefusal } from './graph.ts';
-import { StressMeter } from './stress.ts';
+import { StressMeter, nearestCollider, support } from './stress.ts';
 
 const ALL = 0xffff;
 
@@ -313,6 +313,41 @@ export class JointSystem {
         return angularStiffness(c);
     }
 
+    /**
+     * Timber to timber, the turn across the nails (N m/rad): tipped, a piece bears on its faces'
+     * edge (their contact takes that) and lifts off the rest, held by its nails pulling out at the
+     * lever to that edge: n K_ser reach^2, the reach the nearer edge of the two pieces' shared face
+     * (a plank on a 20 cm beam: 0.1 m, 1.5e4 per nail), never under a nail's own lever.
+     */
+    private liftStiffness(c: Connection): number {
+        const A = this.pw.bodies.get(c.a);
+        const B = this.pw.bodies.get(c.b);
+        if (!A || !B || !c.axis) return twistStiffness(c);
+        const t = A.body.translation();
+        const pa = quatRotate(A.body.rotation(), c.anchorA.x, c.anchorA.y, c.anchorA.z, vec3());
+        const P: [number, number, number] = [t.x + pa.x, t.y + pa.y, t.z + pa.z];
+        const d = quatRotate(B.body.rotation(), c.axis.x, c.axis.y, c.axis.z, vec3());
+        const h = Math.abs(d.x) < 0.9 ? { x: 1, y: 0, z: 0 } : { x: 0, y: 1, z: 0 };
+        const u1 = { x: d.y * h.z - d.z * h.y, y: d.z * h.x - d.x * h.z, z: d.x * h.y - d.y * h.x };
+        const l = Math.hypot(u1.x, u1.y, u1.z);
+        const e1: [number, number, number] = [u1.x / l, u1.y / l, u1.z / l];
+        const e2: [number, number, number] = [
+            d.y * e1[2] - d.z * e1[1],
+            d.z * e1[0] - d.x * e1[2],
+            d.x * e1[1] - d.y * e1[0]
+        ];
+        const mine = nearestCollider(A.colliders, P);
+        const other = nearestCollider(B.colliders, P);
+        let reach: number = NAIL.faceReach;
+        for (const e of [e1, e2])
+            for (const sg of [1, -1]) {
+                const v: [number, number, number] = [sg * e[0], sg * e[1], sg * e[2]];
+                reach = Math.min(reach, support(mine, P, v), support(other, P, v));
+            }
+        reach = Math.max(NAIL.lever, reach);
+        return c.stiffness * Math.max(1, c.nails.length) * NAIL.slipModulus * reach * reach;
+    }
+
     /** Sets a connection's joint springs from its stiffness and nails. */
     private stiffen(c: Connection): void {
         const j = this.rapier.get(c.id);
@@ -320,7 +355,7 @@ export class JointSystem {
         const proto = RAPIER.SphericalImpulseJoint.prototype;
         // about the nails (X): their couple; across them: an anchor's bedding on its stone, timber's
         // nails (its faces' contact bears)
-        const across = c.b === GROUND ? this.angularStiffness(c) : twistStiffness(c);
+        const across = c.b === GROUND ? this.angularStiffness(c) : this.liftStiffness(c);
         for (const [axis, k] of [
             [RAPIER.JointAxis.AngX, twistStiffness(c)],
             [RAPIER.JointAxis.AngY, across],

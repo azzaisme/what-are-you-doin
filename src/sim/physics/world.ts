@@ -664,10 +664,16 @@ export class PhysicsWorld {
             heldHandle < 0 ? undefined : (c: RAPIER.Collider) => c.parent()?.handle !== heldHandle
         );
         // what the controller's move pushed into each body under the feet (it pushes every one)
+        // the controller's push down on what is under the feet is replaced by the weight (below):
+        // taken back here, its turn too (pushing at its own contact points, it rocked the deck
+        // and walked a loose plank along it); its push sideways (shoving a loose piece) stays
+        // (standing still, none at all: pressing down on a neighbour's edge, it shoved it sideways)
+        const walking = Math.hypot(wishX, wishZ) > 0.05;
         for (const u of under) {
-            let st = this.stoodOn.get(u.pb.id);
-            if (!st) this.stoodOn.set(u.pb.id, (st = { pushed: 0, m: 0, x: 0, z: 0 }));
-            st.pushed += u.pb.body.mass() * (u.pb.body.linvel().y - u.vy);
+            if (!this.stoodOn.has(u.pb.id)) this.stoodOn.set(u.pb.id, { pushed: 0, m: 0, x: 0, z: 0 });
+            const v = u.pb.body.linvel();
+            u.pb.body.setLinvel(walking ? { x: v.x, y: u.v.y, z: v.z } : u.v, true);
+            u.pb.body.setAngvel(u.w, true);
         }
         const m = k.computedMovement();
         const t = body.translation();
@@ -715,9 +721,9 @@ export class PhysicsWorld {
      * The dynamic bodies under a character's feet (not held by anyone), with their vertical
      * velocity, before it moves.
      */
-    private underFoot(r: Rig): { pb: PhysBody; vy: number }[] {
+    private underFoot(r: Rig): { pb: PhysBody; v: Vec3Like; w: Vec3Like }[] {
         const t = r.body.translation();
-        const out: { pb: PhysBody; vy: number }[] = [];
+        const out: { pb: PhysBody; v: Vec3Like; w: Vec3Like }[] = [];
         this.world.intersectionsWithShape(
             { x: t.x, y: t.y, z: t.z },
             { x: 0, y: 0, z: 0, w: 1 },
@@ -731,7 +737,7 @@ export class PhysicsWorld {
                     this.holders(pb.id) === 0 &&
                     !out.some((u) => u.pb === pb)
                 )
-                    out.push({ pb, vy: pb.body.linvel().y });
+                    out.push({ pb, v: { ...pb.body.linvel() }, w: { ...pb.body.angvel() } });
                 return true;
             },
             RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
