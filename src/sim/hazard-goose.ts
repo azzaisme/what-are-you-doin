@@ -153,7 +153,8 @@ export class GooseHazard {
         const sp = this.spec;
         const t = h.tick;
         const bearer = h.players.find((p) => p.held === h.bucketId);
-        let wantNeck = 0;
+        // at rest it stands alert (neck half up)
+        let wantNeck = 0.5;
         let wantWings = 0;
         let beak = 0;
         let moveTo: { x: number; z: number } | null = null;
