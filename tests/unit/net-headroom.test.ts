@@ -25,8 +25,8 @@ import { MemoryHub } from '../../src/net/transport.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
 import type { SimEntity } from '../../src/sim/lab-entities.ts';
 import { LabSim, MAX_PLAYERS } from '../../src/sim/lab-sim.ts';
-import { ANIM_MAX, SnapshotRing } from '../../src/sim/snapshots.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
+import { ANIM_MAX, SnapshotRing } from '../../src/sim/snapshots.ts';
 import { pose } from '../../src/voxels/math.ts';
 
 beforeAll(() => initPhysics());
