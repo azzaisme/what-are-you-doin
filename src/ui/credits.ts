@@ -37,6 +37,13 @@ export const THIRD_PARTY: readonly Credit[] = [
         url: 'https://github.com/dmotz/trystero'
     },
     {
+        name: 'Vite',
+        packages: ['vite'],
+        license: 'MIT',
+        what: 'the build; its small module-preload helper is in the game',
+        url: 'https://vite.dev'
+    },
+    {
         name: 'noble-secp256k1',
         packages: ['@noble/secp256k1'],
         license: 'MIT',

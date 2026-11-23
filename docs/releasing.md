@@ -64,22 +64,29 @@ use a free or capped plan. A guest uses about 12 KB/s, roughly 45 MB an hour.
 ## Embed checks (what itch's iframe needs)
 
 itch.io shows the game in a cross-origin iframe on its own page. `tests/e2e/embed.spec.ts` plays
-the game the same way on every pull request. A stand-in itch page on one host frames the game on
-another, with the permissions itch's embed grants (`autoplay; fullscreen; gamepad`), and with
-Chrome blocking sound until a gesture, as real browsers do.
+the game the same way on every pull request into `main`:
 
-| Check                 | What the game does (and the test checks)                                                                                   |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Sound                 | Silent until the first click, tap or key inside the game; then the sound starts                                            |
-| Pointer lock          | Only taken by a click inside the game; that click never grabs anything. Losing it (Esc) opens the menu                     |
-| Resizing              | The canvas and the HUD follow the frame's size                                                                             |
-| Full screen           | itch's own button, or Settings → Game → Full screen inside the game; both ways, the canvas fills the screen and returns    |
-| Tab hidden            | The sound pauses. A solo game stops at the menu (paused), so you come back to it waiting                                   |
-| Online, host hidden   | Guests are told the host's game is in the background and everything waits for them; they stay in the game                  |
-| Online, a peer leaves | A guest who leaves is held for a minute (they can come back). A host who leaves is waited for 20 s, then the guest is told |
+- A stand-in itch page on one host frames the game on another.
+- The iframe grants `autoplay; fullscreen *; gamepad`: the features the game uses. This wasn't
+  checked against the live itch.io page, so an embed without full screen is tested too.
+- Chrome blocks sound until a gesture, as real browsers do.
 
-Headless Chrome never hides a tab. The test hides the page the way the browser announces it: the
-visibility state changes, and a `visibilitychange` event fires.
+| Check                 | What the game does (and the test checks)                                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Sound                 | The browser keeps it suspended until the first click, tap or key inside the game; then it runs                                  |
+| Pointer lock          | Only taken by a click inside the game; that click never grabs the thing under the crosshair. Esc releases it and opens the menu |
+| Resizing              | The canvas and the HUD follow the frame's size                                                                                  |
+| Full screen           | itch's own button, or Settings → Game → Full screen (only offered where allowed); the canvas fills the screen and returns       |
+| Tab hidden            | The sound pauses. A solo game stops at the menu (paused), so you come back to it waiting                                        |
+| Online, host hidden   | Guests are told the host's game is in the background and may stop until they come back; they stay in the game                   |
+| Online, a peer leaves | A guest who leaves is held for a minute (they can come back). A host who leaves is waited for 20 s, then the guest is told      |
+
+- **Hidden tabs.** Headless Chrome never hides a tab. The test hides the page the way the browser
+  announces it: the visibility state changes, and a `visibilitychange` event fires. A host hidden
+  for minutes, peer to peer, keeps its guests: Trystero drops a peer only when the WebRTC
+  connection closes. See `tests/unit/hidden-host.test.ts`.
+- **Plain http.** The test pages are plain `http`. Secure-context features, such as peer-to-peer
+  online play, aren't covered there.
 
 ## Credits and licences
 

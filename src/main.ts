@@ -1842,7 +1842,7 @@ function noteReconnect(g: GuestSession): void {
     if (g.hostAway !== wasHostAway) {
         wasHostAway = g.hostAway;
         showToast(
-            g.hostAway ? "The host's game is in the background: everything waits for them" : 'The host is back',
+            g.hostAway ? "The host's game is in the background: it may stop until they come back" : 'The host is back',
             g.hostAway ? 'warn' : 'info'
         );
         online.render();

@@ -148,7 +148,7 @@ export class OnlinePanel {
             );
             if (st.reconnecting) note('Lost the host: reconnecting…', 'online-warn');
             else if (st.hostAway)
-                note("The host's game is in the background: everything waits for them.", 'online-warn');
+                note("The host's game is in the background: it may stop until they come back.", 'online-warn');
             button('Leave game', () => this.host.leave());
             button('Close', () => this.toggle(false));
             return;
