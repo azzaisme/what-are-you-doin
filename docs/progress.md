@@ -7,52 +7,82 @@ through one another: the bucket's handle disappeared inside the beaver's 5 cm pa
 by priority across lattices, as they always did within one (ADR 0011, amended).
 
 - **How:** each lattice's worker rasterizes, at its own cell size, every object of another lattice
-  that outranks one of its own objects nearby, only inside the boxes where their bounds meet (cell
-  centres only). Where it wins, the cell is left empty there, and the winner's own lattice draws it.
+  that outranks one of its own objects nearby. It samples only cell centres, and only inside one box
+  per part: where that part's bounds meet the bounds of the parts it outranks. Where it wins, the
+  cell is left empty there and the winner's own lattice draws it.
 - **Priority** is the objects' own: priority, then lower id. The bucket (4) wins over the beaver (3)
-  and planks (1); the beaver over the ute (2) and the ragdoll (2).
+  and planks (1); the beaver over the ute (2) and the ragdoll (2). Your own first-person limbs win
+  ties, so another player's beaver never cuts holes in them.
+- **Budget:** at most 12,000 candidate cells a frame per lattice (`MASK_BUDGET`), highest priority
+  first. A mask that would overrun it is skipped that frame (its object intersects as before) and
+  counted (`maskSkipped`). Rejected mask parts are counted too (`maskRejected`).
 - **The static world** is not part of this: it stays on the base lattice, where moving objects
   already win over it.
 - **Debug panel:** "lattices N" after the overlap counts: cells another lattice's object takes now.
-  `__riverLab.latticeHidden()` gives them per object.
+  `__riverLab.latticeHidden()` gives them per object. `?masks=off` turns it off, for comparisons.
 
 ### Measured
 
-| Lane, 60 frames, everything moving (Node, median of 3 runs) | Alone (ms/frame) | With the others |
-| ----------------------------------------------------------- | ---------------: | --------------: |
-| 1 cm bucket; the beaver and the held plank beside it        |            11.26 |           11.15 |
-| 5 cm beaver; the 1 cm bucket in its paw                     |             3.19 |            3.50 |
-| 5 cm beaver; the bucket and the 10 cm ute                   |             3.19 |            3.63 |
-| 1 cm first-person limbs; holding the bucket                 |            16.60 |           20.76 |
-| 1 cm ragdoll head; the beaver standing inside it (worst)    |            15.99 |           23.15 |
+`node scripts/bench-lattice.ts`: one lattice's worker, the other objects placed as listed in the
+script, everything moving 2 mm a frame. Masks off (as before) and on run side by side, framed
+alternately; median over 200 frames, on the container's CPU (Xeon, 2.3 GHz).
 
-The container was also running a browser, so single runs vary by about ±1.5 ms. Each lane is its own worker and
-a voxel frame lands when the slowest lane is done; the base lane, which also builds the world, took
-28 ms a frame on the owner's phone at Epic 1's gate.
+| Lattice: its object; the others                                | Masks off (ms) | Masks on (ms) | Masks (skipped) | Cells sampled | Cells hidden |
+| -------------------------------------------------------------- | -------------: | ------------: | --------------: | ------------: | -----------: |
+| 1 cm: the bucket, alone                                        |          10.55 |         10.56 |           0 (0) |             0 |            0 |
+| 1 cm: the bucket; the beaver and the held plank touching it    |          10.48 |         11.16 |           1 (0) |        10,295 |          510 |
+| 5 cm: the beaver; the 1 cm bucket in it                        |           2.84 |          3.00 |           1 (0) |           674 |          162 |
+| 1 cm: your limbs holding the bucket; three players 0.55 m away |          15.36 |         15.36 |           1 (0) |           744 |            0 |
+| 1 cm: the ragdoll's head; the beaver standing inside it        |          15.50 |         15.26 |           0 (1) |             0 |            0 |
+| 1 cm: the ragdoll's head; three players 0.5 m away             |          15.22 |         16.68 |           1 (1) |         9,565 |        2,661 |
+| 1 cm: the ragdoll's head; the beaver and four players around   |          14.99 |         15.13 |           0 (5) |             0 |            0 |
+| 1 cm: the ragdoll's head and limbs; its 5 cm body              |          28.59 |         28.52 |           0 (0) |             0 |            0 |
 
-Pixels (verify-pixels, frozen frames, 480 × 270, SwiftShader; the harness gives 0 differing pixels
-between two runs of the old build):
+- Single runs move by about 1.2 ms: the head with three players gave +1.46 ms here and
+  +2.68 ms in another run.
+- The ragdoll at rest: its 5 cm body does not touch its 1 cm head or limbs, so it costs nothing.
+  When it flails, the budget bounds it like any other mask.
 
-- **No cross-lattice overlap, unchanged:** River Lab at t = 4 from three views and the Timber Yard
-  from two: 0 of 129,600 pixels differ in each.
-- **The scripted River Lab, the bucket in the paw (t = 4):** 824 pixels differ. 566 are around the
-  paw and handle, the intended change; the other 258 each differ by one level out of 255 (the bloom,
-  which samples the whole screen, sees the changed paw).
+Pixels (`node scripts/verify-pixels.mjs`, scenes in `scripts/verify-pixels-107.json`; frozen
+frames, 480 × 270, SwiftShader). Two captures of the old build (epics-5-10 at 4ed2ccf) match
+exactly in every scene.
+
+- **Unchanged, 0 of 129,600 pixels differ in each:**
+    - the River Lab at t = 4 from three views (no masks);
+    - the Timber Yard from two views (no masks);
+    - the Valley from two views (no masks);
+    - first person beside the yard's bucket, from two spots: here the bucket's mask is rasterized
+      on your limbs' lattice and loses (latticeMasks 1, latticeHidden 0).
+- **The scripted River Lab, the bucket in the paw** (t = 4; orbit camera at (5.2, 0.9, -3.5)
+  looking at (4.6, 0.55, -4.15)): 754 pixels differ.
+    - 595 are at the paw and handle: the intended change.
+    - The other 159 each differ by one level out of 255. The bloom samples the whole screen, so it
+      picks up the changed paw.
 
 ### Tests
 
-- Unit (`tests/unit/lattice-priority.test.ts`, at 5 and 10 cm): the winner empties exactly the
-  cells it shares with a lower-priority object and nothing else; a lower-priority object on another
-  lattice changes nothing (same hash); coarse and fine lattices give way to the base one by
-  priority; cells come back when the winner leaves, matching a fresh build; one lattice for
-  everything has no masks.
-- Browser: in the scripted River Lab the beaver's paw gives cells to the bucket at three times and
-  the bucket keeps all its own; with `?tiers=off` nothing is masked.
+- Unit (`tests/unit/lattice-priority.test.ts`, at 5 and 10 cm):
+    - the winner hides exactly the beaver cells whose centres lie inside a bucket part, computed
+      from the bucket's own volumes, and nothing else;
+    - a lower-priority object on another lattice changes nothing (same hash);
+    - the coarse and fine lattices give way to the base one by priority;
+    - cells come back when the winner leaves, and match a fresh build;
+    - your own limbs win ties;
+    - the budget is served highest priority first, and nothing is hidden when nothing fits;
+    - `masks` off, and one lattice for everything, have no masks.
+- Unit, at 1 cm through the real worker: your limbs holding the bucket beside three players, and
+  the ragdoll's head with the beaver and four players around it, stay within the budget every
+  frame, with no rejected mask parts.
+- Browser:
+    - in the scripted River Lab the beaver's paw gives cells to the bucket at three times, and the
+      bucket keeps all its own;
+    - with `?tiers=off` nothing is masked;
+    - `maskRejected` is 0 wherever `rejected` is checked.
 
-### Found on the way, not changed
+### Found on the way
 
 - With `?props=scripted` the River Lab leaves the spare planks, beams, logs, crates and the ragdoll
-  piled at the origin, in the river, where they show above the water.
+  piled at the origin, in the river, where they show above the water. To be fixed with #110.
 
 ## Epic 5, part 1: nails and the joint graph (2026-11-22)
 

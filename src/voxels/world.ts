@@ -84,6 +84,7 @@ interface DynamicEntry {
     priority: number;
     /** Drawn on another lattice: wins cells by priority but leaves them empty here. */
     mask: boolean;
+    ownBody: boolean;
     cells: Map<number, number>;
     prev: Map<number, number>;
     /** Occupied cells after the last rasterization. */
@@ -418,13 +419,14 @@ export class VoxelWorld {
 
     // ------------------------------------------------------------------------------- dynamic objects
 
-    addObject(id: number, priority = 0, mask = false): void {
+    /** `ownBody`: your own first-person limbs, first among equal priorities (see VoxelService). */
+    addObject(id: number, priority = 0, mask = false, ownBody = false): void {
         if (this.objects.has(id)) throw new Error(`Dynamic object ${id} already registered`);
         if (!Number.isInteger(id) || id < 0) throw new Error(`Invalid object id ${id}`);
-        const e: DynamicEntry = { id, priority, mask, cells: new Map(), prev: new Map(), count: 0 };
+        const e: DynamicEntry = { id, priority, mask, ownBody, cells: new Map(), prev: new Map(), count: 0 };
         this.objects.set(id, e);
         this.order.push(e);
-        this.order.sort((a, b) => b.priority - a.priority || a.id - b.id);
+        this.order.sort((a, b) => b.priority - a.priority || Number(b.ownBody) - Number(a.ownBody) || a.id - b.id);
     }
 
     hasObject(id: number): boolean {
@@ -525,16 +527,17 @@ export class VoxelWorld {
     } satisfies CellSink & { world: VoxelWorld; target: Map<number, number> | null };
 
     /**
-     * Rasterizes a mask object (registered with `mask`) inside the given cell boxes only, and marks
-     * changed cells dirty. `policy` is the mask's own (the service samples cell centres: a cell gives
-     * way where its centre lies inside the winner). No boxes clears it. Returns the number of cells that changed.
+     * Rasterizes a mask object (registered with `mask`), each part only inside its own cell box
+     * (`boxes[part]`; null leaves the part out), and marks changed cells dirty. `policy` is the
+     * mask's own (the service samples cell centres: a cell gives way where its centre lies inside
+     * the winner). Returns the number of cells that changed.
      */
     rasterizeMask(
         id: number,
         parts: readonly PartInstance[],
         policy: SamplingPolicy,
         stats: RasterStats,
-        boxes: readonly CellBox[]
+        boxes: readonly (CellBox | null)[]
     ): number {
         const e = this.objects.get(id);
         if (!e || !e.mask) throw new Error(`Unknown mask object ${id}`);
@@ -542,12 +545,12 @@ export class VoxelWorld {
         const next = e.prev;
         next.clear();
         this.maskSink.target = next;
-        for (const b of boxes)
-            for (let p = 0; p < parts.length; p++) {
-                const part = parts[p];
-                if (part.hidden) continue;
-                rasterizeVolume(part.volume, part.pose, policy, e.priority, this.maskSink, stats, b);
-            }
+        for (let p = 0; p < parts.length; p++) {
+            const part = parts[p];
+            const b = boxes[p];
+            if (part.hidden || !b) continue;
+            rasterizeVolume(part.volume, part.pose, policy, e.priority, this.maskSink, stats, b);
+        }
         this.maskSink.target = null;
         e.prev = prev;
         e.cells = next;
@@ -633,7 +636,8 @@ export class VoxelWorld {
         st.changedCells = 0;
         st.dynDynOverlaps = 0;
         st.dynStaticOverlaps = 0;
-        const order = this.order;
+        // only objects holding cells can contribute (the same order, without the empty ones)
+        const order = this.order.filter((e) => e.cells.size > 0);
         const n = order.length;
         for (const key of this.dirtyCells) {
             const c = this.chunks[key >>> 12];

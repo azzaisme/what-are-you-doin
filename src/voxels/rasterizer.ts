@@ -107,16 +107,15 @@ export function rasterizeVolume(
     poseToMat34(worldPose, _m);
     invertRigidMat34(_m, _inv);
     transformAabb(volume.bounds, _m, _wb);
-    // A box clip (j0 / j1 given: another lattice's object, sampled only where it meets this
-    // lattice's own objects) checks the candidate budget after clipping; a column clip (a streamed
-    // tile) before, as it always has.
+    // the same runaway guards for every part, clipped or not (a box clip, j0 / j1 given, is another
+    // lattice's object sampled only where it meets this lattice's own objects)
     const box = clip !== null && clip.j0 !== undefined && clip.j1 !== undefined;
     if (
         _wb.maxX - _wb.minX > MAX_PART_EXTENT ||
         _wb.maxY - _wb.minY > MAX_PART_EXTENT ||
         _wb.maxZ - _wb.minZ > MAX_PART_EXTENT ||
         !candidateCells(_wb.minX, _wb.minY, _wb.minZ, _wb.maxX, _wb.maxY, _wb.maxZ, _range) ||
-        (!box && rangeCellCount(_range) > MAX_PART_CANDIDATES)
+        rangeCellCount(_range) > MAX_PART_CANDIDATES
     ) {
         stats.rejected++;
         return false;
@@ -132,10 +131,6 @@ export function rasterizeVolume(
             _range.maxJ = Math.min(_range.maxJ, clip.j1!);
         }
         if (_range.minI > _range.maxI || _range.minK > _range.maxK || _range.minJ > _range.maxJ) return true;
-        if (box && rangeCellCount(_range) > MAX_PART_CANDIDATES) {
-            stats.rejected++;
-            return false;
-        }
     }
 
     const inv = _inv;

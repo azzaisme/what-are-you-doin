@@ -61,6 +61,9 @@ const SUMMED: (keyof FrameStats)[] = [
     'dynStaticOverlaps',
     'latticeMasks',
     'latticeHidden',
+    'maskSkipped',
+    'maskCells',
+    'maskRejected',
     'staticRebuilt',
     'dynamicRebuilt',
     'dynamicCells',
@@ -186,7 +189,8 @@ export class VoxelClient {
     }
 
     /** Builds the static world (and each lane's objects); resolves once every lane is ready. */
-    init(seed: number, level: string, data?: unknown): Promise<BuildInfo> {
+    /** `masks`: false turns lattice priority off (objects on different lattices intersect, #107). */
+    init(seed: number, level: string, data?: unknown, masks = true): Promise<BuildInfo> {
         return new Promise((resolve, reject) => {
             this.readyResolve = resolve;
             this.readyReject = reject;
@@ -200,7 +204,8 @@ export class VoxelClient {
                     data,
                     objects: l.objects,
                     world: l.world,
-                    far: l.far
+                    far: l.far,
+                    masks
                 });
         });
     }

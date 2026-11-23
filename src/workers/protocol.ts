@@ -50,8 +50,14 @@ export interface FrameStats {
     dynStaticOverlaps: number;
     /** Objects on other lattices rasterized here because they outrank one of this lattice's (ADR 0011). */
     latticeMasks: number;
-    /** Cells this frame where such an object took the cell from one of this lattice's objects. */
+    /** Cells where such an object now takes the cell from one of this lattice's objects. */
     latticeHidden: number;
+    /** Such objects skipped this frame: the lattice's mask budget (MASK_BUDGET) was spent. */
+    maskSkipped: number;
+    /** Candidate cells sampled for them this frame (at most MASK_BUDGET a lattice). */
+    maskCells: number;
+    /** Their parts the rasterizer rejected (runaway bounds), as `rejected` counts for objects. */
+    maskRejected: number;
     staticRebuilt: number;
     dynamicRebuilt: number;
     rasterMs: number;
@@ -95,6 +101,8 @@ export type ToWorker =
           world?: boolean;
           /** The far lattice of a streamed level: the whole static world, coarse, no objects. */
           far?: boolean;
+          /** False: objects on other lattices do not take cells from this one (?masks=off, #107). */
+          masks?: boolean;
       }
     | {
           type: 'frame';

@@ -231,7 +231,8 @@ function applyViewDistance(q: Quality): void {
     scene.app.scene.fog.start = v.fogStart;
 }
 applyViewDistance(initialQuality);
-const build = await pipeline.init(1, level.id, level.data);
+// ?masks=off: objects on different lattices draw through one another, as before #107 (comparisons)
+const build = await pipeline.init(1, level.id, level.data, params.get('masks') !== 'off');
 setLoading('Uploading meshes…');
 await nextFrame();
 const tUpload = performance.now();
@@ -1639,6 +1640,9 @@ const EMPTY_FRAME_STATS = {
     dynStaticOverlaps: 0,
     latticeMasks: 0,
     latticeHidden: 0,
+    maskSkipped: 0,
+    maskCells: 0,
+    maskRejected: 0,
     staticRebuilt: 0,
     dynamicRebuilt: 0,
     rasterMs: 0,

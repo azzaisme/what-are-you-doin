@@ -53,18 +53,30 @@ tell whether it held water. It also held none: the asset had a water level but n
   on against 37 ms with them off: the lattices build in parallel. Each extra lane adds a worker
   (memory) and up to three more materials' draw calls for its meshes.
 - **Overlaps across lattices resolve by priority** (amended 2026-11-22, #107). At first they did
-  not: a fine object and a base object in the same space simply intersected, sorted by depth. Now
-  each lattice's worker also rasterizes, at its own cell size, every object of another lattice that
-  outranks one of its own (priority, then lower id, as within a lattice), but only inside the boxes
-  where their bounds meet, sampling cell centres. Where such a mask wins a cell, the cell is left
-  empty on this lattice and only the winner's lattice draws it: the 1 cm bucket hanging in the 5 cm
-  paw shows its handle, not the paw through it. A cell gives way when its centre lies inside the
-  winner, so the seam is within half a cell of the true surface. Only objects take part: the static
-  world stays on the base lattice and dynamic-over-static still resolves there. Cost (Node, 60
-  frames, everything moving): nothing for a lattice whose objects outrank everything near them (the
-  bucket); about 0.3–0.4 ms on the base lane with the bucket in a paw; up to 4 ms on the 1 cm
-  first-person limbs' lane while they hold the bucket; about 7 ms on the 1 cm lane in the worst
-  case, the beaver standing fully inside the ragdoll's head.
+  not: a fine object and a base object in the same space simply intersected, sorted by depth.
+    - Each lattice's worker also rasterizes, at its own cell size, every object of another lattice
+      that outranks one of its own: priority, then lower id, as within a lattice, except that your
+      own first-person limbs win ties.
+    - Such a mask is sampled only inside one box per part: where that part's bounds meet the bounds
+      of the parts it outranks. It samples cell centres only.
+    - Where a mask wins a cell, this lattice leaves the cell empty and only the winner's lattice
+      draws it: the 1 cm bucket hanging in the 5 cm paw shows its handle, not the paw through it.
+    - A cell gives way when its centre lies inside the winner, so the seam is within half a cell of
+      the true surface.
+    - Only objects take part: the static world stays on the base lattice, and dynamic-over-static
+      still resolves there.
+    - **Budget:** a lattice samples at most 12,000 candidate cells for masks a voxel frame
+      (`MASK_BUDGET`). Masks are served highest priority first; one that would overrun the budget is
+      skipped that frame, and its object and this lattice's simply intersect again. The stats count
+      skipped masks (`maskSkipped`) and rejected mask parts (`maskRejected`).
+    - **Cost** (`scripts/bench-lattice.ts`, 200 frames with everything moving, masks off and on run
+      side by side; median over 200 frames):
+        - +0.16 ms on the base lattice with the bucket in a paw;
+        - 0 ms on the first-person limbs holding the bucket, with three other players beside you;
+        - +1.5 to +2.7 ms (over runs) on the 1 cm lattice at the budget: the ragdoll's head with
+          three players' beavers half a metre away;
+        - crowded scenes beyond the budget skip their masks.
+    - `?masks=off` turns it off, for comparisons.
 - **The fine lattice reaches ±160 m across and ±18 m up** (its chunk coordinates are limited;
   widened from ±80 m for the Valley). Beyond that, a fine object is not drawn instead of crashing
   the worker. Levels stay within ±125 m across and below 18 m.

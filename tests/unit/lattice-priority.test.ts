@@ -1,10 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { assetTier } from '../../src/assets/cell-tier.ts';
 import { createLabEntities } from '../../src/sim/lab-entities.ts';
 import type { SimEntity } from '../../src/sim/lab-entities.ts';
+import { ANIM_MAX } from '../../src/sim/snapshots.ts';
+import { CHUNK_BITS, CHUNK_MASK, cellCenterX, cellCenterY, cellCenterZ } from '../../src/voxels/grid.ts';
+import { invertRigidMat34, mat34, pose, poseToMat34 } from '../../src/voxels/math.ts';
 import { STATE_STRIDE } from '../../src/workers/protocol.ts';
-import { VoxelService } from '../../src/workers/voxel-service.ts';
+import type { FrameStats, FromWorker, ToWorker } from '../../src/workers/protocol.ts';
+import { MASK_BUDGET, VoxelService } from '../../src/workers/voxel-service.ts';
 
 // #107: objects on different lattices resolve by priority (priority desc, then id asc), as objects
 // on one lattice always have. Unit tests run every lattice at one cell size (the size is fixed per
@@ -170,4 +174,187 @@ describe('lattice priority (#107)', () => {
         // the overlap is resolved inside the one lattice instead
         expect(all.stats.dynDynOverlaps).toBeGreaterThan(0);
     }, 60_000);
+
+    it('the winner takes exactly the cells whose centres lie inside it', () => {
+        // the bucket sunk into the beaver's chest: every beaver cell whose centre is inside a bucket
+        // part (wall, handle, bottom, water) is hidden, and no other
+        const at = { x: 0.1, y: 0.4, z: 0.05 };
+        const b = lane(
+            [beaver],
+            [
+                { e: beaver, x: 0, y: 0, z: 0 },
+                { e: bucket, ...at }
+            ]
+        );
+        const root = pose();
+        root.p.x = at.x;
+        root.p.y = at.y;
+        root.p.z = at.z;
+        const poses = bucket.asset.parts.map(() => pose());
+        bucket.asset.evaluate(root, new Float64Array(ANIM_MAX), poses);
+        const inv = poses.map((p) => invertRigidMat34(poseToMat34(p, mat34()), mat34()));
+        const w = b.svc.world;
+        let inside = 0;
+        for (const [key] of w.objectCells(beaver.id)) {
+            const c = w.chunks[key >>> 12];
+            const li = key & 4095;
+            const i = c.cx * 16 + (li & CHUNK_MASK);
+            const k = c.cz * 16 + ((li >> CHUNK_BITS) & CHUNK_MASK);
+            const j = c.cy * 16 + (li >> (2 * CHUNK_BITS));
+            const x = cellCenterX(i);
+            const y = cellCenterY(j);
+            const z = cellCenterZ(k);
+            const hit = bucket.asset.parts.some((part, n) => {
+                const m = inv[n];
+                const lx = m[0] * x + m[1] * y + m[2] * z + m[3];
+                const ly = m[4] * x + m[5] * y + m[6] * z + m[7];
+                const lz = m[8] * x + m[9] * y + m[10] * z + m[11];
+                return part.volume.sample(lx, ly, lz) !== 0;
+            });
+            if (hit) inside++;
+        }
+        expect(inside).toBeGreaterThan(10);
+        expect(b.stats.latticeHidden).toBe(inside);
+        expect(b.stats.maskRejected).toBe(0);
+    }, 60_000);
+
+    it('your own first-person limbs win ties: other players do not cut holes in them', () => {
+        const fp = byName('fp-body'); // fine (its own lane), priority 3, like every beaver
+        const avatar = byName('avatar-1'); // base, priority 3, a lower id
+        const both = [
+            { e: fp, x: 0, y: 0, z: 0 },
+            { e: avatar, x: 0.1, y: 0, z: 0 }
+        ];
+        const own = lane([fp], both);
+        expect(own.stats.latticeHidden).toBe(0);
+        // and on the base lattice the other player's beaver gives way to them instead
+        expect(lane([avatar], both).stats.latticeHidden).toBeGreaterThan(0);
+    }, 60_000);
+
+    it('the budget: masks over it are skipped this frame, the highest priority first served', () => {
+        // the ragdoll's head inside the beaver, the bucket and an avatar: three masks on its lattice
+        const places = [
+            { e: head, x: 0, y: 0.5, z: 0 },
+            { e: beaver, x: 0, y: 0, z: 0 },
+            { e: bucket, x: 0, y: 0.45, z: 0.05 },
+            { e: byName('avatar-2'), x: 0.05, y: 0, z: 0 }
+        ];
+        const all = lane([head], places);
+        expect(all.stats.latticeMasks).toBe(3);
+        expect(all.stats.maskSkipped).toBe(0);
+        // a budget the bucket's mask fits in, but not the beavers' as well
+        const svc = new VoxelService(new Set([head.id]));
+        svc.build(1, 'yard', undefined, false);
+        svc.maskBudget = all.stats.maskCells - 1;
+        const r = svc.frame(1, 0, 'coverage50', false, states(places));
+        expect(r.stats.maskCells).toBeLessThanOrEqual(svc.maskBudget);
+        expect(r.stats.maskSkipped).toBeGreaterThan(0);
+        expect(r.stats.latticeMasks + r.stats.maskSkipped).toBe(3);
+        // the bucket (priority 4) is served first
+        expect(svc.world.objectCellCount(bucket.id)).toBeGreaterThan(0);
+        // nothing at all fits: every mask skipped, nothing hidden, as before #107
+        svc.maskBudget = 0;
+        const none = svc.frame(2, 0.05, 'coverage50', false, states(places));
+        expect(none.stats.latticeMasks).toBe(0);
+        expect(none.stats.maskSkipped).toBe(3);
+        expect(none.stats.latticeHidden).toBe(0);
+    }, 60_000);
+
+    it('masks off (?masks=off) leaves every object on other lattices out', () => {
+        const svc = new VoxelService(new Set([beaver.id]), false);
+        svc.build(1, 'yard', undefined, false);
+        const r = svc.frame(
+            1,
+            0,
+            'coverage50',
+            false,
+            states([
+                { e: beaver, x: 0, y: 0, z: 0 },
+                { e: bucket, x: 0, y: 0.45, z: 0 }
+            ])
+        );
+        expect(r.stats.latticeMasks).toBe(0);
+        expect(r.stats.latticeHidden).toBe(0);
+    }, 60_000);
+
+    it('at 1 cm, through the real worker: crowded scenes stay within the budget', async () => {
+        // the worker module at the fine lattice's size, with a stand-in for its global scope
+        const replies: FromWorker[] = [];
+        const scope = {
+            postMessage: (m: FromWorker) => replies.push(m),
+            onmessage: null as null | ((e: { data: ToWorker }) => unknown)
+        };
+        vi.stubGlobal('self', scope);
+        const run = async (draws: string[], places: [string, number, number, number][]) => {
+            vi.resetModules();
+            replies.length = 0;
+            await import('../../src/workers/voxel-worker.ts');
+            const ids = draws.map((n) => byName(n).id);
+            await scope.onmessage!({
+                data: { type: 'init', cellCm: 1, seed: 1, level: 'yard', objects: ids, world: false }
+            });
+            expect(replies.some((r) => r.type === 'ready')).toBe(true);
+            const stats: FrameStats[] = [];
+            for (let f = 0; f < 6; f++) {
+                replies.length = 0;
+                const st = new Float64Array(entities.length * STATE_STRIDE);
+                for (const [n, x, y, z] of places) {
+                    const o = entities.indexOf(byName(n)) * STATE_STRIDE;
+                    st[o] = 1;
+                    st[o + 1] = x + f * 0.004;
+                    st[o + 2] = y;
+                    st[o + 3] = z;
+                    st[o + 7] = 1;
+                }
+                await scope.onmessage!({
+                    data: { type: 'frame', frame: f, time: f / 20, policy: 'coverage50', reference: false, states: st }
+                });
+                const fr = replies.find((r) => r.type === 'frame');
+                if (fr?.type === 'frame') stats.push(fr.stats);
+            }
+            expect(stats.length).toBe(6);
+            return stats;
+        };
+        try {
+            // the first-person limbs holding the bucket, three avatars 0.55 m away (bench-lattice)
+            const fp = await run(
+                ['fp-body'],
+                [
+                    ['fp-body', 0, 0, 0],
+                    ['bucket', 0, 0.45, 0.3],
+                    ['avatar-1', 0.55, 0, 0],
+                    ['avatar-2', -0.55, 0, 0],
+                    ['avatar-3', 0, 0, -0.55]
+                ]
+            );
+            for (const s of fp) {
+                expect(s.maskCells).toBeLessThanOrEqual(MASK_BUDGET);
+                expect(s.latticeMasks).toBe(1); // the bucket; the avatars tie and lose
+                expect(s.maskSkipped).toBe(0);
+                expect(s.maskRejected).toBe(0);
+            }
+            // the ragdoll's head with the beaver and four avatars around it
+            const crowd = await run(
+                ['dummy-head'],
+                [
+                    ['dummy-head', 0, 0.5, 0],
+                    ['beaver', 0, 0, 0],
+                    ['avatar-0', 0.35, 0, 0],
+                    ['avatar-1', -0.35, 0, 0],
+                    ['avatar-2', 0, 0, 0.35],
+                    ['avatar-3', 0, 0, -0.35]
+                ]
+            );
+            for (const s of crowd) {
+                expect(s.maskCells).toBeLessThanOrEqual(MASK_BUDGET);
+                expect(s.latticeMasks + s.maskSkipped).toBe(5);
+                expect(s.maskSkipped).toBeGreaterThan(0);
+                expect(s.maskRejected).toBe(0);
+            }
+        } finally {
+            vi.unstubAllGlobals();
+            vi.resetModules();
+            delete (globalThis as { __UE_CELL_CM__?: number }).__UE_CELL_CM__;
+        }
+    }, 300_000);
 });

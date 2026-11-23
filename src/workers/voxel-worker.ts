@@ -20,7 +20,7 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
         (globalThis as { __UE_CELL_CM__?: number }).__UE_CELL_CM__ = msg.cellCm;
         try {
             const { VoxelService } = await import('./voxel-service.ts');
-            service = new VoxelService(msg.objects ? new Set(msg.objects) : undefined);
+            service = new VoxelService(msg.objects ? new Set(msg.objects) : undefined, msg.masks ?? true);
             const { build, units } = service.build(msg.seed, msg.level, msg.data, msg.world ?? true, msg.far ?? false);
             post({ type: 'ready', build, units }, transferables(units));
             ready = true;

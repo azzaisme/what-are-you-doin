@@ -118,6 +118,7 @@ test('boots the River Lab with no console errors and a non-blank frame', async (
     expect(s.staticCells).toBeGreaterThan(1_000_000);
     expect(s.voxel.objects).toBe(7);
     expect(s.voxel.rejected).toBe(0);
+    expect(s.voxel.maskRejected).toBe(0);
     // feet and wheels may dip a cell into the ground at fine cell sizes; the dynamic cell wins and
     // the static cell reappears afterwards (compositor policy). Physics props rest on the analytic
     // terrain, which lies 0-1 cell below the voxel ground surface, so resting props share at most one
@@ -150,6 +151,7 @@ test('objects on different lattices resolve by priority: the 1 cm bucket in the 
     const s = await lab(page, (l) => l.stats());
     expect(s.voxel.latticeMasks).toBeGreaterThan(0);
     expect(s.voxel.rejected).toBe(0);
+    expect(s.voxel.maskRejected).toBe(0);
     const g = await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid());
     expect(g.misaligned).toBe(0);
     expect(problems).toEqual([]);
@@ -196,6 +198,7 @@ test('debug controls: reference mode, voxel rates, sampling policies and stress 
     const s = await lab(page, (l) => l.stats());
     expect(s.voxel.objects).toBe(32);
     expect(s.voxel.rejected).toBe(0);
+    expect(s.voxel.maskRejected).toBe(0);
     expect(problems).toEqual([]);
 });
 
@@ -655,6 +658,7 @@ test('physics sandbox: grab and carry the plank, launch the ragdoll, switch to s
     let s = await lab(page, (l) => l.stats());
     expect(s.voxel.objects).toBeGreaterThanOrEqual(14);
     expect(s.voxel.rejected).toBe(0);
+    expect(s.voxel.maskRejected).toBe(0);
 
     await lab(page, (l) => l.set('props', 'scripted'));
     await lab(page, (l) => l.seek(5));
@@ -681,6 +685,7 @@ test('level 1, the Timber Yard: starts in first person with the objective, and t
     // Epic 5's seven deck planks by the bridge
     expect(s.voxel.objects).toBe(31);
     expect(s.voxel.rejected).toBe(0);
+    expect(s.voxel.maskRejected).toBe(0);
     const g = await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid());
     expect(g.misaligned).toBe(0);
     // deliver the bucket by hand (teleport) and let the sim run
@@ -879,6 +884,7 @@ test('the Valley: one streamed map, stages advance in order and the world follow
     );
     const s = await lab(page, (l) => l.stats());
     expect(s.voxel.rejected).toBe(0);
+    expect(s.voxel.maskRejected).toBe(0);
     expect(problems).toEqual([]);
 });
 
@@ -1142,6 +1148,7 @@ for (const transport of ['local', 'p2p'] as const)
         );
         const gs = await guest.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.stats());
         expect(gs.voxel.rejected).toBe(0);
+        expect(gs.voxel.maskRejected).toBe(0);
         expect(
             (await guest.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid())).misaligned
         ).toBe(0);
@@ -1446,6 +1453,7 @@ test("online co-op in the Valley: the guest streams its own world and follows th
     expect(await call(guest, '(l) => l.nearTiles()')).toBeGreaterThan(10);
     const gs = await guest.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.stats());
     expect(gs.voxel.rejected).toBe(0);
+    expect(gs.voxel.maskRejected).toBe(0);
     await call(guest, '(l) => l.net.leave()');
     expect(problems).toEqual([]);
     expect(guestProblems).toEqual([]);
@@ -1457,6 +1465,7 @@ test('a first visit starts the tutorial: step-by-step objective, the Levels menu
     await expect(page.locator('#hud-objective')).toContainText('Step 1/8');
     const s = await lab(page, (l) => l.stats());
     expect(s.voxel.rejected).toBe(0);
+    expect(s.voxel.maskRejected).toBe(0);
     await page.locator('.levels-chip').click();
     await expect(page.locator('.levels-panel')).toContainText('Timber Yard');
     await expect(page.locator('.levels-panel')).toContainText('Tutorial (playing)');
