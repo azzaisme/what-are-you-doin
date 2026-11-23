@@ -66,15 +66,20 @@ tell whether it held water. It also held none: the asset had a water level but n
       the true surface.
     - Only objects take part: the static world stays on the base lattice, and dynamic-over-static
       still resolves there.
-    - **Budget** (amended 2026-11-23, after the re-audit): a lattice's masks test at most
-      `MASK_BUDGET` (12,000) of its cells a voxel frame, or as many cells as its own objects hold
-      when that is more (`maskLimit`). So the first mask can always cover everything: a beaver
-      over the 1 cm ragdoll head keeps priority however deep it goes. The first version sampled every
-      cell of the boxes within a fixed 12,000; deep overlap at 1 cm never fitted.
+    - **Budget** (amended 2026-11-23, after the re-audit), by quality preset (`MASK_PRESETS`;
+      1 cm lattices exist at both presets). Each mask is charged the most cells it could test (its
+      union box, at most its outranked objects' cells), reported as `maskLimit`/`maskCells`.
+        - **High:** at most `MASK_BUDGET` (12,000) cells a voxel frame, or as many as the
+          lattice's own objects hold when that is more.
+        - **Low:** a fixed `MASK_BUDGET_LOW` (12,000), never raised, so masks stay cheap on phones;
+          deep overlaps beyond it intersect as before.
+          At High So the first mask can always cover everything: a beaver
+          over the 1 cm ragdoll head keeps priority however deep it goes. The first version sampled every
+          cell of the boxes within a fixed 12,000; deep overlap at 1 cm never fitted.
         - Masks are served highest priority first; one that would overrun what is left is skipped
           that frame, and its object and this lattice's simply intersect again.
-        - Hysteresis: the first mask served, and any mask that ran last frame, may use the whole
-          budget; a later new one only 80 % of it. A cost hovering at the limit does not switch a
+        - Hysteresis: any mask that ran last frame, and at High the first mask served, may use the
+          whole budget; any other new one only 80 % of it. A cost hovering at the limit does not switch a
           mask on and off.
         - The stats count skipped masks (`maskSkipped`) and rejected mask parts (`maskRejected`:
           a part posed out of bounds, such as a non-finite animation channel).
@@ -82,11 +87,16 @@ tell whether it held water. It also held none: the asset had a water level but n
       median over 200 frames, an idle Xeon at 2.1 GHz):
         - +0.2 ms on the base lattice with the bucket in a paw;
         - +0.3 ms on the first-person limbs holding the bucket, with three other players beside you;
-        - on the 1 cm lattice with the ragdoll's head (18–19 ms a frame without masks): +4.0 ms with
-          three players half a metre away, +5.7 ms with the beaver standing in it (every head cell
-          tested, 46,414 hidden), +8.0 ms with the beaver and four players around it. A cell tested
-          costs one sample, as each of the lattice's own candidate cells does, so masks stay within
-          about the lattice's own rasterizing time.
+        - High, on the 1 cm lattice with the ragdoll's head (20–22 ms a frame without masks, a
+          slower container): +2.9 ms with three players half a metre away, +8.0 ms with the beaver
+          standing in it (46,414 head cells hidden), +6.8 ms with the beaver and four players
+          around it. A cell tested costs one sample, as each of the lattice's own candidate cells
+          does, so masks stay within about the lattice's own rasterizing time.
+        - Low (`BENCH_PRESET=low`): at most +0.9 ms in every scene; the deep overlaps skip.
+        - **This is voxel-worker time, off the main thread.** The main thread only uploads the
+          remeshed cut: in the scripted River Lab (8 masks, 45,271 cells hidden, High), the upload
+          per voxel frame goes from 2.6 to 2.8 ms (median; p95 4.2 to 5.0 ms). The worker's frame
+          there goes from 49 to 67 ms, so voxel updates come later, not the frame rate.
     - `?masks=off` turns it off, for comparisons.
 - **The fine lattice reaches ±160 m across and ±18 m up** (its chunk coordinates are limited;
   widened from ±80 m for the Valley). Beyond that, a fine object is not drawn instead of crashing

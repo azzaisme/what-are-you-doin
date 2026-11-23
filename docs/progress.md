@@ -13,11 +13,13 @@ by priority across lattices, as they always did within one (ADR 0011, amended).
 - **Priority** is the objects' own: priority, then lower id. The bucket (4) wins over the beaver (3)
   and planks (1); the beaver over the ute (2) and the ragdoll (2). Your own first-person limbs win
   ties, so another player's beaver never cuts holes in them.
-- **Budget:** a lattice's masks test at most 12,000 of its cells a frame (`MASK_BUDGET`), or as many
-  as its own objects hold when more (`maskLimit`), highest priority first. A mask that would overrun
-  it is skipped that frame (its object intersects as before) and counted (`maskSkipped`). The first
-  mask served and one that ran last frame may use it all, a later new one 80 % (hysteresis). Mask
-  parts posed out of bounds are counted (`maskRejected`).
+- **Budget, by quality preset:** each mask is charged the most cells it could test (its union box,
+  at most its outranked objects' cells). High: at most 12,000 a frame (`MASK_BUDGET`), or as many as
+  the lattice's own objects hold when more. Low: a fixed 12,000 (`MASK_BUDGET_LOW`), never raised,
+  so masks stay cheap on phones (1 cm lattices exist at both presets). Highest priority first; a
+  mask that would overrun it is skipped that frame (its object intersects as before) and counted
+  (`maskSkipped`). Hysteresis: one that ran last frame, and at High the first served, may use it
+  all, any other new one 80 %. Mask parts posed out of bounds are counted (`maskRejected`).
 - **Re-audit (2026-11-23):** the first version sampled every cell of the boxes within a fixed
   12,000, so the beaver deep over the 1 cm ragdoll head was always skipped, and at the threshold it
   toggled every frame. Testing only the lattice's own cells, the budget rule and the hysteresis
@@ -35,25 +37,34 @@ by priority across lattices, as they always did within one (ADR 0011, amended).
 
 ### Measured
 
-`node scripts/bench-lattice.ts`: one lattice's worker, the other objects placed as listed in the
-script, everything moving 2 mm a frame. Masks off (as before) and on run side by side, framed
-alternately; median over 200 frames, on the container's CPU (Xeon, 2.1 GHz), idle. "Cells tested" is
-this lattice's own cells tested against masks a frame.
+`node scripts/bench-lattice.ts` (High) and `BENCH_PRESET=low node scripts/bench-lattice.ts` (Low):
+one lattice's worker, the other objects placed as listed in the script, everything moving 2 mm a
+frame. Masks off (as before) and on run side by side, framed alternately; median over 200 frames,
+on the container's CPU (Xeon, 2.1 GHz), idle. "Cells" is the cells charged against the budget a
+frame.
 
-| Lattice: its object; the others                                | Masks off (ms) | Masks on (ms) | Masks (skipped) | Cells tested | Cells hidden |
-| -------------------------------------------------------------- | -------------: | ------------: | --------------: | -----------: | -----------: |
-| 1 cm: the bucket, alone                                        |          12.41 |         12.50 |           0 (0) |            0 |            0 |
-| 1 cm: the bucket; the beaver and the held plank touching it    |          12.49 |         12.24 |           1 (0) |          649 |          510 |
-| 5 cm: the beaver; the 1 cm bucket in it                        |           3.36 |          3.57 |           1 (0) |          691 |          162 |
-| 1 cm: your limbs holding the bucket; three players 0.55 m away |          16.76 |         17.09 |           1 (0) |          109 |            0 |
-| 1 cm: the ragdoll's head; the beaver standing inside it        |          18.54 |         24.26 |           1 (0) |       46,435 |       46,414 |
-| 1 cm: the ragdoll's head; three players 0.5 m away             |          18.29 |         22.26 |           2 (0) |       17,278 |        5,322 |
-| 1 cm: the ragdoll's head; the beaver and four players around   |          19.18 |         27.17 |           1 (4) |       46,435 |       46,414 |
-| 1 cm: the ragdoll's head and limbs; its 5 cm body              |          30.89 |         31.05 |           0 (0) |            0 |            0 |
+| Lattice: its object; the others                                | Masks off (ms) | High: on (ms) | Masks (skipped) |  Cells | Hidden | Low: on (ms) | Masks (skipped) |
+| -------------------------------------------------------------- | -------------: | ------------: | --------------: | -----: | -----: | -----------: | --------------: |
+| 1 cm: the bucket, alone                                        |          14.26 |         14.55 |           0 (0) |      0 |      0 |        14.14 |           0 (0) |
+| 1 cm: the bucket; the beaver and the held plank touching it    |          14.19 |         14.03 |           1 (0) |  5,470 |    510 |        13.88 |           1 (0) |
+| 5 cm: the beaver; the 1 cm bucket in it                        |           4.05 |          4.32 |           1 (0) |    725 |    162 |         4.02 |           1 (0) |
+| 1 cm: your limbs holding the bucket; three players 0.55 m away |          18.90 |         19.99 |           1 (0) |    744 |      0 |        19.73 |           1 (0) |
+| 1 cm: the ragdoll's head; the beaver standing inside it        |          22.32 |         30.32 |           1 (0) | 46,435 | 46,414 |        21.50 |           0 (1) |
+| 1 cm: the ragdoll's head; three players 0.5 m away             |          20.71 |         23.60 |           1 (1) | 19,655 |  2,661 |        21.03 |           0 (2) |
+| 1 cm: the ragdoll's head; the beaver and four players around   |          20.99 |         27.82 |           1 (4) | 46,435 | 46,414 |        20.74 |           0 (5) |
+| 1 cm: the ragdoll's head and limbs; its 5 cm body              |          34.74 |         34.55 |           0 (0) |      0 |      0 |        36.00 |           0 (0) |
 
-- Before the re-audit the beaver standing in the head, and the crowded head, skipped their masks
-  (0 hidden): the head drew through the beaver. They now cost +5.7 and +8.0 ms, the price of
-  hiding the whole head (46,414 cells) and remeshing around it.
+(Low's "masks off" column is within run-to-run noise of High's; Low's own run gave 13.97 to 35.88 ms.)
+
+- Before the re-audit, the beaver standing in the head and the crowded head skipped their masks
+  (0 hidden): the head drew through the beaver. At High they now cost +8.0 and +6.8 ms, the price
+  of hiding the whole head (46,414 cells) and remeshing around it. At Low they skip again, and
+  every scene stays within +0.9 ms.
+- **Off the main thread:** this is voxel-worker time. In the browser (scripted River Lab, High,
+  8 masks hiding 45,271 cells, SwiftShader at 640 × 360), the main thread's mesh upload per voxel
+  frame goes from 2.6 to 2.8 ms (median; p95 4.2 to 5.0 ms), and the slowest worker's frame from 49
+  to 67 ms: voxel updates come later. The frame itself (3.4 s in software rendering, one run) moved
+  by +4 %, which this run cannot tell from noise.
 - The ragdoll at rest: its 5 cm body does not touch its 1 cm head or limbs, so it costs nothing.
   When it flails, the budget bounds it like any other mask.
 
