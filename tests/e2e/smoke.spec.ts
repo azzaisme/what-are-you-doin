@@ -57,6 +57,7 @@ type Lab = {
         planeY: number;
         tick: number;
         tree: number;
+        treeSince: number;
     };
     placeUte(x: number, z: number, yaw?: number): boolean;
     audio(): { started: boolean; context: string; played: number; recent: string[]; loops: Record<string, number> };
@@ -1606,36 +1607,34 @@ test('the falling tree in the Timber Yard: a bite with the ute by the stand, and
         { timeout: 60_000 }
     );
     const cells0 = (await lab(page, (l) => l.stats())).dynamicCells;
-    // (the tick the crack is first seen at: at or after it cracked)
+    // (held still as soon as the crack is seen, to look at it)
     let crack = await lab(page, (l) => l.hazards());
     for (let tries = 0; tries < 30 && crack.tree === 0; tries++) {
         await lab(page, (l) => l.input({ grab: true }));
         await page.waitForTimeout(500);
-        crack = await lab(page, (l) => l.hazards());
+        crack = await lab(page, (l) => {
+            const h = l.hazards();
+            if (h.tree === 1) l.action('pause');
+            return h;
+        });
     }
     expect(crack.tree).toBe(1);
+    expect(await lab(page, (l) => l.paused())).toBe(true);
     await lab(page, (l) => {
         // south-east of it, outside its crown, looking at it diagonally (forward is
         // (-sin yaw, -cos yaw)): the lean towards the ute (east) tips it to the left
         l.teleport(20.0, 1.5, Math.atan2(4, -3));
         l.look(Math.atan2(4, -3), 0.3);
     });
-    await page.waitForTimeout(1500);
+    await idle(page);
     await page.screenshot({ path: 'test-results/falling-tree-crack.png' });
-    // the tell: the static tree is gone and the marker draws it, leaning further over time
-    await page.waitForFunction(
-        (t) => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().tick >= t + 5 * 60,
-        crack.tick,
-        { timeout: 120_000 }
+    // the tell: the static tree is gone and the marker draws it, leaning further over time. Step the
+    // simulation (deterministic) to 5 s into the 7 s tell and hold it there to look at it
+    await page.evaluate(
+        (t) => (window as unknown as { __riverLab: Lab }).__riverLab.seek(t),
+        (crack.treeSince + 5 * 60) / 60
     );
-    // 5 s into the 7 s tell (and at most a frame's steps more): held there to look at it
-    expect(
-        await lab(page, (l) => {
-            l.action('pause');
-            return l.hazards().tree;
-        })
-    ).toBe(1);
-    expect(await lab(page, (l) => l.paused())).toBe(true);
+    expect(await lab(page, (l) => l.hazards().tree)).toBe(1);
     await idle(page);
     await page.screenshot({ path: 'test-results/falling-tree-leaning.png' });
     const cells1 = (await lab(page, (l) => l.stats())).dynamicCells;

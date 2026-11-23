@@ -2675,6 +2675,8 @@ window.__riverLab = {
         floods: sim.hazards.floodCount,
         gusts: sim.hazards.gustCount,
         tree: sim.hazards.tree.phase,
+        /** The tick the falling tree's phase began (its tell's start while it leans). */
+        treeSince: sim.hazards.tree.since,
         planeY: scene.waterEntity.getPosition().y
     }),
     /** The playtest log as text. */
