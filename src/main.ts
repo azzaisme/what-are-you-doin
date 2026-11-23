@@ -82,7 +82,15 @@ import { PlaytestPanel } from './ui/playtest-panel.ts';
 import { controlNames, interactionPrompt } from './ui/prompts.ts';
 import { SettingsMenu } from './ui/settings-menu.ts';
 import type { SettingValue } from './ui/settings-menu.ts';
-import { SETTING_RANGES, deviceDefaults, loadSettings, saveSettings, urlOverrides } from './ui/settings-store.ts';
+import {
+    DEVICE_KEYS,
+    SETTING_RANGES,
+    deviceDefaults,
+    loadChosen,
+    loadSettings,
+    saveSettings,
+    urlOverrides
+} from './ui/settings-store.ts';
 import type { Settings } from './ui/settings-store.ts';
 import { woodLabel, woodPrompt } from './ui/wood-prompt.ts';
 import {
@@ -120,6 +128,8 @@ const DEFAULT_SETTINGS = deviceDefaults({
     reducedMotion: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
 });
 const savedSettings: Settings = loadSettings(settingsStorage, DEFAULT_SETTINGS);
+// device-dependent settings the player has chosen: kept even when they match this device's default
+const chosenSettings = loadChosen(settingsStorage);
 const settings: Settings = { ...savedSettings, ...urlOverrides(params) };
 const initialQuality: Quality = QUALITY[settings.quality];
 // ?level=tutorial|yard|lab; otherwise the last level played; a first visit starts with the tutorial
@@ -2089,7 +2099,8 @@ function setSetting<K extends keyof Settings>(key: K, v: Settings[K]): void {
     if (settings[key] === v) return;
     settings[key] = v;
     savedSettings[key] = v;
-    saveSettings(settingsStorage, savedSettings, DEFAULT_SETTINGS);
+    if (DEVICE_KEYS.includes(key)) chosenSettings.add(key);
+    saveSettings(settingsStorage, savedSettings, DEFAULT_SETTINGS, chosenSettings);
 }
 
 /** Settings that also live in the game state (the debug panel and hotkeys change them too). */
@@ -2716,11 +2727,11 @@ window.__riverLab = {
             drivable: !!sim.vehicle
         };
     },
-    /** Sets the first-person look angles (as mouse look would). */
     /** The main camera's field of view (degrees), as drawn. */
     cameraFov: () => camera.camera!.fov,
     /** The camera's bob and kick offsets this frame (all 0 with Camera bob & kick off). */
     cameraFeel: () => ({ ...feel }),
+    /** Sets the first-person look angles (as mouse look would). */
     look(yaw: number, pitch: number) {
         fpInput.yaw = yaw;
         fpInput.pitch = pitch;

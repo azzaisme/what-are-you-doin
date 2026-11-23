@@ -11,7 +11,21 @@ type Lab = {
     ready: boolean;
     action(id: string): void;
     paused(): boolean;
-    player(): { x: number; y: number; z: number; yaw: number; holding: number; eyeHeight: number };
+    player(): {
+        x: number;
+        y: number;
+        z: number;
+        yaw: number;
+        holding: number;
+        eyeHeight: number;
+        walkDist: number;
+        fallTicks: number;
+        grounded: boolean;
+    };
+    teleport(x: number, z: number, yaw?: number): void;
+    setPlayers(n: number): void;
+    teleport2(x: number, z: number, yaw: number): void;
+    look2(yaw: number, pitch: number): void;
     placeProp(name: string, x: number, y: number, z: number, yaw?: number): boolean;
     interaction(): { holding: string | null; target: string | null };
     look(yaw: number, pitch: number): void;
@@ -55,6 +69,50 @@ const lab = <T>(page: Page, fn: (l: Lab) => T) =>
  * Every visible element that shows text of its own, with its effective zoom (Element.currentCSSZoom)
  * and whether it lies inside the viewport. The developer's debug panel is left out (not player UI).
  */
+/**
+ * Walks forward (W held) from a spot on clear flat ground until the beaver has walked `metres`
+ * (its walked distance, as the walking animation counts it), sampling the camera's bob and kick
+ * every frame. Fails if it is blocked (no progress for 5 s), falls, or the ground isn't flat.
+ */
+async function walkAndFeel(
+    page: Page,
+    from: { x: number; z: number },
+    metres: number
+): Promise<{ walked: number; most: number; rise: number; frames: number }> {
+    await lab(page, (l) => l.look(0, 0));
+    await page.evaluate(
+        ([x, z]) => (window as unknown as { __riverLab: Lab }).__riverLab.teleport(x, z, 0),
+        [from.x, from.z]
+    );
+    await page.waitForTimeout(500);
+    const start = await lab(page, (l) => l.player());
+    await page.keyboard.down('KeyW');
+    let most = 0;
+    let rise = 0;
+    let walked = 0;
+    let frames = 0;
+    let lastProgress = Date.now();
+    try {
+        while (walked < metres) {
+            await page.evaluate(() => new Promise((r) => requestAnimationFrame(r)));
+            frames++;
+            const [f, p] = await page.evaluate(() => {
+                const l = (window as unknown as { __riverLab: Lab }).__riverLab;
+                return [l.cameraFeel(), l.player()] as const;
+            });
+            most = Math.max(most, Math.abs(f.dx), Math.abs(f.dy), Math.abs(f.dz), Math.abs(f.pitch), Math.abs(f.roll));
+            rise = Math.max(rise, Math.abs(p.y - start.y));
+            expect(p.fallTicks, 'not falling').toBe(0);
+            if (p.walkDist - start.walkDist > walked + 0.01) lastProgress = Date.now();
+            walked = Math.max(walked, p.walkDist - start.walkDist);
+            expect(Date.now() - lastProgress, `blocked after ${walked.toFixed(2)} m`).toBeLessThan(5000);
+        }
+    } finally {
+        await page.keyboard.up('KeyW');
+    }
+    return { walked, most, rise, frames };
+}
+
 const texts = (page: Page) =>
     page.evaluate(() => {
         const out: { what: string; zoom: number; inside: boolean }[] = [];
@@ -83,6 +141,28 @@ const texts = (page: Page) =>
         return out;
     });
 
+/**
+ * Text cut off: an element that hides or scrolls what overflows it sideways and is wider inside than
+ * out (a key name cut to an ellipsis, a panel that scrolls sideways). The row of section tabs is
+ * left out: it scrolls sideways by design, each tab keeping its whole name.
+ */
+const clipped = (page: Page) =>
+    page.evaluate(() => {
+        const out: string[] = [];
+        for (const el of document.querySelectorAll<HTMLElement>('body *')) {
+            if (el.closest('.debug-panel, .debug-chip, script, style, canvas, .settings-tabs')) continue;
+            const r = el.getBoundingClientRect();
+            const cs = getComputedStyle(el);
+            if (r.width === 0 || r.height === 0 || cs.visibility === 'hidden') continue;
+            if (cs.overflowX === 'visible' && cs.textOverflow !== 'ellipsis') continue;
+            if (el.scrollWidth > el.clientWidth + 1)
+                out.push(
+                    `${el.tagName.toLowerCase()}.${el.className} "${el.textContent!.trim().slice(0, 24)}" ${el.scrollWidth} > ${el.clientWidth}`
+                );
+        }
+        return out;
+    });
+
 test('text size 160 %: every HUD and menu text is 1.6× and stays on screen, phone and desktop', async ({ page }) => {
     test.setTimeout(600_000);
     await page.addInitScript(() => localStorage.setItem('uncivil.settings', JSON.stringify({ uiScale: 1.6 })));
@@ -95,6 +175,7 @@ test('text size 160 %: every HUD and menu text is 1.6× and stays on screen, pho
         expect(wrong, `${label}: text not at 160 %`).toEqual([]);
         const off = t.filter((x) => !x.inside).map((x) => x.what);
         expect(off, `${label}: text off screen`).toEqual([]);
+        expect(await clipped(page), `${label}: text cut off or scrolled sideways`).toEqual([]);
     };
     for (const [w, h] of [
         [390, 844],
@@ -134,6 +215,38 @@ test('text size 160 %: every HUD and menu text is 1.6× and stays on screen, pho
         // (large text on a phone: the panel covers its chip; it has its own Close button)
         await page.locator('.levels-panel button', { hasText: 'Close' }).click();
         await expect(page.locator('.levels-panel')).toBeHidden();
+        // split screen: player 2 looks down at a beam at their feet (their prompt shows), and each
+        // player's label is in their own half
+        await lab(page, (l) => l.setPlayers(2));
+        const p0 = await lab(page, (l) => l.player());
+        await page.evaluate(
+            ([x, y, z, eye]) => {
+                const l = (window as unknown as { __riverLab: Lab }).__riverLab;
+                l.teleport2(x + 3, z, 0);
+                l.placeProp('beam-0', x + 3, y + 0.3, z - 0.6, 0);
+                l.look2(0, -Math.atan2(eye - 0.2, 0.55));
+            },
+            [p0.x, p0.y, p0.z, p0.eyeHeight]
+        );
+        await page.waitForFunction(
+            () => (document.querySelector('.prompt-p2')?.textContent ?? '').trim() !== '',
+            null,
+            {
+                timeout: 60_000
+            }
+        );
+        await check(`${w}x${h} split screen`);
+        const tags = await page.evaluate(() =>
+            [...document.querySelectorAll<HTMLElement>('.player-tag')].map((e) => {
+                const r = e.getBoundingClientRect();
+                return { text: e.textContent, top: r.top, bottom: r.bottom };
+            })
+        );
+        expect(tags.map((t) => t.text)).toEqual(['P1', 'P2']);
+        expect(tags[0].bottom, `${w}x${h}: P1 in the top half`).toBeLessThanOrEqual(h / 2);
+        expect(tags[1].top, `${w}x${h}: P2 in the bottom half`).toBeGreaterThanOrEqual(h / 2);
+        await lab(page, (l) => l.setPlayers(1));
+        await page.waitForTimeout(500);
     }
     expect(problems).toEqual([]);
 });
@@ -151,16 +264,12 @@ test('less motion: a device set to reduce motion starts with the camera steady a
     expect(await page.evaluate(() => getComputedStyle(document.querySelector('.toast')!).transitionDuration)).toBe(
         '0s'
     );
-    // walking: the camera has no bob or kick at all
-    await page.keyboard.down('KeyW');
-    let most = 0;
-    for (let n = 0; n < 30; n++) {
-        await page.evaluate(() => new Promise((r) => requestAnimationFrame(r)));
-        const f = await lab(page, (l) => l.cameraFeel());
-        most = Math.max(most, Math.abs(f.dx), Math.abs(f.dy), Math.abs(f.dz), Math.abs(f.pitch), Math.abs(f.roll));
-    }
-    await page.keyboard.up('KeyW');
-    expect(most).toBe(0);
+    // walking 2 m on clear flat ground (the spawn, facing up the yard): no bob or kick at all
+    const spawn = await lab(page, (l) => l.player());
+    const still = await walkAndFeel(page, spawn, 2);
+    expect(still.walked).toBeGreaterThanOrEqual(2);
+    expect(still.rise, 'flat ground').toBeLessThan(0.05);
+    expect(still.most).toBe(0);
     // the switch shows it, and turning it on is the player's saved choice
     await page.locator('.settings-chip').click();
     await page.locator('.settings-tabs button', { hasText: 'Video' }).click();
@@ -173,22 +282,72 @@ test('less motion: a device set to reduce motion starts with the camera steady a
         cameraBob: true
     });
     await page.keyboard.press('Escape');
-    // with it on, walking bobs the camera
-    await page.keyboard.down('KeyW');
-    most = 0;
-    for (let n = 0; n < 60 && most < 0.002; n++) {
-        await page.evaluate(() => new Promise((r) => requestAnimationFrame(r)));
-        const f = await lab(page, (l) => l.cameraFeel());
-        most = Math.max(most, Math.abs(f.dy), Math.abs(f.roll));
-    }
-    await page.keyboard.up('KeyW');
-    expect(most).toBeGreaterThan(0.002);
+    // with it on, the same 2 m walk bobs the camera (a few centimetres; a stride is under 2 m)
+    const bobbing = await walkAndFeel(page, spawn, 2);
+    expect(bobbing.walked).toBeGreaterThanOrEqual(2);
+    expect(bobbing.rise, 'flat ground').toBeLessThan(0.05);
+    expect(bobbing.most).toBeGreaterThan(0.005);
     // a reload keeps the choice
     await page.reload();
     await ready(page);
     expect(await lab(page, (l) => l.state.cameraFeel)).toBe(true);
     expect(problems).toEqual([]);
     await context.close();
+});
+
+test('less motion by the switch alone (no system setting): the menus and toasts stop moving', async ({ browser }) => {
+    test.setTimeout(300_000);
+    const context = await browser.newContext({
+        reducedMotion: 'no-preference',
+        viewport: { width: 1280, height: 720 }
+    });
+    const page = await context.newPage();
+    const problems = await boot(page, '?level=yard&t=1&quality=low#cell100');
+    const motion = () =>
+        page.evaluate(() => ({
+            reduced: document.body.classList.contains('reduced-motion'),
+            toast: getComputedStyle(document.querySelector('.toast')!).transitionDuration,
+            menu: getComputedStyle(document.querySelector('.settings-backdrop')!).transitionDuration
+        }));
+    // the system doesn't ask for less motion: the UI moves
+    expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(false);
+    const moving = await motion();
+    expect(moving.reduced).toBe(false);
+    expect(moving.toast).not.toBe('0s');
+    expect(moving.menu).not.toBe('0s');
+    // the player switches Camera bob & kick off: body.reduced-motion alone stills them
+    await page.locator('.settings-chip').click();
+    await page.locator('.settings-tabs button', { hasText: 'Video' }).click();
+    const bob = page.locator('.settings-row', { hasText: 'Camera bob' }).locator('[role=switch]');
+    await expect(bob).toHaveAttribute('aria-checked', 'true');
+    await bob.click();
+    await expect(bob).toHaveAttribute('aria-checked', 'false');
+    expect(await motion()).toEqual({ reduced: true, toast: '0s', menu: '0s' });
+    expect(problems).toEqual([]);
+    await context.close();
+});
+
+test('the online panel is not rebuilt while nothing changes (its buttons stay the same buttons)', async ({ page }) => {
+    test.setTimeout(300_000);
+    const problems = await boot(page, '?level=yard&t=1&quality=low&net=local#cell100');
+    await page.locator('.online-chip', { hasText: 'Play online' }).click();
+    const panel = page.locator('.online-panel:visible');
+    await expect(panel.locator('button', { hasText: 'Close' })).toBeVisible();
+    await page.waitForTimeout(1500);
+    // watch it for over three of its once-a-second refreshes
+    const changes = await page.evaluate(async () => {
+        const el = [...document.querySelectorAll<HTMLElement>('.online-panel')].find((e) => e.offsetWidth > 0)!;
+        const close = [...el.querySelectorAll('button')].find((b) => b.textContent === 'Close');
+        let records = 0;
+        const watch = new MutationObserver((m) => (records += m.length));
+        watch.observe(el, { childList: true, subtree: true, characterData: true, attributes: true });
+        await new Promise((r) => setTimeout(r, 3500));
+        watch.disconnect();
+        const after = [...el.querySelectorAll('button')].find((b) => b.textContent === 'Close');
+        return { records, sameButton: after === close };
+    });
+    expect(changes).toEqual({ records: 0, sameButton: true });
+    expect(problems).toEqual([]);
 });
 
 test('field of view: the setting is the camera’s, live', async ({ page }) => {

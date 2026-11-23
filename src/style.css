@@ -503,11 +503,15 @@ body.split .hud-prompt:not(:empty) {
 body.split .prompt-p2:not(:empty) {
     display: block;
     position: fixed;
-    left: 50%;
+    /* centred across the whole width (not shrunk into the half right of the middle), and as wide as
+       the screen allows at any text size: vw scales with the zoom, so divide it out */
+    left: 0;
+    right: 0;
+    margin-inline: auto;
+    width: fit-content;
     top: calc(75% + 22px);
-    transform: translateX(-50%);
     padding: 3px 9px;
-    max-width: calc(100vw - 32px);
+    max-width: calc(100vw / var(--ui-scale) - 32px);
     font-size: 13px;
     color: #ffd27a;
     text-align: center;
@@ -928,6 +932,7 @@ body.ui-hidden .designer {
 .toast,
 .touch-ui,
 .prompt-p2,
+.player-tag,
 .online-panel,
 .settings-backdrop {
     zoom: var(--ui-scale);
@@ -1154,6 +1159,8 @@ body.settings-open .crosshair {
 }
 
 .settings-panel {
+    /* its rows lay out by the panel's own width (which the text size's zoom narrows), not the screen's */
+    container-type: inline-size;
     flex: 1 1 auto;
     overflow-y: auto;
     overscroll-behavior: contain;
@@ -1163,6 +1170,31 @@ body.settings-open .crosshair {
     flex-direction: column;
     /* rock between the slots */
     gap: calc(var(--vx) * 2);
+}
+
+/* a narrow panel (a phone, or large text): label above its control, full width */
+@container (max-width: 340px) {
+    .settings-row:not(.settings-button) {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+        padding: 8px 12px;
+    }
+
+    .settings-row:not(.settings-button) .settings-control {
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+
+    .settings-bind {
+        flex: 1 1 5em;
+        min-width: 0;
+    }
+
+    .settings-range input {
+        flex: 1 1 auto;
+        width: auto;
+    }
 }
 
 .settings-row {
@@ -1188,6 +1220,8 @@ body.settings-open .crosshair {
     display: flex;
     flex-direction: column;
     gap: 2px;
+    min-width: 0;
+    overflow-wrap: anywhere;
     font-size: 15px;
     font-weight: 600;
     cursor: default;
@@ -1231,10 +1265,10 @@ body.settings-open .crosshair {
     min-width: 96px;
     max-width: 132px;
     padding: 0 10px 2px;
-    overflow: hidden;
     font-weight: 700;
-    white-space: nowrap;
-    text-overflow: ellipsis;
+    /* a long name (Right Shift, Wheel down) wraps onto a second line rather than being cut */
+    line-height: 1.15;
+    overflow-wrap: anywhere;
 }
 
 .settings-bind.capturing,
@@ -1244,12 +1278,6 @@ body.settings-open .crosshair {
 }
 
 /* narrow screens: six sections fit (or scroll) without clipping their names */
-@media (max-width: 480px) {
-    .settings-bind {
-        min-width: 84px;
-    }
-}
-
 .settings-status {
     min-height: 1.3em;
     margin-top: 4px;
@@ -1346,13 +1374,23 @@ body.settings-open .crosshair {
     font-weight: 800;
 }
 
+.settings-button {
+    flex-wrap: wrap;
+}
+
 .settings-button .settings-control {
     flex: 1 1 auto;
     justify-content: flex-start;
 }
 
+/* beside its button when there is room, under it when not */
 .settings-button .settings-label {
     order: 2;
+    flex: 1 1 10em;
+}
+
+.settings-button .settings-label:empty {
+    display: none;
 }
 
 .settings-button .settings-control button {
@@ -1449,22 +1487,6 @@ body.has-pad .settings-foot .foot-pad {
 @media (max-width: 480px) {
     .settings-backdrop {
         padding: 8px;
-    }
-
-    .settings-row:not(.settings-button) {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 6px;
-        padding: 8px 12px;
-    }
-
-    .settings-row:not(.settings-button) .settings-control {
-        justify-content: flex-end;
-    }
-
-    .settings-range input {
-        flex: 1 1 auto;
-        width: auto;
     }
 
     /* six sections: each keeps its whole name; the row scrolls (the current one is kept in view) */

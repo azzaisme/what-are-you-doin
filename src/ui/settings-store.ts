@@ -133,14 +133,41 @@ export function loadSettings(
     }
 }
 
-/** Saves only what differs from the defaults, so a later default change still reaches players. */
+/**
+ * Settings whose default depends on the device (`deviceDefaults`). Once the player chooses one, it is
+ * saved even when it matches this device's default, so a later change of the system setting doesn't
+ * flip the player's choice.
+ */
+export const DEVICE_KEYS: readonly (keyof Settings)[] = ['cameraBob'];
+
+/** The device-dependent settings the player has chosen (those saved), from storage. */
+export function loadChosen(storage: SettingsStorage | null): Set<keyof Settings> {
+    const chosen = new Set<keyof Settings>();
+    try {
+        const raw: unknown = JSON.parse(storage?.getItem(SETTINGS_STORAGE_KEY) ?? 'null');
+        if (raw && typeof raw === 'object' && !Array.isArray(raw))
+            for (const k of DEVICE_KEYS)
+                if (Object.hasOwn(raw, k) && typeof (raw as Record<string, unknown>)[k] === typeof DEFAULT_SETTINGS[k])
+                    chosen.add(k);
+    } catch {
+        // nothing readable: nothing chosen
+    }
+    return chosen;
+}
+
+/**
+ * Saves what differs from the defaults, so a later default change still reaches players, and every
+ * device-dependent setting in `chosen` (the player's own choice) whatever its value.
+ */
 export function saveSettings(
     storage: SettingsStorage | null,
     s: Settings,
-    defaults: Readonly<Settings> = DEFAULT_SETTINGS
+    defaults: Readonly<Settings> = DEFAULT_SETTINGS,
+    chosen: ReadonlySet<keyof Settings> = new Set()
 ): void {
     const diff: Partial<Record<keyof Settings, unknown>> = {};
-    for (const k of Object.keys(defaults) as (keyof Settings)[]) if (s[k] !== defaults[k]) diff[k] = s[k];
+    for (const k of Object.keys(defaults) as (keyof Settings)[])
+        if (s[k] !== defaults[k] || (chosen.has(k) && DEVICE_KEYS.includes(k))) diff[k] = s[k];
     try {
         if (Object.keys(diff).length === 0) storage?.removeItem(SETTINGS_STORAGE_KEY);
         else storage?.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(diff));
