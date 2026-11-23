@@ -38,6 +38,8 @@ const MIN_REACH = 0.02;
 export const FRICTION = 0.5;
 /** The time a connection's load is averaged over, for what it carries asleep (s). */
 const REST_MEAN = 0.25;
+/** Steps after it wakes before a piece's joints are read again. */
+const WAKE_STEPS = 3;
 
 export interface JointLoad {
     /** Force the nails carry (N): their shear and withdrawal together. */
@@ -167,6 +169,8 @@ export class StressMeter {
     private readonly mean = new Map<number, JointLoad>();
     /** Jointed pieces whose loads are still settling: kept awake (before). */
     private readonly unsettled = new Set<number>();
+    /** Pieces woken lately: steps until their loads are read again. */
+    private readonly waking = new Map<number, number>();
 
     constructor(pw: PhysicsWorld, graph: JointGraph) {
         this.pw = pw;
@@ -199,7 +203,18 @@ export class StressMeter {
             // so a piece is kept awake while its joints' loads are still settling, and let sleep once
             // they are steady
             if (b.isSleeping() && this.unsettled.has(pb.id)) b.wakeUp();
-            if (b.isSleeping()) continue;
+            if (b.isSleeping()) {
+                this.waking.set(pb.id, WAKE_STEPS);
+                continue;
+            }
+            // just woken, Rapier's first steps settle what built up asleep (single steps of
+            // several kN on a deck nobody touched): not a load. It keeps what it carried
+            const wk = this.waking.get(pb.id);
+            if (wk) {
+                if (wk <= 1) this.waking.delete(pb.id);
+                else this.waking.set(pb.id, wk - 1);
+                continue;
+            }
             const v = b.linvel();
             const w = b.angvel();
             const I = b.effectiveAngularInertia();
@@ -622,7 +637,7 @@ function rotate(q: RAPIER.Rotation, x: number, y: number, z: number): [number, n
 }
 
 /** The collider of a body nearest a point (a piece of several boxes bears on the one there). */
-export function nearestCollider(cols: RAPIER.Collider[], p: [number, number, number]): RAPIER.Collider | null {
+function nearestCollider(cols: RAPIER.Collider[], p: [number, number, number]): RAPIER.Collider | null {
     let best: RAPIER.Collider | null = null;
     let bd = Infinity;
     for (const c of cols) {
@@ -637,7 +652,7 @@ export function nearestCollider(cols: RAPIER.Collider[], p: [number, number, num
 }
 
 /** How far a collider reaches from p along unit u (a box's support; anything else: unbounded). */
-export function support(col: RAPIER.Collider | null, p: [number, number, number], u: [number, number, number]): number {
+function support(col: RAPIER.Collider | null, p: [number, number, number], u: [number, number, number]): number {
     if (!col) return 0;
     const sh = col.shape as RAPIER.Shape & { halfExtents?: RAPIER.Vector };
     const e = sh.halfExtents;

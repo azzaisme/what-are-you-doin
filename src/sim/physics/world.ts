@@ -688,7 +688,7 @@ export class PhysicsWorld {
         if (Math.abs(m.x) < Math.abs(s.vx * dt) * 0.5) s.vx = m.x / dt;
         if (Math.abs(m.z) < Math.abs(s.vz * dt) * 0.5) s.vz = m.z / dt;
         s.grounded = grounded;
-        r.standing = grounded ? this.standOn(r, k) : -1;
+        r.standing = grounded ? this.standOn(r) : -1;
         s.x = nx;
         s.y = ny;
         s.z = nz;
@@ -698,23 +698,27 @@ export class PhysicsWorld {
      * Which dynamic body (a deck plank, a beam) a grounded character stands on, and its weight
      * there: its own and its share of what it holds (see weighStanding). Returns the body's id, or -1.
      */
-    private standOn(r: Rig, k: RAPIER.KinematicCharacterController): number {
-        for (let i = 0; i < k.numComputedCollisions(); i++) {
-            const c = k.computedCollision(i);
-            // normal1: out of what was hit, towards the character (up, for the ground below)
-            if (!c?.collider || c.normal1.y < 0.5) continue;
-            const pb = this.byCollider.get(c.collider.handle);
-            if (!pb || pb.kind !== 'dynamic' || !pb.enabled) continue;
-            const st = this.stoodOn.get(pb.id);
-            if (st) {
-                const m = CHARACTER.mass + (r.held ? r.held.body.mass() / Math.max(1, this.holders(r.held.id)) : 0);
-                st.x = (st.x * st.m + c.witness2.x * m) / (st.m + m);
-                st.z = (st.z * st.m + c.witness2.z * m) / (st.m + m);
-                st.m += m;
-            }
-            return pb.id;
-        }
-        return -1;
+    private standOn(r: Rig): number {
+        // what is straight under its centre carries it (half off a plank onto stone, the stone does)
+        const t = r.body.translation();
+        const hit = this.world.castRay(
+            new RAPIER.Ray({ x: t.x, y: t.y + 0.05, z: t.z }, { x: 0, y: -1, z: 0 }),
+            0.3,
+            true,
+            RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+            groups(ALL, ALL & ~LAYER.player),
+            r.collider
+        );
+        if (!hit) return -1;
+        const pb = this.byCollider.get(hit.collider.handle);
+        if (!pb || pb.kind !== 'dynamic' || !pb.enabled || this.holders(pb.id) > 0) return -1;
+        let st = this.stoodOn.get(pb.id);
+        if (!st) this.stoodOn.set(pb.id, (st = { pushed: 0, m: 0, x: 0, z: 0 }));
+        const m = CHARACTER.mass + (r.held ? r.held.body.mass() / Math.max(1, this.holders(r.held.id)) : 0);
+        st.x = (st.x * st.m + t.x * m) / (st.m + m);
+        st.z = (st.z * st.m + t.z * m) / (st.m + m);
+        st.m += m;
+        return pb.id;
     }
 
     /**
