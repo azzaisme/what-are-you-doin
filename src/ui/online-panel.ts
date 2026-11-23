@@ -36,6 +36,8 @@ export interface OnlineStatus {
     lagMs?: number | null;
     /** Guest: the host went quiet; waiting for it to come back. */
     reconnecting?: boolean;
+    /** Guest: the host's page is in the background; the world waits for it. */
+    hostAway?: boolean;
 }
 
 const lagText = (ms: number | null | undefined) => (ms === null || ms === undefined ? '…' : `${ms} ms`);
@@ -145,6 +147,8 @@ export class OnlinePanel {
                       : `Playing in game ${st.code} as player ${(st.slot ?? 0) + 1} · round trip ${lagText(st.lagMs)}.`
             );
             if (st.reconnecting) note('Lost the host: reconnecting…', 'online-warn');
+            else if (st.hostAway)
+                note("The host's game is in the background: it may stop until they come back.", 'online-warn');
             button('Leave game', () => this.host.leave());
             button('Close', () => this.toggle(false));
             return;

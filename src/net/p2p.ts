@@ -92,7 +92,7 @@ class P2PChannel implements NetChannel {
         this.room.onPeerLeave = (peerId) => {
             if (this.others.delete(peerId)) this.emit();
         };
-        addEventListener('pagehide', () => this.leave());
+        if (typeof addEventListener === 'function') addEventListener('pagehide', () => this.leave());
     }
 
     private emit(): void {
