@@ -34,7 +34,7 @@ still needed at the Timber Yard and Valley crossings. **The better throw is for 
   leave your hands at 2.9 m/s. The 24 kg plank used to leave at 1.9 m/s, capped by the general
   45 N s; the new cap is 70 N s for it and 110 N s for the long plank. Planks also let go clean: no
   spin from the grip, and no sideways swing from turning as you throw, so they fly flat along your
-  view. `GRAB.throwSpeed` and `GRAB.maxThrowImpulse` are as they were, so every other throw is
+  view. Only the plank's own velocity changes: the thrower keeps moving as they were. `GRAB.throwSpeed` and `GRAB.maxThrowImpulse` are as they were, so every other throw is
   unchanged, the empty bucket's included.
 - **Unchanged:** the Timber Yard and Valley layouts, the sawmill, the ute and Epic 5's bridge (all
   2.4 m planks). The sawmill's rack check now reads the plank size from `PLANK_HALF` instead of a
