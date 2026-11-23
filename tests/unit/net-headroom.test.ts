@@ -215,6 +215,26 @@ describe('a guest that misses updates, or joins late, still gets every pose', ()
         }
     });
 
+    it('a guest that only gets every k-th snapshot (a slow host, coalesced updates) still gets every entity', () => {
+        for (const k of [2, 3, 4, 5, 6]) {
+            const es = boxes(60);
+            es.forEach((e, i) => (e.pose.p.z = i));
+            const enc = new SnapshotEncoder();
+            for (let n = 1; n <= 50; n++) enc.encode(n * 3, es);
+            const dec = new SnapshotDecoder(es.length);
+            const ring = new SnapshotRing(es.length);
+            // from now on, only every k-th snapshot arrives: within k refresh periods all have
+            const last = 50 + k * REFRESH_SNAPSHOTS;
+            for (let n = 51; n <= last; n++) {
+                const bytes = enc.encode(n * 3, es);
+                if (n % k === 0) dec.apply(bytes, ring);
+            }
+            const t = Math.floor(last / k) * k * 3;
+            const missing = es.map((_, i) => i).filter((i) => drawn(ring, i, t)?.z === undefined);
+            expect(missing, `one snapshot in ${k}`).toEqual([]);
+        }
+    });
+
     it('a snapshot within budget lists the stalest entities first and defers the rest', () => {
         const es = boxes(30);
         const enc = new SnapshotEncoder();

@@ -116,8 +116,13 @@ export function encodeSnapshot(
 
 /** Snapshots an entity stays listed after it last changed (1 s): a dropped update can't leave it stale. */
 export const RECENT_SNAPSHOTS = 20;
-/** A resting visible entity is listed again every this many snapshots (1 s), in turn. */
-export const REFRESH_SNAPSHOTS = 20;
+/**
+ * A resting visible entity is listed again every this many snapshots (about 1 s), in turn. Prime:
+ * a guest may get only every k-th snapshot (a slow host publishes several per frame and the
+ * transport sends the last), and with a period sharing a factor with k some entities' turns would
+ * always fall on the snapshots it never gets. With a prime, successive turns land on every phase.
+ */
+export const REFRESH_SNAPSHOTS = 19;
 
 /**
  * The host's side: which entities each snapshot lists, within a byte budget.
