@@ -145,9 +145,13 @@ export class PadPlayer {
     }
 }
 
+/** Local players by gamepad (split screen goes up to quarters). */
+export const MAX_PADS = 4;
+
 /** Tracks connected pads and who has joined with which. */
 export class PadManager {
-    readonly players: (PadPlayer | null)[] = [null, null];
+    /** Joined players by local view (0 = player 1); up to MAX_PADS. */
+    readonly players: (PadPlayer | null)[] = Array.from({ length: MAX_PADS }, () => null);
     private prevA = new Map<number, boolean>();
     private prevMenu = new Map<number, boolean>();
     /** Look settings and button bindings applied to every player's pad. */
@@ -161,7 +165,7 @@ export class PadManager {
     suspended = false;
     /** Start (menu) pressed on any pad, with that pad. */
     onMenu: (pad: Gamepad) => void = () => undefined;
-    /** Called when a pad joins as player `slot` (0 or 1), or when player 2's pad goes away. */
+    /** Called when a pad joins as player `slot` (0..MAX_PADS - 1), or when that player's pad goes away. */
     onJoin: (slot: number) => void = () => undefined;
     onLeave: (slot: number) => void = () => undefined;
 
@@ -181,8 +185,15 @@ export class PadManager {
             if (!pl) continue;
             const pad = pads[pl.padIndex];
             if (!pad || !pad.connected) {
-                this.players[s] = null;
+                // player 1 keeps their place (keyboard and mouse go on); after player 2, the players
+                // behind move up one, so the joined pads stay 1..n-1 like the views they play
+                if (s === 0) this.players[0] = null;
+                else {
+                    this.players.splice(s, 1);
+                    this.players.push(null);
+                }
                 this.onLeave(s);
+                if (s > 0) s--;
                 continue;
             }
             pl.lookScale = this.lookScale;

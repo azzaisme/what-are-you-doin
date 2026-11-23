@@ -68,6 +68,9 @@ export interface Quality {
     pixelRatio: number;
 }
 
+/** Local players (views) one device can show at once: split screen up to quarters. */
+export const MAX_VIEWS = 4;
+
 export const QUALITY: Record<Quality['name'], Quality> = {
     high: {
         name: 'high',
@@ -101,19 +104,26 @@ export interface LabScene {
     worldLayer: Layer;
     immediateLayer: Layer;
     /**
-     * Per-view immediate layers: the main camera draws `viewLayers[0]`, player 2's camera
-     * `viewLayers[1]`, so one local player's aim marks never show in the other's view.
+     * Per-view immediate layers: local view v's camera draws `viewLayers[v]` (0 the main camera), so
+     * one local player's aim marks never show in another's view.
      */
-    viewLayers: [Layer, Layer];
+    viewLayers: Layer[];
     quality: Quality;
     setSun(elevationDeg: number, azimuthDeg: number): void;
     /**
-     * Split screen (local co-op): player 1 on top, player 2's camera below. In split screen the
-     * water uses its sky reflection: the engine's planar reflection follows one camera only.
+     * Split screen (local co-op), 1 to MAX_VIEWS views: two are top and bottom; three are player 1
+     * across the top and players 2 and 3 below; four are quarters. With more than one view the water
+     * uses its sky reflection: the engine's planar reflection follows one camera only.
      */
-    setSplit(split: boolean): void;
-    camera2: Entity;
+    setViews(n: number): void;
+    /** The views' cameras: `cameras[0]` is the main camera, `cameras[v]` local player v + 1's. */
+    cameras: Entity[];
+    /** Views shown now (1 = one full-screen view). */
+    views: number;
+    /** More than one view. */
     split: boolean;
+    /** Each view's screen rectangle (CSS fractions of the canvas, top-left origin), for its HUD. */
+    viewRects(n: number): { x: number; y: number; w: number; h: number }[];
     setQuality(q: Quality): void;
     /** The prototype pixel-game look (`src/render/pixel-look.ts`). */
     pixelLook: boolean;
@@ -172,7 +182,7 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
     // one immediate layer per local view. Inserted before the shared Immediate layer's transparent
     // part: CameraFrame renders layers up to that one in its scene pass (kept to the camera's half
     // in split screen); later layers go to a pass over the whole back buffer
-    const viewLayers: [Layer, Layer] = [new Layer({ name: 'View1' }), new Layer({ name: 'View2' })];
+    const viewLayers = Array.from({ length: MAX_VIEWS }, (_, v) => new Layer({ name: `View${v + 1}` }));
     for (const l of viewLayers) layers.insert(l, layers.getTransparentIndex(immediateLayer));
 
     // ---- sun: soft cascaded shadows sized for 10 cm detail near the camera
@@ -237,7 +247,8 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
     sky.starBrightness = 0;
     cameraFrame.addEffect(sky);
     const pixel1 = addPixelLook(device, cameraFrame, () => scene.quality.samples);
-    let pixel2: PixelLook | null = null;
+    /** Per extra view (index v - 1 for view v): its pixel look, its frame and its sky, made when first shown. */
+    const extraPixel: (PixelLook | null)[] = [];
     app.scene.exposure = 0.95;
     // the sky's ambient is bright and blue; keep it as fill so the low warm sun carries the image
     app.scene.skyboxIntensity = 0.45;
@@ -298,33 +309,40 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
         }
     }) as unknown as WaterApi;
 
-    // ---- second view for split screen: same layers and look, its own HDR frame and sky (the sky of
-    // the main camera alone lights the scene)
-    const camera2 = new Entity('Player2Camera');
-    camera2.addComponent('camera', {
-        fov: 52,
-        nearClip: 0.05,
-        farClip: 600,
-        layers: [
-            worldLayer.id,
-            LAYERID_DEPTH,
-            skyboxLayer.id,
-            waterLayer.id,
-            immediateLayer.id,
-            viewLayers[1].id,
-            uiLayer.id
-        ]
-    });
-    camera2.enabled = false;
-    app.root.addChild(camera2);
-    let frame2: CameraFrame | null = null;
-    let sky2: DynamicSkyEffect | null = null;
-    const ensureSecondFrame = () => {
-        if (frame2) return;
-        const f = new CameraFrame(app, camera2.camera!);
+    // ---- the other local players' views (split screen): same layers and look, each its own HDR
+    // frame and sky (the sky of the main camera alone lights the scene)
+    const cameras: Entity[] = [camera];
+    const frames: (CameraFrame | null)[] = [cameraFrame];
+    const skies: (DynamicSkyEffect | null)[] = [sky];
+    for (let v = 1; v < MAX_VIEWS; v++) {
+        const c = new Entity(`Player${v + 1}Camera`);
+        c.addComponent('camera', {
+            fov: 52,
+            nearClip: 0.05,
+            farClip: 600,
+            layers: [
+                worldLayer.id,
+                LAYERID_DEPTH,
+                skyboxLayer.id,
+                waterLayer.id,
+                immediateLayer.id,
+                viewLayers[v].id,
+                uiLayer.id
+            ]
+        });
+        c.enabled = false;
+        app.root.addChild(c);
+        cameras.push(c);
+        frames.push(null);
+        skies.push(null);
+        extraPixel.push(null);
+    }
+    const ensureFrame = (v: number) => {
+        if (frames[v]) return;
+        const f = new CameraFrame(app, cameras[v].camera!);
         f.rendering.toneMapping = TONEMAP_ACES2;
         f.rendering.sceneDepthMap = true;
-        f.rendering.samples = scene.quality.samples;
+        f.rendering.samples = scene.pixelLook ? 1 : scene.quality.samples;
         f.bloom.intensity = cameraFrame.bloom.intensity;
         f.bloom.blurLevel = cameraFrame.bloom.blurLevel;
         f.vignette.intensity = cameraFrame.vignette.intensity;
@@ -345,20 +363,21 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
         k.elevation = sky.elevation;
         k.azimuth = sky.azimuth;
         f.addEffect(k);
-        pixel2 = addPixelLook(device, f, () => scene.quality.samples);
+        const px = addPixelLook(device, f, () => scene.quality.samples);
         f.update();
-        pixel2.set(scene.pixelLook);
-        frame2 = f;
-        sky2 = k;
+        px.set(scene.pixelLook);
+        frames[v] = f;
+        skies[v] = k;
+        extraPixel[v - 1] = px;
     };
 
     // Split screen with CameraFrame: the frame renders its scene into a full-size target and composes
-    // over the whole back buffer, ignoring camera.rect (measured: the last camera covered both
-    // halves). So in split screen both cameras keep a full rect with the half-screen aspect ratio,
-    // their scene targets are half height (no wasted pixels), and each compose pass is limited to its
-    // half by viewport and scissor, with its clear off. The engine rebuilds these passes when settings
-    // change, so this is re-applied every frame while split.
-    type SplitPass = { scaleY: number } | null | undefined;
+    // over the whole back buffer, ignoring camera.rect (measured: the last camera covered every
+    // view). So in split screen each camera keeps a full rect with its view's aspect ratio, its scene
+    // target is scaled to the view's share of the screen (no wasted pixels), and its compose pass is
+    // limited to its view by viewport and scissor, with its clear off. The engine rebuilds these
+    // passes when settings change, so this is re-applied every frame while split.
+    type SplitPass = { scaleX: number; scaleY: number } | null | undefined;
     type ComposePass = {
         viewport?: Vec4;
         scissor?: Vec4;
@@ -369,14 +388,16 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
     type FrameInternals = {
         renderPassCamera?: { scenePass?: SplitPass; prePass?: SplitPass; composePass?: ComposePass };
     };
-    const topRect = new Vec4();
-    const bottomRect = new Vec4();
-    const applySplit = (f: CameraFrame | null, rect: Vec4) => {
+    const rects = Array.from({ length: MAX_VIEWS }, () => new Vec4());
+    const applySplit = (f: CameraFrame | null, rect: Vec4, sx: number, sy: number) => {
         const rp = (f as unknown as FrameInternals | null)?.renderPassCamera;
         if (!rp) return;
         const scale = f!.rendering.renderTargetScale ?? 1;
-        if (rp.scenePass) rp.scenePass.scaleY = scale * 0.5;
-        if (rp.prePass) rp.prePass.scaleY = scale * 0.5;
+        for (const pass of [rp.scenePass, rp.prePass]) {
+            if (!pass) continue;
+            pass.scaleX = scale * sx;
+            pass.scaleY = scale * sy;
+        }
         const cp = rp.composePass;
         if (!cp) return;
         cp.viewport = rect;
@@ -389,44 +410,83 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
         if (!scene.split) return;
         const w = device.width;
         const h = device.height;
-        const half = Math.floor(h / 2);
-        topRect.set(0, h - half, w, half);
-        bottomRect.set(0, 0, w, half);
-        const aspect = w / Math.max(1, half);
-        camera.camera!.aspectRatio = aspect;
-        camera2.camera!.aspectRatio = aspect;
-        applySplit(cameraFrame, topRect);
-        applySplit(frame2, bottomRect);
+        const vr = scene.viewRects(scene.views);
+        for (let v = 0; v < scene.views; v++) {
+            const r = vr[v];
+            // in pixels, bottom-left origin (the GPU's), whole pixels so the views tile exactly
+            const x0 = Math.round(r.x * w);
+            const x1 = Math.round((r.x + r.w) * w);
+            const y0 = Math.round((1 - r.y - r.h) * h);
+            const y1 = Math.round((1 - r.y) * h);
+            rects[v].set(x0, y0, x1 - x0, y1 - y0);
+            cameras[v].camera!.aspectRatio = (x1 - x0) / Math.max(1, y1 - y0);
+            applySplit(frames[v], rects[v], r.w, r.h);
+        }
     });
 
     const scene: LabScene = {
-        camera2,
+        cameras,
+        views: 1,
         split: false,
+        viewRects(n: number) {
+            if (n <= 1) return [{ x: 0, y: 0, w: 1, h: 1 }];
+            if (n === 2)
+                return [
+                    { x: 0, y: 0, w: 1, h: 0.5 },
+                    { x: 0, y: 0.5, w: 1, h: 0.5 }
+                ];
+            if (n === 3)
+                return [
+                    { x: 0, y: 0, w: 1, h: 0.5 },
+                    { x: 0, y: 0.5, w: 0.5, h: 0.5 },
+                    { x: 0.5, y: 0.5, w: 0.5, h: 0.5 }
+                ];
+            return [
+                { x: 0, y: 0, w: 0.5, h: 0.5 },
+                { x: 0.5, y: 0, w: 0.5, h: 0.5 },
+                { x: 0, y: 0.5, w: 0.5, h: 0.5 },
+                { x: 0.5, y: 0.5, w: 0.5, h: 0.5 }
+            ];
+        },
         pixelLook: false,
         setPixelLook(on: boolean) {
             scene.pixelLook = on;
             pixel1.set(on);
-            pixel2?.set(on);
+            for (const px of extraPixel) px?.set(on);
         },
-        setSplit(split: boolean) {
-            if (split === scene.split) return;
-            scene.split = split;
-            if (split) ensureSecondFrame();
-            camera2.enabled = split;
-            camera2.camera!.priority = -1;
-            camera.camera!.aspectRatioMode = split ? ASPECT_MANUAL : ASPECT_AUTO;
-            camera2.camera!.aspectRatioMode = ASPECT_MANUAL;
-            if (!split) {
-                // back to one full-screen frame: rebuild its passes with full-size targets
-                const cp = (cameraFrame as unknown as FrameInternals).renderPassCamera?.composePass;
-                if (cp) {
-                    cp.viewport = undefined;
-                    cp.scissor = undefined;
-                }
-                cameraFrame.update();
+        setViews(count: number) {
+            const n = Math.max(1, Math.min(MAX_VIEWS, Math.round(count)));
+            if (n === scene.views) return;
+            const was = scene.views;
+            scene.views = n;
+            scene.split = n > 1;
+            for (let v = 1; v < MAX_VIEWS; v++) {
+                if (v < n) ensureFrame(v);
+                cameras[v].enabled = v < n;
+                cameras[v].camera!.priority = -v;
+                cameras[v].camera!.aspectRatioMode = ASPECT_MANUAL;
             }
-            water.reflectionSource = split ? 'sky' : 'planar';
-            water.refraction = split ? false : scene.quality.refraction;
+            camera.camera!.aspectRatioMode = n > 1 ? ASPECT_MANUAL : ASPECT_AUTO;
+            if (n < was) {
+                // views that go away, and the ones that stay, rebuild their passes at full size: the
+                // next prerender scales those still split
+                for (let v = 0; v < was; v++) {
+                    const f = frames[v];
+                    const rp = (f as unknown as FrameInternals | null)?.renderPassCamera;
+                    if (rp?.composePass) {
+                        rp.composePass.viewport = undefined;
+                        rp.composePass.scissor = undefined;
+                    }
+                    for (const pass of [rp?.scenePass, rp?.prePass]) {
+                        if (!pass) continue;
+                        pass.scaleX = f!.rendering.renderTargetScale ?? 1;
+                        pass.scaleY = f!.rendering.renderTargetScale ?? 1;
+                    }
+                    f?.update();
+                }
+            }
+            water.reflectionSource = n > 1 ? 'sky' : 'planar';
+            water.refraction = n > 1 ? false : scene.quality.refraction;
         },
         app,
         device,
@@ -448,10 +508,13 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
             sky.elevation = elevation;
             sky.azimuth = azimuth;
             cameraFrame.update();
-            if (sky2 && frame2) {
-                sky2.elevation = elevation;
-                sky2.azimuth = azimuth;
-                frame2.update();
+            for (let v = 1; v < MAX_VIEWS; v++) {
+                const k = skies[v];
+                const f = frames[v];
+                if (!k || !f) continue;
+                k.elevation = elevation;
+                k.azimuth = azimuth;
+                f.update();
             }
             // fog takes the sky colour near the horizon in the main viewing direction (towards -Z)
             const c = sky.getSkyColor(new Vec3(0, 0.04, -1));
@@ -465,9 +528,11 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
             const samples = scene.pixelLook ? 1 : q.samples;
             cameraFrame.rendering.samples = samples;
             cameraFrame.update();
-            if (frame2) {
-                frame2.rendering.samples = samples;
-                frame2.update();
+            for (let v = 1; v < MAX_VIEWS; v++) {
+                const f = frames[v];
+                if (!f) continue;
+                f.rendering.samples = samples;
+                f.update();
             }
             sun.light!.shadowResolution = q.shadowResolution;
             sun.light!.numCascades = q.cascades;

@@ -56,7 +56,7 @@ import { PLAYTEST_STORAGE_KEY, PlaytestLog } from './playtest/telemetry.ts';
 import { FogDome } from './render/fog-dome.ts';
 import { NailMarkers } from './render/nail-markers.ts';
 import { ReferenceRenderer } from './render/reference.ts';
-import { QUALITY, createLabScene } from './render/scene.ts';
+import { MAX_VIEWS, QUALITY, createLabScene } from './render/scene.ts';
 import type { Quality } from './render/scene.ts';
 import { VoxelClient } from './render/voxel-pipeline.ts';
 import type { LaneSpec } from './render/voxel-pipeline.ts';
@@ -366,20 +366,17 @@ pipeline.particles = (time) => {
     fx.update(time, sim.ring, { x: cp.x, z: cp.z });
     return { buffer: fx.buffer, count: fx.count };
 };
-// streamed levels: the near world follows this device's cameras (both views in split screen)
+// streamed levels: the near world follows this device's cameras (every view in split screen)
 if (level.stream) {
-    const focus = new Float32Array(4);
+    const focus = new Float32Array(2 * MAX_VIEWS);
     pipeline.focus = () => {
-        const a = camera.getPosition();
-        focus[0] = a.x;
-        focus[1] = a.z;
-        if (state.players > 1) {
-            const b = scene.camera2.getPosition();
-            focus[2] = b.x;
-            focus[3] = b.z;
-            return focus;
+        const n = Math.min(localViews(), MAX_VIEWS);
+        for (let v = 0; v < n; v++) {
+            const a = scene.cameras[v].getPosition();
+            focus[2 * v] = a.x;
+            focus[2 * v + 1] = a.z;
         }
-        return focus.subarray(0, 2);
+        return focus.subarray(0, 2 * n);
     };
 }
 const windNow = { x: 0, z: 0, speed: 0, gustiness: 0 };
@@ -412,11 +409,18 @@ let p2pStarting: Promise<void> | null = null;
 let hostSession: HostSession | null = null;
 let guestSession: GuestSession | null = null;
 let guestEventsSeen = 0;
-/** Slot of the local second player (split screen), or -1. */
-let localSlot2 = -1;
+/**
+ * Local players beyond the first (split screen): `localSlots[v]` is the sim slot local view v plays
+ * (v = 1 is player 2's view, up to MAX_VIEWS - 1). Index 0 is unused (player 1 is slot 0).
+ */
+const localSlots: number[] = [0];
+/** The sim slot of local view v, or -1 when that view isn't playing. */
+const localSlotOf = (v: number) => (v >= 1 && v < localSlots.length ? localSlots[v] : -1);
+/** Local views showing now (1 = one full-screen player). */
+const localViews = () => localSlots.length;
 
-/** Test hook: fields merged into player 2's next command (no real pad in headless tests). */
-let p2Injected: Partial<PlayerCommand> | null = null;
+/** Test hook: fields merged into local view v's next command (no real pads in headless tests). */
+const injectedFor = new Map<number, Partial<PlayerCommand>>();
 const clock = new FixedStepClock();
 const voxelClock = new VoxelClock();
 
@@ -649,7 +653,7 @@ class LabDirector extends Script {
 
         // ---- in the driver's seat the view turns with the ute (the look stays relative to it)
         followUte(0, guestSession ? guestSession.slot : 0, renderTime);
-        if (state.players > 1 && localSlot2 > 0) followUte(1, localSlot2, renderTime);
+        for (let v = 1; v < localViews(); v++) followUte(v, localSlotOf(v), renderTime);
 
         // ---- first-person camera: interpolated position, look applied at display rate
         if (state.mode === 'firstPerson') {
@@ -667,7 +671,7 @@ class LabDirector extends Script {
                 (feel.roll * 180) / Math.PI
             );
             // over-the-shoulder view (C): back, up and to the right of the eye, same look
-            if (state.chase && localSlot2 < 0) {
+            if (state.chase && localViews() === 1) {
                 const e = camera.getPosition();
                 const yaw = fpInput.yaw;
                 const cp = Math.cos(fpInput.pitch);
@@ -689,16 +693,17 @@ class LabDirector extends Script {
             }
         }
         if (camera.camera!.fov !== state.fov) camera.camera!.fov = state.fov;
-        // ---- player 2's view (split screen): interpolated eye, look at display rate
-        if (state.players > 1 && localSlot2 > 0) {
-            const c2 = scene.camera2;
-            const p2 = pads.players[1];
-            if (sim.ring.sample(sim.eyes[localSlot2].slot, renderTime, playerPose, playerAnim))
-                c2.setPosition(playerPose.p.x, playerPose.p.y, playerPose.p.z);
-            const yaw2 = p2 ? p2.yaw : sim.players[localSlot2].yaw;
-            const pitch2 = p2 ? p2.pitch : sim.players[localSlot2].pitch;
-            c2.setEulerAngles((pitch2 * 180) / Math.PI, (yaw2 * 180) / Math.PI, 0);
-            if (c2.camera!.fov !== state.fov) c2.camera!.fov = state.fov;
+        // ---- the other local players' views (split screen): interpolated eye, look at display rate
+        for (let v = 1; v < localViews(); v++) {
+            const slot = localSlotOf(v);
+            const cv = scene.cameras[v];
+            const pad = pads.players[v];
+            if (sim.ring.sample(sim.eyes[slot].slot, renderTime, playerPose, playerAnim))
+                cv.setPosition(playerPose.p.x, playerPose.p.y, playerPose.p.z);
+            const yaw = pad ? pad.yaw : sim.players[slot].yaw;
+            const pitch = pad ? pad.pitch : sim.players[slot].pitch;
+            cv.setEulerAngles((pitch * 180) / Math.PI, (yaw * 180) / Math.PI, 0);
+            if (cv.camera!.fov !== state.fov) cv.camera!.fov = state.fov;
         }
 
         // ---- voxel clock: one reconstruction per voxel frame, committed before any pass renders
@@ -708,7 +713,7 @@ class LabDirector extends Script {
         pipeline.firstPersonSlot =
             state.mode === 'firstPerson' &&
             !state.chase &&
-            localSlot2 < 0 &&
+            localViews() === 1 &&
             ownSlot >= 0 &&
             ownSlot < sim.avatars.length
                 ? sim.avatars[ownSlot].slot
@@ -858,72 +863,93 @@ function playerOneCommand() {
     return cmd;
 }
 
-/** Player 2: their pad (or the test hook); undefined in single player. */
-function playerTwoCommand() {
-    if (state.players < 2) return undefined;
-    const pad = pads.players[1];
-    const p = sim.players[Math.max(1, localSlot2)];
+/** Local view v's player (v >= 1): their pad (or the test hook). */
+function localCommand(v: number): PlayerCommand {
+    const pad = pads.players[v];
+    const p = sim.players[localSlotOf(v)];
     const base = pad ? pad.command() : { ...neutralCommand(0, p.yaw, p.pitch) };
-    if (p2Injected) {
-        Object.assign(base, p2Injected);
-        p2Injected = null;
+    const inj = injectedFor.get(v);
+    if (inj) {
+        Object.assign(base, inj);
+        injectedFor.delete(v);
     }
     return base;
 }
 
-/** Commands for slots 1.. this tick: remote guests (when hosting) and the local second player. */
+/** Commands for slots 1.. this tick: remote guests (when hosting) and the other local players. */
 function slotCommands(): (PlayerCommand | undefined)[] {
     const out: (PlayerCommand | undefined)[] = [];
     for (let slot = 1; slot < MAX_PLAYERS; slot++) {
-        if (slot === localSlot2) out[slot] = playerTwoCommand();
+        const v = localSlots.indexOf(slot, 1);
+        if (v >= 1) out[slot] = localCommand(v);
         else if (hostSession) out[slot] = hostSession.commandFor(slot);
     }
     return out;
 }
 
-/** One player or two on this device (split screen: player 1 on top, player 2 below). */
+/**
+ * How many players play on this device (split screen, 1 to MAX_VIEWS): players join and leave at the
+ * end (the last view goes first). A guest of an online game plays alone on its device.
+ */
 function setPlayers(n: number): void {
-    const count = n >= 2 && !guestSession ? 2 : 1;
-    if (count === state.players) return;
-    if (count === 2) {
+    const want = guestSession ? 1 : Math.max(1, Math.min(MAX_VIEWS, Math.round(n)));
+    if (want === localViews()) return;
+    while (localViews() < want) {
         const slot = sim.freeSlot();
         if (slot < 0) {
             showToast('No free player slot (the online game is full)');
-            return;
+            break;
         }
-        localSlot2 = slot;
+        localSlots.push(slot);
+        sim.setSlotActive(slot, true);
+        const pad = pads.players[localViews() - 1];
+        if (pad) {
+            pad.yaw = sim.players[slot].yaw;
+            pad.pitch = sim.players[slot].pitch;
+        }
     }
-    state.players = count;
-    if (count === 2 && state.mode !== 'firstPerson') setMode('firstPerson', false);
-    if (count === 2) sim.setSlotActive(localSlot2, true);
-    else if (localSlot2 > 0) {
-        sim.setSlotActive(localSlot2, false);
-        localSlot2 = -1;
-    }
-    const p2 = pads.players[1];
-    if (p2 && localSlot2 > 0) {
-        p2.yaw = sim.players[localSlot2].yaw;
-        p2.pitch = sim.players[localSlot2].pitch;
-    }
-    scene.setSplit(count === 2);
-    document.body.classList.toggle('split', count === 2);
+    while (localViews() > want) dropLocalView(localViews() - 1);
+    applyViews();
+}
+
+/** Local view v (>= 1) leaves: its player goes; the views after it move up one. */
+function dropLocalView(v: number): void {
+    const slot = localSlotOf(v);
+    if (slot < 0) return;
+    sim.setSlotActive(slot, false);
+    localSlots.splice(v, 1);
+    injectedFor.delete(v);
+}
+
+/** Shows as many views as local players, with their HUD. */
+function applyViews(): void {
+    const n = localViews();
+    state.players = n;
+    if (n > 1 && state.mode !== 'firstPerson') setMode('firstPerson', false);
+    scene.setViews(n);
+    document.body.classList.toggle('split', n > 1);
+    for (let k = 2; k <= MAX_VIEWS; k++) document.body.classList.toggle(`views-${k}`, n === k);
+    layoutViewHud();
     panel.sync();
     updateHud();
 }
 
+const PLAYER_NAMES = ['Player 1', 'Player 2', 'Player 3', 'Player 4'];
 pads.onJoin = (slot) => {
     if (slot === 0) {
         if (state.mode !== 'firstPerson') setMode('firstPerson', false);
         showToast('Player 1: gamepad connected');
     } else {
-        setPlayers(2);
-        showToast('Player 2 joined — split screen');
+        setPlayers(slot + 1);
+        showToast(`${PLAYER_NAMES[slot]} joined — split screen`);
     }
 };
 pads.onLeave = (slot) => {
-    if (slot === 1) {
-        setPlayers(1);
-        showToast('Player 2 left');
+    if (slot >= 1 && slot < localViews()) {
+        // the pads after it moved up one (PadManager), and so do their views
+        dropLocalView(slot);
+        applyViews();
+        showToast(`${PLAYER_NAMES[slot]} left`);
     }
 };
 
@@ -1166,7 +1192,9 @@ const panel = new DebugPanel(host, [
                 label: 'Players (split screen)',
                 options: [
                     { value: '1', label: '1' },
-                    { value: '2', label: '2 (gamepad A joins)' }
+                    { value: '2', label: '2 (gamepad A joins)' },
+                    { value: '3', label: '3' },
+                    { value: '4', label: '4' }
                 ]
             }
         ]
@@ -1280,18 +1308,59 @@ function applyCellSize(cm: number): void {
 const crosshair = document.createElement('div');
 crosshair.className = 'crosshair';
 document.body.append(crosshair);
-// split screen: player 2's crosshair, prompt and label in the bottom view; player 1's label on top
-const crosshair2 = document.createElement('div');
-crosshair2.className = 'crosshair crosshair-p2';
-document.body.append(crosshair2);
-const prompt2 = document.createElement('div');
-prompt2.className = 'hud-prompt prompt-p2';
-document.body.append(prompt2);
-for (const n of [1, 2]) {
+// split screen: each view's crosshair, prompt and label (view 0 uses the main crosshair and the HUD's
+// prompt), placed in that view's part of the screen
+const viewHud = Array.from({ length: MAX_VIEWS }, (_, v) => {
     const tag = document.createElement('div');
-    tag.className = `player-tag player-tag-${n}`;
-    tag.textContent = `P${n}`;
+    tag.className = `player-tag player-tag-${v + 1}`;
+    tag.textContent = `P${v + 1}`;
     document.body.append(tag);
+    if (v === 0) return { crosshair, prompt: null as unknown as HTMLDivElement, tag };
+    const c = document.createElement('div');
+    c.className = 'crosshair crosshair-p2';
+    document.body.append(c);
+    const prompt = document.createElement('div');
+    prompt.className = 'hud-prompt prompt-p2';
+    document.body.append(prompt);
+    return { crosshair: c, prompt, tag };
+});
+
+/** Places each view's crosshair, prompt and label in its part of the screen (CSS percentages). */
+function layoutViewHud(): void {
+    const n = localViews();
+    const rects = scene.viewRects(n);
+    const promptEl = document.getElementById('hud-prompt');
+    for (let v = 0; v < MAX_VIEWS; v++) {
+        const h = viewHud[v];
+        const r = rects[v];
+        const shown = n > 1 && v < n;
+        const prompt = v === 0 ? promptEl : h.prompt;
+        if (!shown) {
+            if (v === 0) {
+                h.crosshair.style.left = h.crosshair.style.top = '';
+                if (prompt) prompt.style.left = prompt.style.top = '';
+            } else {
+                h.crosshair.style.display = 'none';
+                if (prompt) prompt.style.display = 'none';
+            }
+            h.tag.style.display = 'none';
+            continue;
+        }
+        const cx = (r.x + r.w / 2) * 100;
+        const cy = (r.y + r.h / 2) * 100;
+        h.crosshair.style.display = '';
+        h.crosshair.style.left = `${cx}%`;
+        h.crosshair.style.top = `${cy}%`;
+        if (prompt) {
+            prompt.style.display = '';
+            prompt.style.left = `${cx}%`;
+            prompt.style.top = `calc(${cy}% + 22px)`;
+            if (v > 0) prompt.style.maxWidth = `calc(${r.w * 100}vw - 24px)`;
+        }
+        h.tag.style.display = '';
+        h.tag.style.left = `calc(${(r.x + r.w) * 100}% - 14px)`;
+        h.tag.style.top = `calc(${r.y * 100}% + ${v === 0 ? 12 : 10}px)`;
+    }
 }
 const chip = document.createElement('button');
 chip.className = 'debug-chip';
@@ -1533,10 +1602,10 @@ function updateNails(time: number): void {
         }
         marks = hostNails;
     }
-    // every local player's hammer outline, each in its own view (split screen: player 2's below)
+    // every local player's hammer outline, each in its own view (split screen)
     const previews: { x: number; y: number; z: number; ok: boolean; slot: number; view: number }[] = [];
     if (state.mode === 'firstPerson') {
-        const slots = guestSession ? [guestSession.slot] : state.players > 1 && localSlot2 > 0 ? [0, localSlot2] : [0];
+        const slots = guestSession ? [guestSession.slot] : localSlots;
         for (const [view, slot] of slots.entries()) {
             const h = guestSession ? guestSession.hud[slot] : sim.interactionIds(slot);
             if (h?.nailAt && h.nail > 0) previews.push({ ...h.nailAt, ok: h.nail === 1, slot, view });
@@ -1546,7 +1615,7 @@ function updateNails(time: number): void {
 }
 
 /** The ute's yaw last render frame, per local view (NaN when that view's player isn't in it). */
-const lastUteYaw = [NaN, NaN];
+const lastUteYaw = Array.from({ length: MAX_VIEWS }, () => NaN);
 const utePose = pose();
 const uteAnim = new Float64Array(ANIM_MAX);
 function followUte(view: number, slot: number, time: number): void {
@@ -1566,7 +1635,7 @@ function followUte(view: number, slot: number, time: number): void {
     // player 1's pad takes its look from fpInput each frame
     if (view === 0) fpInput.yaw += d;
     else {
-        const pad = pads.players[1];
+        const pad = pads.players[view];
         if (pad) pad.yaw += d;
     }
 }
@@ -1591,7 +1660,8 @@ function updatePrompt(): void {
         } else if (!fpInput.locked && !pads.players[0]) t = 'Click to look around';
         else t = interactionText(0, !fpInput.locked);
     }
-    if (state.players > 1 && localSlot2 > 0) prompt2.textContent = interactionText(localSlot2, true);
+    for (let v = 1; v < MAX_VIEWS; v++)
+        viewHud[v].prompt.textContent = v < localViews() ? interactionText(localSlotOf(v), true) : '';
     if (t !== promptText) {
         promptText = t;
         document.getElementById('hud-prompt')!.textContent = t;
@@ -2534,6 +2604,17 @@ declare global {
     }
 }
 
+function injectView(v: number, c: Record<string, unknown>): void {
+    injectedFor.set(v, { ...injectedFor.get(v), ...c });
+}
+function lookView(v: number, yaw: number, pitch: number): void {
+    const slot = localSlotOf(v);
+    if (slot < 0) return;
+    sim.players[slot].yaw = yaw;
+    sim.players[slot].pitch = pitch;
+    injectView(v, { yaw, pitch });
+}
+
 window.__riverLab = {
     ready: true,
     seek,
@@ -2615,20 +2696,25 @@ window.__riverLab = {
                 : null
         })
     },
-    /** Two-player split screen without real pads (tests); player 2 commands via input2. */
+    /** Split screen without real pads (tests): 1 to MAX_VIEWS local players; inputN commands view N - 1. */
     setPlayers: (n: number) => setPlayers(n),
-    input2: (c: Record<string, unknown>) => {
-        p2Injected = { ...p2Injected, ...c };
-    },
+    input2: (c: Record<string, unknown>) => injectView(1, c),
+    /** Fields merged into local view v's next command (v = 1 is player 2). */
+    inputView: (v: number, c: Record<string, unknown>) => injectView(v, c),
     /** Split screen: puts player 2 at a spot, facing yaw. */
     teleport2(x: number, z: number, yaw = 0) {
-        if (localSlot2 > 0) sim.placePlayer(x, z, yaw, localSlot2);
+        if (localSlotOf(1) > 0) sim.placePlayer(x, z, yaw, localSlotOf(1));
+    },
+    /** Split screen: puts local view v's player at a spot, facing yaw. */
+    teleportView(v: number, x: number, z: number, yaw = 0) {
+        if (localSlotOf(v) > 0) sim.placePlayer(x, z, yaw, localSlotOf(v));
     },
     look2(yaw: number, pitch: number) {
-        sim.players[Math.max(1, localSlot2)].yaw = yaw;
-        sim.players[Math.max(1, localSlot2)].pitch = pitch;
-        p2Injected = { ...p2Injected, yaw, pitch };
+        lookView(1, yaw, pitch);
     },
+    lookView: (v: number, yaw: number, pitch: number) => lookView(v, yaw, pitch),
+    /** Local views and their sim slots, and each view's screen rectangle. */
+    views: () => ({ slots: [...localSlots], rects: scene.viewRects(localViews()) }),
     /** Merges fields into the next player command (grab / throw / move edges for tests). */
     input: (c: Record<string, unknown>) => fpInput.inject(c),
     player: () => ({ ...sim.player, holding: sim.physics.heldId, eyeHeight: EYE_HEIGHT }),
@@ -2670,12 +2756,12 @@ window.__riverLab = {
         drawn: nailMarkers.drawn,
         /** Per local view (0 top / full screen, 1 player 2's), the slots whose hammer outline it drew. */
         outlines: nailMarkers.outlineSlots,
-        /** The per-view outline layers each camera renders (main camera, player 2's camera). */
-        viewLayers: [scene.camera, scene.camera2].map((c) =>
-            scene.viewLayers.filter((l) => c.camera!.layers.includes(l.id)).map((l) => l.name)
-        ),
+        /** The per-view outline layers each camera renders (main camera, then the other views'). */
+        viewLayers: scene.cameras
+            .slice(0, 2)
+            .map((c) => scene.viewLayers.filter((l) => c.camera!.layers.includes(l.id)).map((l) => l.name)),
         /** Split screen: player 2's slot (-1 when one player). */
-        slot2: localSlot2,
+        slot2: localSlotOf(1),
         preview: sim.nailPreview(0)
     }),
     /** The hazards (Epic 8): water level, phases, and the rendered water plane's height. */

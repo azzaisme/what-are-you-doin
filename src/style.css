@@ -479,7 +479,8 @@ body.ui-hidden .toast {
     display: none;
 }
 
-/* ---- split screen (local co-op): player 1 on top, player 2 below ------------------------------ */
+/* ---- split screen (local co-op): 2 views top and bottom; 3 = player 1 across the top, 2 and 3
+   below; 4 = quarters. Each view's crosshair, prompt and label are placed by layoutViewHud. -------- */
 
 .crosshair-p2,
 .prompt-p2,
@@ -532,7 +533,7 @@ body.split::after {
 body.split .player-tag {
     display: block;
     position: fixed;
-    right: 14px;
+    transform: translateX(-100%);
     padding: 2px 8px;
     font:
         600 13px ui-sans-serif,
@@ -552,6 +553,36 @@ body.split .player-tag-1 {
 body.split .player-tag-2 {
     top: calc(50% + 10px);
     background: #8fd3ff;
+}
+
+body.split .player-tag-3 {
+    background: #a8e6a1;
+}
+
+body.split .player-tag-4 {
+    background: #f0a8d8;
+}
+
+/* the line between the bottom views (3 players), and between the left and right views (4) */
+body.views-3::before,
+body.views-4::before {
+    content: '';
+    position: fixed;
+    left: calc(50% - 1px);
+    width: 2px;
+    background: #0e1418;
+    z-index: 9;
+    pointer-events: none;
+}
+
+body.views-3::before {
+    top: 50%;
+    bottom: 0;
+}
+
+body.views-4::before {
+    top: 0;
+    bottom: 0;
 }
 
 body.ui-hidden .player-tag,
