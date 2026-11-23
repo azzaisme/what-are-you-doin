@@ -1,5 +1,52 @@
 # Progress log
 
+## The game in itch's embed: checked in the browser (2026-11-23, Epic 10, #103)
+
+itch.io shows the game in a cross-origin iframe on its own page. A new browser test plays it that
+way on every pull request, and three things changed for players.
+
+### What changed for players
+
+- **Full screen from inside the game:** Settings → Game → **Full screen**. Handy on phones, where
+  itch's own button is small. It only shows where the page around the game allows full screen
+  (itch's embed does).
+- **Switching tabs in a solo game:** the game stops at the menu (paused). You come back to it
+  waiting instead of mid-fall. The sound pauses too (it did before).
+- **Online, the host switches tabs:** a page in the background draws no frames, so the world stops
+  for everyone. Guests are now told why ("The host's game is in the background: everything waits for
+  them"), stay in the game, and hear "The host is back" when it carries on.
+
+### What the test checks (`tests/e2e/embed.spec.ts`, actual results)
+
+The setup is a stand-in itch page on `itch.test` framing the game on `game.test` (routed to the
+build). It uses itch's iframe permissions, and Chrome blocks sound until a gesture.
+
+| Check                        | Result                                                                                     |
+| ---------------------------- | ------------------------------------------------------------------------------------------ |
+| Before any click             | No sound (locked), no pointer lock; the canvas fills the 640 × 360 frame                   |
+| First click inside the frame | Pointer lock taken, sound running, nothing grabbed                                         |
+| The page resizes the frame   | Canvas 960 × 540, HUD inside                                                               |
+| itch's full screen button    | Canvas 1280 × 720 (the screen), the menu opens (the mouse was released); back to 960 × 540 |
+| Settings → Full screen       | The game itself goes full screen and back; the switch shows On, then Off                   |
+| Tab hidden / shown           | Sound suspended / running; the solo game paused at the menu                                |
+| Online, host hidden / shown  | The guest's status and toast say the host is in the background, then back                  |
+| Online, guest's tab closes   | The host holds player 2 (`dropped` is `[1]`)                                               |
+| Online, host's tab closes    | The guest shows "reconnecting", then after 20 s "The host left the game"                   |
+
+- Both tests pass locally (1.2 and 1.5 minutes) with no console errors or warnings.
+- Unit test (`tests/unit/host-away.test.ts`): a host in the background tells its guest. With no
+  snapshots for two minutes the guest still isn't "reconnecting" or gone, and it's told when the
+  host is back.
+- `docs/releasing.md` lists the embed checks.
+
+### Known limits
+
+- **Headless Chrome never hides a tab.** The test hides the page the way the browser announces it
+  (the visibility state and a `visibilitychange` event). What a real background tab does to frames
+  isn't reproduced: none are drawn, and when the page is back the game catches up at most 4 ticks (the rest are skipped).
+- **Not yet tried on the real itch.io page** in Safari, Firefox or on a phone. The checks run in
+  Chrome.
+
 ## Epic 5, part 1: nails and the joint graph (2026-11-22)
 
 You can now nail timber together, or nail it down to stone and ground. In the Timber Yard you can
