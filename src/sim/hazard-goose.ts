@@ -102,6 +102,8 @@ export interface GooseHost {
     /** Players on their feet (slot, where), and the body each holds (-1: none). */
     readonly players: readonly { slot: number; x: number; z: number; held: number }[];
     say(text: string): void;
+    /** How it ended, for the playtest log (host only, not sent). */
+    outcome?(text: string): void;
 }
 
 export class GooseHazard {
@@ -189,6 +191,12 @@ export class GooseHazard {
             }
         }
         if (this.phase === GOOSE_PHASE.chase) {
+            // it is after the bucket: if its bearer lets go while another still holds it (carrying
+            // it together), it goes for that one
+            if (h.players.find((p) => p.slot === this.target)?.held !== h.bucketId) {
+                const other = h.players.find((p) => p.held === h.bucketId);
+                if (other) this.target = other.slot;
+            }
             const who = h.players.find((p) => p.slot === this.target);
             // someone else close by, not carrying the bucket, draws it off
             const decoy = h.players.find(
@@ -201,9 +209,9 @@ export class GooseHazard {
                 h.say(GOOSE_DECOY);
             } else if (!who || who.held !== h.bucketId) {
                 // put down (or handed over): no business of the goose's
-                this.goHome(h, true);
+                this.goHome(h, true, 'the bucket put down');
             } else if (t - this.since >= S(GOOSE.chaseS) || !sp.allowed(who.x, who.z)) {
-                this.goHome(h, true);
+                this.goHome(h, true, 'outrun');
             } else {
                 moveTo = who;
                 top = GOOSE.speed;
@@ -221,7 +229,7 @@ export class GooseHazard {
         }
         if (this.phase === GOOSE_PHASE.distracted) {
             const who = h.players.find((p) => p.slot === this.target);
-            if (!who || t - this.since >= S(GOOSE.distractS)) this.goHome(h, false);
+            if (!who || t - this.since >= S(GOOSE.distractS)) this.goHome(h, false, 'distracted');
             else {
                 moveTo = who;
                 top = GOOSE.speed;
@@ -298,10 +306,11 @@ export class GooseHazard {
         this.yaw = Math.atan2(Math.sin(this.yaw), Math.cos(this.yaw));
     }
 
-    private goHome(h: GooseHost, honk: boolean): void {
+    private goHome(h: GooseHost, honk: boolean, outcome: string): void {
         this.phase = GOOSE_PHASE.home;
         this.target = -1;
         if (honk) h.say(GOOSE_BORED);
+        h.outcome?.(outcome);
     }
 
     /**
@@ -324,6 +333,6 @@ export class GooseHazard {
         }
         this.peckTick = h.tick;
         h.say(GOOSE_PECK);
-        this.goHome(h, false);
+        this.goHome(h, false, 'pecked the bucket loose');
     }
 }

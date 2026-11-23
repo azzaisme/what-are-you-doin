@@ -95,7 +95,8 @@ for each hazard met, what the game saw:
   barrier was shifted, turned back, never came (whoever brought it on stayed short of it), or
   stopped in the closure (someone stood in the closed stretch for a minute); plus "left the ute on
   the closed road" when they did;
-- the weather: came and cleared.
+- the weather: came and cleared;
+- the goose: pecked the bucket loose, the bucket put down, outrun, or distracted.
 
 Compare those with what the testers say happened. These lines come from the host's device (or a
 solo game); a guest's log only has the toasts.

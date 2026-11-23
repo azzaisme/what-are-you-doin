@@ -31,7 +31,11 @@ the bucket near it and it honks, rears up, and comes for the bucket.
       two carrying it, running 4.14 and 4.20 m/s against its 3.2;
     - get someone else to run at it: it turns on them for 4 s, harmlessly, while the bucket gets
       away, then goes home.
+- **It's after the bucket, not a person:** carrying it together, if one lets go, it goes for
+  the other.
 - **No timer on the player:** it's over when the goose is back on its patch.
+- **The playtest log** says how each goose ended: pecked the bucket loose, the bucket put down,
+  outrun, or distracted. Each is tested in its scenario.
 - **Online, tested:** a guest carrying the bucket is chased and pecked just the same (the host
   runs the goose), and the guest gets the toasts (so the honks) and sees the goose where the host
   has it.
@@ -367,7 +371,7 @@ game saw.
 - **Code:** `src/sim/hazards.ts` (`outcomes`), a few lines in `hazard-tree.ts` and
   `hazard-road.ts`, the Valley's track test in `valley.ts`, `main.ts` (fed into the log), and
   `src/playtest/telemetry.ts`.
-- **The goose's outcomes** (pecked, put down, outrun, distracted) come with the goose (#78).
+- **The goose's outcomes** (pecked, put down, outrun, distracted) came with the goose (#78): see its section.
 - **Road closure fixes (from the #131 audit), in this PR:**
     - **A closure the driver brought on ended on the spot.** With the ute still behind the closed
       stretch at the tell (it always is: the tell lands 2.5 s out), "everyone is past" was true at
@@ -563,7 +567,6 @@ build match exactly in all ten scenes.
 
 - With `?props=scripted` the River Lab leaves the spare planks, beams, logs, crates and the ragdoll
   piled at the origin, in the river, where they show above the water. To be fixed with #110.
-
 
 ## Epic 8: the road closure sign swap (2026-11-23, #77)
 

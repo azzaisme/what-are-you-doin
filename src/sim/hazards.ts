@@ -401,7 +401,8 @@ export class HazardDirector {
                 goose: entity,
                 bucketId: h.bucket.id,
                 players,
-                say: (t) => this.say(h, t)
+                say: (t) => this.say(h, t),
+                outcome: (t) => this.outcome(tick, 'goose', t)
             },
             this.canStart(h, tick)
         );

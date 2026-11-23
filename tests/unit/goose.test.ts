@@ -33,6 +33,7 @@ import { Player } from './play.ts';
 beforeAll(() => initPhysics());
 
 const S = (s: number) => Math.round(s * 60);
+const ends = (s: LabSim) => s.hazards.outcomes.map((o) => `${o.hazard}: ${o.what}`);
 const texts = (s: LabSim) => s.events.filter((e) => e.kind === 'hazard').map((e) => e.text);
 
 /** The Timber Yard's frame in the level (the Valley has the yard turned into its route). */
@@ -105,6 +106,8 @@ describe('the goose (#78): it honks, rears up and comes for the carried bucket',
         expect(Math.hypot(g.x - GOOSE_PATCH.x, g.z - GOOSE_PATCH.z)).toBeLessThanOrEqual(GOOSE.home);
         expect(s.hazards.busy).toBe(false);
         expect(Math.abs(s.water.imbalance)).toBeLessThan(1e-9);
+        // the playtest log's account (#70)
+        expect(ends(s)).toEqual(['goose: pecked the bucket loose']);
     }, 120_000);
 
     it('counterplay: put the bucket down; it loses interest, honks once and goes home; no peck', () => {
@@ -124,6 +127,7 @@ describe('the goose (#78): it honks, rears up and comes for the carried bucket',
         expect(g.peckTick).toBe(-1);
         expect(texts(s)).not.toContain(GOOSE_PECK);
         expect(s.hazards.busy).toBe(false);
+        expect(ends(s)).toEqual(['goose: the bucket put down']);
     }, 120_000);
 
     it('counterplay: dodge it: run off with the bucket; it gives up at the edge of its territory; no peck', () => {
@@ -141,6 +145,7 @@ describe('the goose (#78): it honks, rears up and comes for the carried bucket',
         expect(texts(s)).toContain(GOOSE_BORED);
         untilHome(pl);
         expect(g.phase).toBe(GOOSE_PHASE.idle);
+        expect(ends(s)).toEqual(['goose: outrun']);
     }, 120_000);
 
     it('carrying the bucket, a beaver outruns it, alone and two carrying it together: measured by input', () => {
@@ -184,6 +189,7 @@ describe('the goose (#78): it honks, rears up and comes for the carried bucket',
             expect(g.phase === GOOSE_PHASE.home || g.phase === GOOSE_PHASE.idle).toBe(true);
             // still in hand (one of them: running together, a grip can slip on the way)
             expect(s.physics.holders(s.bucket.id)).toBeGreaterThan(0);
+            expect(ends(s), `${n} carrying`).toEqual(['goose: outrun']);
         }
     }, 120_000);
 
@@ -239,6 +245,7 @@ describe('the goose (#78): it honks, rears up and comes for the carried bucket',
         untilHome(pl);
         expect(g.phase).toBe(GOOSE_PHASE.idle);
         expect(g.peckTick).toBe(-1);
+        expect(ends(s)).toEqual(['goose: distracted']);
     }, 120_000);
 
     it('the budget: not in the quiet start, at most twice a run, a minute apart; a run reset puts it home and it comes again', () => {
