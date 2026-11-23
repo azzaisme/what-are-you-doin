@@ -27,7 +27,7 @@ env:
 
 jobs:
     test:
-        name: Checks, unit tests, build, browser tests
+        name: Checks, unit tests, build
         runs-on: ubuntu-latest
         timeout-minutes: 45
         steps:
@@ -52,17 +52,9 @@ jobs:
                   VITE_TURN_USERNAME: ${{ secrets.TURN_USERNAME }}
                   VITE_TURN_CREDENTIAL: ${{ secrets.TURN_CREDENTIAL }}
 
-            # browser smoke tests against the built game (Google Chrome on the runner, software GL)
-            - name: Browser tests
-              run: npx playwright test --trace off
-
-            - name: Upload browser test results
-              if: failure()
-              uses: actions/upload-artifact@v4
-              with:
-                  name: playwright-results
-                  path: test-results/
-                  retention-days: 7
+            # The browser tests (npm run test:e2e) are not run here: on the runner's software GL they
+            # take longer than this job's limit. Every change runs the full suite during development,
+            # before it is pushed for review (see AGENTS.md, "Checking your work").
 
             - name: Keep the build for the release
               uses: actions/upload-artifact@v4
