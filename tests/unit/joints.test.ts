@@ -1,7 +1,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { GROUND, JointGraph, NAIL } from '../../src/sim/joints/graph.ts';
+import { GROUND, JointGraph, NAIL, angularStiffness } from '../../src/sim/joints/graph.ts';
 import { JointSystem } from '../../src/sim/joints/joints.ts';
 import { PhysicsWorld, initPhysics } from '../../src/sim/physics/world.ts';
 import type { BodyOptions } from '../../src/sim/physics/world.ts';
@@ -815,34 +815,40 @@ describe('joint stiffness (#47 audit)', () => {
         return { turn: Math.abs(yaw), M: load * arm, k: js.angularStiffness(c), c };
     }
 
-    it('timber to timber: a nailed joint between two pieces flexes by its 0.8 stiffness, one nail four times four', () => {
+    // (#115 had a fixed 200 kN m/rad per nail, so one nail turned four times as far as four. Now
+    // k = stiffness x max(bedding, K_ser x sum(lever^2 + r^2)) (graph.ts): the pressed faces'
+    // bedding, 2.1e5, is stiffer than a few nails' slip, so one nail and four turn alike, each by M/k)
+    it('timber to timber: a nailed joint between two pieces turns by M/k, its 0.8 stiffness on the faces bedding', () => {
         const one = timberSideways(1, 300);
         const four = timberSideways(4, 300);
         expect(one.c.type).toBe('nail');
         expect(one.c.b).toBe(2);
         expect(one.c.stiffness).toBe(NAIL.stiffness);
         expect(four.c.nails.length).toBe(4);
-        expect(one.k).toBe(NAIL.stiffness * NAIL.angularStiffness);
+        expect(one.k).toBe(NAIL.stiffness * NAIL.bedding);
+        expect(four.k).toBe(angularStiffness(four.c));
         console.log(
             `timber to timber, 300 N at the tip: one nail turns ${(one.turn * 1000).toFixed(2)} mrad (M/k ${((one.M / one.k) * 1000).toFixed(2)}), four ${(four.turn * 1000).toFixed(2)} mrad (M/k ${((four.M / four.k) * 1000).toFixed(2)})`
         );
-        expect(one.turn).toBeGreaterThan(0.9 * (one.M / one.k));
-        expect(one.turn).toBeLessThan(1.1 * (one.M / one.k));
-        expect(one.turn / four.turn).toBeGreaterThan(3.6);
+        for (const r of [one, four]) {
+            expect(r.turn).toBeGreaterThan(0.9 * (r.M / r.k));
+            expect(r.turn).toBeLessThan(1.1 * (r.M / r.k));
+        }
     });
 
-    it('a joint flexes in proportion to its load over its stiffness: one nail four times as much as four', () => {
+    it('a joint flexes in proportion to its load over its stiffness (M/k, k from the bedding or the nails)', () => {
         const one = sideways(1, 300);
         const four = sideways(4, 300);
         expect(one.nails).toBe(1);
         expect(four.nails).toBe(4);
-        expect(four.k).toBe(4 * one.k);
+        expect(one.k).toBe(NAIL.anchorStiffness * NAIL.bedding);
         console.log(
             `sideways 300 N at the tip: one nail turns ${(one.turn * 1000).toFixed(2)} mrad (M/k ${((one.M / one.k) * 1000).toFixed(2)}), four nails ${(four.turn * 1000).toFixed(2)} mrad (M/k ${((four.M / four.k) * 1000).toFixed(2)})`
         );
-        expect(one.turn).toBeGreaterThan(0.9 * (one.M / one.k));
-        expect(one.turn).toBeLessThan(1.1 * (one.M / one.k));
-        expect(one.turn / four.turn).toBeGreaterThan(3.6);
+        for (const r of [one, four]) {
+            expect(r.turn).toBeGreaterThan(0.9 * (r.M / r.k));
+            expect(r.turn).toBeLessThan(1.1 * (r.M / r.k));
+        }
         // twice the load, about twice the turn
         const one2 = sideways(1, 600);
         expect(one2.turn / one.turn).toBeGreaterThan(1.7);

@@ -69,6 +69,11 @@ export const NAIL = {
     bedding: 2.1e5,
     /** How far from a nail the faces it holds together count as its own (m; stress.ts). */
     faceReach: 0.6,
+    /**
+     * The damping time of the turn about the nails (s): two faces turning flat on each other rub
+     * (with the nails' spring alone, a beam spiked at one end yawed on, damping ratio 0.05).
+     */
+    twistDamping: 0.05,
     /** The damping time of the joint springs (s). */
     angularDamping: 0.005,
     /** Relative stiffness of a joint: timber to timber flexes more than a spike into stone. */
@@ -82,11 +87,10 @@ export const NAIL = {
  * axis (two nails side by side resist a turn about it as a couple: a beam spiked down at one end
  * does not swing round in the current).
  */
-export function angularStiffness(c: { stiffness: number; nails: Vec3[] }): number {
-    // a nail group's rotational stiffness: K_ser x sum(lever^2 + r^2), r from the group's centre
-    // (EN 1995-1-1 slip modulus, as for its linear stiffness), times the joint's stiffness
+/** sum(lever^2 + r^2) over a connection's nails, r from the group's centre (m^2). */
+function nailArm2(c: { nails: Vec3[] }): number {
     const n = c.nails.length;
-    if (!n) return c.stiffness * Math.max(NAIL.bedding, NAIL.slipModulus * NAIL.lever * NAIL.lever);
+    if (!n) return NAIL.lever * NAIL.lever;
     let cx = 0;
     let cy = 0;
     let cz = 0;
@@ -97,7 +101,25 @@ export function angularStiffness(c: { stiffness: number; nails: Vec3[] }): numbe
     }
     let sum = 0;
     for (const p of c.nails) sum += NAIL.lever * NAIL.lever + (p.x - cx) ** 2 + (p.y - cy) ** 2 + (p.z - cz) ** 2;
-    return c.stiffness * Math.max(NAIL.bedding, NAIL.slipModulus * sum);
+    return sum;
+}
+
+/**
+ * Turn stiffness of a connection about its nails' own axis (N m/rad): only the nails hold that
+ * turn (two pieces turning flat on each other slide over the faces), as a couple: K_ser x sum(lever^2
+ * + r^2) (EN 1995-1-1 7.1 slip modulus per nail, r from the group's centre), times the joint's
+ * stiffness.
+ */
+export function twistStiffness(c: { stiffness: number; nails: Vec3[] }): number {
+    return c.stiffness * NAIL.slipModulus * nailArm2(c);
+}
+
+/**
+ * Turn stiffness across the nails (tipping one piece on the other, N m/rad): the faces pressed
+ * together bed against it (NAIL.bedding), or the nails' couple where that is stiffer.
+ */
+export function angularStiffness(c: { stiffness: number; nails: Vec3[] }): number {
+    return c.stiffness * Math.max(NAIL.bedding, NAIL.slipModulus * nailArm2(c));
 }
 
 /** Linear stiffness of a connection's joint (N/m): its nails' slip modulus. */
@@ -125,10 +147,10 @@ export interface Connection {
      */
     axis?: Vec3;
     /**
-     * Where the pieces touched when nailed (a's local frame): the faces they bear on each other
-     * with. A moment across the nails tips the pieces onto the edge of these (stress.ts).
+     * The collider the nails bite into (an anchor's stone; runtime only): with a's own shape, the
+     * extent of the faces a moment across the nails tips the pieces onto (stress.ts).
      */
-    faces?: Vec3[];
+    behind?: number;
     stiffness: number;
     /** Load the connection takes before it breaks (N); grows with nails. */
     strength: number;
@@ -252,7 +274,7 @@ export class JointGraph {
             rel: { ...c.rel },
             nails: c.nails.map((n) => ({ ...n })),
             axis: c.axis ? { ...c.axis } : undefined,
-            faces: c.faces?.map((p) => ({ ...p })),
+            behind: c.behind,
             strength: c.strength ?? NAIL.strength * Math.max(1, c.nails.length),
             fatigue: 0
         };

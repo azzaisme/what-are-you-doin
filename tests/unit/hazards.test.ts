@@ -28,7 +28,9 @@ import {
     quatFromAxisAngle,
     quatFromYawPitchRoll,
     quatIdentity,
-    quatMul
+    quatMul,
+    quatRotate,
+    vec3
 } from '../../src/voxels/math.ts';
 
 beforeAll(() => initPhysics());
@@ -956,12 +958,16 @@ describe('hazard director: the level stays winnable', () => {
             walkTo(3, 3);
             walkTo(b.x + 2.4, b.z);
             yaw = Math.PI / 2;
-            // line up with the beam: a little sideways step (facing -x, right is -z)
-            for (let i = 0; i < 120 && Math.abs(s.player.z - beam.pose.p.z) > 0.02; i++)
-                step({ moveX: Math.max(-0.4, Math.min(0.4, (s.player.z - beam.pose.p.z) * 4)) });
+            // where its end is: washed up, a beam lies a few degrees off square (beam-1 by 4.6 degrees,
+            // which puts the point 1.35 m along its axis 11 cm off its centre line)
+            const along = quatRotate(beam.pose.q, 1.35, 0, 0, vec3());
+            const end = { x: beam.pose.p.x + along.x, y: beam.pose.p.y + along.y, z: beam.pose.p.z + along.z };
+            // line up with it: a little sideways step (facing -x, right is -z)
+            for (let i = 0; i < 120 && Math.abs(s.player.z - end.z) > 0.02; i++)
+                step({ moveX: Math.max(-0.4, Math.min(0.4, (s.player.z - end.z) * 4)) });
             step({}, 20);
             // (aim at the top face near the end: the bank is uneven, the end may sit low)
-            pitch = -Math.atan2(s.player.y + EYE_HEIGHT - (beam.pose.p.y + 0.07), s.player.x - (beam.pose.p.x + 1.35));
+            pitch = -Math.atan2(s.player.y + EYE_HEIGHT - (end.y + 0.07), s.player.x - end.x);
             step({}, 5);
             step({ grab: true });
             expect(s.physics.heldId).toBe(beam.id);

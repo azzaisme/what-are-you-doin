@@ -27,7 +27,7 @@ import { SIM_DT } from '../clock.ts';
 import { GRAVITY } from '../physics/world.ts';
 import type { PhysBody, PhysicsWorld } from '../physics/world.ts';
 
-import { GROUND, NAIL, angularStiffness, linearStiffness } from './graph.ts';
+import { GROUND, NAIL, angularStiffness, linearStiffness, twistStiffness } from './graph.ts';
 import type { Connection, JointGraph } from './graph.ts';
 
 /** Friction (a contact: rigid) is this much stiffer than one nail in the elastic share. */
@@ -352,8 +352,9 @@ export class StressMeter {
      * Splits a connection's force and moment (at its nails) between its nails and the faces it
      * holds together. Along the nails, the faces carry compression (bearing) and the nails tension
      * (withdrawal). A moment across the nails tips the pieces onto the edge of the faces they rest
-     * on: the bearing moves out to that edge, at `reach` from the nails, and the nails pull out by
-     * what that leaves over (prying: T = along + |M| / reach). With no face to tip onto, the nails
+     * on: the bearing moves out to that edge, at `reach` from the nails (as far as both pieces
+     * reach that way: the nearer of their two edges), and the nails pull out by what that leaves
+     * over (prying: T = along + |M| / reach). With no face to tip onto, the nails
      * hold the moment themselves. A moment about the nails is theirs (a turn: their shear couple).
      * Sideways, the pressed faces hold mu x bearing by friction before the nails take shear.
      */
@@ -362,9 +363,11 @@ export class StressMeter {
         const fx = x[o] / dt;
         const fy = x[o + 1] / dt;
         const fz = x[o + 2] / dt;
-        const mx = x[o + 3] / dt;
-        const my = x[o + 4] / dt;
-        const mz = x[o + 5] / dt;
+        const B = this.momentBasis(c);
+        const m = (a: number) => (x[o + 3] * B[0][a] + x[o + 4] * B[1][a] + x[o + 5] * B[2][a]) / dt;
+        const mx = m(0);
+        const my = m(1);
+        const mz = m(2);
         const d = this.axisWorld(c);
         if (!d) {
             const force = Math.hypot(fx, fy, fz);
@@ -377,19 +380,27 @@ export class StressMeter {
         const by = my - twist * d[1];
         const bz = mz - twist * d[2];
         const bend = Math.hypot(bx, by, bz);
-        // the bearing balances the bend from along M x d: how far the faces reach that way
+        // the bearing balances the bend from along M x d: as far as both pieces reach that way
         let reach = 0;
-        const a = this.pw.bodies.get(c.a)?.body;
-        if (a && c.faces && bend > 1e-6) {
-            // in a's frame: faces and anchor are stored there
-            const q = a.rotation();
+        if (bend > 1e-6) {
             const u = cross(bx, by, bz, d[0], d[1], d[2]);
-            const ul = rotate({ x: -q.x, y: -q.y, z: -q.z, w: q.w } as RAPIER.Rotation, u[0], u[1], u[2]);
-            for (const f of c.faces)
-                reach = Math.max(
-                    reach,
-                    ((f.x - c.anchorA.x) * ul[0] + (f.y - c.anchorA.y) * ul[1] + (f.z - c.anchorA.z) * ul[2]) / bend
-                );
+            const ul: [number, number, number] = [u[0] / bend, u[1] / bend, u[2] / bend];
+            const P = this.anchorWorld(c);
+            const a = this.pw.bodies.get(c.a);
+            const b = c.b === GROUND ? undefined : this.pw.bodies.get(c.b);
+            const other =
+                c.b === GROUND
+                    ? c.behind !== undefined
+                        ? this.pw.world.getCollider(c.behind)
+                        : null
+                    : b
+                      ? nearestCollider(b.colliders, P)
+                      : null;
+            reach = Math.min(
+                NAIL.faceReach,
+                a ? support(nearestCollider(a.colliders, P), P, ul) : 0,
+                other ? support(other, P, ul) : Infinity
+            );
         }
         let pull: number;
         let moment: number;
@@ -464,6 +475,7 @@ export class StressMeter {
         };
         conns.forEach((c, k) => {
             const P = this.anchorWorld(c);
+            const B = this.momentBasis(c);
             for (const [id, s] of [
                 [c.a, 1],
                 [c.b, -1]
@@ -474,7 +486,7 @@ export class StressMeter {
                 const d = [P[0] - com[i][0], P[1] - com[i][1], P[2] - com[i][2]];
                 for (let a = 0; a < 3; a++) {
                     put(6 * i + a, col + a, s);
-                    put(6 * i + 3 + a, col + 3 + a, s);
+                    for (let e = 0; e < 3; e++) put(6 * i + 3 + a, col + 3 + e, s * B[e][a]);
                 }
                 // torque of the force about the centre of mass: d x F
                 put(6 * i + 3, col + 1, -s * d[2]);
@@ -486,9 +498,10 @@ export class StressMeter {
             }
             // stiffness weights (the elastic share)
             W.fill(linearStiffness(c), 6 * k, 6 * k + 3);
-            // an anchor's moment across its nails is its end bearing on the ground (a pin does
-            // not bend; the face it rests on does): as stiff as its turn, read only about the nails
-            W.fill(angularStiffness(c), 6 * k + 3, 6 * k + 6);
+            // the moment: about the nails by their couple, across them by the faces' bedding, as
+            // the joint's springs hold it (joints.ts stiffen)
+            W[6 * k + 3] = twistStiffness(c);
+            W[6 * k + 4] = W[6 * k + 5] = angularStiffness(c);
         });
         frictions.forEach((f, k) => {
             const col = 6 * conns.length + 2 * k;
@@ -521,6 +534,22 @@ export class StressMeter {
         return x;
     }
 
+    /** The axes a connection's moment is solved along: its nails' axis first, then two across it. */
+    private momentBasis(c: Connection): [number, number, number][] {
+        const d = this.axisWorld(c);
+        if (!d)
+            return [
+                [1, 0, 0],
+                [0, 1, 0],
+                [0, 0, 1]
+            ];
+        const t: [number, number, number] = Math.abs(d[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+        const e1 = cross(d[0], d[1], d[2], t[0], t[1], t[2]);
+        const l = Math.hypot(e1[0], e1[1], e1[2]);
+        const u: [number, number, number] = [e1[0] / l, e1[1] / l, e1[2] / l];
+        return [d, u, cross(d[0], d[1], d[2], u[0], u[1], u[2])];
+    }
+
     /** The connection's axis (into b, against the face its nails entered) in the world, or null. */
     private axisWorld(c: Connection): [number, number, number] | null {
         if (!c.axis) return null;
@@ -549,4 +578,37 @@ function rotate(q: RAPIER.Rotation, x: number, y: number, z: number): [number, n
         iy * q.w + iw * -q.y + iz * -q.x - ix * -q.z,
         iz * q.w + iw * -q.z + ix * -q.y - iy * -q.x
     ];
+}
+
+/** The collider of a body nearest a point (a piece of several boxes bears on the one there). */
+function nearestCollider(cols: RAPIER.Collider[], p: [number, number, number]): RAPIER.Collider | null {
+    let best: RAPIER.Collider | null = null;
+    let bd = Infinity;
+    for (const c of cols) {
+        const t = c.translation();
+        const dd = (t.x - p[0]) ** 2 + (t.y - p[1]) ** 2 + (t.z - p[2]) ** 2;
+        if (dd < bd) {
+            bd = dd;
+            best = c;
+        }
+    }
+    return best;
+}
+
+/** How far a collider reaches from p along unit u (a box's support; anything else: unbounded). */
+function support(col: RAPIER.Collider | null, p: [number, number, number], u: [number, number, number]): number {
+    if (!col) return 0;
+    const sh = col.shape as RAPIER.Shape & { halfExtents?: RAPIER.Vector };
+    const e = sh.halfExtents;
+    if (!e) return Infinity;
+    const t = col.translation();
+    const q = col.rotation();
+    let h = (t.x - p[0]) * u[0] + (t.y - p[1]) * u[1] + (t.z - p[2]) * u[2];
+    for (const [ax, he] of [
+        [rotate(q, 1, 0, 0), e.x],
+        [rotate(q, 0, 1, 0), e.y],
+        [rotate(q, 0, 0, 1), e.z]
+    ] as const)
+        h += he * Math.abs(ax[0] * u[0] + ax[1] * u[1] + ax[2] * u[2]);
+    return h;
 }

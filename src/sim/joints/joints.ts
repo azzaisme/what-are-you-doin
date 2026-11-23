@@ -27,7 +27,7 @@ import type { PhysBody, PhysicsWorld } from '../physics/world.ts';
 
 import { JointHealth } from './breaking.ts';
 import type { JointEvent } from './breaking.ts';
-import { GROUND, JointGraph, NAIL, angularStiffness } from './graph.ts';
+import { GROUND, JointGraph, NAIL, angularStiffness, linearStiffness, twistStiffness } from './graph.ts';
 import type { Connection, NailRefusal } from './graph.ts';
 import { StressMeter } from './stress.ts';
 
@@ -245,31 +245,6 @@ export class JointSystem {
         return out;
     }
 
-    /**
-     * Where A touches what the nail bites into, near the joint (A's local frame): Rapier's contact
-     * points between them, within NAIL.faceReach of the joint point.
-     */
-    private faces(A: PhysBody, pv: NailPreview): Vec3[] {
-        const world = this.pw.world;
-        const other = world.getCollider(pv.behind);
-        const out: Vec3[] = [];
-        if (!other) return out;
-        for (const col of A.colliders)
-            world.contactPair(col, other, (man, flipped) => {
-                const t = col.translation();
-                const q = col.rotation();
-                for (let k = 0; k < man.numContacts(); k++) {
-                    const lp = flipped ? man.localContactPoint2(k) : man.localContactPoint1(k);
-                    if (!lp) continue;
-                    const w = quatRotate(q, lp.x, lp.y, lp.z, vec3());
-                    const p = { x: t.x + w.x, y: t.y + w.y, z: t.z + w.z };
-                    const dj = Math.hypot(p.x - pv.joint.x, p.y - pv.joint.y, p.z - pv.joint.z);
-                    if (dj <= NAIL.faceReach) out.push(toLocal(A.body, p));
-                }
-            });
-        return out;
-    }
-
     /** A world point in the frame nails of this connection are stored in (its `a` body). */
     private nailLocal(c: Connection, p: Vec3Like): Vec3 {
         const body = this.pw.bodies.get(c.a)?.body;
@@ -300,7 +275,7 @@ export class JointSystem {
                 rel: B ? quatConjMul(B.body.rotation(), qa) : { x: qa.x, y: qa.y, z: qa.z, w: qa.w },
                 nails: [toLocal(A.body, pv.head)],
                 axis: B ? toLocalDir(B.body, pv.into) : { ...pv.into },
-                faces: this.faces(A, pv),
+                behind: pv.behind,
                 stiffness: B ? NAIL.stiffness : NAIL.anchorStiffness,
                 tick
             });
@@ -318,13 +293,17 @@ export class JointSystem {
      * afterwards (stress.ts): physics only has to hold the pieces as they would be held.
      */
     private makeJoint(c: Connection, A: PhysBody, B: PhysBody | null): void {
-        const data = RAPIER.JointData.spherical(c.anchorA, c.anchorB);
+        // every axis free, every axis sprung (stiffen): nails slip, they are not pins
+        const data = RAPIER.JointData.generic(c.anchorA, c.anchorB, { x: 1, y: 0, z: 0 }, 0 as RAPIER.JointAxesMask);
         const j = this.pw.world.createImpulseJoint(data, A.body, B ? B.body : this.groundBody(), true);
-        // the frames: the turn at nailing is the rest
-        j.setLocalFrame1(c.anchorA, { x: 0, y: 0, z: 0, w: 1 });
-        j.setLocalFrame2(c.anchorB, c.rel);
-        // the pieces were touching when nailed: their contact would only fight the joint
-        if (B) j.setContactsEnabled(false);
+        // the frames: the turn at nailing is the rest, with X along the nails (its own spring)
+        const qb = B ? B.body.rotation() : { x: 0, y: 0, z: 0, w: 1 };
+        const ax = c.axis ? quatRotate(qb, c.axis.x, c.axis.y, c.axis.z, vec3()) : null;
+        const r1 = ax ? fromXTo(toLocalDir(A.body, ax)) : { x: 0, y: 0, z: 0, w: 1 };
+        j.setLocalFrame1(c.anchorA, r1);
+        j.setLocalFrame2(c.anchorB, quatMul(c.rel, r1));
+        // timber to timber, the pieces keep their contact: it is their faces' bearing (an anchor's
+        // stone keeps its own too)
         this.rapier.set(c.id, j);
         this.stiffen(c);
     }
@@ -338,11 +317,25 @@ export class JointSystem {
     private stiffen(c: Connection): void {
         const j = this.rapier.get(c.id);
         if (!j) return;
-        const k = this.angularStiffness(c);
         const proto = RAPIER.SphericalImpulseJoint.prototype;
-        for (const axis of [RAPIER.JointAxis.AngX, RAPIER.JointAxis.AngY, RAPIER.JointAxis.AngZ]) {
+        // about the nails (X): their couple; across them: an anchor's bedding on its stone, timber's
+        // nails (its faces' contact bears)
+        const across = c.b === GROUND ? this.angularStiffness(c) : twistStiffness(c);
+        for (const [axis, k] of [
+            [RAPIER.JointAxis.AngX, twistStiffness(c)],
+            [RAPIER.JointAxis.AngY, across],
+            [RAPIER.JointAxis.AngZ, across]
+        ] as const) {
             proto.configureMotorModel.call(j, axis, RAPIER.MotorModel.ForceBased);
-            proto.configureMotorPosition.call(j, axis, 0, k, k * NAIL.angularDamping);
+            const damp = axis === RAPIER.JointAxis.AngX ? NAIL.twistDamping : NAIL.angularDamping;
+            proto.configureMotorPosition.call(j, axis, 0, k, k * damp);
+        }
+        // the nails slip under load (EN 1995-1-1 K_ser per nail): a stiff spring, not a pin, so two
+        // anchors on one beam do not fight over its length (as pins they made it jitter, 0.1 rad/s)
+        const kl = c.stiffness * linearStiffness(c);
+        for (const axis of [RAPIER.JointAxis.LinX, RAPIER.JointAxis.LinY, RAPIER.JointAxis.LinZ]) {
+            proto.configureMotorModel.call(j, axis, RAPIER.MotorModel.ForceBased);
+            proto.configureMotorPosition.call(j, axis, 0, kl, kl * NAIL.angularDamping);
         }
     }
 
@@ -398,4 +391,12 @@ function toLocalDir(body: RAPIER.RigidBody, d: Vec3): Vec3 {
     const out = { x: 0, y: 0, z: 0 };
     quatRotate({ x: -q.x, y: -q.y, z: -q.z, w: q.w }, d.x, d.y, d.z, out);
     return out;
+}
+
+/** The rotation that turns +X onto a unit vector (the shortest one). */
+function fromXTo(v: Vec3): { x: number; y: number; z: number; w: number } {
+    if (v.x < -0.999999) return { x: 0, y: 1, z: 0, w: 0 };
+    // axis = X cross v = (0, -v.z, v.y); q = (axis, 1 + v.x), normalised
+    const l = Math.hypot(v.z, v.y, 1 + v.x);
+    return { x: 0, y: -v.z / l, z: v.y / l, w: (1 + v.x) / l };
 }

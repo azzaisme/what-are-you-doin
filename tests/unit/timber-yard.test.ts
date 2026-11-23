@@ -202,8 +202,10 @@ describe('level 1: the timber yard', () => {
         expect(s.water.volume).toBeLessThan(0.25);
         step({ action: ACTION_POUR });
         step({}, 60);
+        // (aimed at the middle of the goal: at 0.3 it landed by its far edge, 8.9 to 9.7 m out,
+        // and rolled out of it with the player 5 mm off after walking over the yard's beams)
         for (let i = 0; i < 20; i++) {
-            pitch += (0.3 - pitch) / 6;
+            pitch += (0.28 - pitch) / 6;
             step();
         }
         step({}, 20);

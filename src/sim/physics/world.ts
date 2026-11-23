@@ -308,8 +308,11 @@ export class PhysicsWorld {
     };
     /** One rig per player: capsule, character controller, grab state. Player 0 is the default. */
     readonly rigs: Rig[] = [];
-    /** Bodies stood on this tick: vertical velocity before the moves, weight on them (kg) and where. */
-    private readonly stoodOn = new Map<number, { vy: number; m: number; x: number; z: number }>();
+    /**
+     * Bodies under characters' feet this tick: the controller's vertical push on them (N s), the
+     * weight standing on them (kg) and where.
+     */
+    private readonly stoodOn = new Map<number, { pushed: number; m: number; x: number; z: number }>();
     private terrainHandle = -1;
     /** How many rigs hold each body (two beavers can carry one log; forces add, each bounded). */
     private readonly holdCount = new Map<number, number>();
@@ -651,7 +654,7 @@ export class PhysicsWorld {
         s.vy -= GRAVITY * dt;
         if (s.grounded && s.vy < -1) s.vy = -1; // keep pressing into the ground, never accumulate
         const heldHandle = r.held ? r.held.body.handle : -1;
-        this.underFoot(r);
+        const under = this.underFoot(r);
         k.computeColliderMovement(
             r.collider,
             { x: s.vx * dt, y: s.vy * dt, z: s.vz * dt },
@@ -660,6 +663,12 @@ export class PhysicsWorld {
             // never collide with (or climb onto) what you are holding: no grab/body feedback loop
             heldHandle < 0 ? undefined : (c: RAPIER.Collider) => c.parent()?.handle !== heldHandle
         );
+        // what the controller's move pushed into each body under the feet (it pushes every one)
+        for (const u of under) {
+            let st = this.stoodOn.get(u.pb.id);
+            if (!st) this.stoodOn.set(u.pb.id, (st = { pushed: 0, m: 0, x: 0, z: 0 }));
+            st.pushed += u.pb.body.mass() * (u.pb.body.linvel().y - u.vy);
+        }
         const m = k.computedMovement();
         const t = body.translation();
         const nx = t.x + m.x;
@@ -702,23 +711,34 @@ export class PhysicsWorld {
         return -1;
     }
 
-    /** Notes the dynamic bodies under a character's feet, and their vertical velocity, before it moves. */
-    private underFoot(r: Rig): void {
+    /**
+     * The dynamic bodies under a character's feet (not held by anyone), with their vertical
+     * velocity, before it moves.
+     */
+    private underFoot(r: Rig): { pb: PhysBody; vy: number }[] {
         const t = r.body.translation();
+        const out: { pb: PhysBody; vy: number }[] = [];
         this.world.intersectionsWithShape(
             { x: t.x, y: t.y, z: t.z },
             { x: 0, y: 0, z: 0, w: 1 },
             FOOT,
             (col) => {
                 const pb = this.byCollider.get(col.handle);
-                if (pb && pb.kind === 'dynamic' && pb.enabled && !this.stoodOn.has(pb.id))
-                    this.stoodOn.set(pb.id, { vy: pb.body.linvel().y, m: 0, x: 0, z: 0 });
+                if (
+                    pb &&
+                    pb.kind === 'dynamic' &&
+                    pb.enabled &&
+                    this.holders(pb.id) === 0 &&
+                    !out.some((u) => u.pb === pb)
+                )
+                    out.push({ pb, vy: pb.body.linvel().y });
                 return true;
             },
             RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
             groups(ALL, LAYER.prop),
             r.collider
         );
+        return out;
     }
 
     /**
@@ -734,7 +754,7 @@ export class PhysicsWorld {
             const pb = this.bodies.get(id);
             if (!pb) continue;
             const b = pb.body;
-            const pushed = b.mass() * (b.linvel().y - st.vy);
+            const pushed = st.pushed;
             const t = b.worldCom();
             const at = st.m > 0 ? { x: st.x, y: t.y, z: st.z } : t;
             const j = -st.m * GRAVITY * SIM_DT - pushed;
