@@ -84,17 +84,40 @@ describe('remappable controls', () => {
         expect(p.pad.jump).toEqual([PAD_BUTTONS.B, -1]);
     });
 
+    it('nailing (Epic 5) is bound like the rest: F and LB; binding grab to F takes it off nail and names it', async () => {
+        const { controlNames } = await import('../../src/ui/prompts.ts');
+        const { hammerHint } = await import('../../src/ui/hammer-hud.ts');
+        const b = defaultBindings();
+        expect(b.keys.nail).toEqual(['KeyF', '']);
+        expect(b.pad.nail).toEqual([PAD_BUTTONS.LB, -1]);
+        expect(actionForKey(b, 'KeyF')).toBe('nail');
+        const names = controlNames(b);
+        expect(hammerHint(1, names.keyVerb('nail'))).toBe('F to nail');
+        expect(hammerHint(1, names.padVerb('nail'))).toBe('LB to nail');
+        // grab onto F: nail loses it, and the change names nail
+        expect(bindKey(b, 'grab', 1, 'KeyF')).toBe('nail');
+        expect(b.keys.nail).toEqual(['', '']);
+        expect(actionForKey(b, 'KeyF')).toBe('grab');
+        expect(names.keyVerb('nail')).toBe('Unbound');
+        // nail onto N: the prompt follows
+        expect(bindKey(b, 'nail', 0, 'KeyN')).toBeNull();
+        expect(hammerHint(1, names.keyVerb('nail'))).toBe('N to nail');
+        // the pad the same way
+        expect(bindPad(b, 'grab', 1, PAD_BUTTONS.LB)).toBe('nail');
+        expect(b.pad.nail).toEqual([-1, -1]);
+    });
+
     it('saves only what differs, loads back exactly, and survives junk and duplicates', () => {
         const s = memory();
         const b = defaultBindings();
         saveBindings(s, b);
         expect(s.data.has(BINDINGS_STORAGE_KEY)).toBe(false);
-        bindKey(b, 'jump', 0, 'KeyF');
-        bindPad(b, 'throw', 0, PAD_BUTTONS.LB);
+        bindKey(b, 'jump', 0, 'KeyH');
+        bindPad(b, 'throw', 0, PAD_BUTTONS.LEFT);
         saveBindings(s, b);
         expect(JSON.parse(s.data.get(BINDINGS_STORAGE_KEY)!)).toEqual({
-            keys: { jump: ['KeyF', ''] },
-            pad: { throw: [PAD_BUTTONS.LB, -1] }
+            keys: { jump: ['KeyH', ''] },
+            pad: { throw: [PAD_BUTTONS.LEFT, -1] }
         });
         expect(loadBindings(s)).toEqual(b);
         // back to defaults: nothing stored

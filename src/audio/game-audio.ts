@@ -70,6 +70,8 @@ export interface AudioWorld {
 const AMBIENT: ReadonlySet<string> = new Set(['river', 'wind', 'rumble', 'bird-0', 'bird-1', 'bird-2']);
 const VARIANTS: Partial<Record<SfxName, number>> = { knock: 3, clank: 2, thud: 2, step: 4, bird: 3, creak: 3 };
 const EMITTERS = 12;
+/** A waterfall's roar: the creek's loop, louder and deeper (heard out to the emitters' 60 m). */
+const WATERFALL = { gain: 1.1, pitch: 0.72 } as const;
 
 interface Track {
     x: number;
@@ -96,6 +98,8 @@ export class GameAudio implements SfxSink {
     private nextEmitter = 0;
     private flat: Entity | null = null;
     private readonly loops = new Map<SoundName, { e: Entity; gain: number; target: number; pitch: number }>();
+    /** The level's waterfalls, each a fixed loop where it falls. */
+    private readonly falls: Entity[] = [];
     /** Loops held on by other features (`sfx.hold`), by their key (src/audio/held-loops.ts). */
     private readonly holds = new HeldLoops<Entity>(
         (key, name, positional) => {
@@ -182,6 +186,22 @@ export class GameAudio implements SfxSink {
             e.sound!.play(name);
             this.loops.set(name, { e, gain: 0, target: 0, pitch: 1 });
         }
+        // the level's waterfalls (#80): the creek's water, deeper and louder, from where each falls
+        if (name === 'river') {
+            for (const at of this.world.level.sounds?.waterfalls ?? []) {
+                const e = this.emitter('SfxWaterfall', true);
+                e.setPosition(at.x, at.y, at.z);
+                e.sound!.addSlot('falls', {
+                    asset: asset.id,
+                    loop: true,
+                    volume: WATERFALL.gain * this.volumes.ambience,
+                    pitch: WATERFALL.pitch,
+                    autoPlay: false
+                });
+                e.sound!.play('falls');
+                this.falls.push(e);
+            }
+        }
         return asset;
     }
 
@@ -192,6 +212,10 @@ export class GameAudio implements SfxSink {
 
     setVolumes(v: AudioVolumes): void {
         this.volumes = { ...v };
+        for (const e of this.falls) {
+            const slot = e.sound!.slot('falls');
+            if (slot) slot.volume = WATERFALL.gain * v.ambience;
+        }
         this.app.soundManager.volume = Math.max(0, Math.min(1, v.master));
     }
 
@@ -489,7 +513,14 @@ export class GameAudio implements SfxSink {
     }
 
     /** For tests and the debug panel. */
-    status(): { started: boolean; context: string; played: number; recent: string[]; loops: Record<string, number> } {
+    status(): {
+        started: boolean;
+        context: string;
+        played: number;
+        recent: string[];
+        loops: Record<string, number>;
+        waterfalls: number;
+    } {
         const loops: Record<string, number> = {};
         for (const [n, l] of this.loops) loops[n] = Math.round(l.gain * 100) / 100;
         return {
@@ -497,7 +528,8 @@ export class GameAudio implements SfxSink {
             context: this.started ? (this.app.soundManager.context?.state ?? 'none') : 'locked',
             played: this.played,
             recent: [...this.recent],
-            loops
+            loops,
+            waterfalls: this.falls.length
         };
     }
 }

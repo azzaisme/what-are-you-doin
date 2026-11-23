@@ -242,7 +242,9 @@ export class Forestry {
                 pw.addStatic(
                     RAPIER.ColliderDesc.cylinder(half + 0.025, LOG_RADIUS * 0.95)
                         .setTranslation(t.x, g + half - 0.025, t.z)
-                        .setFriction(0.8)
+                        .setFriction(0.8),
+                    // a tree's stump is not an anchor for nails (Epic 5): trees are felled
+                    false
                 )
             );
             return;
@@ -255,7 +257,9 @@ export class Forestry {
                 RAPIER.ColliderDesc.cylinder(half, LOG_RADIUS + 0.02)
                     .setTranslation(at.p.x, at.p.y, at.p.z)
                     .setRotation(standTilt(t))
-                    .setFriction(0.8)
+                    .setFriction(0.8),
+                // nor is a standing trunk (Epic 5)
+                false
             )
         );
         // no foliage collision (§2.5): the needles never block a view ray, snag a falling trunk

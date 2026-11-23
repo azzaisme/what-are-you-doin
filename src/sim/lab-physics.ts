@@ -34,7 +34,7 @@ export interface PropDef {
 
 const PLANK: { shape: ShapeSpec; opts: BodyOptions } = {
     shape: { type: 'box', hx: 1.2, hy: 0.1, hz: 0.05 },
-    opts: { density: 500, friction: 0.7, restitution: 0.1, ccd: true }
+    opts: { density: 500, friction: 0.7, restitution: 0.1, ccd: true, nailable: true }
 };
 
 /**
@@ -47,7 +47,14 @@ export function propBody(name: string): { shape: ShapeSpec; opts: BodyOptions } 
     if (name.startsWith('beam'))
         return {
             shape: { type: 'box', hx: BEAM_HALF.x, hy: BEAM_HALF.y, hz: BEAM_HALF.z },
-            opts: { density: 380, friction: 0.75, restitution: 0.05, ccd: true, wristTorque: GRAB.braceTorque }
+            opts: {
+                density: 380,
+                friction: 0.75,
+                restitution: 0.05,
+                ccd: true,
+                wristTorque: GRAB.braceTorque,
+                nailable: true
+            }
         };
     if (name.startsWith('short-log'))
         return {
@@ -63,12 +70,12 @@ export function propBody(name: string): { shape: ShapeSpec; opts: BodyOptions } 
     if (name === 'log' || name.startsWith('extra-log') || name.startsWith('felled-log'))
         return {
             shape: { type: 'cylinder', axis: 'x', r: LOG_RADIUS, half: 1.0 },
-            opts: { density: 450, friction: 0.8, restitution: 0.05, angularDamping: 0.4 }
+            opts: { density: 450, friction: 0.8, restitution: 0.05, angularDamping: 0.4, nailable: true }
         };
     if (name === 'cube' || name.startsWith('crate-'))
         return {
             shape: { type: 'box', hx: 0.25, hy: 0.25, hz: 0.25 },
-            opts: { density: 200, friction: 0.7, restitution: 0.1 }
+            opts: { density: 200, friction: 0.7, restitution: 0.1, nailable: true }
         };
     if (name === 'sphere')
         return {
@@ -146,13 +153,15 @@ export function buildLabPhysics(level: LevelDef): PhysicsWorld {
             pw.addStatic(
                 RAPIER.ColliderDesc.cylinder(th / 2, OAK.trunkRadius * s + 0.02)
                     .setTranslation(t.x, base + th / 2 - 0.05, t.z)
-                    .setFriction(0.8)
+                    .setFriction(0.8),
+                false
             );
             for (const b of oakCrown(t, base))
                 pw.addStatic(
                     RAPIER.ColliderDesc.ball(b.r * 0.85)
                         .setTranslation(b.x, b.y, b.z)
-                        .setFriction(0.5)
+                        .setFriction(0.5),
+                    false
                 );
             continue;
         }
@@ -160,14 +169,16 @@ export function buildLabPhysics(level: LevelDef): PhysicsWorld {
         pw.addStatic(
             RAPIER.ColliderDesc.cylinder(trunkH / 2, pineTrunkRadius(s))
                 .setTranslation(t.x, base + trunkH / 2 - 0.05, t.z)
-                .setFriction(0.8)
+                .setFriction(0.8),
+            false
         );
         for (const tier of PINE_TIERS) {
             const h = tier.h * s;
             pw.addStatic(
                 RAPIER.ColliderDesc.cone(h / 2, tier.r * s)
                     .setTranslation(t.x, base + tier.y * s + h / 2, t.z)
-                    .setFriction(0.6)
+                    .setFriction(0.6),
+                false
             );
         }
     }
@@ -231,10 +242,10 @@ export function buildLabPhysics(level: LevelDef): PhysicsWorld {
     const cz = (A.minZ + A.maxZ) / 2;
     const hx = (A.maxX - A.minX) / 2;
     const hz = (A.maxZ - A.minZ) / 2;
-    pw.addStatic(RAPIER.ColliderDesc.cuboid(hx + 0.5, H, 0.5).setTranslation(cx, 2, A.minZ - 0.5));
-    pw.addStatic(RAPIER.ColliderDesc.cuboid(hx + 0.5, H, 0.5).setTranslation(cx, 2, A.maxZ + 0.5));
-    pw.addStatic(RAPIER.ColliderDesc.cuboid(0.5, H, hz + 0.5).setTranslation(A.minX - 0.5, 2, cz));
-    pw.addStatic(RAPIER.ColliderDesc.cuboid(0.5, H, hz + 0.5).setTranslation(A.maxX + 0.5, 2, cz));
+    pw.addStatic(RAPIER.ColliderDesc.cuboid(hx + 0.5, H, 0.5).setTranslation(cx, 2, A.minZ - 0.5), false);
+    pw.addStatic(RAPIER.ColliderDesc.cuboid(hx + 0.5, H, 0.5).setTranslation(cx, 2, A.maxZ + 0.5), false);
+    pw.addStatic(RAPIER.ColliderDesc.cuboid(0.5, H, hz + 0.5).setTranslation(A.minX - 0.5, 2, cz), false);
+    pw.addStatic(RAPIER.ColliderDesc.cuboid(0.5, H, hz + 0.5).setTranslation(A.maxX + 0.5, 2, cz), false);
     return pw;
 }
 

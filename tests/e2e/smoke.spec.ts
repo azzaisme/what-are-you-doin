@@ -23,13 +23,29 @@ type Lab = {
     input(c: Record<string, unknown>): void;
     action(id: string): void;
     paused(): boolean;
-    player(): { x: number; y: number; z: number; holding: number; grounded: boolean; eyeHeight: number };
+    player(): { x: number; y: number; z: number; pitch: number; holding: number; grounded: boolean; eyeHeight: number };
     look(yaw: number, pitch: number): void;
     level: string;
     progress(): { goalReached: boolean; falls: number; recoveries: number; events: string[] };
     water(): { volume: number; poured: number };
     placeProp(name: string, x: number, y: number, z: number, yaw?: number): boolean;
-    interaction(): { holding: string | null; target: string | null; shared: boolean; driving: boolean; seat: number };
+    interaction(): {
+        holding: string | null;
+        target: string | null;
+        shared: boolean;
+        driving: boolean;
+        seat: number;
+        nail: number;
+    };
+    joints(): {
+        connections: number;
+        nails: number;
+        drawn: number;
+        preview: unknown;
+        outlines: number[][];
+        viewLayers: string[][];
+        slot2: number;
+    };
     teleport(x: number, z: number, yaw?: number): void;
     ute(): { x: number; y: number; z: number; yaw: number; speed: number; driver: number; drivable: boolean };
     hazards(): { waterY: number; flood: number; gust: number; floods: number; planeY: number; tick: number };
@@ -661,8 +677,9 @@ test('level 1, the Timber Yard: starts in first person with the objective, and t
     await expect(page.locator('#hud-water')).toContainText('10.0 L');
     const s = await lab(page, (l) => l.stats());
     // beaver, ute, bucket, six planks, two beams, three logs, the crate, the windsock, and logging:
-    // the axe, the sawmill and the six stand markers (their cut band hidden until a tree is bitten)
-    expect(s.voxel.objects).toBe(24);
+    // the axe, the sawmill and the six stand markers (their cut band hidden until a tree is bitten), and
+    // Epic 5's seven deck planks by the bridge
+    expect(s.voxel.objects).toBe(31);
     expect(s.voxel.rejected).toBe(0);
     const g = await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid());
     expect(g.misaligned).toBe(0);
@@ -783,6 +800,44 @@ test('the Timber Yard ute: get in, drive it with the keyboard, get out', async (
     expect(problems).toEqual([]);
 });
 
+test('the Timber Yard hammer: look at a beam, F nails it down and the nail head shows', async ({ page }) => {
+    test.setTimeout(300_000);
+    const problems = await boot(page, '?level=yard&t=0.01&quality=low#cell100');
+    await lab(page, (l) => l.action('pause'));
+    const p0 = await lab(page, (l) => l.player());
+    // a beam on its edge on the ground 0.6 m in front of you (yaw 0 looks along -z), across your
+    // view; look steeply down at the near side of its top, so the nail comes out of its bottom
+    await page.evaluate(
+        ([x, y, z, eye]) => {
+            const l = (window as unknown as { __riverLab: Lab }).__riverLab;
+            l.teleport(x, z, 0);
+            l.placeProp('beam-0', x, y + 0.3, z - 0.6, 0);
+            l.look(0, -Math.atan2(eye - 0.2, 0.55));
+        },
+        [p0.x, p0.y, p0.z, p0.eyeHeight]
+    );
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().nail === 1,
+        null,
+        { timeout: 60_000 }
+    );
+    expect(await lab(page, (l) => l.joints().nails)).toBe(0);
+    await page.keyboard.press('KeyF');
+    await page.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.joints().nails === 1, null, {
+        timeout: 30_000
+    });
+    await page.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.joints().drawn === 1, null, {
+        timeout: 30_000
+    });
+    // the same spot again is refused: still one nail
+    await page.keyboard.press('KeyF');
+    await page.waitForTimeout(500);
+    expect(await lab(page, (l) => l.joints())).toMatchObject({ connections: 1, nails: 1 });
+    expect(await lab(page, (l) => l.interaction().nail)).toBeGreaterThan(1);
+    await page.screenshot({ path: 'test-results/hammer-nail.png' });
+    expect(problems).toEqual([]);
+});
+
 test('the Valley: one streamed map, stages advance in order and the world follows the player', async ({ page }) => {
     const problems = await boot(page, '?level=valley&t=0.01&quality=low#cell100');
     expect(await lab(page, (l) => l.level)).toBe('valley');
@@ -854,7 +909,7 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
         Math.abs(rowBrightness(Math.floor(shot.height * 0.3)) - rowBrightness(Math.floor(shot.height * 0.8)))
     ).toBeGreaterThan(1);
     const s = await lab(page, (l) => l.stats());
-    expect(s.voxel.objects).toBe(26); // the yard's 24 plus two voxel beaver bodies
+    expect(s.voxel.objects).toBe(33); // the yard's 31 plus two voxel beaver bodies
     // player 2 walks on their own commands
     const before = await page.evaluate(
         () =>
@@ -883,10 +938,106 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
     await lab(page, (l) => (l as unknown as { setPlayers(n: number): void }).setPlayers(1));
     // player 2's body leaves with the next applied voxel frame (wait on it: slow CI runners lag)
     await page.waitForFunction(
-        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 25,
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 32,
         null,
         { timeout: 60_000 }
     );
+    expect(problems).toEqual([]);
+});
+
+test("split screen: player 2's hammer aim shows player 2's nail outline in player 2's view only", async ({ page }) => {
+    test.setTimeout(300_000);
+    const problems = await boot(page, '?level=yard&t=0.01&quality=low&noui#cell100');
+    await lab(page, (l) => l.action('pause'));
+    await lab(page, (l) => (l as unknown as { setPlayers(n: number): void }).setPlayers(2));
+    const slot2 = await lab(page, (l) => l.joints().slot2);
+    expect(slot2).toBeGreaterThan(0);
+    // player 2 stands over a beam on the ground and looks down at it; player 1 looks at the same
+    // beam from 3 m away (out of hammer reach), so a shared outline would show in both views
+    const p0 = await lab(page, (l) => l.player());
+    await page.evaluate(
+        ([x, y, z, eye]) => {
+            const l = (window as unknown as { __riverLab: Lab }).__riverLab as Lab & {
+                teleport2(x: number, z: number, yaw: number): void;
+                look2(yaw: number, pitch: number): void;
+            };
+            l.look(Math.atan2(-3, 0.6), -Math.atan2(eye - 0.2, Math.hypot(3, 0.6)));
+            l.teleport2(x + 3, z, 0);
+            l.placeProp('beam-0', x + 3, y + 0.3, z - 0.6, 0);
+            l.look2(0, -Math.atan2(eye - 0.2, 0.55));
+        },
+        [p0.x, p0.y, p0.z, p0.eyeHeight]
+    );
+    await page.waitForFunction(
+        (s2) => {
+            const o = (window as unknown as { __riverLab: Lab }).__riverLab.joints().outlines;
+            return o[1]?.length === 1 && o[1][0] === s2;
+        },
+        slot2,
+        { timeout: 60_000 }
+    );
+    // player 1's view (the top camera) draws no outline, player 2's (the bottom camera) draws
+    // player 2's; each camera renders its own outline layer and not the other's
+    const j = await lab(page, (l) => l.joints());
+    expect(j.outlines).toEqual([[], [slot2]]);
+    expect(j.viewLayers).toEqual([['View1'], ['View2']]);
+    // and on screen: the pixels that change with the outline (on, off, on, off, on, with uneven
+    // waits: the same in every shot with it and in every shot without, and different between;
+    // animated things, a creature or the water, differ between shots either way) are all in the
+    // bottom half
+    const show = (on: boolean, frames: number) =>
+        page.evaluate(
+            async ([v, k]) => {
+                (
+                    window as unknown as { __riverLab: { showNailOutlines(on: boolean): void } }
+                ).__riverLab.showNailOutlines(v as boolean);
+                for (let f = 0; f < (k as number); f++) await new Promise((r) => requestAnimationFrame(r));
+            },
+            [on, frames]
+        );
+    const shots: string[] = [];
+    for (const [on, frames] of [
+        [true, 3],
+        [false, 5],
+        [true, 4],
+        [false, 7],
+        [true, 6]
+    ] as const) {
+        await show(on, frames);
+        shots.push((await page.screenshot()).toString('base64'));
+    }
+    const changed = await page.evaluate(async (pngs) => {
+        const data = await Promise.all(
+            pngs.map(async (png) => {
+                const img = new Image();
+                img.src = `data:image/png;base64,${png}`;
+                await img.decode();
+                const c = document.createElement('canvas');
+                c.width = img.width;
+                c.height = img.height;
+                const g = c.getContext('2d')!;
+                g.drawImage(img, 0, 0);
+                return { w: c.width, h: c.height, d: g.getImageData(0, 0, c.width, c.height).data };
+            })
+        );
+        const ons = [data[0], data[2], data[4]];
+        const offs = [data[1], data[3]];
+        const diff = (a: Uint8ClampedArray, b: Uint8ClampedArray, i: number) =>
+            Math.max(Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2]));
+        const { w, h } = data[0];
+        const half = [0, 0];
+        for (let i = 0; i < data[0].d.length; i += 4) {
+            const steady =
+                diff(ons[0].d, ons[1].d, i) < 8 && diff(ons[0].d, ons[2].d, i) < 8 && diff(offs[0].d, offs[1].d, i) < 8;
+            if (steady && diff(ons[0].d, offs[0].d, i) > 25) half[(i / 4 / w) * 2 < h ? 0 : 1]++;
+        }
+        return half;
+    }, shots);
+    console.log(`outline pixels: top ${changed[0]}, bottom ${changed[1]}`);
+    // (a stray pixel or two of noise at most; the outline itself is 16 here, and drawn into the
+    // wrong view it shows there)
+    expect(changed[0]).toBeLessThanOrEqual(3);
+    expect(changed[1]).toBeGreaterThan(10);
     expect(problems).toEqual([]);
 });
 
@@ -985,7 +1136,7 @@ for (const transport of ['local', 'p2p'] as const)
         // the guest renders the host's world: both beaver bodies and every prop, all on the grid
         // (voxel frames lag the snapshots in software GL, so wait for the frame that has both beavers)
         await guest.waitForFunction(
-            () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 26,
+            () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 33,
             null,
             { timeout: 60_000 }
         );
@@ -1367,6 +1518,13 @@ test('logging in the Timber Yard: chew a pine down, the voxel tree becomes a stu
     await lab(page, (l) => l.look(-Math.PI / 2 + 0.3, -0.45));
     await page.waitForTimeout(1500);
     await page.screenshot({ path: 'test-results/logging-felled.png' });
+    // a grab press that landed after the fall picks the log up (on a slow software renderer the
+    // presses queue up), and full hands never aim at the lever: let go first
+    for (let tries = 0; tries < 20 && (await lab(page, (l) => l.interaction().holding)) !== null; tries++) {
+        await lab(page, (l) => l.input({ grab: true }));
+        await page.waitForTimeout(500);
+    }
+    expect(await lab(page, (l) => l.interaction().holding)).toBeNull();
     // the sawmill's lever: walk up to the near post and grab it to set the saw to beams
     await lab(page, (l) => {
         // the lever is on the near (north) post: stand north of it, facing south (+z)
@@ -1376,6 +1534,7 @@ test('logging in the Timber Yard: chew a pine down, the voxel tree becomes a stu
     // look down until the view is on the lever (where depends on the body's eye height). The sim
     // reads the look when it steps, so wait for it to step at each pitch: on a slow software
     // renderer a fixed wait can sweep past the lever before the sim ever looks there
+    const sweep: string[] = [];
     for (let p = -0.2; p > -1.0; p -= 0.04) {
         const t0 = await page.evaluate((pitch) => {
             const l = (window as unknown as { __riverLab: Lab }).__riverLab;
@@ -1387,8 +1546,16 @@ test('logging in the Timber Yard: chew a pine down, the voxel tree becomes a stu
             t0,
             { timeout: 30_000 }
         );
-        if ((await lab(page, (l) => l.interaction().target)) === 'sawmill') break;
+        const seen = await lab(page, (l) => {
+            const pl = l.player();
+            const it = l.interaction();
+            return `pitch ${pl.pitch.toFixed(2)} at (${pl.x.toFixed(2)}, ${pl.y.toFixed(2)}, ${pl.z.toFixed(2)}): target ${it.target}, holding ${it.holding}`;
+        });
+        sweep.push(seen);
+        if (seen.includes('target sawmill')) break;
     }
+    // if the sweep missed, the failure says what the player saw at each pitch
+    expect(sweep.at(-1), sweep.join('\n')).toContain('target sawmill');
     await page.waitForFunction(
         () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().target === 'sawmill',
         null,

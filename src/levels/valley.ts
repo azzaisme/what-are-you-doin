@@ -493,8 +493,7 @@ function valleyPieces(): StaticPiece[] {
     P.push(piece('trestle-snapped', boxS(0.1, 0.1, 1.3), gu + 2.3, rim - 1.0, 0.8, darkTimber, { pitch: 0.9 }));
     P.push(piece('trestle-leg', boxS(0.09, 2.0, 0.09), gu - 1.6, 0.5, -1.5, darkTimber, { roll: 0.35 }));
     // the outfall: a concrete pipe end in the far wall, and the water falling from it
-    const wt = 15;
-    const wu = gorgeU(wt) + GORGE.hw;
+    const { u: wu, t: wt } = waterfallSpot();
     P.push(
         piece('outfall', { type: 'cylinder', axis: 'z', r: 0.7, half: 0.6 }, wu + 0.3, rim - 0.6, wt, concrete, {
             priority: 3
@@ -1251,12 +1250,26 @@ const yardActors = {
     ute: fromYard(pose(-10.5, YARD_Y + 0.002, 4.6, quatFromYawPitchRoll(Math.PI / 2 + 0.15, 0, 0)))
 };
 
+/** Where the gorge's waterfall comes out of the far wall (route coordinates: along u, across t). */
+function waterfallSpot(): { u: number; t: number } {
+    const t = 15;
+    return { u: gorgeU(t) + GORGE.hw, t };
+}
+
+/** The waterfall's middle, in the world: its roar is heard from here (Epic 8, #80). */
+export function valleyWaterfall(): { x: number; y: number; z: number } {
+    const { u, t } = waterfallSpot();
+    const w = routeToWorld(u - 0.35, t);
+    return { x: w.x, y: (WALL.low - 0.6 + CREEK_WATER_Y) / 2, z: w.z };
+}
+
 export const valleyLevel: LevelDef = {
     id: 'valley',
     name: 'The Valley',
     bounds: VALLEY_BOUNDS,
     playArea: { minX: -109, maxX: 109, minZ: -109, maxZ: 109 },
     water: { y: CREEK_WATER_Y, cx: 0, cz: 0, halfX: 112, halfZ: 112 },
+    sounds: { waterfalls: [valleyWaterfall()] },
     terrainHeight: valleyHeight,
     layout: valleyLayout,
     build: buildValley,
