@@ -1647,6 +1647,7 @@ const EMPTY_FRAME_STATS = {
     latticeHidden: 0,
     maskSkipped: 0,
     maskCells: 0,
+    maskLimit: 0,
     maskRejected: 0,
     staticRebuilt: 0,
     dynamicRebuilt: 0,

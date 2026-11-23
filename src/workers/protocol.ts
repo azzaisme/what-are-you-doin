@@ -52,10 +52,12 @@ export interface FrameStats {
     latticeMasks: number;
     /** Cells where such an object now takes the cell from one of this lattice's objects. */
     latticeHidden: number;
-    /** Such objects skipped this frame: the lattice's mask budget (MASK_BUDGET) was spent. */
+    /** Such objects skipped this frame: the lattice's mask budget (maskLimit) was spent. */
     maskSkipped: number;
-    /** Candidate cells sampled for them this frame (at most MASK_BUDGET a lattice). */
+    /** This lattice's own cells tested against them this frame (at most maskLimit). */
     maskCells: number;
+    /** This frame's mask budget: MASK_BUDGET, or the cells this lattice's own objects hold when more. */
+    maskLimit: number;
     /** Their parts the rasterizer rejected (runaway bounds), as `rejected` counts for objects. */
     maskRejected: number;
     staticRebuilt: number;

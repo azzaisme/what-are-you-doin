@@ -514,44 +514,41 @@ export class VoxelWorld {
         return changed;
     }
 
-    private readonly maskSink = {
-        world: this as VoxelWorld,
-        target: null as Map<number, number> | null,
-        write(i: number, j: number, k: number, _value: number, priority: number) {
-            // only where this lattice has chunks: a mask matters only over this lattice's own cells
-            const c = this.world.getChunk(i >> CHUNK_BITS, j >> CHUNK_BITS, k >> CHUNK_BITS);
-            if (!c) return;
-            const key = c.id * CHUNK_VOLUME + localIndex(i & CHUNK_MASK, j & CHUNK_MASK, k & CHUNK_MASK);
-            if (!this.target!.has(key)) this.target!.set(key, MASK_VALUE | (priority << 16));
+    /**
+     * Every cell one object holds, as i, j, k and its cell key, four ints a cell, into `out.a`
+     * (grown as needed). Returns the number of cells.
+     */
+    objectCellCoords(id: number, out: { a: Int32Array }): number {
+        const e = this.objects.get(id);
+        if (!e) return 0;
+        if (out.a.length < e.cells.size * 4) out.a = new Int32Array(Math.ceil(e.cells.size * 5));
+        const a = out.a;
+        let n = 0;
+        for (const key of e.cells.keys()) {
+            const c = this.chunks[key >>> 12];
+            const li = key & (CHUNK_VOLUME - 1);
+            a[n] = (c.cx << CHUNK_BITS) | (li & CHUNK_MASK);
+            a[n + 1] = (c.cy << CHUNK_BITS) | (li >> (2 * CHUNK_BITS));
+            a[n + 2] = (c.cz << CHUNK_BITS) | ((li >> CHUNK_BITS) & CHUNK_MASK);
+            a[n + 3] = key;
+            n += 4;
         }
-    } satisfies CellSink & { world: VoxelWorld; target: Map<number, number> | null };
+        return n / 4;
+    }
 
     /**
-     * Rasterizes a mask object (registered with `mask`), each part only inside its own cell box
-     * (`boxes[part]`; null leaves the part out), and marks changed cells dirty. `policy` is the
-     * mask's own (the service samples cell centres: a cell gives way where its centre lies inside
-     * the winner). Returns the number of cells that changed.
+     * Sets a mask object's cells (registered with `mask`) to exactly `keys[0 .. count)`: the cells
+     * this lattice's own objects hold that the mask wins (VoxelService decides which). Marks
+     * changed cells dirty; returns how many changed.
      */
-    rasterizeMask(
-        id: number,
-        parts: readonly PartInstance[],
-        policy: SamplingPolicy,
-        stats: RasterStats,
-        boxes: readonly (CellBox | null)[]
-    ): number {
+    writeMask(id: number, keys: Int32Array, count: number): number {
         const e = this.objects.get(id);
         if (!e || !e.mask) throw new Error(`Unknown mask object ${id}`);
         const prev = e.cells;
         const next = e.prev;
         next.clear();
-        this.maskSink.target = next;
-        for (let p = 0; p < parts.length; p++) {
-            const part = parts[p];
-            const b = boxes[p];
-            if (part.hidden || !b) continue;
-            rasterizeVolume(part.volume, part.pose, policy, e.priority, this.maskSink, stats, b);
-        }
-        this.maskSink.target = null;
+        const v = MASK_VALUE | (e.priority << 16);
+        for (let n = 0; n < count; n++) next.set(keys[n], v);
         e.prev = prev;
         e.cells = next;
         e.count = next.size;

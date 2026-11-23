@@ -25,19 +25,22 @@ import {
     CHUNK_SIZE,
     CHUNK_Y_LIMIT,
     GRID_SIZE,
-    candidateCells,
     cellIndexX,
     cellIndexY,
-    cellIndexZ,
-    createCellRange,
-    rangeCellCount
+    cellIndexZ
 } from '../voxels/grid.ts';
-import { aabb, mat34, pose, poseToMat34, transformAabb } from '../voxels/math.ts';
+import { aabb, mat34, pose, poseIsFinite, poseToMat34, transformAabb } from '../voxels/math.ts';
 import type { AABB, Pose } from '../voxels/math.ts';
 import { MeshOutput, meshRegionBlocked } from '../voxels/mesher.ts';
 import type { MeshMode } from '../voxels/mesher.ts';
-import { MAX_PART_CANDIDATES, createRasterStats, resetRasterStats } from '../voxels/rasterizer.ts';
-import type { SamplingPolicy } from '../voxels/rasterizer.ts';
+import {
+    centerInside,
+    createCenterTest,
+    createRasterStats,
+    prepareCenterTest,
+    resetRasterStats
+} from '../voxels/rasterizer.ts';
+import type { CenterTest, SamplingPolicy } from '../voxels/rasterizer.ts';
 import { VoxelWorld } from '../voxels/world.ts';
 import type { CellBox, PartInstance } from '../voxels/world.ts';
 
@@ -52,7 +55,7 @@ interface Tracked {
     id: number;
     /** False: tracked for the state layout only, drawn by another lattice's service. */
     drawn: boolean;
-    /** Drawn on another lattice and registered here as a mask (see VoxelWorld.rasterizeMask). */
+    /** Drawn on another lattice and registered here as a mask (see rasterizeMasks, VoxelWorld.writeMask). */
     mask: boolean;
     /** Your own first-person limbs: win ties against other objects (see outranks). */
     ownBody: boolean;
@@ -82,8 +85,10 @@ export function maskReach(b: AABB): number {
     return rest * 1.25 + 0.5;
 }
 /**
- * Candidate cells a lattice may sample for masks in one voxel frame (see rasterizeMasks). Measured
- * by scripts/bench-lattice.ts on the 1 cm lattice: at most about 2.7 ms a frame within it.
+ * The least number of this lattice's own cells its masks may test in one voxel frame (see
+ * rasterizeMasks): the budget is this, or the cells this lattice's own objects hold when more. Each
+ * test is one centre sample, as each of the lattice's own candidate cells costs at least one, so
+ * masks at most about double a lattice's own rasterizing (scripts/bench-lattice.ts).
  */
 export const MASK_BUDGET = 12_000;
 
@@ -98,24 +103,6 @@ function outranks(a: Tracked, b: Tracked): boolean {
     return a.id < b.id;
 }
 
-/** Candidate cells a mask's parts would sample inside their boxes (parts the rasterizer rejects cost 0). */
-function maskCost(t: Tracked, boxes: readonly (CellBox | null)[]): number {
-    let n = 0;
-    t.parts.forEach((p, i) => {
-        const box = boxes[i];
-        if (p.hidden || !box) return;
-        const pb = t.partBounds[i];
-        if (!candidateCells(pb.minX, pb.minY, pb.minZ, pb.maxX, pb.maxY, pb.maxZ, _range)) return;
-        if (rangeCellCount(_range) > MAX_PART_CANDIDATES) return;
-        const nx = Math.min(_range.maxI, box.i1) - Math.max(_range.minI, box.i0) + 1;
-        const ny = Math.min(_range.maxJ, box.j1) - Math.max(_range.minJ, box.j0) + 1;
-        const nz = Math.min(_range.maxK, box.k1) - Math.max(_range.minK, box.k0) + 1;
-        if (nx > 0 && ny > 0 && nz > 0) n += nx * ny * nz;
-    });
-    return n;
-}
-const _range = createCellRange();
-
 /** Do two boxes overlap (touching counts)? An empty box (minX = Infinity) meets nothing. */
 function meets(a: AABB, b: AABB): boolean {
     return (
@@ -128,14 +115,15 @@ function meets(a: AABB, b: AABB): boolean {
     );
 }
 
-/** World bounds of an object's posed, shown parts, and of each part (t.partBounds). */
+/** World bounds of an object's posed, shown parts, and of each part (t.partBounds; empty when not finite). */
 function objectBounds(t: Tracked, out: AABB): AABB {
     out.minX = out.minY = out.minZ = Infinity;
     out.maxX = out.maxY = out.maxZ = -Infinity;
     t.parts.forEach((p, i) => {
         const pb = t.partBounds[i];
-        if (p.hidden) {
-            pb.minX = Infinity; // empty: meets nothing
+        // a hidden part, or a runaway one (the rasterizer rejects it): empty, meets nothing
+        if (p.hidden || !poseIsFinite(p.pose)) {
+            pb.minX = Infinity;
             return;
         }
         transformAabb(p.volume.bounds, poseToMat34(p.pose, _m), pb);
@@ -396,6 +384,7 @@ export class VoxelService {
                 latticeHidden: comp.latticeHidden,
                 maskSkipped: this.maskStats.skipped,
                 maskCells: this.maskStats.cells,
+                maskLimit: this.maskStats.limit,
                 maskRejected: this.maskStats.rejected,
                 staticRebuilt,
                 dynamicRebuilt: units.length - staticRebuilt,
@@ -415,11 +404,22 @@ export class VoxelService {
     private readonly bounds = new Map<number, AABB>();
     /** Mask rasterization telemetry, reset every frame (its rejections are reported). */
     private readonly maskRaster = createRasterStats();
-    private readonly maskQueue: { t: Tracked; boxes: (CellBox | null)[]; cost: number }[] = [];
-    /** Candidate cells masks may sample a frame (MASK_BUDGET; tests lower it). */
+    private readonly maskQueue: { t: Tracked; boxes: (CellBox | null)[] }[] = [];
+    /** Per drawn object this frame (as `local`): its cells as i, j, k, key. */
+    private readonly ownCells: { a: Int32Array; n: number }[] = [];
+    /** A mask's candidate cells (own-cell offset | object index << 24), then the keys it wins. */
+    private maskCand = new Int32Array(4096);
+    private readonly maskTests: CenterTest[] = [];
+    private readonly maskUnion: CellBox = { i0: 0, i1: 0, j0: 0, j1: 0, k0: 0, k1: 0 };
+    /** Masks that ran last frame, and this frame (hysteresis, see rasterizeMasks). */
+    private maskRan = new Set<number>();
+    private maskRanNext = new Set<number>();
+    /** The least cells masks may test a frame (MASK_BUDGET; tests change it). */
     maskBudget = MASK_BUDGET;
-    /** Last frame's masks: rasterized, skipped over the budget, and the candidate cells spent. */
-    readonly maskStats = { masks: 0, skipped: 0, cells: 0, rejected: 0 };
+    /** Raise the budget to this lattice's own cells when more (tests turn it off to force skips). */
+    maskOwnBudget = true;
+    /** Last frame's masks: rasterized, skipped over the budget, cells tested, the budget, parts rejected. */
+    readonly maskStats = { masks: 0, skipped: 0, cells: 0, limit: 0, rejected: 0 };
 
     private boundsOf(t: Tracked): AABB {
         let b = this.bounds.get(t.id);
@@ -432,18 +432,21 @@ export class VoxelService {
 
     /**
      * Per-item cell sizes: every object drawn on another lattice that outranks one of this
-     * lattice's objects it touches is rasterized here, at this lattice's size, inside one box: the
-     * union of where its bounds meet theirs (one cell of margin). Where it wins, those cells are left
-     * empty here and only its own lattice draws them. A cell gives way where its centre lies inside
-     * the winner ('center' sampling: one sample a cell).
+     * lattice's objects it touches is tested here, at this lattice's size, against the cells those
+     * objects hold, inside one box per part: where its bounds meet theirs (one cell of margin). A
+     * cell gives way where its centre lies inside the winner ('center' sampling, exactly as the
+     * rasterizer samples it); there it is left empty here and only the winner's lattice draws it.
      *
-     * Budget: at most MASK_BUDGET candidate cells a frame on this lattice. Masks are taken in
-     * compositor order (the highest priority first); one that would overrun what is left is skipped
-     * this frame (its object and this lattice's simply intersect, as before #107) and counted.
+     * Budget: the cells tested, at most MASK_BUDGET a frame on this lattice, or the cells its own
+     * objects hold when more (so one mask can always cover them all). Masks are taken in compositor
+     * order (the highest priority first); one that would overrun what is left is skipped this frame
+     * (its object and this lattice's simply intersect, as before #107) and counted. Hysteresis: a
+     * mask that ran last frame may use the whole budget, a new one only 80 % of it, so a cost that
+     * hovers at the limit does not switch the mask on and off every frame.
      */
     private rasterizeMasks(states: Float64Array, reference: boolean, cull: number): void {
         const st = this.maskStats;
-        st.masks = st.skipped = st.cells = 0;
+        st.masks = st.skipped = st.cells = st.limit = 0;
         resetRasterStats(this.maskRaster);
         const queue = this.maskQueue;
         queue.length = 0;
@@ -460,20 +463,101 @@ export class VoxelService {
                 Math.abs(states[o + 3]) < LATTICE_REACH &&
                 (cull === 0 || this.nearFocus(states[o + 1], states[o + 3], cull));
             const boxes = visible ? this.maskBoxesFor(t, states, o) : null;
-            if (boxes) queue.push({ t, boxes, cost: maskCost(t, boxes) });
+            if (boxes) queue.push({ t, boxes });
             else if (this.world.objectCellCount(t.id) > 0) this.world.clearObject(t.id);
         }
+        const ran = this.maskRan;
+        if (queue.length === 0) {
+            ran.clear();
+            st.rejected = this.maskRaster.rejected;
+            return;
+        }
         queue.sort((a, b) => (outranks(a.t, b.t) ? -1 : 1));
+        // this lattice's own cells, per drawn object: what a mask can take
+        let own = 0;
+        for (let n = 0; n < this.local.length; n++) {
+            const buf = this.ownCells[n] ?? (this.ownCells[n] = { a: new Int32Array(1024), n: 0 });
+            buf.n = this.world.objectCellCoords(this.local[n].id, buf);
+            own += buf.n;
+        }
+        const budget = Math.max(this.maskBudget, this.maskOwnBudget ? own : 0);
+        st.limit = budget;
+        const nextRan = this.maskRanNext;
+        nextRan.clear();
         for (const q of queue) {
-            if (st.cells + q.cost > this.maskBudget) {
-                st.skipped++;
-                if (this.world.objectCellCount(q.t.id) > 0) this.world.clearObject(q.t.id);
+            const t = q.t;
+            // its parts, posed, behind the rasterizer's own guards (a runaway part is left out)
+            const tests = this.maskTests;
+            for (let p = 0; p < t.parts.length; p++) {
+                const test = tests[p] ?? (tests[p] = createCenterTest());
+                test.volume = null;
+                if (q.boxes[p] && !t.parts[p].hidden)
+                    prepareCenterTest(t.parts[p].volume, t.parts[p].pose, this.maskRaster, test);
+            }
+            // the cells it could take: its outranked objects' cells inside the union of its part
+            // boxes (each clipped to its part's candidate range)
+            const u = this.maskUnion;
+            u.i0 = u.j0 = u.k0 = Infinity;
+            u.i1 = u.j1 = u.k1 = -Infinity;
+            for (let p = 0; p < t.parts.length; p++) {
+                const b = q.boxes[p];
+                const r = tests[p].range;
+                if (!b || !tests[p].volume) continue;
+                u.i0 = Math.min(u.i0, Math.max(b.i0, r.minI));
+                u.i1 = Math.max(u.i1, Math.min(b.i1, r.maxI));
+                u.j0 = Math.min(u.j0, Math.max(b.j0, r.minJ));
+                u.j1 = Math.max(u.j1, Math.min(b.j1, r.maxJ));
+                u.k0 = Math.min(u.k0, Math.max(b.k0, r.minK));
+                u.k1 = Math.max(u.k1, Math.min(b.k1, r.maxK));
+            }
+            let m = 0;
+            for (let n = 0; n < this.local.length; n++) {
+                if (!outranks(t, this.local[n])) continue;
+                const { a, n: count } = this.ownCells[n];
+                for (let c = 0; c < count * 4; c += 4) {
+                    const i = a[c];
+                    const j = a[c + 1];
+                    const k = a[c + 2];
+                    if (i < u.i0 || i > u.i1 || j < u.j0 || j > u.j1 || k < u.k0 || k > u.k1) continue;
+                    if (this.maskCand.length <= m) {
+                        const g = new Int32Array(this.maskCand.length * 2);
+                        g.set(this.maskCand);
+                        this.maskCand = g;
+                    }
+                    this.maskCand[m++] = c | (n << 24);
+                }
+            }
+            // hysteresis: a mask that ran last frame keeps running up to the budget; a new one
+            // starts only within 80 % of it, so a cost hovering at the limit does not toggle
+            const limit = ran.has(t.id) ? budget : budget * 0.8;
+            if (m === 0 || st.cells + m > limit) {
+                if (m > 0) st.skipped++;
+                if (this.world.objectCellCount(t.id) > 0) this.world.clearObject(t.id);
                 continue;
             }
-            st.cells += q.cost;
-            this.world.rasterizeMask(q.t.id, q.t.parts, 'center', this.maskRaster, q.boxes);
+            st.cells += m;
+            let won = 0;
+            for (let x = 0; x < m; x++) {
+                const v = this.maskCand[x];
+                const { a } = this.ownCells[v >>> 24];
+                const c = v & 0xffffff;
+                const i = a[c];
+                const j = a[c + 1];
+                const k = a[c + 2];
+                for (let p = 0; p < t.parts.length; p++) {
+                    const b = q.boxes[p];
+                    if (!b || i < b.i0 || i > b.i1 || j < b.j0 || j > b.j1 || k < b.k0 || k > b.k1) continue;
+                    if (!centerInside(tests[p], i, j, k)) continue;
+                    this.maskCand[won++] = a[c + 3];
+                    break;
+                }
+            }
+            this.world.writeMask(t.id, this.maskCand, won);
+            nextRan.add(t.id);
             st.masks++;
         }
+        this.maskRanNext = ran;
+        this.maskRan = nextRan;
         st.rejected = this.maskRaster.rejected;
     }
 
@@ -514,6 +598,13 @@ export class VoxelService {
         for (let c = 0; c < ANIM_MAX; c++) t.anim[c] = states[o + 8 + c];
         t.evaluate(t.root, t.anim, t.poses);
         if (t.hidden) for (let i = 0; i < t.parts.length; i++) t.parts[i].hidden = t.hidden(t.anim, i);
+        // a part posed out of bounds (not finite) is rejected, as the rasterizer rejects objects'
+        // parts: counted, and left out (it meets nothing)
+        for (const p of t.parts)
+            if (!p.hidden && !poseIsFinite(p.pose)) {
+                this.maskRaster.parts++;
+                this.maskRaster.rejected++;
+            }
         const mb = objectBounds(t, this.boundsOf(t));
         // this lattice's parts it may take cells from: those of the objects it outranks, near it
         const targets: AABB[] = [];

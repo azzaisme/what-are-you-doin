@@ -245,6 +245,7 @@ describe('lattice priority (#107)', () => {
         // a budget the bucket's mask fits in, but not the beavers' as well
         const svc = new VoxelService(new Set([head.id]));
         svc.build(1, 'yard', undefined, false);
+        svc.maskOwnBudget = false; // the budget exactly as set (not raised to the head's own cells)
         svc.maskBudget = all.stats.maskCells - 1;
         const r = svc.frame(1, 0, 'coverage50', false, states(places));
         expect(r.stats.maskCells).toBeLessThanOrEqual(svc.maskBudget);
@@ -328,7 +329,8 @@ describe('lattice priority (#107)', () => {
                 ]
             );
             for (const s of fp) {
-                expect(s.maskCells).toBeLessThanOrEqual(MASK_BUDGET);
+                expect(s.maskLimit).toBeGreaterThanOrEqual(MASK_BUDGET);
+                expect(s.maskCells).toBeLessThanOrEqual(s.maskLimit);
                 expect(s.latticeMasks).toBe(1); // the bucket; the avatars tie and lose
                 expect(s.maskSkipped).toBe(0);
                 expect(s.maskRejected).toBe(0);
@@ -346,7 +348,8 @@ describe('lattice priority (#107)', () => {
                 ]
             );
             for (const s of crowd) {
-                expect(s.maskCells).toBeLessThanOrEqual(MASK_BUDGET);
+                expect(s.maskLimit).toBeGreaterThanOrEqual(MASK_BUDGET);
+                expect(s.maskCells).toBeLessThanOrEqual(s.maskLimit);
                 expect(s.latticeMasks + s.maskSkipped).toBe(5);
                 expect(s.maskSkipped).toBeGreaterThan(0);
                 expect(s.maskRejected).toBe(0);
@@ -355,6 +358,111 @@ describe('lattice priority (#107)', () => {
             vi.unstubAllGlobals();
             vi.resetModules();
             delete (globalThis as { __UE_CELL_CM__?: number }).__UE_CELL_CM__;
+        }
+    }, 300_000);
+    it('a mask part posed out of bounds is rejected and counted, that frame only', () => {
+        // the beaver beside the ragdoll's head; a NaN in one animation channel breaks some of its
+        // parts' poses (not its body), a NaN in channel 0 every part's
+        const svc = new VoxelService(new Set([head.id]));
+        svc.build(1, 'yard', undefined, false);
+        const places = [
+            { e: head, x: 0, y: 0.5, z: 0 },
+            { e: beaver, x: 0, y: 0.3, z: 0 }
+        ];
+        const ok = svc.frame(1, 0, 'coverage50', false, states(places)).stats;
+        expect(ok.latticeMasks).toBe(1);
+        expect(ok.maskRejected).toBe(0);
+        const hidden = ok.latticeHidden;
+        expect(hidden).toBeGreaterThan(0);
+        const broken = (c: number) => {
+            const s = states(places);
+            s[entities.indexOf(beaver) * STATE_STRIDE + 8 + c] = NaN;
+            return s;
+        };
+        const some = svc.frame(2, 0.05, 'coverage50', false, broken(4)).stats;
+        expect(some.maskRejected).toBeGreaterThan(0);
+        expect(some.maskRejected).toBeLessThan(beaver.asset.parts.length);
+        expect(some.latticeMasks).toBe(1); // the rest of it still masks
+        expect(svc.frame(3, 0.1, 'coverage50', false, states(places)).stats.maskRejected).toBe(0);
+        const all = svc.frame(4, 0.15, 'coverage50', false, broken(0)).stats;
+        expect(all.maskRejected).toBe(beaver.asset.parts.length);
+        expect(all.latticeMasks).toBe(0);
+        expect(all.latticeHidden).toBe(0);
+        const back = svc.frame(5, 0.2, 'coverage50', false, states(places)).stats;
+        expect(back.maskRejected).toBe(0);
+        expect(back.latticeHidden).toBe(hidden);
+    }, 60_000);
+
+    it('at 1 cm: the beaver keeps priority over the head however deep it overlaps, without toggling', async () => {
+        vi.resetModules();
+        (globalThis as { __UE_CELL_CM__?: number }).__UE_CELL_CM__ = 1;
+        try {
+            const { GRID_SIZE } = await import('../../src/voxels/grid.ts');
+            expect(GRID_SIZE).toBe(0.01);
+            const { VoxelService: Service, MASK_BUDGET: BUDGET } = await import('../../src/workers/voxel-service.ts');
+            const at = (y: number) =>
+                states([
+                    { e: head, x: 0, y: 0.5, z: 0 },
+                    { e: beaver, x: 0, y, z: 0 }
+                ]);
+            const svc = new Service(new Set([head.id]));
+            svc.build(1, 'yard', undefined, false);
+            // the audit's sweep: from 0.58 m down into the head in 2 mm steps (it used to stop
+            // masking at 0.490 m, where the torso's box passed the budget)
+            let f = 0;
+            for (let y = 0.58; y > 0.38; y -= 0.002) {
+                const s = svc.frame(f++, f / 20, 'coverage50', false, at(y)).stats;
+                expect(s.latticeMasks, `y ${y.toFixed(3)}`).toBe(1);
+                expect(s.maskSkipped).toBe(0);
+                expect(s.latticeHidden).toBeGreaterThan(3000);
+                expect(s.maskCells).toBeLessThanOrEqual(s.maskLimit);
+                expect(s.maskLimit).toBe(Math.max(BUDGET, svc.world.objectCellCount(head.id)));
+            }
+            // held at 0.490 m with a 2 mm jitter: masked every frame, the same cells each way
+            const hiddenAt = new Map<number, number>();
+            for (let n = 0; n < 30; n++) {
+                const y = n % 2 ? 0.492 : 0.488;
+                const s = svc.frame(f++, f / 20, 'coverage50', false, at(y)).stats;
+                expect(s.latticeMasks).toBe(1);
+                expect(s.maskSkipped).toBe(0);
+                if (hiddenAt.has(y)) expect(s.latticeHidden).toBe(hiddenAt.get(y));
+                hiddenAt.set(y, s.latticeHidden);
+            }
+            // the head wholly inside the beaver: all but its cells outside the beaver hidden
+            const deep = svc.frame(f++, f / 20, 'coverage50', false, at(0)).stats;
+            expect(deep.latticeMasks).toBe(1);
+            expect(deep.latticeHidden).toBeGreaterThan(0.99 * svc.world.objectCellCount(head.id));
+
+            // hysteresis, with the budget pinned to the mask's cost at 0.490 m: once running it
+            // stays while the cost hovers at the limit; once skipped it stays off until well under
+            const pinned = new Service(new Set([head.id]));
+            pinned.build(1, 'yard', undefined, false);
+            const cost = (y: number) => {
+                const probe = new Service(new Set([head.id]));
+                probe.build(1, 'yard', undefined, false);
+                return probe.frame(0, 0, 'coverage50', false, at(y)).stats.maskCells;
+            };
+            const lo = cost(0.488);
+            const hi = cost(0.492);
+            expect(lo).toBeGreaterThan(hi); // deeper costs more
+            pinned.maskOwnBudget = false;
+            pinned.maskBudget = Math.floor((lo + hi) / 2);
+            // it starts further out, where it costs under 80 % of the budget, and comes in
+            let g = 0;
+            for (let y = 0.58; y > 0.492; y -= 0.002) pinned.frame(g++, 0, 'coverage50', false, at(y));
+            const states1: number[] = [];
+            for (let n = 0; n < 30; n++) {
+                const s = pinned.frame(g++, 0, 'coverage50', false, at(n % 2 ? 0.492 : 0.488)).stats;
+                expect(s.maskCells).toBeLessThanOrEqual(pinned.maskBudget);
+                states1.push(s.latticeMasks);
+            }
+            // at most one change (running, then skipped at the first deeper frame), never back
+            const changes = states1.filter((v, n) => n > 0 && v !== states1[n - 1]).length;
+            expect(changes).toBeLessThanOrEqual(1);
+            expect(states1[29]).toBe(0);
+        } finally {
+            delete (globalThis as { __UE_CELL_CM__?: number }).__UE_CELL_CM__;
+            vi.resetModules();
         }
     }, 300_000);
 });

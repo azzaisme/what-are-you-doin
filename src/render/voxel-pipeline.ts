@@ -63,6 +63,7 @@ const SUMMED: (keyof FrameStats)[] = [
     'latticeHidden',
     'maskSkipped',
     'maskCells',
+    'maskLimit',
     'maskRejected',
     'staticRebuilt',
     'dynamicRebuilt',

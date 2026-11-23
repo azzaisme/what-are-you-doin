@@ -49,6 +49,22 @@ async function capture(base, label, scenesFile) {
             await page.waitForTimeout(2500);
             await page.waitForFunction(() => window.__riverLab.voxelIdle(), null, { timeout: 120_000 });
             await page.waitForTimeout(2500);
+            // the orbit camera eases towards its target: wait until it holds still for 5 frames (a
+            // fixed wait was not enough on a loaded machine, where a frame can take seconds)
+            await page.evaluate(async () => {
+                const app = [...globalThis.__playcanvasApps.keys()][0];
+                const cam = app.root.findByName('MainCamera');
+                let still = 0;
+                let last = '';
+                for (let i = 0; i < 600 && still < 5; i++) {
+                    await new Promise((r) => app.once('frameend', r));
+                    const p = cam.getPosition();
+                    const q = cam.getRotation();
+                    const now = [p.x, p.y, p.z, q.x, q.y, q.z, q.w].join(',');
+                    still = now === last ? still + 1 : 0;
+                    last = now;
+                }
+            });
             const px = await page.evaluate(async () => {
                 const app = [...globalThis.__playcanvasApps.keys()][0];
                 app.autoRender = false;
