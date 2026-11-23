@@ -60,13 +60,13 @@ export const SERVICES = [
 
 export const LICENSES_FILE = './third-party-licenses.txt';
 
-/** The credits dialog (DOM only). Text is set with textContent. */
+/** The credits dialog (DOM only, built the first time it opens). Text is set with textContent. */
 export class CreditsPanel {
-    readonly el: HTMLDivElement;
-    private readonly close: HTMLButtonElement;
+    private el: HTMLDivElement | null = null;
+    private close: HTMLButtonElement | null = null;
     private opener: Element | null = null;
 
-    constructor() {
+    private build(): HTMLDivElement {
         const el = document.createElement('div');
         el.className = 'credits-backdrop';
         el.hidden = true;
@@ -139,20 +139,22 @@ export class CreditsPanel {
         document.body.append(el);
         this.el = el;
         this.close = close;
+        return el;
     }
 
     get open(): boolean {
-        return !this.el.hidden;
+        return !!this.el && !this.el.hidden;
     }
 
     show(): void {
         this.opener = document.activeElement;
-        this.el.hidden = false;
-        this.close.focus();
+        const el = this.el ?? this.build();
+        el.hidden = false;
+        this.close?.focus();
     }
 
     hide(): void {
-        if (this.el.hidden) return;
+        if (!this.el || this.el.hidden) return;
         this.el.hidden = true;
         if (this.opener instanceof HTMLElement && document.contains(this.opener)) this.opener.focus();
     }
