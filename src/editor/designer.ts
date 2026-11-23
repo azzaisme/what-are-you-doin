@@ -10,6 +10,7 @@
 import { Color, Vec3 } from 'playcanvas';
 import type { AppBase, Entity, Layer } from 'playcanvas';
 
+import { BEAM_HALF, plankHalfOf } from '../assets/props.ts';
 import { MATERIAL_NAMES, dataHeight, parseLevelData } from '../levels/data.ts';
 import type { GroundFeature, LevelData, MaterialName, PieceData } from '../levels/data.ts';
 import { starterLevel } from '../levels/starter.ts';
@@ -40,6 +41,7 @@ export function saveDraft(d: LevelData): void {
 /** Prop entity pools (the entity catalogue's fixed sets). */
 const PROP_POOLS: Record<string, string[]> = {
     plank: ['plank', 'extra-plank-0', 'extra-plank-1', 'extra-plank-2', 'extra-plank-3', 'extra-plank-4'],
+    'long-plank': ['long-plank'],
     beam: ['beam-0', 'beam-1'],
     log: ['log', 'extra-log-0', 'extra-log-1'],
     crate: ['cube'],
@@ -57,6 +59,7 @@ type Tool =
     | 'ditch'
     | 'mound'
     | 'plank'
+    | 'long-plank'
     | 'beam'
     | 'log'
     | 'crate'
@@ -74,6 +77,7 @@ const TOOLS: { id: Tool; label: string }[] = [
     { id: 'ditch', label: 'Ditch' },
     { id: 'mound', label: 'Hill' },
     { id: 'plank', label: 'Plank' },
+    { id: 'long-plank', label: 'Long plank' },
     { id: 'beam', label: 'Beam' },
     { id: 'log', label: 'Log' },
     { id: 'crate', label: 'Crate' },
@@ -429,9 +433,9 @@ export class Designer {
         );
         d.props.forEach((p, i) => {
             const long = p.name.includes('plank')
-                ? 1.2
+                ? plankHalfOf(p.name).x
                 : p.name.startsWith('beam')
-                  ? 1.6
+                  ? BEAM_HALF.x
                   : p.name.includes('log')
                     ? 1
                     : 0.25;

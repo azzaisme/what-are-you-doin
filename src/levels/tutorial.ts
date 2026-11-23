@@ -150,8 +150,11 @@ export const TUTORIAL_DATA: LevelData = {
     props: [
         { name: 'cube', x: 2, z: 0.6 },
         { name: 'sphere', x: 2.2, z: -3.2 },
-        // the plank already points across the ditch: push or carry it over
-        { name: 'plank', x: -1.8, z: -7.6, yaw: Math.PI / 2 },
+        // the long plank (3.8 m, only here) already points across the ditch, its far end 10 cm short
+        // of the edge (and clear of the bin): grab it by the middle from its near end, carry it to the
+        // edge and lay it across. Over the ditch's 2.3 m (lip to lip) it has 0.75 m on each bank
+        // laid centred, and laid from the lip (you hold it at arm's length) about 0.5 m on the far one.
+        { name: 'long-plank', x: -0.75, z: -6.85, yaw: Math.PI / 2 },
         { name: 'bucket', x: 1.6, z: -6.8 }
     ],
     spawn: { x: 0, z: 10.5, yaw: 0 },
@@ -180,7 +183,7 @@ export const TUTORIAL_DATA: LevelData = {
         },
         {
             kind: 'reach',
-            text: 'Push the plank across the ditch and walk over it.',
+            text: 'Lay the plank across the ditch: grab it by the middle, carry it to the edge, let go, walk over.',
             rect: { minX: -4, maxX: 4, minZ: -14, maxZ: -11.2 }
         },
         { kind: 'goal', text: 'Bring the bucket to the flag. (Falling in? You are fished out.)' }

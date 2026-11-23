@@ -81,6 +81,18 @@ export interface BodyOptions {
     wristTorque?: number;
     /** Timber: takes nails (src/sim/joints). */
     nailable?: boolean;
+    /** How this body flies when thrown, instead of the general throw (see ThrowSpec). */
+    throw?: ThrowSpec;
+}
+
+/**
+ * A body's own throw (planks): the impulse cap instead of GRAB.maxThrowImpulse (the desired speed
+ * stays GRAB.throwSpeed), and a steady release that lets go without the spin the grip gave it, so
+ * it flies flat along the view instead of tumbling.
+ */
+export interface ThrowSpec {
+    maxImpulse: number;
+    steady: boolean;
 }
 
 export interface PhysBody {
@@ -103,6 +115,8 @@ export interface PhysBody {
     alwaysAwake?: boolean;
     /** See BodyOptions.nailable. */
     nailable?: boolean;
+    /** See BodyOptions.throw. */
+    throw?: ThrowSpec;
     /** The collision shape of a single-shape body (floodwater samples it: sim/physics/water.ts). */
     shape?: ShapeSpec;
 }
@@ -423,6 +437,7 @@ export class PhysicsWorld {
             grabPoint: o.grabPoint,
             wristTorque: o.wristTorque,
             nailable: o.nailable,
+            throw: o.throw,
             spawn: { p: { ...spawn.p }, q: { ...spawn.q } },
             baseAngularDamping: o.angularDamping ?? 0.3,
             enabled: true,
@@ -846,7 +861,16 @@ export class PhysicsWorld {
         if (!pb) return;
         this.release(p);
         const d = viewDir(yaw, pitch, _dir);
-        const j = throwImpulse(pb.body.mass());
+        const j = throwImpulse(pb.body.mass(), pb.throw?.maxImpulse);
+        if (pb.throw?.steady) {
+            // let go clean: no spin from the grip, and no sideways swing from turning as you throw
+            pb.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+            const v = pb.body.linvel();
+            const sx = Math.cos(yaw);
+            const sz = -Math.sin(yaw);
+            const side = v.x * sx + v.z * sz;
+            pb.body.setLinvel({ x: v.x - side * sx, y: v.y, z: v.z - side * sz }, true);
+        }
         pb.body.applyImpulse({ x: d.x * j, y: d.y * j + j * 0.15, z: d.z * j }, true);
         // the throw itself is allowed: raise the post-release bound by the throw speed
         const g = this.releasedGuards.find((x) => x.pb === pb);

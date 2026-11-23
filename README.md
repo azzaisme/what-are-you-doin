@@ -80,7 +80,7 @@ Query parameters (handy for comparisons and screenshots):
 | Left click or `E` at a banded pine         | chew it (empty hands) or chop it (holding the axe); it falls away from you                 |
 | Left click or `E`, axe in hand, at a log   | buck it into two short logs one beaver can carry; lay logs in the sawmill's guide to saw   |
 | Left click or `E` at the sawmill's lever   | switch the saw between planks (three per log) and a beam (one per log)                     |
-| Right click                                | throw what you hold                                                                        |
+| Right click                                | throw what you hold (a plank flies flat, along your view)                                  |
 | Mouse wheel                                | hold closer / further                                                                      |
 | `Q`                                        | drop                                                                                       |
 | `F`                                        | nail what you look at to what is behind it (timber to timber, or down to stone or ground)  |

@@ -255,7 +255,8 @@ const watch = (name: string, bottom: number, timber: boolean) => {
     if (e) watched.push({ slot: e.slot, bottom, timber });
 };
 for (const e of sim.entities) {
-    if (e.name === 'plank' || e.name === 'held-plank' || e.name.startsWith('extra-plank')) watch(e.name, 0.05, true);
+    if (e.name === 'plank' || e.name === 'held-plank' || e.name === 'long-plank' || e.name.startsWith('extra-plank'))
+        watch(e.name, 0.05, true);
     else if (e.name.startsWith('beam-')) watch(e.name, 0.075, true);
     else if (e.name.startsWith('crate-')) watch(e.name, 0.25, true);
 }
@@ -1296,6 +1297,7 @@ function setUiHidden(h: boolean): void {
 const PROP_LABEL: Record<string, string> = {
     plank: 'plank',
     'held-plank': 'plank',
+    'long-plank': 'long plank',
     log: 'log (heavy)',
     cube: 'crate',
     sphere: 'ball',

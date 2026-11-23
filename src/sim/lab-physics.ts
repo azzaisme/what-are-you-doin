@@ -8,7 +8,15 @@ import RAPIER from '@dimforge/rapier3d-compat';
 
 import { DUMMY_PARTS, dummyRestPose } from '../assets/dummy.ts';
 import { AXE, SHORT_LOG_HALF } from '../assets/forestry.ts';
-import { BEAM_HALF, BUCKET_HANDLE_TOP, BUCKET_HEIGHT, LOG_RADIUS } from '../assets/props.ts';
+import {
+    BEAM_HALF,
+    BUCKET_HANDLE_TOP,
+    BUCKET_HEIGHT,
+    LOG_RADIUS,
+    LONG_PLANK_LENGTH,
+    PLANK_HALF,
+    PLANK_LENGTH
+} from '../assets/props.ts';
 import { OAK, PINE_TIERS, PINE_TRUNK_HEIGHT, ROCK_CENTRE_LIFT, oakCrown, pineTrunkRadius } from '../levels/common.ts';
 import type { LevelDef } from '../levels/level.ts';
 import { pose, quatFromYawPitchRoll, quatMul } from '../voxels/math.ts';
@@ -32,18 +40,46 @@ export interface PropDef {
     spawn: Pose;
 }
 
-const PLANK: { shape: ShapeSpec; opts: BodyOptions } = {
-    shape: { type: 'box', hx: 1.2, hy: 0.1, hz: 0.05 },
-    opts: { density: 500, friction: 0.7, restitution: 0.1, ccd: true, nailable: true }
-};
+/**
+ * Every plank's own throw (only planks: the general cap, GRAB.maxThrowImpulse, and so every other
+ * throw, the bucket's included, is unchanged). A plank leaves your hands at PLANK_THROW_SPEED (the
+ * 24 kg plank at 2.9 m/s instead of 45 / 24 = 1.9 m/s) and lets go clean: no spin from the grip, no
+ * sideways swing from turning as you throw, so it flies flat along your view (tests/unit/throw.test.ts).
+ */
+export const PLANK_THROW_SPEED = 2.9;
+const PLANK_DENSITY = 500;
+
+/** A plank of a length: 0.2 x 0.1 m timber, its wrist scaled to its weight, and the plank throw. */
+function plankBody(length: number): { shape: ShapeSpec; opts: BodyOptions } {
+    const mass = PLANK_DENSITY * length * 2 * PLANK_HALF.y * 2 * PLANK_HALF.z;
+    return {
+        shape: { type: 'box', hx: length / 2, hy: PLANK_HALF.y, hz: PLANK_HALF.z },
+        opts: {
+            density: PLANK_DENSITY,
+            friction: 0.7,
+            restitution: 0.1,
+            ccd: true,
+            nailable: true,
+            // two hands spread along a longer plank: it starts to sag held 0.3 m off its balance
+            // point, as the 24 kg plank does at GRAB.maxTorque (24 kg x 9.81 x 0.3 m = 71 N m)
+            wristTorque: length > PLANK_LENGTH ? (GRAB.maxTorque * length) / PLANK_LENGTH : undefined,
+            throw: { maxImpulse: mass * PLANK_THROW_SPEED, steady: true }
+        }
+    };
+}
+
+const PLANK = plankBody(PLANK_LENGTH);
+/** The tutorial's long plank (3.8 m, 38 kg). */
+const LONG_PLANK = plankBody(LONG_PLANK_LENGTH);
 
 /**
  * Collision shape and material for a prop entity, by name (the entity catalogue's naming):
- * plank 2.4 x 0.2 x 0.1 m ~24 kg; beam 3.2 x 0.2 x 0.15 m ~36 kg (liftable alone, just); log r 0.2
+ * plank 2.4 x 0.2 x 0.1 m ~24 kg (the tutorial's long plank 3.8 m ~38 kg); beam 3.2 x 0.2 x 0.15 m ~36 kg (liftable alone, just); log r 0.2
  * x 2 m ~113 kg (drag it); crate 0.5 m ~25 kg; bouncy ball; ~1.5 kg empty bucket (origin at base).
  */
 export function propBody(name: string): { shape: ShapeSpec; opts: BodyOptions } | null {
     if (name === 'plank' || name === 'held-plank' || name.startsWith('extra-plank')) return PLANK;
+    if (name === 'long-plank') return LONG_PLANK;
     if (name.startsWith('beam'))
         return {
             shape: { type: 'box', hx: BEAM_HALF.x, hy: BEAM_HALF.y, hz: BEAM_HALF.z },
