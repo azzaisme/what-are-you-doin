@@ -25,6 +25,15 @@ An existing cheat: the Valley could be finished without building a single bridge
       with under 1 L, and a second beaver carrying it to the flag doesn't complete the stage;
     - the 3 L spare carried over the built culvert and gorge crossings, and a full bucket over the
       crevasse, each complete their stage, with no falls.
+- **Weather follow-ups from the #128 audit:**
+    - The fog's sky now has one dome per local view, each round its own camera and drawn in that
+      view only. In split screen, player 2 can be far from player 1, and a dome round player 1's
+      camera would have stood inside player 2's fog. A browser test puts the two views about
+      130 m apart at full fog and checks each dome sits on its own camera.
+    - The debug weather hook never starts a zone over the gorge mist. The mist is atmosphere, so no
+      hazard is running, but weather is (tested).
+    - The six-height rain carry has a dry control: the same carry alone holds at −0.8 and −1.2 in
+      the dry, so it is the wet grip that loses it in the rain.
 - **Also fixed: a weak check in the Valley's crossing test.** It looked for each crossing's rim
   30 cm back from where the ground drops below the fall line. The crevasse's bed is at the fall line
   itself, so the "rim" it found was 2 m up the crevasse wall, not on the bench at 9.3 m, and its beam
