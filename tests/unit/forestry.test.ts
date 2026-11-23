@@ -1,10 +1,10 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
-import { SAW_MODE, TREE_CUT, TREE_STATE } from '../../src/assets/forestry.ts';
+import { SAW_MODE, TREE_CUT, TREE_STATE, TREE_SWAY, TREE_SWAY_YAW } from '../../src/assets/forestry.ts';
 import { LOG_RADIUS } from '../../src/assets/props.ts';
 import { sfx } from '../../src/audio/sfx.ts';
 import { MAX_PARTICLES, ParticleFX } from '../../src/fx/particles.ts';
-import { WoodFX } from '../../src/fx/wood-fx.ts';
+import { SWAY_FX, WoodFX } from '../../src/fx/wood-fx.ts';
 import { PINE_TRUNK_HEIGHT } from '../../src/levels/common.ts';
 import { SAWMILL, STAND_CROWN_RADIUS, sawmillToWorld } from '../../src/levels/forestry.ts';
 import { BRIDGE_X, YARD_FORESTRY, YARD_Y, timberYardLevel } from '../../src/levels/timber-yard.ts';
@@ -20,6 +20,7 @@ import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
 import { GRAB } from '../../src/sim/physics/grab.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
 import { SAW } from '../../src/sim/sawmill.ts';
+import type { SnapshotRing } from '../../src/sim/snapshots.ts';
 import { GRID_SIZE, cellIndexX, cellIndexZ } from '../../src/voxels/grid.ts';
 import { pose, quatFromYawPitchRoll, quatMul, quatRotate } from '../../src/voxels/math.ts';
 import type { Pose } from '../../src/voxels/math.ts';
@@ -678,6 +679,8 @@ describe('voxels: a felled tree leaves the static world, a regrown one comes bac
             return { n, h };
         };
         const before = crown();
+        const ground = () => [0.15, 0.3, 0.5, 0.8].map((d) => at(g - d));
+        const groundBefore = ground();
         expect(at(g + 0.7)).toBe(M.Bark);
         expect(before.n).toBeGreaterThan(200);
         let f = 0;
@@ -695,10 +698,76 @@ describe('voxels: a felled tree leaves the static world, a regrown one comes bac
         svc.frame(f++, 0.2, 'coverage50', false, states);
         expect(crown()).toEqual(before);
         expect(at(g + 0.7)).toBe(M.Bark);
+        // leaning (the falling-tree hazard): the static tree goes, stump and all (its marker draws
+        // it tilted), and comes back when the lean ends with it standing (given up, the ute moved)
+        states[o + 8 + TREE_SWAY] = 0.5;
+        svc.frame(f++, 0.3, 'coverage50', false, states);
+        expect(crown().n).toBe(0);
+        expect(at(g + 0.7)).toBe(0);
+        expect(at(g + 0.2)).toBe(0);
+        // the ground under it is untouched (below where the trunk reached into it)
+        expect(ground()).toEqual(groundBefore);
+        states[o + 8 + TREE_SWAY] = 0;
+        svc.frame(f++, 0.4, 'coverage50', false, states);
+        expect(crown()).toEqual(before);
+        expect(at(g + 0.7)).toBe(M.Bark);
+        // and felled while leaning: the stump
+        states[o + 8 + TREE_SWAY] = 0.9;
+        svc.frame(f++, 0.5, 'coverage50', false, states);
+        states[o + 8 + TREE_SWAY] = 0;
+        states[o + 8 + TREE_STATE] = 1;
+        svc.frame(f++, 0.6, 'coverage50', false, states);
+        expect(crown().n).toBe(0);
+        expect([M.LogBark, M.LogEnd]).toContain(at(g + 0.2));
     }, 60_000);
 });
 
 describe('wood effects', () => {
+    // the sound test installs a sink: never leave it installed for later tests, even on a failure
+    afterEach(() => sfx.setSink(null));
+
+    it('a leaning stand tree (the falling-tree hazard) sheds needles towards its lean, further as it grows, with a creak', () => {
+        const creaks: number[] = [];
+        sfx.setSink({ play: (n, _at, o) => n === 'creak' && creaks.push(o?.gain ?? 0), hold: () => undefined });
+        // one marker at (10, 2, 5) swaying east (yaw pi/2), its amount set by the test
+        const sway = { amount: 0.25 };
+        const ring = {
+            sample(slot: number, _time: number, out: Pose, anim: Float64Array) {
+                if (slot !== 7) return false;
+                out.p.x = 10;
+                out.p.y = 2;
+                out.p.z = 5;
+                anim.fill(0);
+                anim[TREE_SWAY] = sway.amount;
+                anim[TREE_SWAY_YAW] = Math.PI / 2;
+                return true;
+            }
+        } as unknown as SnapshotRing;
+        const fx = new WoodFX({ chips: 1, needles: 2, sawmill: 3, markers: [7] }, null);
+        const bursts: { kind: string; x: number; y: number; z: number }[] = [];
+        const at = (time: number) => fx.update(time, ring, (kind, x, y, z) => bursts.push({ kind, x, y, z }));
+        at(0.1);
+        at(0.2); // the same shake
+        expect(bursts).toHaveLength(1);
+        sway.amount = 1;
+        at(0.1 + SWAY_FX.every);
+        expect(bursts).toHaveLength(2);
+        const [a, b] = bursts;
+        expect(a.kind).toBe('needles');
+        expect(a.y).toBeCloseTo(2 + SWAY_FX.crownY);
+        // east of the trunk, and further out once it sways more
+        expect(a.x).toBeGreaterThan(10.5);
+        expect(Math.abs(a.z - 5)).toBeLessThan(1e-6);
+        expect(b.x - 10).toBeCloseTo(SWAY_FX.out1);
+        expect(b.x).toBeGreaterThan(a.x + 0.5);
+        expect(creaks).toHaveLength(2);
+        expect(creaks[1]).toBeGreaterThan(creaks[0]);
+        // no sway: nothing
+        sway.amount = 0;
+        at(0.1 + 3 * SWAY_FX.every);
+        expect(bursts).toHaveLength(2);
+    });
+
     it('chips fly at every bite, needles burst when the crown breaks off, sawdust while it saws (and their sounds)', () => {
         const heard: string[] = [];
         const held: number[] = [];
