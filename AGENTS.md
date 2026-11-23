@@ -31,7 +31,8 @@ A PlayCanvas Engine app in TypeScript, built with Vite. The scene is built in co
 
 ## Checking your work
 
-- Run `npm run typecheck`, `npm run lint` and `npm run build` before you finish. All three must pass.
+- Run `npm run typecheck`, `npm run lint`, `npm run fmt`, `npm test` and `npm run build` before you finish. All must pass.
+- Run the full browser suite, `npm run build && npx playwright test --trace off`, before you push a branch for review or open a pull request, and report its pass count. CI does not run the browser tests (they outgrew its time limit on software GL), so this run is the only one. Every test must pass; don't skip, retry-until-green or loosen one. If another session may be running Playwright on the same machine, use a copy of `playwright.config.ts` on a different port.
 - To see the result, run `npm run dev` and open the page in a browser. The console should show `Powered by PlayCanvas` and no errors. Press the backquote key for the Inspector, which shows the hierarchy, assets, materials, textures, frame graph and physics. <kbd>F9</kbd> pauses and <kbd>F10</kbd> steps a frame.
 
 ## Agent skills
