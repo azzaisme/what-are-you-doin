@@ -498,6 +498,17 @@ orbit.focusPoint = ORBIT_HOME.focus.clone();
 orbit.pitchRange = new Vec2(-85, 5);
 orbit.zoomRange = new Vec2(1.5, 60);
 orbit.rotateSpeed = 0.25;
+// The orbit controls' mouse input stays on the canvas in first person (disabling the script doesn't
+// detach it), and on every press it asks for pointer capture, which the browser refuses while the
+// mouse is locked (an uncaught InvalidStateError). A press then belongs to first person alone.
+window.addEventListener(
+    'pointerdown',
+    (e) => {
+        if (e.pointerType === 'mouse' && e.target === canvas && document.pointerLockElement === canvas)
+            e.stopPropagation();
+    },
+    true
+);
 
 /** `lock`: request pointer lock (only from a user gesture; the level start waits for a click). */
 function setMode(mode: State['mode'], lock = true): void {

@@ -264,7 +264,10 @@ test('clicking a menu never grabs the timber under the crosshair; a click on the
     await expect.poll(() => page.evaluate(() => !!document.pointerLockElement)).toBe(true);
     await notHeld('Resume');
     expect(await lab(page, (l) => l.interaction().target)).toBe('bucket');
-    await page.mouse.click(centre.x, centre.y);
+    // a click on the game, without moving the mouse (with the mouse taken, moving it turns the view;
+    // the click goes to the game wherever the pointer sits): it grabs the bucket
+    await page.mouse.down();
+    await page.mouse.up();
     await expect.poll(() => lab(page, (l) => l.interaction().holding)).toBe('bucket');
     expect(problems).toEqual([]);
 });
