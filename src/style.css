@@ -112,12 +112,15 @@ kbd {
 /* the action prompt sits under the crosshair in first person */
 .hud-prompt:not(:empty) {
     position: fixed;
-    left: 50%;
+    /* centred across the whole width, as wide as the screen allows at any text size (zoom scales vw
+       and px, so divide them back out) */
+    left: 0;
+    right: 0;
+    width: fit-content;
     top: calc(50% + 22px);
-    transform: translateX(-50%);
-    margin: 0;
+    margin: 0 auto;
     padding: 3px 9px;
-    max-width: calc(100vw - 32px);
+    max-width: calc(100vw / var(--ui-scale) - 32px);
     text-align: center;
     border-radius: 6px;
     background: #0008;
@@ -496,8 +499,9 @@ body.split .crosshair-p2 {
     top: 75%;
 }
 
+/* player 1's: under their crosshair, or under the HUD's text when large text makes it reach lower */
 body.split .hud-prompt:not(:empty) {
-    top: calc(25% + 22px);
+    top: max(calc(25% + 22px), calc(var(--hud-bottom) / var(--ui-scale) + 6px));
 }
 
 body.split .prompt-p2:not(:empty) {
@@ -509,7 +513,10 @@ body.split .prompt-p2:not(:empty) {
     right: 0;
     margin-inline: auto;
     width: fit-content;
-    top: calc(75% + 22px);
+    /* at the bottom of player 2's view, held up by its bottom edge just above the dock: placed under
+       player 2's crosshair, a long prompt in large text would run into the dock */
+    top: auto;
+    bottom: calc(var(--dock-h) / var(--ui-scale) + 8px);
     padding: 3px 9px;
     max-width: calc(100vw / var(--ui-scale) - 32px);
     font-size: 13px;

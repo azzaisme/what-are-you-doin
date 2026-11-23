@@ -163,6 +163,24 @@ const clipped = (page: Page) =>
         return out;
     });
 
+/** Each action prompt shown that overlaps the HUD's other text, the dock or the other prompt. */
+const promptsCovered = (page: Page) =>
+    page.evaluate(() => {
+        const box = (e: Element) => e.getBoundingClientRect();
+        const hit = (a: DOMRect, b: DOMRect) =>
+            a.width > 0 && b.width > 0 && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+        const prompts = [...document.querySelectorAll<HTMLElement>('.hud-prompt')].filter(
+            (e) => e.textContent!.trim() !== '' && getComputedStyle(e).display !== 'none'
+        );
+        const others = [...document.querySelectorAll('.hud > :not(.hud-prompt), .ui-dock > *')];
+        const out: string[] = [];
+        for (const p of prompts) {
+            for (const o of [...others, ...prompts.filter((q) => q !== p)])
+                if (hit(box(p), box(o))) out.push(`${p.className} over ${o.className}`);
+        }
+        return out;
+    });
+
 test('text size 160 %: every HUD and menu text is 1.6× and stays on screen, phone and desktop', async ({ page }) => {
     test.setTimeout(600_000);
     await page.addInitScript(() => localStorage.setItem('uncivil.settings', JSON.stringify({ uiScale: 1.6 })));
@@ -176,6 +194,7 @@ test('text size 160 %: every HUD and menu text is 1.6× and stays on screen, pho
         const off = t.filter((x) => !x.inside).map((x) => x.what);
         expect(off, `${label}: text off screen`).toEqual([]);
         expect(await clipped(page), `${label}: text cut off or scrolled sideways`).toEqual([]);
+        expect(await promptsCovered(page), `${label}: an action prompt over other text or the dock`).toEqual([]);
     };
     for (const [w, h] of [
         [390, 844],
@@ -218,6 +237,7 @@ test('text size 160 %: every HUD and menu text is 1.6× and stays on screen, pho
         // split screen: player 2 looks down at a beam at their feet (their prompt shows), and each
         // player's label is in their own half
         await lab(page, (l) => l.setPlayers(2));
+        if (await lab(page, (l) => l.paused())) await lab(page, (l) => l.action('pause')); // play live
         const p0 = await lab(page, (l) => l.player());
         await page.evaluate(
             ([x, y, z, eye]) => {
@@ -307,7 +327,8 @@ test('less motion by the switch alone (no system setting): the menus and toasts 
         page.evaluate(() => ({
             reduced: document.body.classList.contains('reduced-motion'),
             toast: getComputedStyle(document.querySelector('.toast')!).transitionDuration,
-            menu: getComputedStyle(document.querySelector('.settings-backdrop')!).transitionDuration
+            // the menu's buttons (their press and hover)
+            menu: getComputedStyle(document.querySelector('.settings-close')!).transitionDuration
         }));
     // the system doesn't ask for less motion: the UI moves
     expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(false);
