@@ -313,6 +313,14 @@ export class HostSession {
         this.onGuestsChanged(joined, left, dropped, back);
     }
 
+    /**
+     * The host's page went to the background (or came back). A hidden page draws no frames, so the
+     * world waits for it: guests are told why it stopped, rather than seeing it freeze.
+     */
+    setAway(away: boolean): void {
+        this.ch.setState({ away: away || null });
+    }
+
     /** Slots held for a guest who dropped. */
     droppedSlots(): number[] {
         return [...this.dropped.keys()];
@@ -528,6 +536,8 @@ export class GuestSession {
     private ended = false;
     /** The host runs a build with another entity layout (see layoutHash): the game can't be played. */
     incompatible = false;
+    /** The host's page is in the background: the world waits for it. */
+    hostAway = false;
     private readonly layout: string;
     private readonly now: () => number;
 
@@ -581,6 +591,7 @@ export class GuestSession {
         this.lostAt = null;
         const st = h.state;
         if (st.end === true) this.ended = true;
+        this.hostAway = st.away === true;
         // another build's world: its snapshots would land on the wrong entities, so apply none
         if (st.layout !== this.layout) {
             this.incompatible = true;

@@ -147,7 +147,17 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
     app.setCanvasResolution(RESOLUTION_AUTO);
     const resize = () => app.resizeCanvas();
     window.addEventListener('resize', resize);
-    app.on('destroy', () => window.removeEventListener('resize', resize));
+    // the window's resize event alone can miss a size change: leaving full screen inside an iframe
+    // (itch's embed) may fire it before the new size is laid out, or not at all. A ResizeObserver on
+    // the page fires once the layout has the new size; full screen changes are watched too.
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(resize) : null;
+    observer?.observe(document.documentElement);
+    document.addEventListener('fullscreenchange', resize);
+    app.on('destroy', () => {
+        window.removeEventListener('resize', resize);
+        document.removeEventListener('fullscreenchange', resize);
+        observer?.disconnect();
+    });
     app.start();
 
     const layers = app.scene.layers;

@@ -72,6 +72,247 @@ close to its limit groans, and an overloaded one cracks and lets go.
 - Joints are rigid until they break: pieces don't visibly bend. The warning is the creak, the
   colour and the message.
 
+## Credits and licences (2026-11-23, Epic 10, #104)
+
+The game now says what it is made with, and ships the licence notices its parts ask for.
+
+- **In the game:** Settings → Game → **Credits & licences…** opens a dialog with three sections:
+    - **The game's own work:** the code, levels, voxel models and animation; every sound
+      (synthesised in code, no recordings); and the text, which uses your device's fonts.
+    - **Made with:**
+
+        | Package           | Licence    | What it does                                         |
+        | ----------------- | ---------- | ---------------------------------------------------- |
+        | PlayCanvas Engine | MIT        | the 3D engine, and its camera, sky and water scripts |
+        | Rapier            | Apache-2.0 | physics                                              |
+        | Trystero          | MIT        | connects players peer to peer                        |
+        | noble-secp256k1   | MIT        | signs the matchmaking messages (used by Trystero)    |
+
+    - **Online services:** public Nostr relays help players find each other, and a TURN relay is
+      used if one is configured.
+- **Full licence texts:** the build writes `third-party-licenses.txt` beside the game (19 KB),
+  with every bundled package's name, version, licence and licence text, read from the installed
+  packages. The dialog links to it. Minifying drops the notices from the code, and MIT and
+  Apache-2.0 ask for them to travel with it.
+- **Kept honest:** a unit test fails if a production dependency is added without a credit, or if
+  its licence differs from the one credited. Type-only packages (`@types/webxr`, `@webgpu/types`)
+  put no code in the build and are left out. Vite, a development package, is included: its small
+  module-preload helper is bundled. Only Vite's own MIT notice is shipped, not the licences of the
+  tools Vite bundles into itself.
+- **Tests:**
+    - unit (`tests/unit/credits.test.ts`): the credits match the production packages and their
+      licences, and each licence text is in the file;
+    - browser, inside the itch embed: the dialog lists all five, the licence file loads from
+      its relative URL with the Apache and MIT texts, and Esc closes the credits but not the menu.
+- **Not decided here:** the game's own licence. The repository has none; that's the owner's
+  choice.
+
+## The game in itch's embed: checked in the browser (2026-11-23, Epic 10, #103)
+
+itch.io shows the game in a cross-origin iframe on its own page. New browser tests play it that way
+on every pull request into `main`, and three things changed for players.
+
+### What changed for players
+
+- **Full screen from inside the game:** Settings → Game → **Full screen**. Handy on phones, where
+  itch's own button is small. It's only offered where the page around the game allows full screen.
+  A test checks it's hidden when the embed forbids it.
+- **Switching tabs in a solo game:** the game stops at the menu (paused). You come back to it
+  waiting instead of mid-fall. The sound pauses too (it did before).
+- **Online, the host switches tabs:** a page in the background draws no frames, so the host's game
+  may stop for everyone. Guests are now told: "The host's game is in the background: it may stop
+  until they come back". Then "The host is back".
+
+### What happens when the host stays hidden for minutes
+
+Browsers throttle a hidden page's timers. After 5 minutes, chained timers run about once a minute.
+
+- **Peer to peer (itch.io):** Trystero drops a peer only when its WebRTC connection fails or closes,
+  and the browser keeps that connection alive itself, whatever the page's timers do. Our channel has
+  no timeout of its own, so guests stay in the game however long the host is away. If the browser
+  discards the hidden tab (phones do) or the network drops, the connection closes. Guests then see
+  "reconnecting" and leave after 20 s.
+  Shown in `tests/unit/hidden-host.test.ts` with Trystero replaced by an in-memory stand-in on fake
+  timers: the host sends nothing for 15 minutes, the guest receives nothing and stays; then the
+  connection closes and the guest leaves after 20 s.
+- **The local test transport (`?net=local`)** used to forget a page silent for 10 s, which would
+  have dropped a throttled host. A page now says when it is hidden, and is then kept for 10 minutes.
+  Tested on fake timers: a silent visible page goes after 10 s, a silent hidden one stays 9 minutes
+  and goes after 10.
+
+### What the embed tests check (`tests/e2e/embed.spec.ts`, actual results)
+
+The setup:
+
+- A stand-in itch page on `itch.test` frames the game on `game.test` (routed to the build).
+- The iframe grants `autoplay; fullscreen *; gamepad`: the features the game uses, as itch's embed
+  is understood to grant them. This was **not** checked against the live itch.io page, because this
+  environment can't reach itch.io. Full screen is also tested with an embed that forbids it.
+- Chrome blocks sound until a gesture. This Chrome does so by default; the `--autoplay-policy=user-gesture-required` flag is a safeguard for browsers whose default allows autoplay, so the asserts don't depend on it.
+- The browser's own audio state is recorded by a script that runs at page load, before any test
+  code.
+
+| Check                                       | Result                                                                                                                                                        |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Before any click                            | No user activation at load; an AudioContext made then is suspended; no pointer lock; canvas 640 × 360                                                         |
+| The bucket under the crosshair, first click | Pointer lock taken, the game's AudioContext running, the bucket **not** grabbed (still the target)                                                            |
+| Esc (a real key press)                      | The menu opens and the mouse is released (here by the game's own Esc handling: headless Chrome passes Esc to the page); Resume takes it back, nothing grabbed |
+| The page resizes the frame                  | Canvas 960 × 540, HUD inside                                                                                                                                  |
+| itch's full screen button                   | Canvas 1280 × 720, the menu opens (the mouse was released); back to 960 × 540                                                                                 |
+| Settings → Full screen                      | The game itself goes full screen and back; the switch shows On, then Off                                                                                      |
+| An embed without full screen                | No Full screen switch in Settings                                                                                                                             |
+| Tab hidden / shown                          | Sound suspended / running; the solo game paused at the menu                                                                                                   |
+| Online, host hidden / shown                 | The guest's status and toast say the host is in the background, then back                                                                                     |
+| Online, guest's tab closes                  | The host holds player 2 (`dropped` is `[1]`)                                                                                                                  |
+| Online, host's tab closes                   | The guest shows "reconnecting", then after 20 s "The host left the game"                                                                                      |
+
+- Three embed tests, and one for the credits (below), pass locally with no console errors or
+  warnings.
+- Unit test (`tests/unit/host-away.test.ts`): the host's away flag reaches the guest and clears.
+- `docs/releasing.md` lists the embed checks.
+
+### Known limits
+
+- **Headless Chrome never hides a tab.** The test hides the page the way the browser announces it
+  (the visibility state and a `visibilitychange` event). What a real background tab does to frames
+  isn't reproduced: none are drawn, and when the page is back the game catches up at most 4 ticks
+  (the rest are skipped).
+- **The test pages are plain `http`.** itch serves the game over `https`. Features that need a
+  secure context, such as peer-to-peer online play, aren't covered by these tests. The online
+  embed test uses the local test transport.
+- **Not yet tried on the real itch.io page** in Safari, Firefox or on a phone.
+
+## Weather along the Valley, and its flood (2026-11-22, Epic 9, towards #88)
+
+Each Valley area past the creek now gets its own weather once per run. It comes a seeded 4–22 s
+after the first player gets there. The hazard director runs the weather that is a hazard, so it
+takes turns with the flood, the gust and the handbrake prank: only one hazard at a time, with a
+15 s quiet spell after each. Each hazard has a way to beat it, and a test plays it out by input.
+
+- **Rain on the Forest Road: wet timber slips.** While it rains, a player under it grips with
+  less force. It scales with the rain's strength: at full rain a grip gives about 400 N instead
+  of 650 N.
+    - Alone, a beaver carrying a heavy beam from the log dump up the road lost it after 1.43 m.
+      The same carry in the dry held all 12 m.
+    - Two beavers carrying it together held it all the way in the rain.
+    - Carrying it lower alone is no reliable answer. Of ten heights tried (view pitch −0.25 to
+      −1.2), only −1.0 held all the way; the others slipped within 1.6 m. So the toast only says
+      what works: "Wet timber slips: carry heavy pieces together". A test checks that, of six of
+      those heights, at most one holds.
+    - A guest's carry slips the same way: the host decides everyone's grip.
+    - The river also rises 0.35 m in the rain, but that is only scenery: it reaches no bridge.
+- **A fog bank on the mountain road.** At full strength the view closes in to the near world's
+  edge: 24 m on Low, 30 m on High (its own end).
+    - The fog fully covers the near world's edge on both presets (opacity at the edge 1.0), so
+      the coarse far ground behind it never shows through.
+    - It only hangs over its own area. The summit and its flower stay clear.
+    - **The sky turns the fog colour too.** At full fog the far world had shown as fog-coloured
+      outlines against a blue sky. Now a dome round the camera, far beyond the fog's end, is
+      fogged out like the far world and fades in as the fog closes in. A browser test measures the
+      colour where the far landmarks stand at full fog on Low: ΔE under 3 (it was about 18).
+    - Played: in the fog, a beaver walked the 27.5 m stretch by input, steering only by the edge
+      posts it could pick out (fog under 0.9). It never strayed more than 0.80 m from the road's
+      middle, with no falls.
+    - When it lifts, the view is back to the level's own.
+- **Mist over the gorge: atmosphere, not a hazard.** It closes the view in like the fog, but
+  there is nothing to beat. So it comes whatever else is going on, holds nothing up, and says
+  nothing.
+- **A snow squall at the crevasse.** A crosswind (up to 1000 N) pushes carried planks across the
+  road, like a weaker version of the Timber Yard's gust. All three cases start with the plank
+  picked up by input:
+    - carried at chest height alone, it was torn away (692 N against a 650 N grip);
+    - carried low, the push was 200 N, and it held;
+    - carried by two players, it held at 1000 N (two grips hold 1300 N).
+- **The Timber Yard's flood now happens at Shallow Creek too.** It is the same flood on the same
+  crossing, turned with the yard.
+    - Played: the flood washes both beams off and leaves them downstream on the near bank. A
+      beaver fetches them, rebuilds and carries the bucket to the far flag, all by input.
+    - The flood can leave a beam lying askew (13° in the test), so the player squares it up
+      before laying it, as a player would.
+    - **Fixed:** the Valley's water area covers the whole map, and the Timber Yard's ground
+      (0.4 m) is lower than the flood's peak (0.6 m). So the flood had been floating loose props
+      in the yard, with the water drawn over it. Now the flood's lift and current keep to the
+      creek's channel, and the drawn surface stops just under the banks.
+    - In a test, nine props lying in the yard didn't move during a flood.
+    - It is just as strong: the bridge floated off at the same tick (1175) as before.
+- **One at a time (tested):**
+    - a bridge finished in the rain waits for it and the quiet spell;
+    - rain waits out a flood;
+    - the aimed gust never comes during weather;
+    - the fog and the handbrake prank each wait for the other.
+- **Online:** guests get the weather's area and strength from the host (tested through real host
+  and guest sessions).
+    - An older host sends neither, and that reads as no weather.
+    - The Timber Yard sends nothing new.
+- **On screen:** rain and snow fall round the camera as voxel particles (at most 90 cells). Mist
+  and fog are drawn with the fog alone.
+- **Seen in a real browser** (`docs/screenshots/epic9/weather-*.jpg`): each area at full
+  strength, at Low and High.
+    - The screenshots switch each weather on with a debug hook (`__riverLab.weather(n)`), which
+      waits for the same moment any hazard would. It refuses in the grace period, during another
+      hazard, in its quiet spell and over other weather (tested). The browser test seeks past the
+      grace period first, which steps the simulation without drawing.
+    - They come from a committed browser test, `tests/e2e/weather.spec.ts`
+      (`WEATHER_SHOTS=1`).
+- **Known visuals:**
+    - The fog fades in with the frame time, which is capped. At normal frame rates it is most of
+      the way in about 4 s; in software rendering it takes much longer.
+    - At the flood's peak, a beam floating off the caps sits about 0.2 m above the drawn water.
+    - The rain's rise lifts the drawn water everywhere, so the gorge's waterfall foam sits a
+      little under the surface while it rains.
+- **Timber Yard unchanged:** all its hazard tests pass untouched.
+
+## Epic 8: a tree falls towards the ute (2026-11-22, #74)
+
+The logging stand can now fight back. Take a bite out of a stand tree with the ute parked close
+by, and the pine leans towards the ute.
+
+- **When:** a player bites or chops a stand tree while the ute stands within 5.5 m of it (trunk to
+  the ute's nearer end). Only a fresh bite or blow sets it off: a tree cut a little during the quiet
+  start, or left half cut, says nothing until someone cuts it again.
+- **The tell:** at that bite, a crack (a snap and a low creak) and a toast: "The pine is leaning
+  towards the ute! Move the ute, or cut from its side so it falls away." Then the whole tree leans
+  over towards the ute, to 0.2 rad (about 11°, its top moving about 1.4 m) over the tell, with a
+  shake, and sheds needles on that side every half second with a creak each time. It stays leaning
+  until it falls, and stands back up if the ute is moved out of reach or the hazard is given up.
+  The voxel worker takes the static tree away while the tree's marker draws it tilted, from its
+  channels in the snapshots, so a guest sees it too. Tested on the host and the guest (the drawn
+  crown moves towards the ute and further over time), in the worker (taken away, put back), and
+  in a browser test with a screenshot of the lean.
+- **Time to react: 7 s.** The tree can't fall sooner, however fast it is chewed: it hangs on its
+  last fibres, and the next bite after the tell fells it. Measured by input: from the crack, a
+  player at the tree walks to the ute, gets in and drives it out of reach in 5.0 s. The other 2 s
+  are for reading the toast.
+- **What happens:** while the ute is in reach, the tree's weight shifts towards the ute: its own
+  lean is replaced by a lean of 0.035 rad towards the ute.
+    - Cut from the far side, it comes down on the ute (tested: within 10°, on tree 1 and on the
+      leaning trees 0, 2 and 5).
+    - Cut square to the ute, it is pulled round towards it (tested: about 63° from the ute, at
+      least 20° nearer than the same cut with no hazard).
+- **Counterplay, true of every tree in the stand, each tested by player input:**
+    - **Cut from the ute's side:** the cut's push (0.07) beats the lean, whatever the tree's own
+      lean, so it falls straight away from the ute. Tested on all six trees, the leaning ones too:
+      more than 160° from the ute.
+    - **Move the ute:** at the crack, walk to the ute, drive it out of reach, walk back and finish
+      the tree. It falls as the same cut does with no hazard (tested: within 5°).
+    - **A rope** waits for ropes.
+- **Budget, tested so that removing each check fails a test:**
+    - not in the first 20 s;
+    - not within 60 s of the last one ending, even once the 15 s quiet spell is over (a cut 20 s
+      after gives nothing; the second cracks on the first bite after the 60 s);
+    - at most two (a third tree cut after another 60 s gives nothing);
+    - none while another hazard runs (a tree cut during the flood's warning brings nothing).
+- **Online, tested:** the guest gets the toast (and so the crack, which plays from it), sees the
+  tree lean over towards the ute and the trunk come down on it, all in the host's snapshots. A
+  guest who joins mid-tell sees the lean but missed the toast.
+- **The creak at 70% cut** names no direction while the hazard pulls the tree, because the ute
+  could still move ("The pine creaks: stand clear!").
+- **Playtest log:** the summary counts falling trees, and the script says what to watch for.
+- **Code:** `src/sim/hazard-tree.ts`, with three small hooks in the forestry (an extra lean on a
+  fall, a hold on it, the lean on the marker), four more marker channels, the leaning tree drawn
+  by the stand marker (`src/assets/forestry.ts`) while the worker leaves it out of the static layer,
+  the needles in `src/fx/wood-fx.ts`, a few lines in the director, and a `placeUte` test hook.
+
 ## Epic 5, part 1: nails and the joint graph (2026-11-22)
 
 You can now nail timber together, or nail it down to stone and ground. In the Timber Yard you can

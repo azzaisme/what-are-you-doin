@@ -1,5 +1,7 @@
 import { defineConfig } from 'vite';
 
+import { thirdPartyLicenses } from './scripts/third-party-licenses.ts';
+
 // https://vite.dev/config/
 export default defineConfig({
     worker: { format: 'es' },
@@ -12,6 +14,8 @@ export default defineConfig({
         chunkSizeWarningLimit: 3000
     },
     plugins: [
+        // the bundled packages' licence notices, next to the game (#104)
+        thirdPartyLicenses(),
         {
             // Dev only: install the PlayCanvas Inspector before the app starts (press ` to toggle)
             name: 'playcanvas-inspector',
