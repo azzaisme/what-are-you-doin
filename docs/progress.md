@@ -53,6 +53,7 @@ between two runs of the old build):
 
 - With `?props=scripted` the River Lab leaves the spare planks, beams, logs, crates and the ragdoll
   piled at the origin, in the river, where they show above the water.
+
 ## Epic 5, part 1: nails and the joint graph (2026-11-22)
 
 You can now nail timber together, or nail it down to stone and ground. In the Timber Yard you can
