@@ -40,6 +40,12 @@ export interface StaticPiece {
     policy?: SamplingPolicy;
     /** False for things out of reach or purely decorative at a distance. */
     collide: boolean;
+    /**
+     * A foot detour's stepping piece (Epic 9, #87), named as players would say it ("stepping
+     * stones"): a beaver standing on one cannot hold the bucket, so building the crossing stays the
+     * only way to get it over.
+     */
+    detour?: string;
 }
 
 export interface LevelLayout {

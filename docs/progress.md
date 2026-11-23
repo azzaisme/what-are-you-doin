@@ -1,5 +1,66 @@
 # Progress log
 
+## Foot detours over three Valley crossings, and the bucket still has to go over the bridge (2026-11-23, Epic 9, #87)
+
+Three narrow paths now go round the Valley's crossings, for beavers on foot:
+
+- **Stepping stones** across Shallow Creek, upstream of the old bridge: four stones rising towards
+  the far bank.
+- **A fallen trunk** over the culvert, resting on both rims.
+- **Three boulders** wedged side by side in the crevasse.
+
+Each path leaves the road and comes back to it. They are graded like the side paths: the banks'
+cross-fall is at most 0.11 m over a beaver's width, at the trunk path's corner. No tree or rock
+stands on them. They keep clear of the logging and lookout tracks (the detours are on the other
+side of the road), the road closure's barrier (u 22) and its sign (u 10.5). The trees, rocks and
+flowers elsewhere are exactly where they were.
+
+**The bucket can't go over a detour.** The detours' pieces are tagged in the level ("stepping
+stones", "fallen trunk", "boulders"):
+
+- A beaver standing on one can't hold the bucket. A grab is refused, and a carried bucket drops
+  where they stand. The first time, the toast says "The bucket's too awkward for the stepping
+  stones: build the crossing to get it over." The usual let-go sound plays.
+- Nobody can take hold of a bucket lying on a piece, from a piece or from the bank. If it's left
+  there for a third of a second, it goes back to the stage start like a bucket that fell in ("The
+  bucket can't be carried on the boulders. A spare bucket (3 L) is waiting at the Mountain Approach
+  start.").
+    - This second half was added after measuring. With only the first half, a beaver on the
+      crevasse's near rim could set the bucket on the first boulder, and a beaver on the far rim
+      picked it up (2.7 m from their eye, inside the 2.6 m reach to the bucket's near side). The same
+      hand-over across the bare road crossings fails: the far beaver can't reach.
+- A plank laid over the stones is building. A beaver standing on it holds the bucket (their feet
+  are on the plank, 10 cm above the stone), and a bucket set on it isn't "on the stones".
+- The stage objectives say so: "the stepping stones are feet only", "the fallen trunk is feet
+  only", and "the boulders are feet only, the bucket goes over the bridge".
+
+**Tests** (`tests/unit/valley-detours.test.ts`, all by input; set-up places players, the bucket and
+a built bridge). Each of these fails to get the bucket over:
+
+- carried onto the stepping stones: it was held on a stone for at most 1 tick, then dropped and
+  went back to the start;
+- carried with a running jump onto the stones;
+- alone: set down on a stone from the bank, then reached for from the bank, and from a stone;
+- passed from a beaver on the bank to one on a stone;
+- set on a boulder from the near rim, then reached for from the far rim;
+- two carriers: the one who steps onto a stone lets go, and the one left on the bank drops it on the
+  next step;
+- dragged along the fallen trunk;
+- driven at in the ute: at each detour, the ute never got onto the far bank;
+- online: a guest on a stone can't take it from the host. The guest is told it holds nothing, sees
+  the toast, and its snapshots show the bucket within 0.3 m of where the host has it.
+
+The rest:
+
+- **Control:** the same hand-over over the built crevasse crossing works (the beaver on the beams
+  takes it), and the flag counts it.
+- **Walks:** a beaver walks each detour end to end with no falls, and so does a guest over the
+  stepping stones, with host and guest agreeing within 0.3 m.
+- **Timber, measured:** a plank (2.4 m) and a beam (3.2 m) can each be carried over all three
+  detours by one beaver. So a crossing can be built from either side. Only the bucket is held back.
+- Valley planks stay 2.4 m, and the bucket's throw is unchanged.
+- npm test 822/822 (5 cm and 10 cm).
+
 ## Valley flags want water in the bucket: the empty-bucket throw is closed (2026-11-23, Epic 9)
 
 An existing cheat: the Valley could be finished without building a single bridge.

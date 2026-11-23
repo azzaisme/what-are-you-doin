@@ -14,7 +14,6 @@ import {
     routeT,
     routeToWorld,
     routeU,
-    valleyHeight,
     valleyLevel
 } from '../../src/levels/valley.ts';
 import { GuestSession, HostSession, listGames } from '../../src/net/session.ts';
@@ -23,9 +22,10 @@ import { neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
 import { EYE_HEIGHT, HANDOVER_REACH, HANDOVER_TEXT, HEAVY_JUMP_TEXT, LabSim } from '../../src/sim/lab-sim.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
-import { pose, quatFromYawPitchRoll } from '../../src/voxels/math.ts';
+import { pose } from '../../src/voxels/math.ts';
 
 import { Player } from './play.ts';
+import { bridge, gapsAt } from './valley-play.ts';
 
 beforeAll(() => initPhysics());
 
@@ -34,54 +34,6 @@ beforeAll(() => initPhysics());
  * gone, so throwing it over a crossing no longer completes the stage. Players act by input (the
  * Player helper); levels are set up by placing things (where the run is, beams across a gap).
  */
-
-const hAt = (u: number, t: number) => {
-    const w = routeToWorld(u, t);
-    return valleyHeight(w.x, w.z);
-};
-
-/**
- * The gaps along the road at a crossing: runs of ground well below its rims (the crevasse's bed is
- * at the fall line itself, so "below the fall line" would miss its edges).
- */
-function gapsAt(cu: number): [number, number][] {
-    const t = roadT(cu);
-    const rims = Math.min(hAt(cu - 6, t), hAt(cu + 6, t));
-    const gaps: [number, number][] = [];
-    let start = NaN;
-    for (let u = cu - 6; u <= cu + 6; u += 0.02) {
-        const low = hAt(u, t) < Math.min(rims, valleyLevel.rules!.fallY + 1) - 0.5;
-        if (low && Number.isNaN(start)) start = u;
-        if (!low && !Number.isNaN(start)) {
-            gaps.push([start, u]);
-            start = NaN;
-        }
-    }
-    if (cu === GORGE.u) {
-        const [a, b] = gaps.pop()!;
-        gaps.push([a, GORGE.u - GORGE.pierHalfU], [GORGE.u + GORGE.pierHalfU, b]);
-    }
-    return gaps;
-}
-
-/** Two beams side by side over each gap of a crossing, along the road (the bridge, placed). */
-function bridge(s: LabSim, cu: number, names: string[]): void {
-    const t = roadT(cu);
-    let n = 0;
-    for (const [a, b] of gapsAt(cu)) {
-        const rim = Math.max(hAt(a - 0.3, t), hAt(b + 0.3, t));
-        for (const dt of [-0.11, 0.11]) {
-            const w = routeToWorld((a + b) / 2, t + dt);
-            const name = names[n++];
-            const e = s.entities.find((x) => x.name === name)!;
-            s.physics.place(e.id, {
-                p: { x: w.x, y: rim + 0.2, z: w.z },
-                q: quatFromYawPitchRoll(ROUTE_YAW + Math.PI / 2, Math.PI / 2, 0)
-            });
-        }
-    }
-    for (let i = 0; i < 120; i++) s.step(neutralCommand(s.tick));
-}
 
 /**
  * A Valley run at stage `step` (0-based), player 1 in first person, the bucket (still full) waiting

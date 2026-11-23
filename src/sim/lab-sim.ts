@@ -25,7 +25,7 @@ import {
     BEAVER_WALK_PHASE
 } from '../assets/beaver.ts';
 import { BODY } from '../assets/player-body.ts';
-import { BUCKET_HANDLE_TOP, BUCKET_LITRES, LOG_RADIUS } from '../assets/props.ts';
+import { BUCKET_HANDLE_TOP, BUCKET_HEIGHT, BUCKET_LITRES, LOG_RADIUS } from '../assets/props.ts';
 import {
     UTE_ANIM_CHANNELS,
     UTE_DROP_0,
@@ -226,6 +226,8 @@ export class LabSim {
     /** Events since reset, newest last (the client shows them as toasts). */
     readonly events: SimEvent[] = [];
     private lostTicks = 0;
+    /** Ticks the bucket has lain on a foot detour's stepping piece (#87). */
+    private stuckTicks = 0;
     private goalTicks = 0;
     /** Not voxelized: carries the walker's pose through the snapshot ring for interpolation. */
     readonly playerEntity: SimEntity;
@@ -235,6 +237,19 @@ export class LabSim {
     readonly pouring: boolean[] = Array.from({ length: MAX_PLAYERS }, () => false);
     /** The bucket sat in the goal without enough water (said once per visit). */
     private dryNoticed = false;
+    /** Said once a run: the bucket cannot be carried on a detour's stepping pieces. */
+    private detourNoticed = false;
+    /** The level's foot-detour pieces (StaticPiece.detour): box, pose, and what players call them. */
+    private readonly detours: {
+        what: string;
+        x: number;
+        y: number;
+        z: number;
+        q: { x: number; y: number; z: number; w: number };
+        hx: number;
+        hy: number;
+        hz: number;
+    }[];
     /** Logging (Epic 6): the stand's trees, felled logs, the axe (src/sim/forestry.ts). */
     readonly forestry: Forestry;
     /** The level's sawmill, if it has one (src/sim/sawmill.ts). */
@@ -243,6 +258,20 @@ export class LabSim {
     constructor(opts: LabSimOptions = {}) {
         this.level = opts.level ?? riverLabLevel;
         this.hazards = new HazardDirector(this.level, opts.hazards ?? true);
+        this.detours = this.level.layout(1).pieces.flatMap((pc) =>
+            pc.detour && pc.shape.type === 'box'
+                ? [
+                      {
+                          what: pc.detour,
+                          ...pc.pose.p,
+                          q: pc.pose.q,
+                          hx: pc.shape.hx,
+                          hy: pc.shape.hy,
+                          hz: pc.shape.hz
+                      }
+                  ]
+                : []
+        );
         if (opts.hazardSeed !== undefined) this.hazards.seed = opts.hazardSeed >>> 0;
         this.propsMode = this.level.scriptedProps ? (opts.props ?? 'physics') : 'physics';
         const c = createLabEntities();
@@ -304,7 +333,7 @@ export class LabSim {
         this.events.length = 0;
         // (tick starts again at 0: a hint given before the reset must not hold the next one back)
         this.looseHintTick = -Infinity;
-        this.lostTicks = this.goalTicks = 0;
+        this.lostTicks = this.stuckTicks = this.goalTicks = 0;
         this.water.reset();
         // the first snapshot already shows a full bucket
         this.bucket.anim[BUCKET_LITRES] = this.water.volume;
@@ -313,6 +342,7 @@ export class LabSim {
         this.heavyNoticed = false;
         this.farNoticed = false;
         this.jumpWas.fill(0);
+        this.detourNoticed = false;
         for (const pl of this.players) {
             pl.fallTicks = 0;
             pl.safe.valid = false;
@@ -677,6 +707,24 @@ export class LabSim {
                 break;
             }
         }
+        // foot detours (Epic 9, #87): standing on a stepping stone, a trunk or a boulder, a beaver
+        // cannot hold the bucket (a grab is refused, a carried one is dropped where they stand), and
+        // nobody can take hold of a bucket lying on one (it goes back to the stage start)
+        if (pw.heldIdOf(i) === this.bucket.id) {
+            const what = this.detourUnder(p) ?? (heldBefore !== this.bucket.id ? this.bucketOnDetour() : null);
+            if (what) {
+                pw.release(i);
+                ev.dropped = true;
+                if (!this.detourNoticed) {
+                    this.detourNoticed = true;
+                    this.events.push({
+                        tick: this.tick,
+                        kind: 'hint',
+                        text: `The bucket's too awkward for the ${what}: build the crossing to get it over.`
+                    });
+                }
+            }
+        }
         const heldAfter = pw.heldIdOf(i);
         if (heldAfter !== this.bucket.id) this.pouring[i] = false;
         if (heldAfter >= 0 && heldAfter !== heldBefore) ev.grabbed = true;
@@ -730,9 +778,14 @@ export class LabSim {
         const lost =
             p0.y < rules.lostY ||
             (this.hazards.rise > 0 && p0.y < rules.lostY + this.hazards.rise && !rules.isSafe(p0.x, p0.z));
-        this.lostTicks = lost && pw.holders(bk.id) === 0 ? this.lostTicks + 1 : 0;
-        if (this.lostTicks > 90) {
-            this.lostTicks = 0;
+        const free = pw.holders(bk.id) === 0;
+        this.lostTicks = lost && free ? this.lostTicks + 1 : 0;
+        // left on a detour's stepping piece (#87) for a third of a second: as good as fallen in
+        const stuck = free && this.detours.length ? this.bucketOnDetour() : null;
+        this.stuckTicks = stuck ? this.stuckTicks + 1 : 0;
+        if (this.lostTicks > 90 || this.stuckTicks > 20) {
+            const how = this.stuckTicks > 20 ? `can't be carried on the ${stuck}` : 'fell in';
+            this.lostTicks = this.stuckTicks = 0;
             this.progress.recoveries++;
             const st = this.stage;
             const spare = st?.spareLitres ?? 0;
@@ -746,8 +799,8 @@ export class LabSim {
                     tick: this.tick,
                     kind: 'recovered',
                     text: spare
-                        ? `The bucket fell in. A spare bucket (${spare} L) is waiting at the ${st.name} start.`
-                        : `The bucket fell in. A spare (empty) one is waiting at the ${st.name} start.`
+                        ? `The bucket ${how}. A spare bucket (${spare} L) is waiting at the ${st.name} start.`
+                        : `The bucket ${how}. A spare (empty) one is waiting at the ${st.name} start.`
                 });
             } else {
                 pw.respawn(bk.id);
@@ -795,6 +848,58 @@ export class LabSim {
             }
         }
         this.applySteps(rules);
+    }
+
+    /**
+     * The detour piece a player stands on (its name for players), or null: feet over its top face,
+     * within a hand's width of its edges and a few centimetres of its top (a plank laid on a stone
+     * lifts the feet off it: building over the stones is building).
+     */
+    detourUnder(p: { x: number; y: number; z: number; grounded: boolean }): string | null {
+        return p.grounded ? this.detourAt(p, 0.15, 0.08) : null;
+    }
+
+    /**
+     * The detour piece the bucket lies on, or null: the lowest point of its rim or base on the
+     * piece's top face (on a plank laid over the piece, it is a plank's thickness, 10 cm, higher).
+     */
+    bucketOnDetour(): string | null {
+        const { p, q } = this.bucket.pose;
+        // the bucket's axis (its local up) and the lowest point of its 0.16 m rim, at base or top
+        const ux = 2 * (q.x * q.y - q.w * q.z);
+        const uy = 1 - 2 * (q.x * q.x + q.z * q.z);
+        const uz = 2 * (q.y * q.z + q.w * q.x);
+        const end = uy >= 0 ? 0 : BUCKET_HEIGHT;
+        const side = Math.sqrt(Math.max(0, 1 - uy * uy));
+        // (down its circle's own slope: straight down, less its part along the axis, made 0.16 long)
+        const k = side > 1e-6 ? (0.16 * uy) / side : 0;
+        const low = {
+            x: p.x + ux * end + ux * k,
+            y: p.y + uy * end - 0.16 * side,
+            z: p.z + uz * end + uz * k
+        };
+        return this.detourAt(low, 0.06, 0.05);
+    }
+
+    /** The detour piece whose top face is under (and within `below`/`above` metres of) a point. */
+    private detourAt(p: { x: number; y: number; z: number }, below: number, above: number): string | null {
+        for (const d of this.detours) {
+            const dx = p.x - d.x;
+            const dy = p.y - d.y;
+            const dz = p.z - d.z;
+            // into the piece's frame (inverse rotation)
+            const q = d.q;
+            const tx = 2 * (-q.y * dz + q.z * dy);
+            const ty = 2 * (-q.z * dx + q.x * dz);
+            const tz = 2 * (-q.x * dy + q.y * dx);
+            const lx = dx + q.w * tx + (-q.y * tz + q.z * ty);
+            const ly = dy + q.w * ty + (-q.z * tx + q.x * tz);
+            const lz = dz + q.w * tz + (-q.x * ty + q.y * tx);
+            if (Math.abs(lx) > d.hx + 0.1 || Math.abs(lz) > d.hz + 0.1) continue;
+            if (ly < d.hy - below || ly > d.hy + above) continue;
+            return d.what;
+        }
+        return null;
     }
 
     /** Journey levels: the stage being played (the last one once all are done), or null. */
