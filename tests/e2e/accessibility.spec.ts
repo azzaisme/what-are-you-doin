@@ -86,7 +86,8 @@ const texts = (page: Page) =>
 test('text size 160 %: every HUD and menu text is 1.6× and stays on screen, phone and desktop', async ({ page }) => {
     test.setTimeout(600_000);
     await page.addInitScript(() => localStorage.setItem('uncivil.settings', JSON.stringify({ uiScale: 1.6 })));
-    const problems = await boot(page, '?level=yard&t=1&quality=low#cell100');
+    // (the local test transport: the online panel opens without reaching for the public relays)
+    const problems = await boot(page, '?level=yard&t=1&quality=low&net=local#cell100');
     const check = async (label: string) => {
         const t = await texts(page);
         expect(t.length, `${label}: some text`).toBeGreaterThan(3);
@@ -206,7 +207,7 @@ test('field of view: the setting is the camera’s, live', async ({ page }) => {
 
 test('clicking a menu never grabs the timber under the crosshair; a click on the game does', async ({ page }) => {
     test.setTimeout(300_000);
-    const problems = await boot(page, '?level=yard&t=1&quality=low#cell100');
+    const problems = await boot(page, '?level=yard&t=1&quality=low&net=local#cell100');
     await lab(page, (l) => l.action('pause')); // play live
     // the bucket on the ground 1.3 m ahead, under the crosshair
     const p = await lab(page, (l) => l.player());
