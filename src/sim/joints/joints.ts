@@ -99,6 +99,7 @@ export class JointSystem {
     readonly health = new JointHealth();
     private readonly pw: PhysicsWorld;
     private readonly rapier = new Map<number, RAPIER.ImpulseJoint>();
+    private readonly springK = new Map<number, { twist: number; tipY: number; tipZ: number; linear: number }>();
     private ground: RAPIER.RigidBody | null = null;
 
     constructor(pw: PhysicsWorld) {
@@ -332,6 +333,7 @@ export class JointSystem {
         const A = this.pw.bodies.get(c.a)?.body;
         const B = c.b === GROUND ? null : this.pw.bodies.get(c.b)?.body;
         const f = A ? quatMul(A.rotation(), j.frameX1()) : null;
+        const set: number[] = [];
         for (const [axis, k0, e] of [
             [RAPIER.JointAxis.AngX, twistStiffness(c), [1, 0, 0]],
             [RAPIER.JointAxis.AngY, across, [0, 1, 0]],
@@ -344,6 +346,7 @@ export class JointSystem {
                 const ieff = B ? (ia * inertiaAbout(B, u)) / (ia + inertiaAbout(B, u)) : ia;
                 k = Math.min(k, ieff * MAX_RING * MAX_RING);
             }
+            set.push(k);
             proto.configureMotorModel.call(j, axis, RAPIER.MotorModel.ForceBased);
             const damp = axis === RAPIER.JointAxis.AngX ? NAIL.twistDamping : NAIL.angularDamping;
             proto.configureMotorPosition.call(j, axis, 0, k, k * damp);
@@ -355,6 +358,12 @@ export class JointSystem {
             proto.configureMotorModel.call(j, axis, RAPIER.MotorModel.ForceBased);
             proto.configureMotorPosition.call(j, axis, 0, kl, kl * NAIL.angularDamping);
         }
+        this.springK.set(c.id, { twist: set[0], tipY: set[1], tipZ: set[2], linear: kl });
+    }
+
+    /** The spring stiffnesses a connection's joint was given (N m/rad, N/m; tests). */
+    springs(id: number): { twist: number; tipY: number; tipZ: number; linear: number } | undefined {
+        return this.springK.get(id);
     }
 
     /**
@@ -379,6 +388,7 @@ export class JointSystem {
             this.pw.world.removeImpulseJoint(j, true);
             this.rapier.delete(id);
         }
+        this.springK.delete(id);
         for (const b of c ? [c.a, c.b] : []) {
             const pb = this.pw.bodies.get(b);
             if (!pb) continue;
