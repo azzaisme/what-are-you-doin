@@ -553,6 +553,19 @@ describe('the yard crossing, built by a player and driven over (Epic 5 gate)', (
         expect(r.s.hazards.floodMoved).toBe(0);
         // the nailed deck held its shape under the ute
         expect(Math.max(...r.shift)).toBeLessThan(NAILED_SHIFT_MAX);
+        // and through both floods and the ute no nailed plank sank into a beam (nailed pieces do not
+        // collide: their joint holds them apart): each still rests on the beams' tops
+        for (const l of r.landed) {
+            const p = r.s.entities.find((e) => e.id === l.id)!;
+            // the beams' tops under it, along their (sloping) centre lines
+            const tops = r.beams.map((b) => {
+                const ax = quatRotate(b.pose.q, 1, 0, 0, vec3());
+                return b.pose.p.y + ax.y * ((p.pose.p.z - b.pose.p.z) / ax.z) + 0.075;
+            });
+            const beamTop = Math.max(...tops);
+            const bottom = p.pose.p.y - 0.05;
+            expect(bottom - beamTop, `plank ${p.name}`).toBeGreaterThan(-0.01);
+        }
         expect(r.s.progress.falls).toBe(0);
     }, 300_000);
 
