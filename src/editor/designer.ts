@@ -41,7 +41,6 @@ export function saveDraft(d: LevelData): void {
 /** Prop entity pools (the entity catalogue's fixed sets). */
 const PROP_POOLS: Record<string, string[]> = {
     plank: ['plank', 'extra-plank-0', 'extra-plank-1', 'extra-plank-2', 'extra-plank-3', 'extra-plank-4'],
-    'long-plank': ['long-plank'],
     beam: ['beam-0', 'beam-1'],
     log: ['log', 'extra-log-0', 'extra-log-1'],
     crate: ['cube'],
@@ -59,7 +58,6 @@ type Tool =
     | 'ditch'
     | 'mound'
     | 'plank'
-    | 'long-plank'
     | 'beam'
     | 'log'
     | 'crate'
@@ -77,7 +75,6 @@ const TOOLS: { id: Tool; label: string }[] = [
     { id: 'ditch', label: 'Ditch' },
     { id: 'mound', label: 'Hill' },
     { id: 'plank', label: 'Plank' },
-    { id: 'long-plank', label: 'Long plank' },
     { id: 'beam', label: 'Beam' },
     { id: 'log', label: 'Log' },
     { id: 'crate', label: 'Crate' },

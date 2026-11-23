@@ -43,15 +43,25 @@ export interface PropDef {
 /**
  * Every plank's own throw (only planks: the general cap, GRAB.maxThrowImpulse, and so every other
  * throw, the bucket's included, is unchanged). A plank leaves your hands at PLANK_THROW_SPEED (the
- * 24 kg plank at 2.9 m/s instead of 45 / 24 = 1.9 m/s) and lets go clean: no spin from the grip, no
- * sideways swing from turning as you throw, so it flies flat along your view (tests/unit/throw.test.ts).
+ * 24 kg plank at 2.9 m/s instead of 45 / 24 = 1.9 m/s) and lets go clean: no spin from the grip and
+ * no sideways swing in your hands, so it flies flat along your view. It keeps the way you were moving,
+ * like anything else you throw (tests/unit/throw.test.ts).
  */
 export const PLANK_THROW_SPEED = 2.9;
 const PLANK_DENSITY = 500;
 
-/** A plank of a length: 0.2 x 0.1 m timber, its wrist scaled to its weight, and the plank throw. */
+/**
+ * The tutorial's long plank is carried balanced (BodyOptions.carryAhead): wherever you grab it, your
+ * grip slides to this far behind its middle, so the rest reaches ahead of you. Its middle then
+ * rides about 1.4 m ahead of your toes, so walked to the ditch's edge (or 0.4 m short of it)
+ * and let go, it lies on both banks.
+ */
+export const LONG_PLANK_CARRY_AHEAD = 0.5;
+
+/** A plank of a length: 0.2 x 0.1 m timber with the plank throw. */
 function plankBody(length: number): { shape: ShapeSpec; opts: BodyOptions } {
     const mass = PLANK_DENSITY * length * 2 * PLANK_HALF.y * 2 * PLANK_HALF.z;
+    const long = length > PLANK_LENGTH;
     return {
         shape: { type: 'box', hx: length / 2, hy: PLANK_HALF.y, hz: PLANK_HALF.z },
         opts: {
@@ -60,9 +70,9 @@ function plankBody(length: number): { shape: ShapeSpec; opts: BodyOptions } {
             restitution: 0.1,
             ccd: true,
             nailable: true,
-            // two hands spread along a longer plank: it starts to sag held 0.3 m off its balance
-            // point, as the 24 kg plank does at GRAB.maxTorque (24 kg x 9.81 x 0.3 m = 71 N m)
-            wristTorque: length > PLANK_LENGTH ? (GRAB.maxTorque * length) / PLANK_LENGTH : undefined,
+            // the long plank is shouldered like a beam (braced): it stays level held off its middle
+            wristTorque: long ? GRAB.braceTorque : undefined,
+            carryAhead: long ? LONG_PLANK_CARRY_AHEAD : undefined,
             throw: { maxImpulse: mass * PLANK_THROW_SPEED, steady: true }
         }
     };

@@ -1550,7 +1550,28 @@ test('logging in the Timber Yard: chew a pine down, the voxel tree becomes a stu
     expect(problems).toEqual([]);
 });
 
-test('the tutorial: the 3.8 m long plank carried to the ditch and let go spans it, bank to bank, and you walk over', async ({
+/** Waits until the sim has run `n` more ticks (not wall time: software GL can run a few ticks a second). */
+async function ticks(page: Page, n: number): Promise<void> {
+    const t0 = await lab(page, (l) => l.hazards().tick);
+    await page.waitForFunction(
+        (t) => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().tick >= t,
+        t0 + n,
+        { timeout: 120_000 }
+    );
+}
+
+/** Waits until a prop has moved under 5 mm over 30 sim ticks (it has come to rest; wind may nudge it). */
+async function atRest(page: Page, name: string): Promise<void> {
+    for (let k = 0; k < 20; k++) {
+        const a = (await lab(page, (l) => l.entities()))[name];
+        await ticks(page, 30);
+        const b = (await lab(page, (l) => l.entities()))[name];
+        if (Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) < 0.005) return;
+    }
+    throw new Error(`${name} never came to rest`);
+}
+
+test('the tutorial: the 3.8 m long plank, grabbed by its near end and let go short of the ditch, spans it bank to bank, and you walk over', async ({
     page
 }) => {
     test.setTimeout(300_000);
@@ -1562,13 +1583,13 @@ test('the tutorial: the 3.8 m long plank carried to the ditch and let go spans i
     const HALF = 1.9;
     const pk = (await lab(page, (l) => l.entities()))['long-plank'];
     // stand 0.4 m off the plank's near end (it lies along the lane, pointing across the ditch), look
-    // at its middle and take it
+    // at it near that end and take it
     await page.evaluate(
         ([x, y, z, half]) => {
             const l = (window as unknown as { __riverLab: Lab }).__riverLab;
             l.teleport(x, z + half + 0.4, 0);
             const p = l.player();
-            l.look(0, -Math.atan2(p.y + p.eyeHeight - (y + 0.05), half + 0.4));
+            l.look(0, -Math.atan2(p.y + p.eyeHeight - (y + 0.05), 0.6));
         },
         [pk.x, pk.y, pk.z, HALF]
     );
@@ -1583,23 +1604,24 @@ test('the tutorial: the 3.8 m long plank carried to the ditch and let go spans i
         null,
         { timeout: 30_000 }
     );
-    // walk it forward (W) to just short of the lip, then creep until your toes are at the lip
-    // (a step every frame), then let go
+    // look ahead, walk it forward (W) and stop 0.3 m short of the lip, then let go
+    await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.look(0, -0.35));
+    await ticks(page, 30);
     await page.keyboard.down('KeyW');
     await page.waitForFunction(
-        (lip) => (window as unknown as { __riverLab: Lab }).__riverLab.player().z <= lip + 0.6,
+        (lip) => (window as unknown as { __riverLab: Lab }).__riverLab.player().z <= lip + 0.8,
         LIP_NEAR,
         { timeout: 120_000, polling: 'raf' }
     );
     await page.keyboard.up('KeyW');
-    await page.waitForTimeout(500);
-    expect((await lab(page, (l) => l.player())).z).toBeGreaterThan(LIP_NEAR + 0.1);
+    await ticks(page, 30);
+    expect((await lab(page, (l) => l.player())).z).toBeGreaterThan(LIP_NEAR + 0.3);
     await page.evaluate(
         (lip) =>
             new Promise<void>((done) => {
                 const l = (window as unknown as { __riverLab: Lab }).__riverLab;
                 const tick = () => {
-                    if (l.player().z <= lip + 0.1) return done();
+                    if (l.player().z <= lip + 0.3) return done();
                     l.input({ moveZ: 0.5 });
                     requestAnimationFrame(tick);
                 };
@@ -1607,32 +1629,33 @@ test('the tutorial: the 3.8 m long plank carried to the ditch and let go spans i
             }),
         LIP_NEAR
     );
-    await page.waitForTimeout(1000);
+    await ticks(page, 30);
     await lab(page, (l) => l.input({ grab: true }));
     await page.waitForFunction(
         () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().holding === null,
         null,
         { timeout: 30_000 }
     );
-    await page.waitForTimeout(3000);
+    await atRest(page, 'long-plank');
     // it lies flat on both banks, 0.4 m or more past each lip
     const laid = (await lab(page, (l) => l.entities()))['long-plank'];
     expect(laid.z + HALF - LIP_NEAR).toBeGreaterThan(0.4);
     expect(LIP_FAR - (laid.z - HALF)).toBeGreaterThan(0.4);
     expect(Math.abs(laid.y - pk.y)).toBeLessThan(0.03);
-    // for the picture: back off and walk to the side along the bank (S, D), then look at it
+    // a picture of it across the ditch (its near end is behind the beaver): back off and walk to the
+    // side along the bank (S, D), look at it over your shoulder (C)
     await page.keyboard.down('KeyS');
     await page.waitForFunction(
         (lip) => (window as unknown as { __riverLab: Lab }).__riverLab.player().z > lip + 1.6,
         LIP_NEAR,
-        { timeout: 60_000, polling: 'raf' }
+        { timeout: 120_000, polling: 'raf' }
     );
     await page.keyboard.up('KeyS');
     await page.keyboard.down('KeyD');
     await page.waitForFunction(
         (x) => (window as unknown as { __riverLab: Lab }).__riverLab.player().x > x + 2.6,
         laid.x,
-        { timeout: 60_000, polling: 'raf' }
+        { timeout: 120_000, polling: 'raf' }
     );
     await page.keyboard.up('KeyD');
     await page.evaluate(
@@ -1645,9 +1668,9 @@ test('the tutorial: the 3.8 m long plank carried to the ditch and let go spans i
         },
         [laid.x, laid.y, laid.z]
     );
-    // over the shoulder (C), so the beaver's paws do not fill the picture
     await page.keyboard.press('KeyC');
-    await page.waitForTimeout(2500);
+    await ticks(page, 60);
+    await idleFrames(page);
     await page.screenshot({ path: 'test-results/tutorial-plank-span.png' });
     await page.keyboard.press('KeyC');
     // walk back to the plank's near end, then over it (W, turning to face where you go)
@@ -1670,13 +1693,25 @@ test('the tutorial: the 3.8 m long plank carried to the ditch and let go spans i
             { timeout: 120_000, polling: 'raf' }
         );
         await page.keyboard.up('KeyW');
-        await page.waitForTimeout(300);
+        await ticks(page, 20);
     };
     await walkTo(laid.x, LIP_NEAR + 1.2);
     await walkTo(laid.x, LIP_FAR - 1.2);
     expect(await lab(page, (l) => l.progress().falls)).toBe(0);
     expect(problems).toEqual([]);
 });
+
+/** A few rendered frames (the screenshot shows the view after the last look). */
+async function idleFrames(page: Page): Promise<void> {
+    await page.evaluate(
+        () =>
+            new Promise<void>((done) => {
+                let n = 0;
+                const f = () => (++n >= 5 ? done() : requestAnimationFrame(f));
+                requestAnimationFrame(f);
+            })
+    );
+}
 
 test('the falling tree in the Timber Yard: a bite with the ute by the stand, and the pine leans over towards it', async ({
     page

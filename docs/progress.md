@@ -9,73 +9,85 @@ still needed at the Timber Yard and Valley crossings. **The better throw is for 
 
 ### What changed
 
-- **The tutorial's long plank:** a new prop, `long-plank`. It is 3.8 × 0.2 × 0.1 m of the same wood
-  (38 kg) and only the tutorial places it. It is its own entity, so a guest draws and simulates the
-  same 3.8 m plank as the host. The standard plank (`plank`, `extra-plank-N`, the sawmill's planks)
-  stays 2.4 m and 24 kg. The level designer has a "Long plank" tool.
-- **Why 3.8 m (measured, by input):** the tutorial ditch's flat bottom is 1.8 m wide and its banks
-  start to drop 1.15 m from its line, so it is **2.3 m from lip to lip**. A 2.4 m plank has 5 cm on
-  each bank at best.
-    - You carry a plank at arm's length, so held by its middle its centre is only about 0.9 m past
-      your toes.
-    - Carried to the lip and let go, a 3.6 m plank (1.5 times) lay 0.92 m on the near bank and
-      **0.38 m on the far bank**: under the 0.4 m wanted.
-    - **The 3.8 m plank lies 1.08 m and 0.42 m**, and it carries you over.
-    - **Thrown from 1.25 m back from the lip, it lands 0.76 m and 0.74 m.**
-    - 4.0 m does not work from the same start: you cannot reach its middle from its near end.
-- **The long plank's wrist** is scaled to its weight (111 N m). It starts to sag held 0.3 m off its
-  balance point, as the 2.4 m plank does at 70 N m.
+- **The tutorial's long plank:** a new prop, `long-plank`, 3.8 × 0.2 × 0.1 m of the same wood
+  (38 kg).
+    - Only the tutorial places it, and the level designer has no tool for it.
+    - It is its own entity, so a guest draws and simulates the same 3.8 m plank as the host.
+    - The standard plank (`plank`, `extra-plank-N`, the sawmill's planks) stays 2.4 m and 24 kg.
+- **Carried balanced, so laying it is easy:** wherever you grab the long plank, your grip slides
+  onto its long axis, 0.5 m behind its middle (centred if it lies across you). It is shouldered
+  like a beam, so it stays level, and the rest of it reaches ahead of you.
+    - Its middle rides about 1.4 m ahead of your toes, whatever you grabbed.
+    - Walk it to the ditch's edge, or stop 0.4 m short (tested), let go, and it lies on both
+      banks.
+- **Measured, by input** (`tests/unit/tutorial.test.ts`). The ditch is 2.3 m from lip to lip; a
+  2.4 m plank has 5 cm on each bank at best. Grabbed by its near end, a quarter along or its middle,
+  carried looking ahead and let go:
+    - 0.1 m short of the lip: **0.56–0.58 m** on the near bank, **0.92–0.94 m** on the far bank;
+    - 0.4 m short: **0.82–0.83 m** and **0.67 m**;
+    - you then walk over it.
+    - Thrown from 1.65 m back from the lip, it lands **0.72 m and 0.78 m**. A throw spans the ditch
+      from 1.5 to 1.8 m back.
+- **Why 3.8 m, not 3.6 m:** before the balanced carry, a 3.6 m plank held by its middle and let go
+  at the lip lay only 0.38 m on the far bank. You carry a plank at arm's length, so its middle was
+  only about 0.9 m past your toes.
 - **The tutorial:** the plank used to lie through the bin's south wall (found by the new spawn
   check). The long plank now lies at (-0.75, -6.85), still pointing across the ditch, its far end
   10 cm short of the edge. Pushing a plank over the ditch never worked: it tips in before its front
-  end reaches the far bank. The step now says: "Lay the plank across the ditch: grab it by the
-  middle, carry it to the edge, let go, walk over."
-- **Throwing a plank (every plank):** planks get their own throw (`src/sim/lab-physics.ts`): they
-  leave your hands at 2.9 m/s. The 24 kg plank used to leave at 1.9 m/s, capped by the general
-  45 N s; the new cap is 70 N s for it and 110 N s for the long plank. Planks also let go clean: no
-  spin from the grip, and no sideways swing from turning as you throw, so they fly flat along your
-  view. Only the plank's own velocity changes: the thrower keeps moving as they were. `GRAB.throwSpeed` and `GRAB.maxThrowImpulse` are as they were, so every other throw is
-  unchanged, the empty bucket's included.
+  end reaches the far bank. The step now says: "Lay the plank across the ditch: grab it, carry it
+  to the edge, let go, walk over."
+- **Throwing a plank (every plank):** planks get their own throw (`src/sim/lab-physics.ts`).
+    - They leave your hands at 2.9 m/s. The 24 kg plank used to leave at 1.9 m/s, capped by the
+      general 45 N s; the new cap is 70 N s for it and 110 N s for the long plank.
+    - They let go clean: no spin from the grip and no sideways swing in your hands, so they fly
+      flat along your view.
+    - Only the plank's own velocity changes, and it keeps the way you were moving (running or
+      strafing), like anything else you throw. The thrower's own motion is untouched.
+    - `GRAB.throwSpeed` and `GRAB.maxThrowImpulse` are as they were, so every other throw is
+      unchanged.
 - **Unchanged:** the Timber Yard and Valley layouts, the sawmill, the ute and Epic 5's bridge (all
   2.4 m planks). The sawmill's rack check now reads the plank size from `PLANK_HALF` instead of a
   copy of it (the same numbers).
 
-### Measured, by input (`tests/unit/throw.test.ts`, flat ground, from the thrower's feet to where the plank's centre first touches down)
+### Measured, by input (`tests/unit/throw.test.ts`, flat ground, from the thrower's feet to where the piece's centre first touches down)
 
-| Looking up | 2.4 m plank before | 2.4 m plank now | Change |
-| ---------- | ------------------ | --------------- | ------ |
-| 0 rad      | 1.72 m             | 2.27 m          | +32%   |
-| 0.3 rad    | 1.77 m             | 2.50 m          | +41%   |
-| 0.6 rad    | 1.68 m             | 2.48 m          | +48%   |
+| Throw                      | Before (epics-5-10) | Now     | Change |
+| -------------------------- | ------------------- | ------- | ------ |
+| 2.4 m plank, looking 0 rad | 1.72 m              | 2.27 m  | +32%   |
+| 2.4 m plank, 0.3 rad       | 1.77 m              | 2.50 m  | +41%   |
+| 2.4 m plank, 0.6 rad       | 1.68 m              | 2.48 m  | +48%   |
+| 2.4 m plank, at a sprint   | 4.33 m              | 5.29 m  | +22%   |
+| Long plank, 0.3 rad        | –                   | 2.50 m  |        |
+| Empty bucket, 0.3 rad      | 8.738 m             | 8.738 m | none   |
+| Beam, 0.3 rad              | 1.372 m             | 1.372 m | none   |
+| Log, 0.3 rad               | 1.460 m             | 1.460 m | none   |
 
-- The long plank, thrown at 0.3 rad, touches down 2.50 m out.
+- At rest, the sprint throw ends 5.72 m out (was 4.55 m) and the bucket 12.19 m out (unchanged).
 - **Straighter:** thrown while turning at 2 rad/s, the plank used to turn 0.51 rad in the air and
   land 0.97 m off the line you looked along. Now it turns 0.00 rad and lands 0.02 m off it.
-- **The empty bucket:** touches down 8.738 m out and rests 12.19 m out, before and after (to the
-  millimetre).
-- **Shallow Creek:** a thrown 2.4 m plank lands about 2.5 m out, but it is shorter than the creek's
-  2.6 m gap, so it cannot land across it. Bridging still needs the beams.
-- **What a thrown plank hits:** a ball and a crate where it comes down are knocked at up to 3.3 and
-  1.1 m/s (a direct throw sends them at up to 9 m/s), and neither leaves the ground. A player stood
-  there is not moved.
+- **Shallow Creek:** a thrown 2.4 m plank lands about 2.5 m out standing and 5.3 m at a sprint.
+  Either way it is shorter than the creek's 2.6 m gap, so it cannot land across it; bridging still
+  needs the beams.
+- **What a thrown plank hits:** a crate where it comes down is knocked at up to 1.3 m/s and never
+  leaves the ground. The bouncy ball is knocked at up to 6.0 m/s and hops at most 0.11 m. A
+  direct throw sends either at up to 9 m/s.
 
 ### Tests (actual)
 
-- New: `tests/unit/throw.test.ts`, `tests/unit/planks.test.ts`, three tutorial tests and a browser
-  test. The browser test carries the long plank to the tutorial ditch by input, lets go, checks it
-  lies 0.4 m or more past each lip, walks over, and saves `test-results/tutorial-plank-span.png`.
-- `tests/unit/planks.test.ts`: every plank in the tutorial, Timber Yard, Valley, River Lab and
-  starter level starts clear of the ground, the pieces and every other prop; only the tutorial
-  places the long plank; the sawmill's outfeed spots are clear in the Yard and the Valley.
-- The tutorial's placed-plank test now uses the long plank (the tutorial has no standard plank).
-
-### Known limits
-
-- **The plain lay is close:** carried by its middle and let go with your toes at the lip, the long
-  plank has 0.42 m on the far bank. Stop well short of the lip and it can fall in. Throwing it from
-  a step back, or gripping it nearer its near end, gives more.
-- **The ute's tray** was not changed: the standard plank is still 2.4 m, and the tray (1.32 m long
-  inside) never held one lying flat.
+- New:
+    - `tests/unit/throw.test.ts`: the distances above, the bucket, beam and log unchanged, and what
+      a thrown plank hits.
+    - `tests/unit/planks.test.ts`: sizes and masses; every plank in every level starts clear of
+      everything; only the tutorial places the long plank; the sawmill's outfeed spots are clear;
+      and online, a guest has the long plank with the host's id and slot, a 3.8 m asset, and the
+      host's pose while the host carries it.
+    - Tutorial tests: six grab-and-lay cases and a throw, all by input.
+    - A browser test: grab the long plank by its near end, carry it to 0.3 m short of the ditch,
+      let go, check it lies 0.4 m or more past each lip, walk over. It waits on sim ticks, not
+      wall time. It saves `test-results/tutorial-plank-span.png`, a picture of the plank across
+      the ditch (its near end is behind the beaver).
+- The tutorial's placed-plank test now uses the long plank (the tutorial has no standard plank). No
+  existing expected values changed.
 
 ## Credits and licences (2026-11-23, Epic 10, #104)
 

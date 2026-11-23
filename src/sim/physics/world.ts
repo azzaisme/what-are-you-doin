@@ -83,6 +83,12 @@ export interface BodyOptions {
     nailable?: boolean;
     /** How this body flies when thrown, instead of the general throw (see ThrowSpec). */
     throw?: ThrowSpec;
+    /**
+     * Long timber carried balanced (the tutorial's long plank): wherever it is grabbed, the grip
+     * slides onto its long axis (local X), this far (m) behind its middle when it points the way you
+     * face (centred when it lies across you), so the rest of it reaches ahead.
+     */
+    carryAhead?: number;
 }
 
 /**
@@ -117,6 +123,8 @@ export interface PhysBody {
     nailable?: boolean;
     /** See BodyOptions.throw. */
     throw?: ThrowSpec;
+    /** See BodyOptions.carryAhead. */
+    carryAhead?: number;
     /** The collision shape of a single-shape body (floodwater samples it: sim/physics/water.ts). */
     shape?: ShapeSpec;
 }
@@ -443,6 +451,7 @@ export class PhysicsWorld {
             wristTorque: o.wristTorque,
             nailable: o.nailable,
             throw: o.throw,
+            carryAhead: o.carryAhead,
             spawn: { p: { ...spawn.p }, q: { ...spawn.q } },
             baseAngularDamping: o.angularDamping ?? 0.3,
             enabled: true,
@@ -780,6 +789,16 @@ export class PhysicsWorld {
             r.heldLocal.y = pb.grabPoint.y;
             r.heldLocal.z = pb.grabPoint.z;
         } else inverseRotate(q, point.x - t.x, point.y - t.y, point.z - t.z, r.heldLocal);
+        if (pb.carryAhead !== undefined) {
+            // balanced: the grip on its long axis, behind its middle by how much it points away from you
+            rotate(q, 1, 0, 0, _v);
+            const dx = t.x - r.state.x;
+            const dz = t.z - r.state.z;
+            const d = Math.hypot(dx, dz);
+            const h = Math.hypot(_v.x, _v.z);
+            const along = d > 1e-6 && h > 1e-6 ? (_v.x * dx + _v.z * dz) / (d * h) : 0;
+            r.heldLocal.x = -pb.carryAhead * along;
+        }
         r.held = pb;
         r.holdDist = clampHold(holdDistance);
         r.holdSet = false;
@@ -869,11 +888,13 @@ export class PhysicsWorld {
         const j = throwImpulse(pb.body.mass(), pb.throw?.maxImpulse);
         if (pb.throw?.steady) {
             // let go clean: no spin from the grip, and no sideways swing from turning as you throw
+            // (only its swing in your hands: it keeps the way you were moving, like anything else)
             pb.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
             const v = pb.body.linvel();
+            const st = this.rigs[p]!.state;
             const sx = Math.cos(yaw);
             const sz = -Math.sin(yaw);
-            const side = v.x * sx + v.z * sz;
+            const side = (v.x - st.vx) * sx + (v.z - st.vz) * sz;
             pb.body.setLinvel({ x: v.x - side * sx, y: v.y, z: v.z - side * sz }, true);
         }
         pb.body.applyImpulse({ x: d.x * j, y: d.y * j + j * 0.15, z: d.z * j }, true);

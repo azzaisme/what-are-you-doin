@@ -141,6 +141,15 @@ function takePlank(behind: number): { s: LabSim; p: Player } {
     return { s, p };
 }
 
+/** Looks ahead (0.35 rad down, as you walk carrying something) over half a second. */
+function lookAhead(p: Player): void {
+    const p0 = p.pitch;
+    for (let i = 1; i <= 30; i++) {
+        p.pitch = p0 + ((-0.35 - p0) * i) / 30;
+        p.step();
+    }
+}
+
 describe('the long plank spans the ditch, laid by a player from the bank (3.8 m, the tutorial only)', () => {
     it('the ditch is 2.3 m between its lips: the 3.8 m plank laid centred has 0.75 m on each bank', () => {
         expect(LIP_NEAR - LIP_FAR).toBeCloseTo(2.3, 9);
@@ -149,28 +158,42 @@ describe('the long plank spans the ditch, laid by a player from the bank (3.8 m,
         expect(LONG_PLANK_LENGTH / 2 - (LIP_NEAR - LIP_FAR) / 2).toBeCloseTo(0.75, 9);
     });
 
-    it('carried by input (gripped by its middle) to the edge and let go, it lies on both banks with 0.4 m or more on each, and carries you over', () => {
-        const { s, p } = takePlank(0);
-        // walk it forward until your toes are at the lip, let go
-        for (let i = 0; i < 600 && s.player.z > LIP_NEAR + 0.1; i++) p.step({ moveZ: 0.3 });
-        p.step({}, 30);
-        expect(s.physics.heldId).toBe(plankOf(s).id);
-        p.step({ grab: true });
-        p.step({}, 120);
-        const b = bearing(s);
-        console.info(`laid by hand: ${b.near.toFixed(2)} m on the near bank, ${b.far.toFixed(2)} m on the far bank`);
-        expect(b.near).toBeGreaterThan(0.4);
-        expect(b.far).toBeGreaterThan(0.4);
-        expect(b.tilt).toBeLessThan(0.03);
-        // walk over it
-        expect(p.walkTo(plankOf(s).pose.p.x, LIP_FAR - 1.5, 0.3, 900, 0.5)).toBe(true);
-        expect(s.player.z).toBeLessThan(LIP_FAR - 1);
-        expect(s.player.y).toBeGreaterThan(height(s.player.x, s.player.z) - 0.05);
-        expect(s.progress.falls).toBe(0);
-    });
+    // wherever you grab it (by the end nearest you, a quarter along, or the middle), carried to the
+    // edge (toes at the lip, or stopping 0.4 m short) and let go, it lies on both banks: you carry
+    // it balanced, its middle ahead of your grip (LONG_PLANK_CARRY_AHEAD)
+    for (const [grab, behind] of [
+        ['its near end', LONG_PLANK_HALF.x - 0.1],
+        ['a quarter along', LONG_PLANK_HALF.x / 2],
+        ['its middle', 0]
+    ] as const)
+        for (const short of [0.1, 0.4])
+            it(`grabbed by ${grab}, carried to ${short} m short of the lip and let go, it lies 0.4 m or more on each bank, and carries you over`, () => {
+                const { s, p } = takePlank(behind);
+                lookAhead(p);
+                for (let i = 0; i < 600 && s.player.z > LIP_NEAR + short; i++) p.step({ moveZ: 0.3 });
+                p.step({}, 30);
+                expect(s.physics.heldId).toBe(plankOf(s).id);
+                // carried level, along the lane
+                expect(bearing(s).tilt).toBeLessThan(0.05);
+                p.step({ grab: true });
+                p.step({}, 120);
+                const b = bearing(s);
+                console.info(
+                    `grabbed by ${grab}, let go ${short} m short: ${b.near.toFixed(2)} m on the near bank, ${b.far.toFixed(2)} m on the far bank`
+                );
+                expect(b.near).toBeGreaterThan(0.4);
+                expect(b.far).toBeGreaterThan(0.4);
+                expect(b.tilt).toBeLessThan(0.03);
+                // walk over it
+                expect(p.walkTo(plankOf(s).pose.p.x, LIP_FAR - 1.5, 0.3, 900, 0.5)).toBe(true);
+                expect(s.player.z).toBeLessThan(LIP_FAR - 1);
+                expect(s.player.y).toBeGreaterThan(height(s.player.x, s.player.z) - 0.05);
+                expect(s.progress.falls).toBe(0);
+            });
 
     it('thrown by input from a step back from the edge, it lands across the ditch with 0.4 m or more on each bank', () => {
         const { s, p } = takePlank(0);
+        lookAhead(p);
         for (let i = 0; i < 600 && s.player.z > LIP_NEAR + THROW_BACK; i++) p.step({ moveZ: 0.3 });
         const p0 = p.pitch;
         for (let i = 1; i <= 30; i++) {
@@ -199,7 +222,7 @@ describe('the long plank spans the ditch, laid by a player from the bank (3.8 m,
 });
 
 /** How far back from the near lip the throw test stands (m). */
-const THROW_BACK = 1.25;
+const THROW_BACK = 1.65;
 
 function run(s: LabSim, k: number, c: Partial<PlayerCommand> = {}): void {
     for (let i = 0; i < k; i++) s.step(cmd(5000 + i, c));
