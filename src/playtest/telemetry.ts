@@ -7,7 +7,8 @@
  * stages, the goal, the hazards and what they did, the ute); restarts, menu visits and the
  * facilitator's own notes; and every few seconds where the players and the bucket are and what they
  * hold. The summary answers the gate's questions: how long, finished or not, how often things went
- * wrong, and which hazards were met and survived.
+ * wrong, which hazards were met, and how each ended (the host's account: the hazard director's
+ * `outcomes`, which are never sent; on a guest's device the log has the toasts only).
  *
  * Engine-free: main.ts feeds it, the settings menu shows it.
  */
@@ -101,13 +102,29 @@ export class PlaytestLog {
         const washed = hazardLines.filter((e) => e.text.includes('left')).length;
         const brakes = hazardLines.filter((e) => e.text.includes('creeping off')).length;
         const trees = hazardLines.filter((e) => e.text.includes('leaning towards the ute')).length;
+        const closures = hazardLines.filter((e) => e.text.includes('Road closed ahead')).length;
         const first = (k: string) => (this.firsts.has(k) ? mins(this.firsts.get(k)!) : '—');
+        // how each hazard ended (the host's account, "hazard: what"), counted
+        const ends = new Map<string, Map<string, number>>();
+        for (const e of this.entries) {
+            if (e.kind !== 'outcome') continue;
+            const i = e.text.indexOf(': ');
+            const hz = i < 0 ? e.text : e.text.slice(0, i);
+            const what = i < 0 ? '' : e.text.slice(i + 2);
+            const m = ends.get(hz) ?? new Map<string, number>();
+            m.set(what, (m.get(what) ?? 0) + 1);
+            ends.set(hz, m);
+        }
+        const endLines = [...ends].map(
+            ([hz, m]) => `    ${hz}: ${[...m].map(([what, n]) => (n > 1 ? `${what} (${n}×)` : what)).join('; ')}`
+        );
         return [
             `Playtest summary (${this.meta.level ?? '?'})`,
             `  length: ${mins(dur)}; most players at once: ${this.maxPlayers}`,
             `  finished: ${this.goalAt >= 0 ? `yes, at ${mins(this.goalAt)}` : 'no'}`,
             `  falls into the creek: ${this.count('fell')}; bucket recoveries: ${this.count('recovered')}`,
-            `  floods: ${floods} (timber washed downstream ${washed}×); gusts: ${gusts} (torn from hands ${torn}×); handbrake pranks: ${brakes}; falling trees: ${trees}`,
+            `  floods: ${floods} (timber washed downstream ${washed}×); gusts: ${gusts} (torn from hands ${torn}×); handbrake pranks: ${brakes}; falling trees: ${trees}; road closures: ${closures}`,
+            ...(endLines.length ? ['  how the hazards ended:', ...endLines] : []),
             `  restarts: ${this.count('restart')}; settings opened: ${this.count('menu')}; facilitator notes: ${this.count('note')}`,
             `  first grab: ${first('grab')}; first stage step: ${first('step')}; first hazard: ${first('hazard')}`
         ].join('\n');

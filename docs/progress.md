@@ -1,5 +1,36 @@
 # Progress log
 
+## Epic 8: the playtest log says how each hazard ended (2026-11-23, #70)
+
+The playtest log's summary used to count floods and gusts only. Now it says what each hazard met
+was, and how it ended, so the facilitator can check the testers' explanations against what the
+game saw.
+
+- **New counts:** road closures, alongside the floods, gusts, handbrake pranks and falling trees.
+- **"How the hazards ended":** one line per hazard met, grouped, with repeats counted, for example
+  "handbrake: chocked (2×); someone got in".
+    - **Falling tree:** fell towards the ute, cut from the ute's side (fell away from it), the ute
+      moved out of reach, or left standing.
+    - **Handbrake:** someone got in, chocked, or rolled until it caught.
+    - **Road closure:** took the track on foot, squeezed past on foot (or some of each), drove the
+      ute round the track (or got it round another way), or barrier shifted off the road.
+    - **Weather:** came and cleared, by area.
+- **Where the account comes from:** the hazard director keeps it as each hazard ends. It's on the
+  host only and never sent, so it adds nothing to the network. A guest's log has the toasts, as
+  before. A run's reset clears it.
+- **Tested from real play, by input:** each account is checked in the scenario that brings it
+  about:
+    - the falling tree: cut with the ute in reach, cut from its side, the ute driven out of reach,
+      left standing;
+    - the handbrake: rolled, got in, chocked;
+    - the road closure: walked the track, drove the track, squeezed past (three ways), dragged the
+      barrier off;
+    - the weather: a test shower.
+- **Code:** `src/sim/hazards.ts` (`outcomes`), a few lines in `hazard-tree.ts` and
+  `hazard-road.ts`, the Valley's track test in `valley.ts`, `main.ts` (fed into the log), and
+  `src/playtest/telemetry.ts`.
+- **The goose's outcomes** (pecked, put down, outrun, distracted) come with the goose (#78).
+
 ## Epic 8: the road closure sign swap (2026-11-23, #77)
 
 The Valley's forest road can now be closed on you. Come up from Shallow Creek and the sign at the

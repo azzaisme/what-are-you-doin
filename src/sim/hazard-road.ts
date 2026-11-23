@@ -89,6 +89,8 @@ export interface RoadClosureSpec {
      * across the creek) does not keep the closure going; every player does. An empty ute never does.
      */
     from: number;
+    /** Is (x, z) on the side track (optional: for the playtest log's account of how they went round)? */
+    track?: (x: number, z: number) => boolean;
     /** Distance from the road's centre line, across it (m), and the road's half width. */
     across: (x: number, z: number) => number;
     roadHalf: number;
@@ -109,11 +111,13 @@ export interface RoadClosureHost {
     readonly tick: number;
     readonly physics: PhysicsWorld;
     readonly entities: ClosureEntities;
-    /** Who could be coming: players on foot, and the ute (its speed). */
-    readonly walkers: readonly { x: number; z: number }[];
+    /** Who could be coming: players on foot (their slots), and the ute (its speed). */
+    readonly walkers: readonly { x: number; z: number; slot?: number }[];
     /** The ute (where, how fast, and whether someone is driving it), or null without one. */
     readonly ute: { x: number; z: number; speed: number; driven?: boolean } | null;
     say(text: string): void;
+    /** How it ended, for the playtest log (host only, not sent). */
+    outcome?(text: string): void;
 }
 
 export class RoadClosure {
@@ -131,6 +135,9 @@ export class RoadClosure {
     /** The ute's distance along the route last tick (for how fast it is closing on the junction). */
     private uteAlong = NaN;
     private uteClosing = 0;
+    /** This closure: which players (slots) and whether the ute went by the side track. */
+    private readonly byTrack = new Set<number>();
+    private uteByTrack = false;
     private readonly spec: RoadClosureSpec;
 
     constructor(spec: RoadClosureSpec) {
@@ -146,6 +153,8 @@ export class RoadClosure {
         this.placedHidden = false;
         this.uteAlong = NaN;
         this.uteClosing = 0;
+        this.byTrack.clear();
+        this.uteByTrack = false;
     }
 
     get busy(): boolean {
@@ -214,8 +223,22 @@ export class RoadClosure {
         const blocking = this.blocking(pw, bid);
         if (this.phase === CLOSURE_PHASE.tell && h.tick - this.since >= S(CLOSURE.swingS))
             this.phase = CLOSURE_PHASE.active;
+        // who goes by the side track (for the account of how it ended)
+        if (this.phase !== CLOSURE_PHASE.idle && sp.track) {
+            const between = (x: number, z: number) => {
+                const a = sp.along(x, z);
+                return a > sp.junction + 1 && a < sp.rejoin - 1 && sp.track!(x, z);
+            };
+            h.walkers.forEach((w, i) => {
+                if (between(w.x, w.z)) this.byTrack.add(w.slot ?? i);
+            });
+            if (h.ute && between(h.ute.x, h.ute.z)) this.uteByTrack = true;
+        }
         // over once the road is open, or everyone has gone round
-        if (this.phase !== CLOSURE_PHASE.idle && (!blocking || this.everyonePast(h))) this.phase = CLOSURE_PHASE.idle;
+        if (this.phase !== CLOSURE_PHASE.idle && (!blocking || this.everyonePast(h))) {
+            this.phase = CLOSURE_PHASE.idle;
+            h.outcome?.(this.account(h, blocking));
+        }
         // the sign: closed exactly while the barrier stands on the road
         const target = blocking ? 1 : 0;
         if (this.swing > 0.5 && target === 0 && this.swing === 1) h.say(CLOSURE_OPEN);
@@ -270,6 +293,23 @@ export class RoadClosure {
         };
         if (h.walkers.some((w) => near(w.x, w.z, 0.4))) return false;
         return !(h.ute && near(h.ute.x, h.ute.z, 2));
+    }
+
+    /** How it ended, in a few words: the barrier shifted, or how they went round. */
+    private account(h: RoadClosureHost, blocking: boolean): string {
+        if (!blocking) return 'barrier shifted off the road';
+        const parts: string[] = [];
+        const slots = h.walkers.map((w, i) => w.slot ?? i);
+        const track = slots.filter((s) => this.byTrack.has(s)).length;
+        if (slots.length && track === slots.length) parts.push('took the track on foot');
+        else if (slots.length && track === 0) parts.push('squeezed past on foot');
+        else if (slots.length) parts.push('some took the track, some squeezed past');
+        const sp = this.spec;
+        if (h.ute && sp.along(h.ute.x, h.ute.z) >= sp.from)
+            parts.push(this.uteByTrack ? 'drove the ute round the track' : 'got the ute round another way');
+        this.byTrack.clear();
+        this.uteByTrack = false;
+        return parts.join('; ') || 'went round';
     }
 
     /** Every player and the ute are on the road beyond the barrier. */

@@ -489,6 +489,10 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         expect(s.closure.sign.anim[SIGN_SWING]).toBe(1);
         expect(texts(s)).not.toContain(CLOSURE_OPEN);
         expect(s.hazards.busy).toBe(false);
+        // the playtest log's account (#70)
+        expect(s.hazards.outcomes.map((o) => `${o.hazard}: ${o.what}`)).toEqual([
+            'road closure: took the track on foot'
+        ]);
     }, 300_000);
 
     it('counterplay: drive the ute round the logging track', () => {
@@ -501,6 +505,7 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         inputs(s).step({}, 5);
         expect(s.hazards.road!.busy).toBe(false);
         expect(s.closure.sign.anim[SIGN_SWING]).toBe(1);
+        expect(s.hazards.outcomes.map((o) => o.what)).toEqual(['drove the ute round the track']);
     }, 300_000);
 
     it('counterplay on foot: a beaver squeezes round either end of the barrier (or between the old fence posts); with the ute left in the yard that ends it, and the sign stays closed', () => {
@@ -527,6 +532,10 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
             expect(s.hazards.road!.busy, how).toBe(false);
             expect(s.hazards.road!.blocking(s.physics, s.closure.barrier.id)).toBe(true);
             expect(s.closure.sign.anim[SIGN_SWING]).toBe(1);
+            expect(
+                s.hazards.outcomes.map((o) => o.what),
+                how
+            ).toEqual(['squeezed past on foot']);
         }
     }, 300_000);
 
@@ -711,6 +720,7 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         expect(s.hazards.road!.busy).toBe(false);
         expect(s.closure.sign.anim[SIGN_SWING]).toBe(0);
         expect(texts(s).filter((t) => t === CLOSURE_OPEN)).toHaveLength(1);
+        expect(s.hazards.outcomes.map((o) => o.what)).toEqual(['barrier shifted off the road']);
         // and the road beyond is walkable straight up
         const beyond = roadAt(CLOSURE_AT.barrierU + 3);
         const from = roadAt(CLOSURE_AT.barrierU - 3);
@@ -934,6 +944,9 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         cross();
         expect(s.hazards.road!.count).toBe(1);
         expect(texts(s)).toContain(CLOSURE_TELL);
+        expect(s.hazards.outcomes.map((o) => `${o.hazard}: ${o.what}`)).toEqual([
+            'weather: test shower: came and cleared'
+        ]);
     }, 300_000);
 
     it('the barrier dragged back across the road: the sign clunks closed again, with its toast', () => {
