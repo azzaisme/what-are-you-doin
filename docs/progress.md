@@ -1,5 +1,49 @@
 # Progress log
 
+## Split screen for up to four players on one screen (2026-11-23, Epic 10, #22)
+
+Local co-op used to stop at two players. Now up to four can share one screen. It's still one
+world and one simulation, with a view per player.
+
+### What changed for players
+
+- **Plug in up to four controllers.** Each new pad that presses a button joins as the next player
+  (P2, P3, P4), and the screen splits:
+    - two players: top and bottom;
+    - three players: player 1 across the top, players 2 and 3 side by side below;
+    - four players: quarters.
+- **Each view has its own crosshair, prompt and coloured P-label**, placed inside that view.
+  Thin lines divide the views.
+- **Unplugging a pad** removes that player's view and body. Players after them move up one place,
+  so the screen never shows a gap. If player 1's pad leaves, player 1 stays (they still have the
+  keyboard and mouse).
+- A fifth pad is ignored. Online guests stay at one view, as before.
+
+### Tests (actual)
+
+| Test                                                                                                                                                                                                                                                                                                                                     | Result         |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| `tests/unit/local-players.test.ts`: four pads join; a fifth is refused; a middle pad leaving moves the rest up; player 1 leaving keeps the others in place; rejoin                                                                                                                                                                       | pass           |
+| `tests/e2e/split-screen.spec.ts`: four views are each lit and each different; four crosshairs at the quarter centres; P1–P4 each inside their quarter; players 2, 3 and 4 each walk on their own commands while the others stay put; the three-view layout; back to one view with the extra bodies gone (32 voxel objects) and no errors | pass (2.1 min) |
+| Existing two-player co-op and split-screen nail-outline tests                                                                                                                                                                                                                                                                            | pass           |
+
+### Cost per extra view (measured in this container)
+
+The yard at low quality, 1280×720, after 12 s at each count. The container draws with a software
+GPU (SwiftShader), so its frame times aren't real-hardware numbers. Draw calls are the fair
+comparison.
+
+| Views | Draw calls | Avg frame (software GPU) |
+| ----- | ---------- | ------------------------ |
+| 1     | 2007       | 1269 ms                  |
+| 2     | 2624       | 1316 ms                  |
+| 3     | 3666       | 1396 ms                  |
+| 4     | 4745       | 1490 ms                  |
+
+Each extra view adds about 600–1100 draw calls, because each view culls and draws the scene
+again. Going back to one view returned to 2029 draw calls. Four views on a phone is untested here,
+and a likely place to lower quality first.
+
 ## Input and accessibility: text size everywhere, less motion, menus never grab (2026-11-23, Epic 10, #21)
 
 This finishes the input and accessibility list (#21). Remapping (#98) and the sound sliders (Epic 8)
