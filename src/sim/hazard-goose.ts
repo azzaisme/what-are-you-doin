@@ -37,8 +37,11 @@ export const GOOSE = {
     notice: 5,
     /** Rearing up and honking, standing still (s): the tell. */
     tellS: 2,
-    /** A goose's run (m/s): more than a walk (2.2), less than a beaver's run (4.2). And going home. */
-    speed: 3.6,
+    /**
+     * A goose's run (m/s): more than a walk (2.2), less than a beaver running with the bucket
+     * (measured by input: 3.8-4.2 alone, 3.6-4.1 carrying it together). And going home.
+     */
+    speed: 3.2,
     homeSpeed: 1.4,
     accel: 6,
     /** How fast it turns (rad/s): a sidestep makes it overshoot. */
@@ -300,7 +303,10 @@ export class GooseHazard {
         if (honk) h.say(GOOSE_BORED);
     }
 
-    /** Knock the bucket out of its bearer's hands: away from the goose, and up. */
+    /**
+     * Knock the bucket out of its bearer's hands: away from the goose, and up; never out over ground
+     * the goose may not go on (the water): then straight down. The bearer is not touched.
+     */
     private peckBucket(h: GooseHost, bp: { x: number; y: number; z: number }): void {
         const pw = h.physics;
         pw.releaseAll(h.bucketId);
@@ -311,6 +317,7 @@ export class GooseHazard {
             const l = Math.hypot(dx, dz) || 1;
             dx /= l;
             dz /= l;
+            if (!this.spec.allowed(bp.x + dx * 1.2, bp.z + dz * 1.2)) dx = dz = 0;
             const v = b.linvel();
             b.setLinvel({ x: v.x + dx * GOOSE.shove, y: v.y + GOOSE.lift, z: v.z + dz * GOOSE.shove }, true);
         }

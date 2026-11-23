@@ -143,6 +143,69 @@ describe('the goose (#78): it honks, rears up and comes for the carried bucket',
         expect(g.phase).toBe(GOOSE_PHASE.idle);
     }, 120_000);
 
+    it('carrying the bucket, a beaver outruns it, alone and two carrying it together: measured by input', () => {
+        for (const n of [1, 2]) {
+            const s = new LabSim({ level: timberYardLevel });
+            s.runTo(S(HAZARD.graceS) + 10);
+            s.fpActive = true;
+            if (n === 2) s.setSlotActive(1, true);
+            s.placePlayer(BUCKET_STUMP.x, BUCKET_STUMP.z + 1, 0, 0);
+            if (n === 2) s.placePlayer(BUCKET_STUMP.x + 1, BUCKET_STUMP.z, 0, 1);
+            const a = new Player(s, 0);
+            a.step({}, 20);
+            expect(a.grabBucket()).toBe(true);
+            if (n === 2) expect(new Player(s, 1).grabBucket()).toBe(true);
+            const g = s.hazards.goose!;
+            /** Every carrier heads for (x, z); returns player 1's speed over the last second. */
+            const go = (x: number, z: number, c: Partial<PlayerCommand>, k: number) => {
+                const xs: { x: number; z: number }[] = [];
+                for (let i = 0; i < k; i++) {
+                    const yaw = (p: { x: number; z: number }) => Math.atan2(-(x - p.x), -(z - p.z));
+                    s.step(
+                        { ...neutralCommand(s.tick, yaw(s.players[0]), -0.3), ...c },
+                        n === 2 ? { ...neutralCommand(s.tick, yaw(s.players[1]), -0.3), ...c } : undefined
+                    );
+                    xs.push({ x: s.players[0].x, z: s.players[0].z });
+                }
+                const e = xs.length - 1;
+                return e < 60 ? 0 : Math.hypot(xs[e].x - xs[e - 60].x, xs[e].z - xs[e - 60].z);
+            };
+            // up to the goose until it honks, then run for it, west along the open yard (z 5.8)
+            for (let i = 0; i < S(10) && g.tellTick < 0; i++) go(GOOSE_PATCH.x, GOOSE_PATCH.z, { moveZ: 1 }, 1);
+            expect(g.tellTick).toBeGreaterThan(0);
+            go(-4, 5.8, { moveZ: 1, sprint: true }, 60);
+            const speed = go(-4, 5.8, { moveZ: 1, sprint: true }, 61);
+            console.log(`carrying the bucket (${n}), running: ${speed.toFixed(2)} m/s; the goose ${GOOSE.speed} m/s`);
+            expect(speed).toBeGreaterThan(GOOSE.speed);
+            // on to the end and wait there: it gives up
+            go(-4, 5.8, { moveZ: 1, sprint: true }, S(2));
+            go(-4, 5.8, {}, S(8));
+            expect(g.peckTick, `${n} carrying`).toBe(-1);
+            expect(g.phase === GOOSE_PHASE.home || g.phase === GOOSE_PHASE.idle).toBe(true);
+            // still in hand (one of them: running together, a grip can slip on the way)
+            expect(s.physics.holders(s.bucket.id)).toBeGreaterThan(0);
+        }
+    }, 120_000);
+
+    it('the worst peck: the bearer on the bank’s edge, the creek behind, the goose coming from the yard; nobody and nothing goes in', () => {
+        const { s, pl } = holding();
+        const g = s.hazards.goose!;
+        // walk to the very edge of the bank, between the goose's patch and the water, and turn to it
+        const edge = { x: GOOSE_PATCH.x, z: 0.85 };
+        pl.walkTo(edge.x, edge.z, 0.2);
+        pl.lookAt(GOOSE_PATCH.x, s.player.y + EYE_HEIGHT - 0.4, GOOSE_PATCH.z + 2, 10);
+        expect(g.tellTick).toBeGreaterThan(0);
+        const at = { x: pl.p.x, z: pl.p.z };
+        for (let i = 0; i < S(10) && g.peckTick < 0; i++) pl.step();
+        expect(g.peckTick).toBeGreaterThan(0);
+        pl.step({}, S(3));
+        // the bearer was not moved, did not fall in; the bucket did not go in
+        expect(Math.hypot(pl.p.x - at.x, pl.p.z - at.z)).toBeLessThan(0.05);
+        expect(s.events.some((e) => e.kind === 'fell' || e.kind === 'recovered')).toBe(false);
+        expect(s.bucket.pose.p.y).toBeGreaterThan(timberYardLevel.water.y);
+        expect(s.bucket.pose.p.z).toBeGreaterThan(0.5);
+    }, 120_000);
+
     it('counterplay: distract it: while player 1 carries the bucket away, player 2 runs at the goose; it turns on them for 4 s, harmlessly, then goes home; no peck', () => {
         const { s, pl } = holding();
         s.setSlotActive(1, true);

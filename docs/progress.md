@@ -13,15 +13,22 @@ the bucket near it and it honks, rears up, and comes for the bucket.
 - **The tell:** a honk (a new sound: two nasal blasts, the second lower) and a toast: "HONK! The
   goose has seen your bucket. Put it down, dodge, or get someone to distract it!" It rears up (neck
   tall, wings spread, beak opening and shutting) and stands still for 2 s. Only then does it come,
-  at 3.6 m/s: faster than a walk (2.2), slower than a run (4.2).
+  at 3.2 m/s: faster than a walk (2.2), slower than a beaver running with the bucket. Measured by
+  input, that's 3.8–4.2 m/s alone and 3.6–4.1 m/s for two carrying it together.
 - **The peck:** reaching the bucket in someone's hands, it knocks it out of them with a small shove.
   The bucket's own water physics decides what spills: in the test it kept 7.5 L of 10. Then it
   waddles home. Water and time, never the run.
+    - The shove never sends the bucket out over the water (then it just drops), and the bearer
+      isn't touched.
+    - The worst case is tested: the bearer stands on the very edge of the bank with the creek
+      behind and the goose coming from the yard. After the peck they haven't moved, nobody fell
+      in, and the bucket stayed on the bank.
 - **Lead time, measured by input:** walking straight at it with the bucket, the peck came 2.50 s
   after the honk. It can't come sooner than 2 s: it doesn't move during the tell.
 - **Ways to deal with it, each tested by input:**
     - put the bucket down: it loses interest, honks once and goes home;
-    - run off with it: it gives up at the edge of its patch (or after 8 s);
+    - run off with it: it gives up at the edge of its patch (or after 8 s). Tested alone and with
+      two carrying it, running 4.14 and 4.20 m/s against its 3.2;
     - get someone else to run at it: it turns on them for 4 s, harmlessly, while the bucket gets
       away, then goes home.
 - **No timer on the player:** it's over when the goose is back on its patch.
@@ -34,7 +41,9 @@ the bucket near it and it honks, rears up, and comes for the bucket.
   and head and a white chin strap, from the existing palette), the honk in `synth.ts`, the patch in
   `timber-yard.ts` and `valley.ts`, and a few lines in the director, lab-sim and lab-entities. No
   new HazardNet fields.
-- **Tests:** `tests/unit/goose.test.ts` (8 tests, at both voxel sizes), and the honk in
+- **Network budget:** the goose adds 33 bytes to the Valley's worst-case host state: 4074 of 4096
+  with the road closure. Its pull request waits for Epic 10's leaner host state (NET_PROTOCOL 3).
+- **Tests:** `tests/unit/goose.test.ts` (10 tests, at both voxel sizes), and the honk in
   `audio.test.ts`.
 
 ## Epic 8: the barrier holds when you drag it forward round a corner (2026-11-27, #77)
