@@ -1,5 +1,36 @@
 # Progress log
 
+## Valley flags want water in the bucket: the empty-bucket throw is closed (2026-11-23, Epic 9)
+
+An existing cheat: the Valley could be finished without building a single bridge.
+
+- An empty bucket thrown from the near bank lands across Shallow Creek, the culvert, the gorge (in
+  one throw, pier and all) and the crevasse.
+- The stage flags counted any bucket resting at them, and the works tank and the mountain spring
+  refill it later.
+
+- **The fix:** every flag past the Timber Yard now wants at least 1 L of water in the bucket.
+    - A thrown bucket lands with its water gone: 0.02 L at most, measured with 0–3.4 L in it. A
+      full one falls short into the creek.
+    - Carried over a built crossing, it keeps nearly all of its 10 L.
+    - At the flag, a bucket that's too dry gets the message "it needs at least 1 L of water in it.
+      Carry it over the crossing, don't throw it."
+- **Spare buckets:** a bucket lost at the Forest Road, Gorge or Mountain Approach comes back with
+  3 L in it ("A spare bucket (3 L) is waiting…"). There's no water near those stage starts, and an
+  empty spare would have meant a walk back to the yard.
+    - Spares at the other stages stay empty: they have water nearby.
+    - Thrown, a 3 L spare also lands nearly empty, so it doesn't reopen the cheat.
+- **Tests** (`tests/unit/valley-water-flags.test.ts`, by input; the bridges are placed):
+    - at Shallow Creek, the culvert, the gorge and the crevasse, the bucket thrown over lands across
+      with under 1 L, and a second beaver carrying it to the flag doesn't complete the stage;
+    - the 3 L spare carried over the built culvert and gorge crossings, and a full bucket over the
+      crevasse, each complete their stage, with no falls.
+- **Also fixed: a weak check in the Valley's crossing test.** It looked for each crossing's rim
+  30 cm back from where the ground drops below the fall line. The crevasse's bed is at the fall line
+  itself, so the "rim" it found was 2 m up the crevasse wall, not on the bench at 9.3 m, and its beam
+  had been resting inside the crevasse. It now finds the gap as ground well below the rims. A
+  beam laid there rests on the bench.
+
 ## Weather along the Valley, and its flood (2026-11-22, Epic 9, towards #88)
 
 Each Valley area past the creek now gets its own weather once per run. It comes a seeded 4–22 s

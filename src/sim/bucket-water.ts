@@ -71,10 +71,15 @@ export class BucketWaterState {
         this.massApplied = -1;
     }
 
-    /** The bucket fell in and is replaced by a spare: its water is gone with it, the spare is empty. */
-    bucketLost(): void {
+    /**
+     * The bucket fell in and is replaced by a spare: its water is gone with it. The spare is empty,
+     * or holds `spare` litres (stages with no water nearby; counted as water topped up).
+     */
+    bucketLost(spare = 0): void {
         this.lost += this.water.volume;
-        this.water.reset(0);
+        const v = Math.max(0, Math.min(WATER.capacity, spare));
+        this.water.reset(v);
+        this.toppedUp += v;
         this.filling = -1;
     }
 
