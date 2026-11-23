@@ -13,8 +13,10 @@ takes turns with the flood, the gust and the handbrake prank: only one hazard at
     - Alone, a beaver carrying a heavy beam from the log dump up the road lost it after 1.43 m.
       The same carry in the dry held all 12 m.
     - Two beavers carrying it together held it all the way in the rain.
-    - Carrying it low alone doesn't save it (it still slipped), so the toast says what does:
-      "Wet timber slips: carry heavy pieces together".
+    - Carrying it lower alone is no reliable answer. Of ten heights tried (view pitch −0.25 to
+      −1.2), only −1.0 held all the way; the others slipped within 1.6 m. So the toast only says
+      what works: "Wet timber slips: carry heavy pieces together". A test checks that, of six of
+      those heights, at most one holds.
     - A guest's carry slips the same way: the host decides everyone's grip.
     - The river also rises 0.35 m in the rain, but that is only scenery: it reaches no bridge.
 - **A fog bank on the mountain road.** At full strength the view closes in to the near world's
@@ -22,9 +24,13 @@ takes turns with the flood, the gust and the handbrake prank: only one hazard at
     - The fog fully covers the near world's edge on both presets (opacity at the edge 1.0), so
       the coarse far ground behind it never shows through.
     - It only hangs over its own area. The summit and its flower stay clear.
+    - **The sky turns the fog colour too.** At full fog the far world had shown as fog-coloured
+      outlines against a blue sky. Now a dome round the camera, far beyond the fog's end, is
+      fogged out like the far world and fades in as the fog closes in. A browser test measures the
+      colour where the far landmarks stand at full fog on Low: ΔE under 3 (it was about 18).
     - Played: in the fog, a beaver walked the 27.5 m stretch by input, steering only by the edge
-      posts it could see within 24 m. It never strayed more than 0.80 m from the road's middle,
-      with no falls.
+      posts it could pick out (fog under 0.9). It never strayed more than 0.80 m from the road's
+      middle, with no falls.
     - When it lifts, the view is back to the level's own.
 - **Mist over the gorge: atmosphere, not a hazard.** It closes the view in like the fog, but
   there is nothing to beat. So it comes whatever else is going on, holds nothing up, and says
@@ -60,9 +66,12 @@ takes turns with the flood, the gust and the handbrake prank: only one hazard at
   and fog are drawn with the fog alone.
 - **Seen in a real browser** (`docs/screenshots/epic9/weather-*.jpg`): each area at full
   strength, at Low and High.
-    - The screenshots switch each weather on with a debug hook (`__riverLab.weather(n)`). It
-      refuses while another hazard or weather is on. It skips the grace period, because in a
-      software-rendered browser the simulation runs at about 4 ticks a second.
+    - The screenshots switch each weather on with a debug hook (`__riverLab.weather(n)`), which
+      waits for the same moment any hazard would. It refuses in the grace period, during another
+      hazard, in its quiet spell and over other weather (tested). The browser test seeks past the
+      grace period first, which steps the simulation without drawing.
+    - They come from a committed browser test, `tests/e2e/weather.spec.ts`
+      (`WEATHER_SHOTS=1`).
 - **Known visuals:**
     - The fog fades in with the frame time, which is capped. At normal frame rates it is most of
       the way in about 4 s; in software rendering it takes much longer.
