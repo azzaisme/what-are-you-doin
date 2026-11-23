@@ -6,18 +6,19 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { BRIDGE, BRIDGE_X, YARD_Y } from '../../src/levels/timber-yard.ts';
+import { BRIDGE, BRIDGE_X, YARD_Y, timberYardLevel } from '../../src/levels/timber-yard.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
 import { BREAK, JointHealth, capacity, utilization } from '../../src/sim/joints/breaking.ts';
 import { GROUND, NAIL } from '../../src/sim/joints/graph.ts';
 import type { Connection } from '../../src/sim/joints/graph.ts';
 import { JointSystem } from '../../src/sim/joints/joints.ts';
+import { LabSim } from '../../src/sim/lab-sim.ts';
 import { FRICTION } from '../../src/sim/joints/stress.ts';
 import type { JointLoad } from '../../src/sim/joints/stress.ts';
 import { CHARACTER, PhysicsWorld, initPhysics } from '../../src/sim/physics/world.ts';
 import { pose, quatFromYawPitchRoll } from '../../src/voxels/math.ts';
 
-import { LINES, driveOver, hammerAt, shortBridge, yardBridge } from './bridge-helpers.ts';
+import { FLAT_ALONG_Z, LINES, driveOver, hammerAt, shortBridge, yardBridge } from './bridge-helpers.ts';
 
 beforeAll(() => initPhysics());
 
@@ -469,6 +470,113 @@ describe('the yard bridge (Epic 5 gate)', () => {
         const b = run();
         expect(b).toEqual(a);
     }, 60_000);
+});
+
+describe('the tipping spring, both ways (#49)', () => {
+    it('a beam nailed at its near end while its far end is propped 2 mm high settles onto its far seat: no load, no creak', () => {
+        const s = new LabSim({ level: timberYardLevel });
+        const beams = ['beam-0', 'beam-1'].map((name) => s.entities.find((e) => e.name === name)!);
+        beams.forEach((b, i) => s.physics.place(b.id, pose(LINES[i], YARD_Y + 0.32, BRIDGE.zc, FLAT_ALONG_Z)));
+        // a prop under each far end, 2 mm above the far seat (contact compliance's scale) (taken away once the near end is nailed)
+        const farY = YARD_Y + 0.13 + 0.002;
+        const props = LINES.map((x) =>
+            s.physics.addStatic(
+                RAPIER.ColliderDesc.cuboid(0.15, 0.05, 0.1).setTranslation(x, farY - 0.05, BRIDGE.farFace - 0.25)
+            )
+        );
+        for (let k = 0; k < 60; k++) s.step(neutralCommand(s.tick + 1));
+        for (let i = 0; i < 2; i++)
+            for (let k = 0; k < 2; k++)
+                hammerAt(
+                    s.joints,
+                    { x: LINES[i], y: beams[i].pose.p.y + 0.12, z: BRIDGE.nearFace + 0.22 + 0.08 * k },
+                    s.tick
+                );
+        expect(s.joints.graph.size).toBe(2);
+        const before = beams.map((b) => b.pose.p.y);
+        for (const c of props) s.physics.world.removeCollider(c, true);
+        const e0 = s.events.length;
+        let peak = 0;
+        for (let k = 0; k < 600; k++) {
+            s.step(neutralCommand(s.tick + 1));
+            for (const [id, st] of s.joints.health.states) {
+                peak = Math.max(peak, st.util);
+            }
+        }
+        const dropped = beams.map((b, i) => before[i] - b.pose.p.y);
+        console.log(
+            `settling onto the far seat (beams' middles dropped ${dropped.map((d) => (d * 100).toFixed(1)).join(', ')} cm): peak utilization ${peak.toFixed(3)} over 10 s`
+        );
+        expect(peak).toBeLessThan(0.1);
+        expect(s.events.slice(e0).filter((e) => e.kind === 'creak' || e.kind === 'break')).toEqual([]);
+    }, 60_000);
+
+    it('a cantilever at rest stays still and finite (prying it open: the statics test above)', () => {
+        const { pw, pb, js } = cantilever(4, 0.25);
+        // (how fast it actually turns, step to step: Rapier's reported angular velocity of a body
+        // its joint and contacts hold still reads a steady 0.06 rad/s while it does not move)
+        let wmax = 0;
+        let finite = true;
+        let q0 = { ...pb.body.rotation() };
+        for (let i = 0; i < 300; i++) {
+            pw.step();
+            js.update(i);
+            const q = pb.body.rotation();
+            const t = pb.body.translation();
+            finite &&= [q.x, q.y, q.z, q.w, t.x, t.y, t.z].every(Number.isFinite);
+            const dot = Math.min(1, Math.abs(q.x * q0.x + q.y * q0.y + q.z * q0.z + q.w * q0.w));
+            if (i >= 120) wmax = Math.max(wmax, 2 * Math.acos(dot) * 60);
+            q0 = { ...q };
+        }
+        console.log(`cantilever at rest: angular speed up to ${wmax.toFixed(4)} rad/s from 2 s on`);
+        expect(finite).toBe(true);
+        expect(wmax).toBeLessThan(0.05);
+        expect(js.graph.size).toBe(1);
+    });
+
+    it("a joint's faces count out to NAIL.faceReach: the readings hold at 0.5 and 0.8 m", () => {
+        const n = NAIL as { faceReach: number };
+        const keep = n.faceReach;
+        const read = () => {
+            const { pw, pb, js, c } = cantilever(4, 0.25);
+            let T = 0;
+            let k = 0;
+            for (let i = 0; i < 120; i++) {
+                const t = pb.body.translation();
+                pb.body.applyImpulseAtPoint({ x: 0, y: -200 / 60, z: 0 }, { x: TIP, y: t.y, z: 0 }, true);
+                pw.step();
+                js.update(i);
+                if (i >= 60) {
+                    T += js.stress.loads.get(c.id)?.pull ?? 0;
+                    k++;
+                }
+            }
+            const bridge = yardBridge([1, -1], 2);
+            let peak = 0;
+            driveOver(bridge.s, () => {
+                for (const st of bridge.s.joints.health.states.values()) peak = Math.max(peak, st.util);
+            });
+            return { T: T / k, peak };
+        };
+        const at = new Map<number, { T: number; peak: number }>();
+        try {
+            for (const r of [0.5, keep, 0.8]) {
+                n.faceReach = r;
+                at.set(r, read());
+            }
+        } finally {
+            n.faceReach = keep;
+        }
+        const mid = at.get(keep)!;
+        console.log(
+            `face reach: ${[...at].map(([r, v]) => `${r} m: cantilever withdrawal ${v.T.toFixed(0)} N, proper bridge peak ${v.peak.toFixed(2)}`).join('; ')}`
+        );
+        for (const v of at.values()) {
+            expect(v.T / mid.T).toBeGreaterThan(0.95);
+            expect(v.T / mid.T).toBeLessThan(1.05);
+            expect(Math.abs(v.peak - mid.peak)).toBeLessThan(0.05);
+        }
+    }, 120_000);
 });
 
 describe('breaks and strain online (#50, #53)', () => {
