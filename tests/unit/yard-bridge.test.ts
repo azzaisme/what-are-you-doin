@@ -78,6 +78,13 @@ function buildAndCross(pullPlankNails = false) {
             falls = s.progress.falls;
         const gw = s.hazards.gustPhase;
         rawStep(...args);
+        if (process.env.GATE_STRAIN)
+            for (const c of s.joints.graph.connections()) {
+                const h = s.joints.health.states.get(c.id);
+                const l = s.joints.stress.loads.get(c.id);
+                if (!h || !l || h.util < 0.5) continue;
+                log.push(`STRAIN t ${(s.tick / 60).toFixed(2)} c${c.id} ${c.a}>${c.b} n${c.nails.length}: u ${h.util.toFixed(2)} raw ${h.raw.toFixed(2)} shear ${l.shear.toFixed(0)} pull ${l.pull.toFixed(0)} bearing ${l.bearing.toFixed(0)} moment ${l.moment.toFixed(0)} f (${l.fx.toFixed(0)},${l.fy.toFixed(0)},${l.fz.toFixed(0)}) player (${s.player.x.toFixed(2)},${s.player.y.toFixed(2)},${s.player.z.toFixed(2)}) held ${s.physics.heldId}`);
+            }
         if (process.env.GATE_DEBUG && gw === PHASE.idle && s.hazards.gustPhase !== PHASE.idle)
             log.push(
                 `gust at ${(s.tick / 60).toFixed(1)} s holding ${s.physics.heldId} at (${s.player.x.toFixed(2)}, ${s.player.z.toFixed(2)})`
