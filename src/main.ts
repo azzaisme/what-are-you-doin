@@ -1423,8 +1423,10 @@ function updateWater(): void {
         const k = guestSession ? guestSession.step : sim.progress.step;
         const flower = stages && stages[Math.min(k, stages.length - 1)]?.flower;
         const full = Math.max(0, Math.min(10, Math.round((w.volume / BUCKET_CAPACITY) * 10)));
-        t = `Bucket ${'▮'.repeat(full)}${'▯'.repeat(10 - full)} ${w.volume.toFixed(1)} L`;
-        if (flower) t += ` · flower ${w.poured.toFixed(1)} / ${WATER.minDelivery} L`;
+        // (from the 0.01 L the host sends its guests, so every device shows the same litres)
+        const litres = (v: number) => (Math.round(v * 100) / 100).toFixed(1);
+        t = `Bucket ${'▮'.repeat(full)}${'▯'.repeat(10 - full)} ${litres(w.volume)} L`;
+        if (flower) t += ` · flower ${litres(w.poured)} / ${WATER.minDelivery} L`;
     }
     if (t !== waterText) {
         waterText = t;
