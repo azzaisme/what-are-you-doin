@@ -364,6 +364,17 @@ function buildAndCross(pullPlankNails = false) {
         }
     walkTo(BRIDGE_X, deck[deck.length - 2] + 1.2);
     layPlank(deck[deck.length - 1]);
+    // ---- the finished bridge, built by input, stands a minute with nobody on it (off it, by the
+    // yard end): its joints carry next to nothing and never creak
+    phase('idle');
+    walkTo(BRIDGE_X, BRIDGE.nearEdge + 2.5, true);
+    const idle = { peak: 0, events: 0 };
+    const e0 = s.events.length;
+    for (let k = 0; k < 60 * 60; k++) {
+        step();
+        for (const st of s.joints.health.states.values()) idle.peak = Math.max(idle.peak, st.util);
+    }
+    idle.events = s.events.slice(e0).filter((e) => e.kind === 'creak' || e.kind === 'break').length;
     phase('to the ute');
     // ---- 4. back to the yard, along past the stacks to the ute's driver's door (its right side)
     const ute = s.ute;
@@ -460,7 +471,7 @@ function buildAndCross(pullPlankNails = false) {
         const b = s.entities.find((e) => e.id === l.id)!.pose.p;
         return Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
     });
-    return { s, log, deck, placed, target, minY, beams, phases, landed, shift, atStart, u0, floods };
+    return { s, log, deck, placed, target, minY, beams, phases, landed, shift, atStart, u0, floods, idle };
 }
 
 /** A nailed deck barely moves under the ute; the same planks only laid are shoved about (m). */
@@ -495,6 +506,10 @@ describe('the yard crossing, built by a player and driven over (Epic 5 gate)', (
     it('from inputs alone: beams, a nailed plank deck, both ends anchored; the ute drives from its spawn, bank to bank', () => {
         const r = buildAndCross();
         const { anchors, deckJoints } = report('player-built bridge', r);
+        // built by input and left a minute with nobody on it: under 10 % and not a creak
+        console.log(`   idle a minute: peak utilization ${r.idle.peak.toFixed(3)}, ${r.idle.events} creaks or breaks`);
+        expect(r.idle.peak).toBeLessThan(0.1);
+        expect(r.idle.events).toBe(0);
         expect(r.log.filter((l) => l.includes('ute'))).toEqual([]);
         expect(r.placed).toBe(r.deck.length);
         // every plank came to rest flat on both beams, on its spot
