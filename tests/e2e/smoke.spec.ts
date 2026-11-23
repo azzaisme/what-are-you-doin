@@ -317,7 +317,10 @@ test('settings menu: mouse, keyboard and gamepad reach every setting, and it is 
     expect(problems).toEqual([]);
 });
 
-test('remappable controls: rebind a key and a pad button in Settings; they work and are saved', async ({ page }) => {
+// (real speed: it catches the top of each jump between frames, so a frame must not hold a whole jump)
+test('remappable controls: rebind a key and a pad button in Settings; they work and are saved @realtime', async ({
+    page
+}) => {
     test.setTimeout(600_000); // two boots of the game page
     await page.addInitScript(() => {
         const buttons = Array.from({ length: 17 }, () => ({ pressed: false, touched: false, value: 0 }));
