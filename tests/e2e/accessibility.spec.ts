@@ -130,7 +130,9 @@ test('text size 160 %: every HUD and menu text is 1.6× and stays on screen, pho
         await page.locator('.online-panel:visible button', { hasText: 'Close' }).click();
         await page.locator('.levels-chip').click();
         await check(`${w}x${h} levels panel`);
-        await page.locator('.levels-chip').click();
+        // (large text on a phone: the panel covers its chip; it has its own Close button)
+        await page.locator('.levels-panel button', { hasText: 'Close' }).click();
+        await expect(page.locator('.levels-panel')).toBeHidden();
     }
     expect(problems).toEqual([]);
 });
@@ -211,7 +213,7 @@ test('clicking a menu never grabs the timber under the crosshair; a click on the
     const ahead = 1.3;
     await page.evaluate(
         ([x, y, z]) => (window as unknown as { __riverLab: Lab }).__riverLab.placeProp('bucket', x, y, z),
-        [p.x - Math.sin(p.yaw) * ahead, p.y + 0.3, p.z - Math.cos(p.yaw) * ahead]
+        [p.x - Math.sin(p.yaw) * ahead, p.y + 0.15, p.z - Math.cos(p.yaw) * ahead]
     );
     await page.evaluate(
         ([yaw, pitch]) => (window as unknown as { __riverLab: Lab }).__riverLab.look(yaw, pitch),
@@ -220,9 +222,12 @@ test('clicking a menu never grabs the timber under the crosshair; a click on the
     await expect.poll(() => lab(page, (l) => l.interaction().target), { timeout: 20_000 }).toBe('bucket');
     const vw = page.viewportSize()!;
     const centre = { x: vw.width / 2, y: vw.height / 2 };
+    // after each click: nothing held, and the bucket still under the crosshair (so the click had
+    // something to grab, had it reached the game)
     const notHeld = async (what: string) => {
         await page.waitForTimeout(400);
         expect((await lab(page, (l) => l.player())).holding, what).toBe(-1);
+        expect(await lab(page, (l) => l.interaction().target), `${what}: still aimed at the bucket`).toBe('bucket');
     };
 
     // the first click on the game takes the mouse, and grabs nothing
@@ -249,7 +254,7 @@ test('clicking a menu never grabs the timber under the crosshair; a click on the
     await page.locator('.online-panel:visible button', { hasText: 'Close' }).click();
     await notHeld('the online panel');
     await page.locator('.levels-chip').click();
-    await page.locator('.levels-chip').click();
+    await page.locator('.levels-panel button', { hasText: 'Close' }).click();
     await notHeld('the level chooser');
     // Resume from the menu takes the mouse back and grabs nothing; then a click on the game grabs
     await page.keyboard.press('Escape');
