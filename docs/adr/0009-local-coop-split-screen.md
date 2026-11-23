@@ -47,3 +47,25 @@ shared (one grid, one worker). The Deck's frame rate is unmeasured; start it on 
 7.5–10 cm voxels. The `CameraFrame` workaround touches engine internals (`renderPassCamera`,
 `scenePass.scaleY`, `composePass.viewport`) and must be rechecked on engine upgrades; the split-screen
 browser test catches a black half.
+
+## Addendum (2026-11-23, Epic 10 #22): up to four local players
+
+- **Views.** `LabScene.setViews(1..4)` replaces `setSplit`. Each extra view has its own camera,
+  `CameraFrame`, sky (`lighting = false`) and per-view immediate layer, made the first time it is
+  shown.
+- **Layout.**
+    - **Two views:** top and bottom.
+    - **Three views:** player 1 across the top, players 2 and 3 in the bottom quarters. This covers
+      the whole screen: an empty quarter would show stale pixels, because no compose pass clears it.
+    - **Four views:** quarters.
+- **Render targets.** Each view's scene target is scaled to its share of the screen (`scaleX`,
+  `scaleY` on the scene and pre passes), and its compose pass is clipped to its rectangle, the same
+  workaround as for two views.
+- **Pads.** `PadManager` holds four players. When a pad behind player 1 disconnects, the ones after
+  it move up one, and so do their views and sim slots. Player 1 keeps their place (keyboard and
+  mouse).
+- **HUD.** Each view's crosshair, prompt and label are placed in its rectangle (`layoutViewHud`).
+- **Streaming.** Every view's camera is a streaming focus.
+- **Cost.** The world renders once per view, with shadows per camera. Voxel reconstruction stays
+  shared. Measure frame time on the target device before relying on four views; the Low preset is
+  the starting point.
