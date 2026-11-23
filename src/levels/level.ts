@@ -86,6 +86,13 @@ export interface LevelStage {
     bucket: { x: number; y: number; z: number };
     /** Epic 7: this stage is done by pouring water here (the flower), not by setting the bucket down. */
     flower?: FlowerTarget;
+    /**
+     * The bucket only counts at `goal` with at least this much water (litres). A thrown bucket lands
+     * with its water gone, so a crossing has to be built and the bucket carried over.
+     */
+    minLitres?: number;
+    /** A bucket lost in this stage comes back at `bucket` holding this much water (default empty). */
+    spareLitres?: number;
 }
 
 /**

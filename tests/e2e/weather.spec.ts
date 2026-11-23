@@ -22,7 +22,8 @@ type Lab = {
     ready: boolean;
     action(id: string): void;
     seek(t: number): void;
-    teleport(x: number, z: number, yaw?: number): void;
+    teleport(x: number, z: number, yaw?: number, slot?: number): void;
+    setPlayers(n: number): void;
     weather(n: number): boolean;
     nearBuiltAt(x: number, z: number): boolean;
     hazards(): { weatherZone?: number; weather?: number };
@@ -130,6 +131,49 @@ test('full fog on Low: the sky is the fog colour, no outline of the far world ag
     const median = [0, 1, 2].map((i) => px.map((c) => c[i]).sort((a, b) => a - b)[px.length >> 1]);
     const worst = Math.max(...px.map((c) => deltaE(c, median)));
     expect(worst, `colour spread over the far landmarks: dE ${worst.toFixed(2)}`).toBeLessThan(3);
+});
+
+test('split screen at full fog: each view has its own fog sky, round its own camera, however far apart', async ({
+    page
+}) => {
+    test.setTimeout(900_000);
+    await inWeather(page, ZONES[2], 'low', 0);
+    // player 2 joins on the same screen, 130 m back down the road
+    const far = at(18, roadT(18));
+    await page.evaluate((far) => {
+        const l = (window as unknown as { __riverLab: Lab }).__riverLab;
+        l.setPlayers(2);
+        l.teleport(far.x, far.z, -Math.PI / 4, 1);
+    }, far);
+    await page.waitForTimeout(4000);
+    const views = await page.evaluate(() => {
+        type E = {
+            enabled: boolean;
+            getPosition(): { x: number; y: number; z: number };
+        };
+        const apps = (
+            globalThis as unknown as { __playcanvasApps: Map<{ root: { findByName(n: string): E | null } }, unknown> }
+        ).__playcanvasApps;
+        const app = [...apps.keys()][0];
+        const pos = (n: string) => {
+            const e = app.root.findByName(n)!;
+            const p = e.getPosition();
+            return { x: p.x, y: p.y, z: p.z, on: e.enabled };
+        };
+        return {
+            dome1: pos('FogDome1'),
+            dome2: pos('FogDome2'),
+            camera1: pos('MainCamera'),
+            camera2: pos('Player2Camera')
+        };
+    });
+    const d = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }) =>
+        Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+    expect(views.dome1.on).toBe(true);
+    expect(views.dome2.on).toBe(true);
+    expect(d(views.camera1, views.camera2), 'the two views are far apart').toBeGreaterThan(120);
+    expect(d(views.dome1, views.camera1), "player 1's dome round player 1's camera").toBeLessThan(0.5);
+    expect(d(views.dome2, views.camera2), "player 2's dome round player 2's camera").toBeLessThan(0.5);
 });
 
 for (const quality of ['low', 'high'] as const)

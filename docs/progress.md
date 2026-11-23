@@ -197,6 +197,45 @@ The setup:
   secure context, such as peer-to-peer online play, aren't covered by these tests. The online
   embed test uses the local test transport.
 - **Not yet tried on the real itch.io page** in Safari, Firefox or on a phone.
+## Valley flags want water in the bucket: the empty-bucket throw is closed (2026-11-23, Epic 9)
+
+An existing cheat: the Valley could be finished without building a single bridge.
+
+- An empty bucket thrown from the near bank lands across Shallow Creek, the culvert, the gorge (in
+  one throw, pier and all) and the crevasse.
+- The stage flags counted any bucket resting at them, and the works tank and the mountain spring
+  refill it later.
+
+- **The fix:** every flag past the Timber Yard now wants at least 1 L of water in the bucket.
+    - A thrown bucket lands with its water gone: 0.02 L at most, measured with 0–3.4 L in it. A
+      full one falls short into the creek.
+    - Carried over a built crossing, it keeps nearly all of its 10 L.
+    - At the flag, a bucket that's too dry gets the message "it needs at least 1 L of water in it.
+      Carry it over the crossing, don't throw it."
+- **Spare buckets:** a bucket lost at the Forest Road, Gorge or Mountain Approach comes back with
+  3 L in it ("A spare bucket (3 L) is waiting…"). There's no water near those stage starts, and an
+  empty spare would have meant a walk back to the yard.
+    - Spares at the other stages stay empty: they have water nearby.
+    - Thrown, a 3 L spare also lands nearly empty, so it doesn't reopen the cheat.
+- **Tests** (`tests/unit/valley-water-flags.test.ts`, by input; the bridges are placed):
+    - at Shallow Creek, the culvert, the gorge and the crevasse, the bucket thrown over lands across
+      with under 1 L, and a second beaver carrying it to the flag doesn't complete the stage;
+    - the 3 L spare carried over the built culvert and gorge crossings, and a full bucket over the
+      crevasse, each complete their stage, with no falls.
+- **Weather follow-ups from the #128 audit:**
+    - The fog's sky now has one dome per local view, each round its own camera and drawn in that
+      view only. In split screen, player 2 can be far from player 1, and a dome round player 1's
+      camera would have stood inside player 2's fog. A browser test puts the two views about
+      130 m apart at full fog and checks each dome sits on its own camera.
+    - The debug weather hook never starts a zone over the gorge mist. The mist is atmosphere, so no
+      hazard is running, but weather is (tested).
+    - The six-height rain carry has a dry control: the same carry alone holds at −0.8 and −1.2 in
+      the dry, so it is the wet grip that loses it in the rain.
+- **Also fixed: a weak check in the Valley's crossing test.** It looked for each crossing's rim
+  30 cm back from where the ground drops below the fall line. The crevasse's bed is at the fall line
+  itself, so the "rim" it found was 2 m up the crevasse wall, not on the bench at 9.3 m, and its beam
+  had been resting inside the crevasse. It now finds the gap as ground well below the rims. A
+  beam laid there rests on the bench.
 
 ## Weather along the Valley, and its flood (2026-11-22, Epic 9, towards #88)
 

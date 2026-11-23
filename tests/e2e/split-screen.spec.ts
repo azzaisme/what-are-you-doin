@@ -5,6 +5,8 @@
  * sit in their part of the screen, and each player moves on their own commands.
  */
 
+import path from 'node:path';
+
 import type { Page } from '@playwright/test';
 import { expect, test } from '@playwright/test';
 import { PNG } from 'pngjs';
@@ -20,6 +22,15 @@ type Lab = {
     views(): { slots: number[]; rects: Rect[] };
     entities(): Record<string, { x: number; z: number; visible: boolean }>;
     stats(): { voxel: { objects: number; rejected: number } };
+    seek(t: number): void;
+    teleport(x: number, z: number, yaw?: number, slot?: number): void;
+    weather(n: number): boolean;
+    nearBuiltAt(x: number, z: number): boolean;
+    teleportView(v: number, x: number, z: number, yaw?: number): void;
+    player(): { x: number; y: number; z: number; eyeHeight: number };
+    placeProp(id: string, x: number, y: number, z: number, yaw: number): void;
+    showNailOutlines(on: boolean): void;
+    joints(): { outlines: number[][]; viewLayers: string[][] };
 };
 
 const IGNORED = [
@@ -205,5 +216,174 @@ test('split screen for four, then three: every view draws, every HUD sits in its
     expect(h.crosshairs.length).toBe(1);
     expect(h.tags.length).toBe(0);
     expect((await lab(page, (l) => l.stats())).voxel.rejected).toBe(0);
+    expect(problems).toEqual([]);
+});
+
+test("four views: a player's hammer outline shows in that player's quarter only", async ({ page }) => {
+    test.setTimeout(600_000);
+    const problems = await boot(page, '?level=yard&t=0.01&quality=low&noui#cell100');
+    await lab(page, (l) => l.action('pause'));
+    await lab(page, (l) => l.setPlayers(4));
+    const { slots, rects } = await lab(page, (l) => l.views());
+    // player 3 (view 2, bottom left) stands over a beam on the ground and looks down at it; the
+    // others look at the same beam from 3 m and more away (out of hammer reach), so an outline
+    // shared between views would show in theirs
+    const p0 = await lab(page, (l) => l.player());
+    await page.evaluate(
+        ([x, y, z, eye]) => {
+            const l = (window as unknown as { __riverLab: Lab }).__riverLab;
+            l.placeProp('beam-0', x + 3, y + 0.3, z - 0.6, 0);
+            l.look(Math.atan2(-3, 0.6), -Math.atan2(eye - 0.2, Math.hypot(3, 0.6)));
+            l.teleportView(1, x + 6, z - 0.6, 0);
+            l.lookView(1, Math.PI / 2, -0.2);
+            l.teleportView(2, x + 3, z, 0);
+            l.lookView(2, 0, -Math.atan2(eye - 0.2, 0.55));
+            l.teleportView(3, x + 3, z - 4.6, 0);
+            l.lookView(3, Math.PI, -0.2);
+        },
+        [p0.x, p0.y, p0.z, p0.eyeHeight]
+    );
+    await page.waitForFunction(
+        (s3) => {
+            const o = (window as unknown as { __riverLab: Lab }).__riverLab.joints().outlines;
+            return o.length === 4 && o[2].length === 1 && o[2][0] === s3;
+        },
+        slots[2],
+        { timeout: 120_000 }
+    );
+    const j = await lab(page, (l) => l.joints());
+    expect(j.outlines).toEqual([[], [], [slots[2]], []]);
+    // each camera draws its own view's layer and no other
+    expect(j.viewLayers).toEqual([['View1'], ['View2'], ['View3'], ['View4']]);
+    // on screen: the pixels that change with the outline (the same in every shot with it and in
+    // every shot without, and different between) are all in player 3's quarter
+    const shots: PNG[] = [];
+    for (const [on, frames] of [
+        [true, 3],
+        [false, 5],
+        [true, 4],
+        [false, 7],
+        [true, 6]
+    ] as const) {
+        await page.evaluate(
+            async ([v, k]) => {
+                (window as unknown as { __riverLab: Lab }).__riverLab.showNailOutlines(v as boolean);
+                for (let f = 0; f < (k as number); f++) await new Promise((r) => requestAnimationFrame(r));
+            },
+            [on, frames]
+        );
+        shots.push(PNG.sync.read(await page.screenshot()));
+    }
+    const { width: w, height: h } = shots[0];
+    const ons = [shots[0], shots[2], shots[4]];
+    const offs = [shots[1], shots[3]];
+    const at = (p: PNG, i: number) => p.data[i] * 65536 + p.data[i + 1] * 256 + p.data[i + 2];
+    const inView = [0, 0, 0, 0];
+    let outside = 0;
+    for (let y = 0; y < h; y++)
+        for (let x = 0; x < w; x++) {
+            const i = (y * w + x) * 4;
+            const on = at(ons[0], i);
+            const off = at(offs[0], i);
+            if (on === off || ons.some((p) => at(p, i) !== on) || offs.some((p) => at(p, i) !== off)) continue;
+            const v = rects.findIndex(
+                (r) => x >= r.x * w && x < (r.x + r.w) * w && y >= r.y * h && y < (r.y + r.h) * h
+            );
+            if (v >= 0) inView[v]++;
+            else outside++;
+        }
+    expect(inView[2], "outline pixels in player 3's quarter").toBeGreaterThan(20);
+    expect([inView[0], inView[1], inView[3], outside], 'outline pixels anywhere else').toEqual([0, 0, 0, 0]);
+    expect(problems).toEqual([]);
+});
+
+/** Route frame (valley.ts) to the world, as in weather.spec.ts. */
+const valleyAt = (u: number, t: number) => ({ x: -64 + (u + t) / Math.SQRT2, z: 62 + (t - u) / Math.SQRT2 });
+
+test('four views at full fog: each view has its own fog sky, round its own camera, on its own layer only', async ({
+    page
+}) => {
+    test.setTimeout(900_000);
+    await page.addInitScript({ path: path.resolve('.claude/skills/inspect-runtime/scripts/devtools-hook.js') });
+    const problems = await boot(page, '?level=valley&quality=low&noui#cell100');
+    await page.waitForTimeout(3000);
+    // past the hazards' grace period, then the fog area (zone 2) at full strength
+    await lab(page, (l) => l.seek(19.98));
+    await lab(page, (l) => l.action('pause'));
+    const fog = valleyAt(148, 0);
+    expect(
+        await page.evaluate((p) => {
+            const l = (window as unknown as { __riverLab: Lab }).__riverLab;
+            l.teleport(p.x, p.z, -Math.PI / 4);
+            return l.weather(2);
+        }, fog)
+    ).toBe(true);
+    await page.waitForFunction(
+        (p) => (window as unknown as { __riverLab: Lab }).__riverLab.nearBuiltAt(p.x, p.z),
+        fog,
+        {
+            timeout: 300_000
+        }
+    );
+    // three more players, spread far back down the road (the road is straight at these points)
+    await lab(page, (l) => l.setPlayers(4));
+    const spots = [100, 60, 30].map((u) => valleyAt(u, 0));
+    await page.evaluate((spots) => {
+        const l = (window as unknown as { __riverLab: Lab }).__riverLab;
+        spots.forEach((p, i) => l.teleportView(i + 1, p.x, p.z, -Math.PI / 4));
+    }, spots);
+    type Apps = Map<{ scene: { fog: { end: number } } }, unknown>;
+    await page.waitForFunction(
+        () => {
+            const apps = (globalThis as unknown as { __playcanvasApps?: Apps }).__playcanvasApps;
+            const app = apps ? [...apps.keys()][0] : null;
+            return !!app && app.scene.fog.end < 24.5;
+        },
+        null,
+        { timeout: 400_000, polling: 1000 }
+    );
+    await page.waitForTimeout(3000);
+    const views = await page.evaluate(() => {
+        type E = {
+            enabled: boolean;
+            getPosition(): { x: number; y: number; z: number };
+            render?: { layers: number[] };
+            camera?: { layers: number[] };
+        };
+        type App = {
+            root: { findByName(n: string): E | null };
+            scene: { layers: { getLayerByName(n: string): { id: number } | null } };
+        };
+        const apps = (globalThis as unknown as { __playcanvasApps: Map<App, unknown> }).__playcanvasApps;
+        const app = [...apps.keys()][0];
+        const viewIds = [1, 2, 3, 4].map((v) => app.scene.layers.getLayerByName(`View${v}`)!.id);
+        const named = (id: number) => viewIds.indexOf(id);
+        return [0, 1, 2, 3].map((v) => {
+            const dome = app.root.findByName(`FogDome${v + 1}`)!;
+            const cam = app.root.findByName(v === 0 ? 'MainCamera' : `Player${v + 1}Camera`)!;
+            const d = dome.getPosition();
+            const c = cam.getPosition();
+            return {
+                on: dome.enabled,
+                fromCamera: Math.hypot(d.x - c.x, d.y - c.y, d.z - c.z),
+                camera: { x: c.x, z: c.z },
+                // the view layers the dome draws in, and the ones its camera draws
+                domeViews: dome.render!.layers.map(named),
+                cameraViews: cam.camera!.layers.map(named).filter((i) => i >= 0)
+            };
+        });
+    });
+    for (const [v, s] of views.entries()) {
+        expect(s.on, `dome ${v + 1} on`).toBe(true);
+        expect(s.fromCamera, `dome ${v + 1} round camera ${v + 1}`).toBeLessThan(0.5);
+        expect(s.domeViews, `dome ${v + 1} only on View${v + 1}`).toEqual([v]);
+        expect(s.cameraViews, `camera ${v + 1} draws View${v + 1} only`).toEqual([v]);
+    }
+    for (let a = 0; a < 4; a++)
+        for (let b = a + 1; b < 4; b++)
+            expect(
+                Math.hypot(views[a].camera.x - views[b].camera.x, views[a].camera.z - views[b].camera.z),
+                `views ${a + 1} and ${b + 1} apart`
+            ).toBeGreaterThan(25);
     expect(problems).toEqual([]);
 });

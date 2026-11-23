@@ -688,17 +688,20 @@ export class LabSim {
         if (this.lostTicks > 90) {
             this.lostTicks = 0;
             this.progress.recoveries++;
-            this.water.bucketLost();
+            const st = this.stage;
+            const spare = st?.spareLitres ?? 0;
+            this.water.bucketLost(spare);
             this.water.teleported();
             this.water.refillSources();
-            const st = this.stage;
             if (st) {
                 // journeys: the bucket comes back at the last checkpoint reached
                 pw.place(bk.id, pose(st.bucket.x, st.bucket.y, st.bucket.z));
                 this.events.push({
                     tick: this.tick,
                     kind: 'recovered',
-                    text: `The bucket fell in. A spare (empty) one is waiting at the ${st.name} start.`
+                    text: spare
+                        ? `The bucket fell in. A spare bucket (${spare} L) is waiting at the ${st.name} start.`
+                        : `The bucket fell in. A spare (empty) one is waiting at the ${st.name} start.`
                 });
             } else {
                 pw.respawn(bk.id);
@@ -775,7 +778,21 @@ export class LabSim {
         const inside = p.x > g.minX && p.x < g.maxX && p.z > g.minZ && p.z < g.maxZ;
         const resting = Math.hypot(v.x, v.y, v.z) < 0.4 && holders === 0;
         this.goalTicks = inside && resting ? this.goalTicks + 1 : 0;
+        if (!inside) this.dryNoticed = false;
         if (this.goalTicks <= 30) return;
+        // the flag wants water in the bucket (a thrown bucket arrives empty)
+        const need = stages[k].minLitres ?? 0;
+        if (this.water.volume < need) {
+            if (!this.dryNoticed) {
+                this.dryNoticed = true;
+                this.events.push({
+                    tick: this.tick,
+                    kind: 'water',
+                    text: `The bucket made it, but it needs at least ${need} L of water in it. Carry it over the crossing, don't throw it.`
+                });
+            }
+            return;
+        }
         this.goalTicks = 0;
         this.progress.step++;
         const last = this.progress.step >= stages.length;

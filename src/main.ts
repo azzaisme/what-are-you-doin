@@ -566,8 +566,11 @@ let renderTime = 0;
 let prevGustPhase = 0;
 /** How far the camera is under the weather's area (eased, so its fog fades in and out at the edge). */
 let weatherUnder = 0;
-/** The fog's sky (created with the first weather): the sky turns the fog colour as it closes in. */
-let fogDome: FogDome | null = null;
+/**
+ * The fog's sky, one dome per local view (each centred on its own camera, drawn in that view's
+ * layer only: split screen), created on the first frame of a level with weather.
+ */
+let fogDomes: FogDome[] | null = null;
 const playerPose = pose();
 const playerAnim = new Float64Array(ANIM_MAX);
 const bodyPose = pose();
@@ -776,8 +779,12 @@ class LabDirector extends Script {
             );
             scene.app.scene.fog.start = f.start;
             scene.app.scene.fog.end = f.end;
-            fogDome ??= new FogDome(scene.app, scene.worldLayer);
-            fogDome.update(c, f.end);
+            fogDomes ??= scene.viewLayers.map((l, v) => new FogDome(scene.app, l, `FogDome${v + 1}`));
+            // every local view (split screen) has its own, round its own camera; unused ones hide
+            const shown = scene.views;
+            for (const [v, dome] of fogDomes.entries())
+                if (v < shown) dome.update(scene.cameras[v].getPosition(), f.end);
+                else dome.update(c, Infinity);
             const zone = wz >= 0 ? wSpec.zones[wz] : undefined;
             fx.weather.kind = zone?.kind ?? 0;
             fx.weather.strength = k;
@@ -2719,7 +2726,8 @@ window.__riverLab = {
     input: (c: Record<string, unknown>) => fpInput.inject(c),
     player: () => ({ ...sim.player, holding: sim.physics.heldId, eyeHeight: EYE_HEIGHT }),
     /** Puts player 1 somewhere (tests and screenshots of big levels). */
-    teleport: (x: number, z: number, yaw?: number) => sim.placePlayer(x, z, yaw ?? sim.player.yaw, 0),
+    teleport: (x: number, z: number, yaw?: number, slot = 0) =>
+        sim.placePlayer(x, z, yaw ?? sim.players[slot].yaw, slot),
     /** Puts the ute down at (x, z), facing yaw, on the ground there (tests: a ute by the logging stand). */
     placeUte: (x: number, z: number, yaw = 0) => {
         if (!sim.vehicle) return false;
@@ -2758,7 +2766,7 @@ window.__riverLab = {
         outlines: nailMarkers.outlineSlots.slice(0, localViews()),
         /** The per-view outline layers each camera renders (main camera, then the other views'). */
         viewLayers: scene.cameras
-            .slice(0, 2)
+            .slice(0, localViews())
             .map((c) => scene.viewLayers.filter((l) => c.camera!.layers.includes(l.id)).map((l) => l.name)),
         /** Split screen: player 2's slot (-1 when one player). */
         slot2: localSlotOf(1),
