@@ -70,7 +70,7 @@ function brightness(png: PNG, r: Rect): number {
 /** Where each visible crosshair and player label is (pixel centres / boxes). */
 const hud = (page: Page) =>
     page.evaluate(() => {
-        const vis = (e: Element) => getComputedStyle(e).display !== 'none' && (e as HTMLElement).offsetParent !== null;
+        const vis = (e: Element) => getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().width > 0;
         const crosshairs = [...document.querySelectorAll('.crosshair')].filter(vis).map((e) => {
             const b = e.getBoundingClientRect();
             return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
@@ -86,7 +86,7 @@ test('split screen for four, then three: every view draws, every HUD sits in its
     page
 }) => {
     test.setTimeout(900_000);
-    const problems = await boot(page, '?level=yard&t=0.01&quality=low&noui#cell100');
+    const problems = await boot(page, '?level=yard&t=0.01&quality=low#cell100');
     await lab(page, (l) => l.action('pause')); // play live
     await lab(page, (l) => l.setPlayers(4));
     const v4 = await lab(page, (l) => l.views());
