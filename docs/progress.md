@@ -41,8 +41,26 @@ comparison.
 | 4     | 4745       | 1490 ms                  |
 
 Each extra view adds about 600–1100 draw calls, because each view culls and draws the scene
-again. Going back to one view returned to 2029 draw calls. Four views on a phone is untested here,
-and a likely place to lower quality first.
+again. Going back to one view returned to 2029 draw calls.
+
+**Where it goes: the sun's shadows.** The engine draws the sun's shadow map again for every camera.
+A second run, averaging 5 samples at each count, with the sun's shadows switched on and off:
+
+| Views | Yard, shadows on | Yard, shadows off | Valley, shadows on | Valley, shadows off |
+| ----- | ---------------- | ----------------- | ------------------ | ------------------- |
+| 1     | 1991             | 727               | 1529               | 825                 |
+| 2     | 2443             | 1052              | 1362               | 988                 |
+| 3     | 3286             | 1343              | 1539               | 1165                |
+| 4     | 4137             | 1612              | 1530               | 1178                |
+
+On the yard, about two thirds of the draw calls are shadows. Four views without them (1612) cost
+less than one view with them (1991). The Valley's shadow count barely grows with views; its
+shadowed ground near the camera is already merged into few pieces. Four views on a real phone GPU
+are untested.
+
+- Cutting each view's draw calls (#109) helps every view.
+- For split screen, the bigger lever is the sun's shadows: fewer cascades, or none, at three or
+  four views on Low.
 
 ## Input and accessibility: text size everywhere, less motion, menus never grab (2026-11-23, Epic 10, #21)
 
@@ -197,6 +215,7 @@ The setup:
   secure context, such as peer-to-peer online play, aren't covered by these tests. The online
   embed test uses the local test transport.
 - **Not yet tried on the real itch.io page** in Safari, Firefox or on a phone.
+
 ## Valley flags want water in the bucket: the empty-bucket throw is closed (2026-11-23, Epic 9)
 
 An existing cheat: the Valley could be finished without building a single bridge.
