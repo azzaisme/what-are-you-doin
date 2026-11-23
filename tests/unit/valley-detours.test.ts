@@ -615,6 +615,31 @@ describe('building over the detours is building', () => {
         pl.step({}, 60);
         expect(holds(s, 0)).toBe(true);
     }, 60_000);
+
+    it('with #132’s hand-over rule too: from the bank to a beaver on a plank laid onto the stones, it passes', () => {
+        // (the plank is ground between them, and the feet on it aren't on a stone: both rules agree
+        // that building over the stones is building; without the plank, the stone refuses it)
+        const s = run(CREEK.stage, 2);
+        const [a, b] = pair(s);
+        const plank = s.entities.find((e) => e.name === 'extra-plank-0')!;
+        // from the bank's edge out onto the first two stones, along the stones' line
+        const mid = routeToWorld(-1.0, CREEK.t);
+        s.physics.place(plank.id, pose(mid.x, 0.55, mid.z, quatFromYawPitchRoll(ROUTE_YAW + Math.PI / 2, 0, 0)));
+        a.step({}, 90);
+        const pp = plank.pose.p;
+        putBucket(s, CREEK.near - 1, CREEK.t);
+        stand(a, CREEK.near - 2.1, CREEK.t);
+        expect(a.grabBucket()).toBe(true);
+        faceAcross(a, CREEK.t);
+        walkAlong(a, CREEK.t, -1.8);
+        standOn(b, routeU(pp.x, pp.z) + 0.3, CREEK.t, pp.y + 0.1, false);
+        expect(s.detourUnder(s.players[1]), 'on the plank, not a stone').toBeNull();
+        faceAcross(a, CREEK.t, -0.3);
+        a.step({}, 40);
+        expect(Math.hypot(b.p.x - a.p.x, b.p.z - a.p.z)).toBeLessThan(HANDOVER_REACH);
+        expect(takeFromHands(b), 'the beaver on the plank takes it').toBe(true);
+        expect(texts(s, 'hint')).toEqual([]);
+    }, 60_000);
 });
 
 /**

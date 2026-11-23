@@ -99,11 +99,15 @@ export type PropsMode = 'physics' | 'scripted';
 
 /** The player body's eye height (beavers 1.22 m; the former stand-in people 1.86 m). */
 export const EYE_HEIGHT = BODY.eyeHeight;
-/** Said the first time a beaver tries to jump holding the bucket. */
 /** The farthest apart (feet, across the ground, m) two beavers can be to pass the bucket hand to hand. */
 export const HANDOVER_REACH = 1.9;
-/** Said the first time a beaver reaches for the bucket in another's hands from too far. */
-export const HANDOVER_TEXT = 'Too far to hand the bucket over: stand close, or build the crossing.';
+/** Along a hand-over, ground every this far (m) between the two beavers' feet... */
+export const HANDOVER_STEP = 0.15;
+/** ...within this much (m) under the line between their feet: a gap between them refuses it. */
+export const HANDOVER_DROP = 0.5;
+/** Said the first time a beaver reaches for the bucket in another's hands from too far or over a gap. */
+export const HANDOVER_TEXT = 'Can’t hand the bucket over a gap or from far off: stand close, or build the crossing.';
+/** Said the first time a beaver tries to jump holding the bucket (or grab it in mid-air). */
 export const HEAVY_JUMP_TEXT = 'Too heavy to jump with the bucket: build the crossing to get it over.';
 /** Stress bodies get a deterministic upward kick this often (ticks), so 25 bodies keep moving. */
 export const STRESS_KICK_TICKS = 150;
@@ -181,6 +185,8 @@ export class LabSim {
     private readonly jumpWas = new Uint8Array(MAX_PLAYERS);
     /** Said once a run: no jumping with the bucket. */
     private heavyNoticed = false;
+    /** Ticks each player has been off the ground. */
+    private readonly airTicks = new Uint16Array(MAX_PLAYERS);
     /** Said once a run: the bucket is handed over only standing close. */
     private farNoticed = false;
     private readonly landingVy = new Float64Array(MAX_PLAYERS);
@@ -343,6 +349,7 @@ export class LabSim {
         this.farNoticed = false;
         this.jumpWas.fill(0);
         this.detourNoticed = false;
+        this.airTicks.fill(0);
         for (const pl of this.players) {
             pl.fallTicks = 0;
             pl.safe.valid = false;
@@ -659,6 +666,7 @@ export class LabSim {
         p.z = c.z;
         p.vy = c.vy;
         p.grounded = c.grounded;
+        this.airTicks[i] = p.grounded ? 0 : Math.min(this.airTicks[i] + 1, 60000);
 
         if (!this.physicsProps) return;
         const ev = this.animEvents[i];
@@ -692,19 +700,14 @@ export class LabSim {
             else if (!this.enterUte(i, eye, cmd)) ev.missed = true;
         }
         pw.applyGrab(eye, cmd.yaw, cmd.pitch, i);
-        // the bucket passes hand to hand only between beavers standing close (Epic 9): reaching it
-        // out of another's hands across a gap would get it over a crossing nobody built
-        if (heldBefore !== this.bucket.id && pw.heldIdOf(i) === this.bucket.id) {
-            for (let j = 0; j < this.players.length; j++) {
-                if (j === i || pw.heldIdOf(j) !== this.bucket.id) continue;
-                const o = this.players[j];
-                if (Math.hypot(o.x - p.x, o.z - p.z) <= HANDOVER_REACH) continue;
-                pw.release(i);
-                if (!this.farNoticed) {
-                    this.farNoticed = true;
-                    this.events.push({ tick: this.tick, kind: 'hint', text: HANDOVER_TEXT });
-                }
-                break;
+        // no taking hold of the bucket in mid-air (Epic 9): jumped empty-handed and grabbed on the
+        // way up, it would be carried over a crossing all the same
+        const air = !p.grounded && (p.vy > 0.5 || this.airTicks[i] >= 3);
+        if (air && heldBefore !== this.bucket.id && pw.heldIdOf(i) === this.bucket.id) {
+            pw.release(i);
+            if (!this.heavyNoticed) {
+                this.heavyNoticed = true;
+                this.events.push({ tick: this.tick, kind: 'hint', text: HEAVY_JUMP_TEXT });
             }
         }
         // foot detours (Epic 9, #87): standing on a stepping stone, a trunk or a boulder, a beaver
@@ -723,6 +726,22 @@ export class LabSim {
                         text: `The bucket's too awkward for the ${what}: build the crossing to get it over.`
                     });
                 }
+            }
+        }
+        // the bucket passes hand to hand only between beavers standing close, with ground between
+        // them (Epic 9): reaching it out of another's hands across a gap would get it over a
+        // crossing nobody built (a built span is ground: along a bridge, it passes)
+        if (heldBefore !== this.bucket.id && pw.heldIdOf(i) === this.bucket.id) {
+            for (let j = 0; j < this.players.length; j++) {
+                if (j === i || pw.heldIdOf(j) !== this.bucket.id) continue;
+                const o = this.players[j];
+                if (Math.hypot(o.x - p.x, o.z - p.z) <= HANDOVER_REACH && this.groundBetween(p, o)) continue;
+                pw.release(i);
+                if (!this.farNoticed) {
+                    this.farNoticed = true;
+                    this.events.push({ tick: this.tick, kind: 'hint', text: HANDOVER_TEXT });
+                }
+                break;
             }
         }
         const heldAfter = pw.heldIdOf(i);
@@ -900,6 +919,34 @@ export class LabSim {
             return d.what;
         }
         return null;
+    }
+
+    /**
+     * Ground all along the line between two players' feet (sampled every HANDOVER_STEP): something
+     * to stand on (the ground, a prop, a built span) within HANDOVER_DROP under the line. A gap
+     * between them, a crossing nobody built, says no.
+     */
+    private groundBetween(a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): boolean {
+        const len = Math.hypot(b.x - a.x, b.z - a.z);
+        const n = Math.max(1, Math.ceil(len / HANDOVER_STEP));
+        // (across a beaver's width too: one standing on two beams side by side is on the bridge)
+        const sx = len > 1e-6 ? (-(b.z - a.z) / len) * 0.15 : 0;
+        const sz = len > 1e-6 ? ((b.x - a.x) / len) * 0.15 : 0;
+        for (let k = 0; k <= n; k++) {
+            const f = k / n;
+            const x = a.x + (b.x - a.x) * f;
+            const y = a.y + (b.y - a.y) * f + 0.3;
+            const z = a.z + (b.z - a.z) * f;
+            const r = 0.3 + HANDOVER_DROP;
+            const pw = this.physics;
+            if (
+                pw.supportY(x, z, y, r) === null &&
+                pw.supportY(x + sx, z + sz, y, r) === null &&
+                pw.supportY(x - sx, z - sz, y, r) === null
+            )
+                return false;
+        }
+        return true;
     }
 
     /** Journey levels: the stage being played (the last one once all are done), or null. */
