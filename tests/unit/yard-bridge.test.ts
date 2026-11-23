@@ -82,7 +82,7 @@ function buildAndCross(pullPlankNails = false) {
             for (const c of s.joints.graph.connections()) {
                 const h = s.joints.health.states.get(c.id);
                 const l = s.joints.stress.loads.get(c.id);
-                if (!h || !l || h.raw < 0.4 || s.tick - c.tick > 200) continue;
+                if (!h || !l || h.util < 0.5) continue;
                 const ps = (id: number) => {
                     const e = s.entities.find((x) => x.id === id);
                     if (!e) return 'g';
