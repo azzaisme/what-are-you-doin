@@ -48,7 +48,16 @@ type Lab = {
     };
     teleport(x: number, z: number, yaw?: number): void;
     ute(): { x: number; y: number; z: number; yaw: number; speed: number; driver: number; drivable: boolean };
-    hazards(): { waterY: number; flood: number; gust: number; floods: number; planeY: number; tick: number };
+    hazards(): {
+        waterY: number;
+        flood: number;
+        gust: number;
+        floods: number;
+        planeY: number;
+        tick: number;
+        tree: number;
+    };
+    placeUte(x: number, z: number, yaw?: number): boolean;
     audio(): { started: boolean; context: string; played: number; recent: string[]; loops: Record<string, number> };
     wood(): {
         trees: { phase: string; cut: number }[];
@@ -1538,5 +1547,62 @@ test('logging in the Timber Yard: chew a pine down, the voxel tree becomes a stu
         await page.waitForTimeout(500);
     }
     expect((await lab(page, (l) => l.wood())).sawmill?.mode).toBe('beam');
+    expect(problems).toEqual([]);
+});
+
+test('the falling tree in the Timber Yard: a bite with the ute by the stand, and the pine leans over towards it', async ({
+    page
+}) => {
+    test.setTimeout(300_000);
+    const problems = await boot(page, '?level=yard&t=0.01&quality=low#cell100');
+    // past the quiet start, with the ute parked east of tree 1 (16.0, 4.5)
+    await lab(page, (l) => {
+        l.placeUte(20.5, 4.5, 0);
+        // the software renderer runs slower than real time: step the sim past the quiet start,
+        // then let it run on (seek pauses it)
+        l.seek(21);
+        l.action('pause');
+    });
+    expect(await lab(page, (l) => l.paused())).toBe(false);
+    // chew it from the west, the far side from the ute
+    await lab(page, (l) => {
+        // (forward is (-sin yaw, -cos yaw): facing +x)
+        l.teleport(14.9, 4.5, -Math.PI / 2);
+        l.look(-Math.PI / 2, -0.75);
+    });
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().target === 'tree-1',
+        null,
+        { timeout: 60_000 }
+    );
+    const cells0 = (await lab(page, (l) => l.stats())).dynamicCells;
+    for (let tries = 0; tries < 30 && (await lab(page, (l) => l.hazards().tree)) === 0; tries++) {
+        await lab(page, (l) => l.input({ grab: true }));
+        await page.waitForTimeout(500);
+    }
+    expect(await lab(page, (l) => l.hazards().tree)).toBe(1);
+    await lab(page, (l) => {
+        // south-east of it, outside its crown, looking at it diagonally (forward is
+        // (-sin yaw, -cos yaw)): the lean towards the ute (east) tips it to the left
+        l.teleport(20.0, 1.5, Math.atan2(4, -3));
+        l.look(Math.atan2(4, -3), 0.3);
+    });
+    await page.waitForTimeout(1500);
+    await page.screenshot({ path: 'test-results/falling-tree-crack.png' });
+    // the tell: the static tree is gone and the marker draws it, leaning further over time
+    const t0 = await lab(page, (l) => l.hazards().tick);
+    await page.waitForFunction(
+        (t) => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().tick >= t + 5 * 60,
+        t0,
+        { timeout: 120_000 }
+    );
+    // 5 s into the 7 s tell
+    expect(await lab(page, (l) => l.hazards().tree)).toBe(1);
+    await page.waitForTimeout(1500);
+    await page.screenshot({ path: 'test-results/falling-tree-leaning.png' });
+    const cells1 = (await lab(page, (l) => l.stats())).dynamicCells;
+    // a whole tree's worth of moving cells (at 10 cm: its trunk and four needle tiers)
+    expect(cells1 - cells0).toBeGreaterThan(1000);
+    expect((await lab(page, (l) => l.wood())).trees[1].phase).toBe('standing');
     expect(problems).toEqual([]);
 });

@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { BUCKET_LITRES, BUCKET_SLOPE_X, bucketAsset } from '../../src/assets/props.ts';
 import { sfx } from '../../src/audio/sfx.ts';
@@ -17,6 +17,8 @@ import type { Quat } from '../../src/voxels/math.ts';
 import { M, voxelMaterial } from '../../src/voxels/palette.ts';
 
 beforeAll(() => initPhysics());
+// a test that installs an sfx sink never leaves it installed for later tests, even on a failure
+afterEach(() => sfx.setSink(null));
 
 const cmd = (n: number, c: Partial<PlayerCommand> = {}): PlayerCommand => ({ ...neutralCommand(n), ...c });
 const UP: Quat = { x: 0, y: 0, z: 0, w: 1 };
