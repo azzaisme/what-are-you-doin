@@ -1,5 +1,49 @@
 # Progress log
 
+## Input and accessibility: text size everywhere, less motion, menus never grab (2026-11-23, Epic 10, #21)
+
+This finishes the input and accessibility list (#21). Remapping (#98) and the sound sliders (Epic 8)
+came earlier.
+
+### What changed for players
+
+- **Text & menu size reaches every panel.** The online panel, the level chooser and player 2's
+  split-screen prompt didn't follow the setting before. At 160 % they're still sized to fit the
+  screen.
+- **Less motion:**
+    - A device set to reduce motion (the system's accessibility setting) starts with **Camera bob &
+      kick** off. Turning it back on is saved as your choice.
+    - With the switch off, or the system setting on, the menus and toasts stop sliding and fading
+      too.
+- **Clicking never grabs by accident**, and a fix found while testing it:
+    - A click on a menu, a panel, the dock or Resume never grabs the timber under the crosshair (it
+      didn't before either; now it is tested).
+    - Every click in first person with the mouse taken used to throw an uncaught error behind the
+      scenes. The engine's orbit controls stayed on the canvas and asked for pointer capture, which
+      the browser refuses while the mouse is locked. Fixed.
+- **The online panel stops eating clicks.** It refreshes every second (round trips, relay status)
+  and used to rebuild its buttons each time, so a click could land on a button that was just
+  replaced. It now changes only what changed.
+
+### Tests (actual, `tests/e2e/accessibility.spec.ts`)
+
+| Test                                            | Result                                                                                                                                                                                                                                 |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Text size 160 %, 390 × 844 and 1280 × 720       | Every visible text (HUD, dock, every Settings section, credits, online panel, level chooser) has an effective zoom of 1.6 and is on screen; the HUD and dock don't overlap                                                             |
+| A device set to reduce motion                   | Camera bob off, UI transitions 0 s; walking, the camera's bob and kick stay exactly 0; switched on, it bobs, and that's saved across a reload                                                                                          |
+| Field of view                                   | The camera's field of view follows the slider live (52° → 60°)                                                                                                                                                                         |
+| Menu clicks with the bucket under the crosshair | The click that takes the mouse, clicks on the menu over the crosshair, its tabs, the backdrop, the online panel, the level chooser and Resume grab nothing (the bucket stays the target throughout); then a click on the game grabs it |
+
+- Unit tests (`tests/unit/device-defaults.test.ts`): a reduce-motion device's defaults, and the
+  player's own choice saved and restored against them.
+- Effective zoom is read with `Element.currentCSSZoom`, so a panel left out of the setting fails the
+  test.
+
+### Known limits
+
+- **The developer's debug panel** (F3) isn't scaled. It's left out of the test on purpose.
+- **Touch controls aren't remappable** (from #98).
+
 ## Credits and licences (2026-11-23, Epic 10, #104)
 
 The game now says what it is made with, and ships the licence notices its parts ask for.
