@@ -49,7 +49,8 @@ function handle(msg: ToWorker): void {
                 msg.focus,
                 msg.nearTiles,
                 msg.nearTileSize,
-                msg.nearRadius
+                msg.nearRadius,
+                msg.maskPreset
             );
             post({ type: 'frame', units, stats, tiles }, transferables(units));
         } else if (msg.type === 'query') {

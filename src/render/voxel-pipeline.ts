@@ -103,6 +103,8 @@ export class VoxelClient {
     focus: (() => Float32Array) | null = null;
     /** Streamed levels: the near world's radius (m), from the quality preset (null: the level's). */
     nearRadius: number | null = null;
+    /** This device's quality preset, for the lattices' mask budget (see MASK_PRESETS). */
+    maskPreset: 'high' | 'low' = 'high';
     /** Streamed levels: near tiles built (ti, tk keys) and their size (m). */
     readonly nearTiles = new Set<number>();
     nearTileSize = 0;
@@ -373,7 +375,8 @@ export class VoxelClient {
                     focus: l.world && !l.far && focus ? focus.slice() : undefined,
                     nearTiles: l.far && this.nearTileList ? this.nearTileList.slice() : undefined,
                     nearTileSize: l.far ? this.nearTileSize : undefined,
-                    nearRadius: l.world && !l.far && this.nearRadius !== null ? this.nearRadius : undefined
+                    nearRadius: l.world && !l.far && this.nearRadius !== null ? this.nearRadius : undefined,
+                    maskPreset: this.maskPreset
                 },
                 transfer
             );

@@ -85,12 +85,26 @@ export function maskReach(b: AABB): number {
     return rest * 1.25 + 0.5;
 }
 /**
- * The least number of this lattice's own cells its masks may test in one voxel frame (see
- * rasterizeMasks): the budget is this, or the cells this lattice's own objects hold when more. Each
- * test is one centre sample, as each of the lattice's own candidate cells costs at least one, so
- * masks at most about double a lattice's own rasterizing (scripts/bench-lattice.ts).
+ * The High quality preset's least number of cells a lattice's masks may be charged in one voxel
+ * frame (see rasterizeMasks): the budget is this, or the cells this lattice's own objects hold when
+ * more. Each test is one centre sample, as each of the lattice's own candidate cells costs at least
+ * one, so masks stay within about a lattice's own rasterizing (scripts/bench-lattice.ts: +8 ms at
+ * worst on the 1 cm lattice, the whole ragdoll head inside a beaver).
  */
 export const MASK_BUDGET = 12_000;
+/**
+ * The Low quality preset's mask budget: a fixed number of cells, not raised to the lattice's own,
+ * so masks cost little (`BENCH_PRESET=low node scripts/bench-lattice.ts`: at most +0.9 ms). Deep
+ * overlaps beyond it intersect as before #107.
+ */
+export const MASK_BUDGET_LOW = 12_000;
+
+/** Mask budgets per quality preset: the least cells, and whether it rises to the lattice's own. */
+export const MASK_PRESETS = {
+    high: { budget: MASK_BUDGET, own: true },
+    low: { budget: MASK_BUDGET_LOW, own: false }
+} as const;
+export type MaskPreset = keyof typeof MASK_PRESETS;
 
 /**
  * Does `a` win a shared cell against `b` (priority desc, then id asc, as the compositor orders)?
@@ -293,9 +307,11 @@ export class VoxelService {
         focus?: Float32Array,
         nearTiles?: Int32Array,
         nearTileSize = 0,
-        nearRadius?: number
+        nearRadius?: number,
+        maskPreset?: MaskPreset
     ): { units: UnitMesh[]; stats: FrameStats; tiles?: TileReport } {
         const t0 = performance.now();
+        if (maskPreset !== undefined) this.setMaskPreset(maskPreset);
         resetRasterStats(this.raster);
         let objects = 0;
         if (focus && focus.length >= 2) this.focus = focus;
@@ -418,6 +434,13 @@ export class VoxelService {
     maskBudget = MASK_BUDGET;
     /** Raise the budget to this lattice's own cells when more (tests turn it off to force skips). */
     maskOwnBudget = true;
+
+    /** This device's quality preset's mask budget (MASK_PRESETS). */
+    setMaskPreset(preset: MaskPreset): void {
+        const p = MASK_PRESETS[preset];
+        this.maskBudget = p.budget;
+        this.maskOwnBudget = p.own;
+    }
     /** Last frame's masks: rasterized, skipped over the budget, cells tested, the budget, parts rejected. */
     readonly maskStats = { masks: 0, skipped: 0, cells: 0, limit: 0, rejected: 0 };
 
@@ -437,13 +460,15 @@ export class VoxelService {
      * cell gives way where its centre lies inside the winner ('center' sampling, exactly as the
      * rasterizer samples it); there it is left empty here and only the winner's lattice draws it.
      *
-     * Budget: the cells tested, at most MASK_BUDGET a frame on this lattice, or the cells its own
-     * objects hold when more (so one mask can always cover them all). Masks are taken in compositor
+     * Budget (by quality preset, MASK_PRESETS): each mask is charged the most cells it could test
+     * (its union box, at most its outranked objects' cells; nothing is listed for a mask that does
+     * not run). At High at most MASK_BUDGET a frame, or the cells this lattice's objects hold when
+     * more (so one mask can always cover them all); at Low a fixed MASK_BUDGET_LOW. Masks are taken in compositor
      * order (the highest priority first); one that would overrun what is left is skipped this frame
-     * (its object and this lattice's simply intersect, as before #107) and counted. Hysteresis: the
-     * first mask served and a mask that ran last frame may use the whole budget, a later new one only
-     * 80 % of it, so a cost that hovers at the limit does not switch a mask on and off every frame.
-     * The first always fits: it can test no more cells than this lattice holds.
+     * (its object and this lattice's simply intersect, as before #107) and counted. Hysteresis: a mask
+     * that ran last frame may use the whole budget, and at High so may the first served (it always
+     * fits: it is charged no more cells than this lattice holds); any other new one only 80 % of it,
+     * so a cost that hovers at the limit does not switch a mask on and off every frame.
      */
     private rasterizeMasks(states: Float64Array, reference: boolean, cull: number): void {
         const st = this.maskStats;
@@ -474,12 +499,13 @@ export class VoxelService {
             return;
         }
         queue.sort((a, b) => (outranks(a.t, b.t) ? -1 : 1));
-        // this lattice's own cells, per drawn object: what a mask can take
+        // this lattice's own cells, per drawn object: what a mask can take (listed only once a
+        // mask that needs them runs)
         let own = 0;
         for (let n = 0; n < this.local.length; n++) {
-            const buf = this.ownCells[n] ?? (this.ownCells[n] = { a: new Int32Array(1024), n: 0 });
-            buf.n = this.world.objectCellCoords(this.local[n].id, buf);
-            own += buf.n;
+            const buf = this.ownCells[n] ?? (this.ownCells[n] = { a: new Int32Array(1024), n: -1 });
+            buf.n = -1;
+            own += this.world.objectCellCount(this.local[n].id);
         }
         const budget = Math.max(this.maskBudget, this.maskOwnBudget ? own : 0);
         st.limit = budget;
@@ -511,10 +537,32 @@ export class VoxelService {
                 u.k0 = Math.min(u.k0, Math.max(b.k0, r.minK));
                 u.k1 = Math.max(u.k1, Math.min(b.k1, r.maxK));
             }
+            // its cost, without listing anything: the cells it could test, at most the union box's
+            // and at most its outranked objects' cells
+            let held = 0;
+            for (let n = 0; n < this.local.length; n++)
+                if (outranks(t, this.local[n])) held += this.world.objectCellCount(this.local[n].id);
+            const cost =
+                u.i0 > u.i1 || u.j0 > u.j1 || u.k0 > u.k1
+                    ? 0
+                    : Math.min(held, (u.i1 - u.i0 + 1) * (u.j1 - u.j0 + 1) * (u.k1 - u.k0 + 1));
+            // hysteresis: a mask that ran last frame may use the whole budget, and so may the first
+            // served (the highest priority) when the budget covers this lattice's own cells (it
+            // always fits then); any other new one starts only within 80 % of it, so a cost
+            // hovering at the limit does not toggle
+            const limit = (this.maskOwnBudget && st.cells === 0) || ran.has(t.id) ? budget : budget * 0.8;
+            if (cost === 0 || st.cells + cost > limit) {
+                if (cost > 0) st.skipped++;
+                if (this.world.objectCellCount(t.id) > 0) this.world.clearObject(t.id);
+                continue;
+            }
+            st.cells += cost;
             let m = 0;
             for (let n = 0; n < this.local.length; n++) {
                 if (!outranks(t, this.local[n])) continue;
-                const { a, n: count } = this.ownCells[n];
+                const buf = this.ownCells[n];
+                if (buf.n < 0) buf.n = this.world.objectCellCoords(this.local[n].id, buf);
+                const { a, n: count } = buf;
                 for (let c = 0; c < count * 4; c += 4) {
                     const i = a[c];
                     const j = a[c + 1];
@@ -528,16 +576,6 @@ export class VoxelService {
                     this.maskCand[m++] = c | (n << 24);
                 }
             }
-            // hysteresis: the first mask served (the highest priority) and a mask that ran last
-            // frame may use the whole budget; a new one after them starts only within 80 % of it,
-            // so a cost hovering at the limit does not toggle
-            const limit = st.cells === 0 || ran.has(t.id) ? budget : budget * 0.8;
-            if (m === 0 || st.cells + m > limit) {
-                if (m > 0) st.skipped++;
-                if (this.world.objectCellCount(t.id) > 0) this.world.clearObject(t.id);
-                continue;
-            }
-            st.cells += m;
             let won = 0;
             for (let x = 0; x < m; x++) {
                 const v = this.maskCand[x];

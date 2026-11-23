@@ -54,9 +54,11 @@ export interface FrameStats {
     latticeHidden: number;
     /** Such objects skipped this frame: the lattice's mask budget (maskLimit) was spent. */
     maskSkipped: number;
-    /** This lattice's own cells tested against them this frame (at most maskLimit). */
+    /** Cells charged against the budget this frame (at most maskLimit; each mask is charged the
+     * most cells it could test: its union box, at most its outranked objects' cells). */
     maskCells: number;
-    /** This frame's mask budget: MASK_BUDGET, or the cells this lattice's own objects hold when more. */
+    /** This frame's mask budget (MASK_PRESETS): at High MASK_BUDGET, or the cells this lattice's own
+     * objects hold when more; at Low MASK_BUDGET_LOW. */
     maskLimit: number;
     /** Their parts the rasterizer rejected (runaway bounds), as `rejected` counts for objects. */
     maskRejected: number;
@@ -122,6 +124,8 @@ export type ToWorker =
           nearTileSize?: number;
           /** Streamed levels: the near world's radius (m) for this device's quality preset. */
           nearRadius?: number;
+          /** This device's quality preset, for the mask budget (MASK_PRESETS; default high). */
+          maskPreset?: 'high' | 'low';
       }
     | { type: 'query'; id: number; what: 'hash' | 'verify' | 'lattice' };
 

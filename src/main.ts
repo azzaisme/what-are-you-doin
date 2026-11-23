@@ -223,8 +223,12 @@ if (level.stream)
         far: true
     });
 const pipeline = new VoxelClient(lanes, sim);
-/** Streamed levels: how far around the cameras the near world is built follows the quality preset. */
+/**
+ * The quality preset's share of the voxel workers: the mask budget (every level), and on streamed
+ * levels how far around the cameras the near world is built.
+ */
 function applyViewDistance(q: Quality): void {
+    pipeline.maskPreset = q.name;
     if (!level.stream) return;
     const v = viewDistance(level.stream, q.name);
     pipeline.nearRadius = v.radius;

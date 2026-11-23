@@ -8,6 +8,7 @@
  *
  * Usage: node scripts/bench-lattice.ts     (each scenario runs in its own process: the cell size is
  *                                           fixed per process, ADR 0007)
+ *        BENCH_PRESET=low node scripts/bench-lattice.ts   (the Low quality preset's mask budget)
  */
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
@@ -121,6 +122,10 @@ async function run(s: Scenario): Promise<void> {
     const draws = new Set(s.draws.map((n) => byName(n).id));
     const svcs = [new VoxelService(draws, false), new VoxelService(draws, true)];
     for (const svc of svcs) svc.build(1, 'yard', undefined, false);
+    // BENCH_PRESET=low: the Low quality preset's mask budget (BENCH_BUDGET overrides its cells)
+    const preset = process.env.BENCH_PRESET === 'low' ? 'low' : 'high';
+    svcs[1].setMaskPreset(preset);
+    if (process.env.BENCH_BUDGET) svcs[1].maskBudget = Number(process.env.BENCH_BUDGET);
     const times: number[][] = [[], []];
     const tele = { masks: 0, skipped: 0, cells: 0, hidden: 0, rejected: 0 };
     const FRAMES = 200;
