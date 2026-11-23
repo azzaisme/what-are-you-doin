@@ -84,9 +84,9 @@ export function clampSetting(key: NumberKey, v: unknown): number {
 }
 
 /** A complete, valid Settings from anything (stored JSON, old versions, junk). */
-export function sanitizeSettings(raw: unknown): Settings {
+export function sanitizeSettings(raw: unknown, defaults: Readonly<Settings> = DEFAULT_SETTINGS): Settings {
     const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
-    const out: Settings = { ...DEFAULT_SETTINGS };
+    const out: Settings = { ...defaults };
     for (const k of Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]) {
         // own properties only: nothing inherited from a prototype counts
         if (!Object.hasOwn(src, k)) continue;
@@ -104,6 +104,15 @@ export function sanitizeSettings(raw: unknown): Settings {
     return out;
 }
 
+/**
+ * The defaults for this device. A device set to reduce motion (the system's accessibility setting,
+ * `prefers-reduced-motion`) starts with the camera bob and kick off; the player can still turn it
+ * on, and that choice is saved like any other.
+ */
+export function deviceDefaults(env: { reducedMotion: boolean }): Settings {
+    return { ...DEFAULT_SETTINGS, cameraBob: !env.reducedMotion };
+}
+
 /** The minimal storage interface (localStorage, or a stand-in in tests). */
 export interface SettingsStorage {
     getItem(key: string): string | null;
@@ -112,20 +121,26 @@ export interface SettingsStorage {
 }
 
 /** Saved settings; defaults when nothing is saved, storage is blocked or the data is bad. */
-export function loadSettings(storage: SettingsStorage | null): Settings {
+export function loadSettings(
+    storage: SettingsStorage | null,
+    defaults: Readonly<Settings> = DEFAULT_SETTINGS
+): Settings {
     try {
         const s = storage?.getItem(SETTINGS_STORAGE_KEY);
-        return sanitizeSettings(s ? JSON.parse(s) : null);
+        return sanitizeSettings(s ? JSON.parse(s) : null, defaults);
     } catch {
-        return { ...DEFAULT_SETTINGS };
+        return { ...defaults };
     }
 }
 
 /** Saves only what differs from the defaults, so a later default change still reaches players. */
-export function saveSettings(storage: SettingsStorage | null, s: Settings): void {
+export function saveSettings(
+    storage: SettingsStorage | null,
+    s: Settings,
+    defaults: Readonly<Settings> = DEFAULT_SETTINGS
+): void {
     const diff: Partial<Record<keyof Settings, unknown>> = {};
-    for (const k of Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[])
-        if (s[k] !== DEFAULT_SETTINGS[k]) diff[k] = s[k];
+    for (const k of Object.keys(defaults) as (keyof Settings)[]) if (s[k] !== defaults[k]) diff[k] = s[k];
     try {
         if (Object.keys(diff).length === 0) storage?.removeItem(SETTINGS_STORAGE_KEY);
         else storage?.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(diff));

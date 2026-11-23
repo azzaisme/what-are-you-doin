@@ -80,7 +80,7 @@ import { PlaytestPanel } from './ui/playtest-panel.ts';
 import { controlNames, interactionPrompt } from './ui/prompts.ts';
 import { SettingsMenu } from './ui/settings-menu.ts';
 import type { SettingValue } from './ui/settings-menu.ts';
-import { DEFAULT_SETTINGS, SETTING_RANGES, loadSettings, saveSettings, urlOverrides } from './ui/settings-store.ts';
+import { SETTING_RANGES, deviceDefaults, loadSettings, saveSettings, urlOverrides } from './ui/settings-store.ts';
 import type { Settings } from './ui/settings-store.ts';
 import { woodLabel, woodPrompt } from './ui/wood-prompt.ts';
 import {
@@ -113,7 +113,11 @@ const settingsStorage = (() => {
         return null;
     }
 })();
-const savedSettings: Settings = loadSettings(settingsStorage);
+// the device's defaults: a system set to reduce motion starts with the camera bob and kick off
+const DEFAULT_SETTINGS = deviceDefaults({
+    reducedMotion: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+});
+const savedSettings: Settings = loadSettings(settingsStorage, DEFAULT_SETTINGS);
 const settings: Settings = { ...savedSettings, ...urlOverrides(params) };
 const initialQuality: Quality = QUALITY[settings.quality];
 // ?level=tutorial|yard|lab; otherwise the last level played; a first visit starts with the tutorial
@@ -1039,6 +1043,8 @@ const host: PanelHost = {
                 break;
             case 'cameraFeel':
                 state.cameraFeel = Boolean(v);
+                // less motion: the menus and toasts stop sliding and fading too
+                document.body.classList.toggle('reduced-motion', !state.cameraFeel);
                 break;
             case 'chase':
                 state.chase = Boolean(v);
@@ -2039,7 +2045,7 @@ function setSetting<K extends keyof Settings>(key: K, v: Settings[K]): void {
     if (settings[key] === v) return;
     settings[key] = v;
     savedSettings[key] = v;
-    saveSettings(settingsStorage, savedSettings);
+    saveSettings(settingsStorage, savedSettings, DEFAULT_SETTINGS);
 }
 
 /** Settings that also live in the game state (the debug panel and hotkeys change them too). */
@@ -2070,6 +2076,7 @@ function applyUiSettings(): void {
     });
     document.documentElement.style.setProperty('--ui-scale', String(settings.uiScale));
     document.body.classList.toggle('no-hints', !settings.controlHints);
+    document.body.classList.toggle('reduced-motion', !settings.cameraBob);
     layoutVars();
 }
 applyInputSettings();
@@ -2391,7 +2398,12 @@ const menu = new SettingsMenu(
                     ]
                 },
                 { kind: 'range', key: 'fov', label: 'Field of view', ...SETTING_RANGES.fov, format: (v) => `${v}°` },
-                { kind: 'toggle', key: 'cameraBob', label: 'Camera bob & kick', hint: 'Off for less motion' },
+                {
+                    kind: 'toggle',
+                    key: 'cameraBob',
+                    label: 'Camera bob & kick',
+                    hint: 'Off for less motion: the camera holds steady and menus stop animating'
+                },
                 { kind: 'toggle', key: 'particles', label: 'Leaves & particles' }
             ]
         },
@@ -2659,6 +2671,10 @@ window.__riverLab = {
         };
     },
     /** Sets the first-person look angles (as mouse look would). */
+    /** The main camera's field of view (degrees), as drawn. */
+    cameraFov: () => camera.camera!.fov,
+    /** The camera's bob and kick offsets this frame (all 0 with Camera bob & kick off). */
+    cameraFeel: () => ({ ...feel }),
     look(yaw: number, pitch: number) {
         fpInput.yaw = yaw;
         fpInput.pitch = pitch;

@@ -582,8 +582,9 @@ body.ui-hidden .crosshair-p2 {
     left: 50%;
     top: 50%;
     transform: translate(-50%, -50%);
-    width: min(360px, calc(100vw - 32px));
-    max-height: calc(100vh - 32px);
+    /* scaled with the text size (zoom): it still fits the screen */
+    width: min(360px, calc(100vw / var(--ui-scale) - 32px));
+    max-height: calc(100dvh / var(--ui-scale) - 32px);
     overflow-y: auto;
     z-index: 40;
     padding: 16px;
@@ -926,6 +927,8 @@ body.ui-hidden .designer {
 .ui-dock,
 .toast,
 .touch-ui,
+.prompt-p2,
+.online-panel,
 .settings-backdrop {
     zoom: var(--ui-scale);
 }
@@ -1629,4 +1632,26 @@ body.has-pad .settings-foot .foot-pad {
     background: #26313b;
     border: 0;
     cursor: pointer;
+}
+
+/* ---- less motion: the system's setting, or Camera bob & kick off (#21) ----------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        transition-duration: 0s !important;
+        animation-duration: 0s !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+body.reduced-motion *,
+body.reduced-motion *::before,
+body.reduced-motion *::after {
+    transition-duration: 0s !important;
+    animation-duration: 0s !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
 }
