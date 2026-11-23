@@ -34,8 +34,15 @@ const yawOf = (q: { x: number; y: number; z: number; w: number }) =>
 const at = (u: number, t: number) => routeToWorld(u, t);
 const roadAt = (u: number) => at(u, roadT(u));
 
+/**
+ * The Valley with only the closure among its hazards (its flood and weather share the director's
+ * budget: crossing the creek on the test's beams finishes the bridge and brings the flood first;
+ * that interplay has its own test below, on the full Valley).
+ */
+const CLOSURE_ONLY = { ...valleyLevel, hazards: { seed: 1, roadClosure: R } };
+
 /** The Valley past its quiet start, player 0 on foot. */
-function valley(level = valleyLevel): LabSim {
+function valley(level = CLOSURE_ONLY): LabSim {
     const s = new LabSim({ level });
     s.runTo(S(HAZARD.graceS) + 10);
     s.fpActive = true;
@@ -116,7 +123,7 @@ function walkUpTheRoad(s: LabSim, sprint: boolean, until: number) {
 }
 
 /** The closure brought on: player 0 crosses the creek on the beams, in the tell's window. */
-function closed(level = valleyLevel): LabSim {
+function closed(level = CLOSURE_ONLY): LabSim {
     const s = valley(level);
     bridge(s);
     const p = inputs(s);
@@ -391,7 +398,7 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
 
     it('the budget: not in the quiet start, once a run; a run reset puts the sign and the barrier back, and it comes again', () => {
         // in the quiet start: crossing in the window brings nothing, and nothing comes later
-        const early = new LabSim({ level: valleyLevel });
+        const early = new LabSim({ level: CLOSURE_ONLY });
         early.runTo(60);
         early.fpActive = true;
         early.runTo(62);
@@ -525,5 +532,36 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         expect(host.hazards.road!.pinned).toBe(false);
         gs.leave();
         hs.stop();
+    }, 300_000);
+
+    it('on the full Valley it waits its turn: crossing while the flood is coming brings no closure; after the flood and its quiet spell it comes; no rain while it runs', () => {
+        const s = valley(valleyLevel);
+        bridge(s);
+        const r = walkUpTheRoad(s, false, 5);
+        // the finished bridge brought the flood first (pending, then its siren): no closure as
+        // they crossed
+        expect(s.hazards.busy).toBe(true);
+        expect(r.tell).toBe(-1);
+        expect(s.hazards.road!.count).toBe(0);
+        // wait the flood and its quiet spell out
+        const p = inputs(s);
+        for (let i = 0; i < S(120) && s.hazards.busy; i++) p.step();
+        expect(s.hazards.busy).toBe(false);
+        expect(s.hazards.floodCount).toBe(1);
+        p.step({}, S(HAZARD.safeS) + 5);
+        // the next one in the window (on the crossing) brings it
+        const w = at(-0.5, 0);
+        s.placePlayer(w.x, w.z, 0);
+        p.step({}, 3);
+        expect(s.hazards.road!.count).toBe(1);
+        expect(texts(s)).toContain(CLOSURE_TELL);
+        // up onto the forest road (the rain's area) and wait there: while the closure runs, no rain
+        const fr = roadAt(13);
+        s.placePlayer(fr.x, fr.z, 0);
+        for (let i = 0; i < S(40); i++) {
+            p.step();
+            expect(s.hazards.weather!.busy && s.hazards.road!.busy).toBe(false);
+        }
+        expect(s.hazards.road!.busy).toBe(true);
     }, 300_000);
 });

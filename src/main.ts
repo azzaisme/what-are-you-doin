@@ -53,6 +53,7 @@ import type { GameAd } from './net/session.ts';
 import { localTransport, roomTransport } from './net/transport.ts';
 import type { NetTransport } from './net/transport.ts';
 import { PLAYTEST_STORAGE_KEY, PlaytestLog } from './playtest/telemetry.ts';
+import { FogDome } from './render/fog-dome.ts';
 import { NailMarkers } from './render/nail-markers.ts';
 import { ReferenceRenderer } from './render/reference.ts';
 import { QUALITY, createLabScene } from './render/scene.ts';
@@ -71,6 +72,7 @@ import type { PropsMode } from './sim/lab-sim.ts';
 import { initPhysics } from './sim/physics/world.ts';
 import { ANIM_MAX } from './sim/snapshots.ts';
 import { WATER } from './sim/water.ts';
+import { weatherCovers, weatherFog } from './sim/weather.ts';
 import type { CameraControlsApi } from './types/engine-scripts.ts';
 import { withHammer } from './ui/hammer-hud.ts';
 import { OnlinePanel } from './ui/online-panel.ts';
@@ -223,12 +225,14 @@ if (level.stream)
         far: true
     });
 const pipeline = new VoxelClient(lanes, sim);
+/** The fog's start for the quality preset (the weather closes the fog in from here and from the level's end). */
+let baseFogStart = scene.app.scene.fog.start;
 /** Streamed levels: how far around the cameras the near world is built follows the quality preset. */
 function applyViewDistance(q: Quality): void {
     if (!level.stream) return;
     const v = viewDistance(level.stream, q.name);
     pipeline.nearRadius = v.radius;
-    scene.app.scene.fog.start = v.fogStart;
+    scene.app.scene.fog.start = baseFogStart = v.fogStart;
 }
 applyViewDistance(initialQuality);
 const build = await pipeline.init(1, level.id, level.data);
@@ -539,6 +543,10 @@ let frameTimeHead = 0;
 let lastFrameStamp = performance.now();
 let renderTime = 0;
 let prevGustPhase = 0;
+/** How far the camera is under the weather's area (eased, so its fog fades in and out at the edge). */
+let weatherUnder = 0;
+/** The fog's sky (created with the first weather): the sky turns the fog colour as it closes in. */
+let fogDome: FogDome | null = null;
 const playerPose = pose();
 const playerAnim = new Float64Array(ANIM_MAX);
 const bodyPose = pose();
@@ -711,9 +719,10 @@ class LabDirector extends Script {
         scene.water.bumpiness = 0.26 + 0.03 * windNow.speed;
         // the flood (Epic 8): the river's surface follows the host's water level
         const hz = guestSession ? guestSession.hazard : sim.hazards.net();
-        if (hz.waterY !== fx.waterY) {
-            scene.waterEntity.setLocalPosition(level.water.cx, hz.waterY, level.water.cz);
-            fx.waterY = hz.waterY;
+        const drawY = Math.min(hz.waterY, level.water.drawMaxY ?? Infinity);
+        if (drawY !== fx.waterY) {
+            scene.waterEntity.setLocalPosition(level.water.cx, drawY, level.water.cz);
+            fx.waterY = drawY;
         }
         // the aimed gust's warning: leaves stream past the player it is aimed at
         if (hz.gust === 1 && prevGustPhase === 0 && hz.gustSlot >= 0 && hz.gustSlot < sim.eyes.length) {
@@ -728,6 +737,30 @@ class LabDirector extends Script {
                 );
         }
         prevGustPhase = hz.gust;
+        // the weather (Epic 9): fog over its own area, rain or snow round the camera
+        const wSpec = level.hazards?.weather;
+        if (wSpec && level.stream) {
+            const c = camera.getPosition();
+            const wz = hz.weatherZone ?? -1;
+            const under = weatherCovers(wSpec, wz, c.x, c.z) ? 1 : 0;
+            weatherUnder += (under - weatherUnder) * Math.min(1, dt * 0.6);
+            const k = (hz.weather ?? 0) * weatherUnder;
+            const f = weatherFog(
+                wSpec,
+                wz,
+                k,
+                { start: baseFogStart, end: level.stream.fog.end },
+                pipeline.nearRadius ?? level.stream.radius
+            );
+            scene.app.scene.fog.start = f.start;
+            scene.app.scene.fog.end = f.end;
+            fogDome ??= new FogDome(scene.app, scene.worldLayer);
+            fogDome.update(c, f.end);
+            const zone = wz >= 0 ? wSpec.zones[wz] : undefined;
+            fx.weather.kind = zone?.kind ?? 0;
+            fx.weather.strength = k;
+            fx.weather.dir = zone?.wind?.dir ?? 0;
+        }
         const cpos = camera.getPosition();
         audio.update({
             time: renderTime,
@@ -2568,6 +2601,8 @@ window.__riverLab = {
         sim.physics.place(e.id, { p: { x, y, z }, q });
         return true;
     },
+    /** Turns weather zone `n` on at full strength now (host only; tests and screenshots). */
+    weather: (n: number) => !guestSession && sim.hazards.startWeatherNow(sim, n),
     interaction: () => sim.interaction(),
     /** The joint graph: connections, nails, and nail heads drawn this frame. */
     joints: () => ({

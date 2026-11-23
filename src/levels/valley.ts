@@ -26,6 +26,10 @@
 
 import { BARRIER_HALF } from '../assets/road-closure.ts';
 import type { RoadClosureSpec } from '../sim/hazard-road.ts';
+import { crossingFrame } from '../sim/hazards.ts';
+import type { HazardSpec } from '../sim/hazards.ts';
+import { WEATHER } from '../sim/weather.ts';
+import type { WeatherZone } from '../sim/weather.ts';
 import { GRID_SIZE, cellCenterX, cellCenterZ, cellIndexX, cellIndexZ } from '../voxels/grid.ts';
 import { pose, quatFromYawPitchRoll, quatMul } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
@@ -68,14 +72,17 @@ import { routeSign } from './route-signs.ts';
 import { nearestPath } from './side-paths.ts';
 import type { SidePath } from './side-paths.ts';
 import {
+    BRIDGE,
     BRIDGE_X,
     BUCKET_STUMP,
+    FLOOD_PEAK_Y,
     CREEK_BED_Y,
     CREEK_WATER_Y,
     WINDSOCK,
     YARD_Y,
     creekCenterZ,
     creekHalfWidth,
+    floodWashup,
     yardButt,
     yardHeight,
     YARD_FORESTRY,
@@ -1274,6 +1281,129 @@ export const VALLEY_STAGES: LevelStage[] = [
     }
 ];
 
+// ------------------------------------------------------------------------------- hazards and weather
+
+/** In the creek's channel (and a hand's width over its lip), anywhere along it. */
+function inCreek(x: number, z: number): boolean {
+    const u = routeU(x, z);
+    const t = routeT(x, z);
+    return Math.abs(u - creekU(t)) < creekHW(t) + 0.3;
+}
+
+/** Along the route (u) from `u0` to `u1`: a weather area. */
+const alongRoute =
+    (u0: number, u1: number) =>
+    (x: number, z: number): boolean => {
+        const u = routeU(x, z);
+        return u >= u0 && u < u1;
+    };
+/** Downstream (+t: the creek, the culvert and the gorge all run across the route). */
+const DOWNSTREAM = { x: Math.SQRT1_2, z: Math.SQRT1_2 };
+
+/**
+ * The weather along the journey (src/sim/weather.ts, Epic 9 #88), one kind per area, each once a
+ * run, a seeded moment after the first player gets there; the hazard director keeps it one hazard
+ * at a time with the flood. Counterplay (tests/unit/valley-weather.test.ts):
+ * - rain on the forest road: wet timber slips (a grip gives less force, HAZARD.wetGrip): a heavy beam
+ *   carried alone slips out; carry it together. (The river rises a little too: atmosphere, it
+ *   reaches no bridge.)
+ * - mist over the gorge: atmosphere only (not a hazard: no budget, no toast); the view closes in;
+ * - a fog bank on the mountain road: the view closes in to the near world's edge at most (only for
+ *   players in that area); the road's edge posts are close enough to steer by;
+ * - a snow squall at the crevasse: a crosswind on carried planks, more than one grip holds at
+ *   chest height; carry them low or together.
+ */
+export const VALLEY_WEATHER_ZONES: WeatherZone[] = [
+    {
+        name: 'Forest Road',
+        kind: WEATHER.rain,
+        contains: alongRoute(10, 74),
+        tellS: 6,
+        activeS: 45,
+        clearS: 10,
+        delayS: 12,
+        delayJitterS: 10,
+        riverRise: 0.35,
+        current: { x: DOWNSTREAM.x * 0.6, z: DOWNSTREAM.z * 0.6 },
+        fogEnd: 150,
+        tell: '🌧 Rain on the forest road! Wet timber slips: carry heavy pieces together.',
+        clear: 'The rain eases off. Grips are dry again.'
+    },
+    {
+        name: 'Gorge',
+        kind: WEATHER.mist,
+        contains: alongRoute(74, 100),
+        tellS: 5,
+        activeS: 40,
+        clearS: 10,
+        delayS: 6,
+        delayJitterS: 6,
+        fogEnd: 55,
+        // atmosphere, not a hazard: nothing to beat, so it takes no part in the budget and says nothing
+        atmosphere: true,
+        veil: true,
+        tell: '',
+        clear: ''
+    },
+    {
+        name: 'Mountain Approach',
+        kind: WEATHER.fog,
+        contains: alongRoute(138, 166),
+        tellS: 6,
+        activeS: 40,
+        clearS: 12,
+        delayS: 4,
+        delayJitterS: 6,
+        fogEnd: 30,
+        veil: true,
+        tell: '🌫 A fog bank rolls down the mountain. Keep to the road: follow the edge posts.',
+        clear: 'The fog thins and lifts off the road.'
+    },
+    {
+        name: 'Crevasse',
+        kind: WEATHER.snow,
+        contains: alongRoute(166, 196),
+        tellS: 5,
+        activeS: 35,
+        clearS: 8,
+        delayS: 4,
+        delayJitterS: 8,
+        fogEnd: 80,
+        wind: { force: 1000, dir: Math.atan2(DOWNSTREAM.z, DOWNSTREAM.x) },
+        tell: '❄ Snow on the wind! A squall is coming across the road: carry planks low, or together.',
+        clear: 'The squall blows over.'
+    }
+];
+
+/**
+ * The Valley's hazards: the Timber Yard's flood at Shallow Creek (the same crossing, turned with
+ * the yard), and the weather. No aimed gust: the Valley's water covers the whole map, so "near the
+ * water" would be everywhere; the snow's crosswind is the mountain's gust.
+ */
+export const VALLEY_HAZARDS: HazardSpec = (() => {
+    const near = yardToWorld(BRIDGE_X, BRIDGE.nearFace);
+    const far = yardToWorld(BRIDGE_X, BRIDGE.farFace);
+    // the crossing's frame: its z along the yard's z (towards the yard)
+    const yaw = Math.atan2(near.x - far.x, near.z - far.z);
+    const n = crossingFrame({ yaw }, near);
+    const f = crossingFrame({ yaw }, far);
+    const cur = yardToWorld(BRIDGE_X + 1.3, 0);
+    const c0 = yardToWorld(BRIDGE_X, 0);
+    return {
+        seed: 1,
+        flood: {
+            peakY: FLOOD_PEAK_Y,
+            current: { x: cur.x - c0.x, z: cur.z - c0.z },
+            crossing: { x: n.x, halfX: BRIDGE.halfWidth + 0.3, z0: n.z, z1: f.z, yaw },
+            washup: floodWashup().map((w) => ({ ...yardToWorld(w.x, w.z), y: w.y })),
+            // the creek's channel only: the Valley's water area covers the map, and the banks
+            // (the yard at 0.4 m) are lower than the flood's peak
+            channel: inCreek
+        },
+        weather: { zones: VALLEY_WEATHER_ZONES }
+    };
+})();
+
 /** Ground the player may be put back on after a fall. */
 function isSafe(x: number, z: number): boolean {
     return channelEdge(routeU(x, z), routeT(x, z)) > 0.9;
@@ -1306,7 +1436,9 @@ export const valleyLevel: LevelDef = {
     name: 'The Valley',
     bounds: VALLEY_BOUNDS,
     playArea: { minX: -109, maxX: 109, minZ: -109, maxZ: 109 },
-    water: { y: CREEK_WATER_Y, cx: 0, cz: 0, halfX: 112, halfZ: 112 },
+    // (the water area is the whole map; floods keep to the creek's channel, and the drawn surface
+    // stops just under the Timber Yard's banks)
+    water: { y: CREEK_WATER_Y, cx: 0, cz: 0, halfX: 112, halfZ: 112, drawMaxY: YARD_Y - 0.02 },
     sounds: { waterfalls: [valleyWaterfall()] },
     terrainHeight: valleyHeight,
     layout: valleyLayout,
@@ -1332,8 +1464,8 @@ export const valleyLevel: LevelDef = {
         ute: { mode: 'drivable', pose: yardActors.ute }
     },
     props: valleyProps(),
-    hazards: { seed: 1, roadClosure: VALLEY_ROAD_CLOSURE },
     forestry: VALLEY_FORESTRY,
+    hazards: { ...VALLEY_HAZARDS, roadClosure: VALLEY_ROAD_CLOSURE },
     rules: {
         objective: 'Bring water to the flower on the summit',
         goal: VALLEY_STAGES[VALLEY_STAGES.length - 1].goal,

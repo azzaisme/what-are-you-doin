@@ -12,7 +12,10 @@ beyond it. Take the track, or shift the barrier.
 - **When:** a player crossing the creek on foot, or the ute coming up at speed, reaches the tell's
   window: 2.5 s from the junction at the fastest it can go there (a run, 4.2 m/s; the ute, 10 m/s),
   and 1.5 m deep. One already closer when it could not start gets no closure at all rather than a
-  late one. Once a run, and through the shared budget: not in the first 20 s, one hazard at a time.
+  late one. Once a run, and through the shared budget: not in the first 20 s, one hazard at a time,
+  and not during the weather. Tested on the full Valley: crossing the creek on a finished bridge
+  brings the flood first and no closure; after the flood and its quiet spell the next one in the
+  window gets it; while it runs, the forest road's rain waits.
 - **Lead time, measured by input:** at a run 3.03 s before the junction, at a walk 5.65 s; the ute
   at 9.1 m/s, 3.10 s. (The ute was tested on the same closure moved up the forest road, beyond the
   culvert: the Valley's own junction is just past the creek, which the ute cannot take at speed.)
@@ -48,7 +51,89 @@ beyond it. Take the track, or shift the barrier.
 - **Also in this PR (the #127 audit's follow-ups):** the falling-tree browser test steps the sim by
   ticks instead of waiting in real time, and now checks the lean and that the static tree is gone
   in every worker lane.
-- **Tests:** `tests/unit/road-closure.test.ts` (10 tests). Unit tests: 712 pass at both voxel sizes.
+- **Tests:** `tests/unit/road-closure.test.ts` (11 tests; all but the budget test use the Valley
+  with only the closure among its hazards, so the flood the test's bridge brings does not get in
+  first). Unit tests: 772 pass at both voxel sizes, with Epic 9's weather merged in.
+
+## Weather along the Valley, and its flood (2026-11-22, Epic 9, towards #88)
+
+Each Valley area past the creek now gets its own weather once per run. It comes a seeded 4–22 s
+after the first player gets there. The hazard director runs the weather that is a hazard, so it
+takes turns with the flood, the gust and the handbrake prank: only one hazard at a time, with a
+15 s quiet spell after each. Each hazard has a way to beat it, and a test plays it out by input.
+
+- **Rain on the Forest Road: wet timber slips.** While it rains, a player under it grips with
+  less force. It scales with the rain's strength: at full rain a grip gives about 400 N instead
+  of 650 N.
+    - Alone, a beaver carrying a heavy beam from the log dump up the road lost it after 1.43 m.
+      The same carry in the dry held all 12 m.
+    - Two beavers carrying it together held it all the way in the rain.
+    - Carrying it lower alone is no reliable answer. Of ten heights tried (view pitch −0.25 to
+      −1.2), only −1.0 held all the way; the others slipped within 1.6 m. So the toast only says
+      what works: "Wet timber slips: carry heavy pieces together". A test checks that, of six of
+      those heights, at most one holds.
+    - A guest's carry slips the same way: the host decides everyone's grip.
+    - The river also rises 0.35 m in the rain, but that is only scenery: it reaches no bridge.
+- **A fog bank on the mountain road.** At full strength the view closes in to the near world's
+  edge: 24 m on Low, 30 m on High (its own end).
+    - The fog fully covers the near world's edge on both presets (opacity at the edge 1.0), so
+      the coarse far ground behind it never shows through.
+    - It only hangs over its own area. The summit and its flower stay clear.
+    - **The sky turns the fog colour too.** At full fog the far world had shown as fog-coloured
+      outlines against a blue sky. Now a dome round the camera, far beyond the fog's end, is
+      fogged out like the far world and fades in as the fog closes in. A browser test measures the
+      colour where the far landmarks stand at full fog on Low: ΔE under 3 (it was about 18).
+    - Played: in the fog, a beaver walked the 27.5 m stretch by input, steering only by the edge
+      posts it could pick out (fog under 0.9). It never strayed more than 0.80 m from the road's
+      middle, with no falls.
+    - When it lifts, the view is back to the level's own.
+- **Mist over the gorge: atmosphere, not a hazard.** It closes the view in like the fog, but
+  there is nothing to beat. So it comes whatever else is going on, holds nothing up, and says
+  nothing.
+- **A snow squall at the crevasse.** A crosswind (up to 1000 N) pushes carried planks across the
+  road, like a weaker version of the Timber Yard's gust. All three cases start with the plank
+  picked up by input:
+    - carried at chest height alone, it was torn away (692 N against a 650 N grip);
+    - carried low, the push was 200 N, and it held;
+    - carried by two players, it held at 1000 N (two grips hold 1300 N).
+- **The Timber Yard's flood now happens at Shallow Creek too.** It is the same flood on the same
+  crossing, turned with the yard.
+    - Played: the flood washes both beams off and leaves them downstream on the near bank. A
+      beaver fetches them, rebuilds and carries the bucket to the far flag, all by input.
+    - The flood can leave a beam lying askew (13° in the test), so the player squares it up
+      before laying it, as a player would.
+    - **Fixed:** the Valley's water area covers the whole map, and the Timber Yard's ground
+      (0.4 m) is lower than the flood's peak (0.6 m). So the flood had been floating loose props
+      in the yard, with the water drawn over it. Now the flood's lift and current keep to the
+      creek's channel, and the drawn surface stops just under the banks.
+    - In a test, nine props lying in the yard didn't move during a flood.
+    - It is just as strong: the bridge floated off at the same tick (1175) as before.
+- **One at a time (tested):**
+    - a bridge finished in the rain waits for it and the quiet spell;
+    - rain waits out a flood;
+    - the aimed gust never comes during weather;
+    - the fog and the handbrake prank each wait for the other.
+- **Online:** guests get the weather's area and strength from the host (tested through real host
+  and guest sessions).
+    - An older host sends neither, and that reads as no weather.
+    - The Timber Yard sends nothing new.
+- **On screen:** rain and snow fall round the camera as voxel particles (at most 90 cells). Mist
+  and fog are drawn with the fog alone.
+- **Seen in a real browser** (`docs/screenshots/epic9/weather-*.jpg`): each area at full
+  strength, at Low and High.
+    - The screenshots switch each weather on with a debug hook (`__riverLab.weather(n)`), which
+      waits for the same moment any hazard would. It refuses in the grace period, during another
+      hazard, in its quiet spell and over other weather (tested). The browser test seeks past the
+      grace period first, which steps the simulation without drawing.
+    - They come from a committed browser test, `tests/e2e/weather.spec.ts`
+      (`WEATHER_SHOTS=1`).
+- **Known visuals:**
+    - The fog fades in with the frame time, which is capped. At normal frame rates it is most of
+      the way in about 4 s; in software rendering it takes much longer.
+    - At the flood's peak, a beam floating off the caps sits about 0.2 m above the drawn water.
+    - The rain's rise lifts the drawn water everywhere, so the gorge's waterfall foam sits a
+      little under the surface while it rains.
+- **Timber Yard unchanged:** all its hazard tests pass untouched.
 
 ## Epic 8: a tree falls towards the ute (2026-11-22, #74)
 
