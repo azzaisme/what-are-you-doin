@@ -54,7 +54,7 @@ Then start a timer and stay quiet.
     - **The falling tree** (if they cut a stand tree with the ute close by): do they hear the
       crack, see the tree lean and read the warning? Do they move the ute, go round to cut from its side, or carry on?
     - **The road closure** (the Valley, coming up the forest road): do they hear the clunk and read
-      the sign? Do they take the old logging track, shift the barrier, or pick a way round it through the trees?
+      the sign? Do they take the old logging track, shift the barrier, or squeeze past it on foot (and what about the ute)?
     - **Every fall into the creek:** what were they trying to do?
     - **Stuck:** a minute or more with no progress. Note what they are trying.
 

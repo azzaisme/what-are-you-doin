@@ -4,11 +4,12 @@
  * stands across the road further on. Counterplay: take the side track (on foot or in the ute), or
  * move the barrier by hand.
  *
- * - **Trigger:** a player (on foot) or the moving ute, coming up the road, is CLOSURE.leadS from the
- *   junction at the fastest it can go there (a run, or the ute's top speed), within a window
- *   CLOSURE.window deep: the tell lands at least 2.5 s before it reaches the junction however it
- *   speeds up, and one already closer (when the closure could not start before) gets none. Once a run, through
- *   the director's budget (one hazard at a time, the quiet start and spells, the weather).
+ * - **Trigger:** a player on foot coming up the road CLOSURE.leadS from the junction at a run, in
+ *   a window CLOSURE.window deep; or the ute closing on it, once the quickest it could get there
+ *   (flat out from its speed now: quickest()) drops to leadS (+ CLOSURE.uteWindowS). Either way the
+ *   tell lands at least 2.5 s before it reaches the junction however it speeds up, and one already
+ *   closer (when the closure could not start before) gets none. Once a run, through the director's
+ *   budget (one hazard at a time, the quiet start and spells, the weather).
  * - **Tell:** a mechanical clunk and a toast, and the sign's board swinging over (CLUNK.swingS) to
  *   the closed face, its arrow pointing down the track. The barrier is set across the road, beyond
  *   the junction, only when nobody stands where it goes.
@@ -38,10 +39,18 @@ export const CLOSURE = {
     leadS: 2.5,
     /** ... and fires within this much further out (m): a window, not "anywhere closer". */
     window: 1.5,
-    /** On foot: a run (m/s). The ute: its top speed. */
+    /** On foot: a run (m/s). */
     runSpeed: 4.2,
+    /**
+     * The ute: its top speed (m/s) and, to be safe, more than its best acceleration (m/s^2: from a
+     * standstill it makes 3.5 for the first moment, 0.9 m/s at 0.25 s, then less). Its tell comes
+     * when the quickest it could reach the junction from where and how fast it is going drops to
+     * leadS + uteWindowS: so its own lead is at least leadS however it is driven.
+     */
     uteSpeed: 10,
-    /** The ute counts as coming only while it moves at least this fast (m/s). */
+    uteAccel: 3.6,
+    uteWindowS: 0.5,
+    /** The ute counts as coming only while it closes on the junction at least this fast (m/s). */
     uteMoving: 1,
     /** How far either side of the road's centre an actor counts as on it (m). */
     corridor: 6,
@@ -57,7 +66,8 @@ export const CLOSURE = {
 export const CLOSURE_PHASE = { idle: 0, tell: 1, active: 2 } as const;
 
 /** The toasts (every device plays the clunk from them: src/audio/game-audio.ts). */
-export const CLOSURE_TELL = '🚧 Clunk! Road closed ahead: take the old logging track, or shift the barrier.';
+export const CLOSURE_TELL =
+    '🚧 Clunk! Road closed ahead: drive round by the old logging track, or shift the barrier. On foot, you can squeeze past.';
 export const CLOSURE_OPEN = '🚧 Clunk. The road is open again.';
 
 /** Stand marker channel for the sign: its board's swing, 0 (the road goes on) to 1 (closed). */
@@ -112,6 +122,9 @@ export class RoadClosure {
     /** When the tell came, and how far the actor that brought it was from the junction (m). */
     tellDistance = 0;
     private placedHidden = false;
+    /** The ute's distance along the route last tick (for how fast it is closing on the junction). */
+    private uteAlong = NaN;
+    private uteClosing = 0;
     private readonly spec: RoadClosureSpec;
 
     constructor(spec: RoadClosureSpec) {
@@ -125,6 +138,8 @@ export class RoadClosure {
         this.swing = 0;
         this.tellDistance = 0;
         this.placedHidden = false;
+        this.uteAlong = NaN;
+        this.uteClosing = 0;
     }
 
     get busy(): boolean {
@@ -167,6 +182,10 @@ export class RoadClosure {
             this.placedHidden = true;
         }
         e.barrier.visible = this.deployed;
+        // how fast the ute closes on the junction (m/s, along the route), every tick
+        const along = h.ute ? sp.along(h.ute.x, h.ute.z) : NaN;
+        this.uteClosing = Number.isFinite(along - this.uteAlong) ? (along - this.uteAlong) * 60 : 0;
+        this.uteAlong = along;
         // hidden, it keeps the pose it will stand at (out of the world, nothing touches it)
         if (!this.deployed) copyPose(sp.barrier, e.barrier.pose);
         if (this.phase === CLOSURE_PHASE.idle && !this.deployed && mayStart && this.count < CLOSURE.max) {
@@ -205,16 +224,25 @@ export class RoadClosure {
     private approaching(h: RoadClosureHost): number | null {
         const sp = this.spec;
         let best: number | null = null;
-        const check = (x: number, z: number, top: number) => {
-            if (Math.abs(sp.across(x, z)) > CLOSURE.corridor) return;
-            const d = sp.junction - sp.along(x, z);
-            // in the window: far enough that even at full speed the junction is leadS away (one
-            // already closer is not surprised late: it has no tell, and no closure)
-            const near = CLOSURE.leadS * top;
-            if (d >= near && d <= near + CLOSURE.window && (best === null || d < best)) best = d;
+        const onRoad = (x: number, z: number) => Math.abs(sp.across(x, z)) <= CLOSURE.corridor;
+        const take = (d: number) => {
+            if (best === null || d < best) best = d;
         };
-        for (const w of h.walkers) check(w.x, w.z, CLOSURE.runSpeed);
-        if (h.ute && h.ute.speed >= CLOSURE.uteMoving) check(h.ute.x, h.ute.z, CLOSURE.uteSpeed);
+        // on foot: in the window, far enough that even at a run the junction is leadS away (one
+        // already closer is not surprised late: it has no tell, and no closure)
+        const near = CLOSURE.leadS * CLOSURE.runSpeed;
+        for (const w of h.walkers) {
+            const d = sp.junction - sp.along(w.x, w.z);
+            if (onRoad(w.x, w.z) && d >= near && d <= near + CLOSURE.window) take(d);
+        }
+        // the ute: by the quickest it could get there from here, closing on it as fast as it is
+        const along = this.uteAlong;
+        const closing = this.uteClosing;
+        if (h.ute && closing >= CLOSURE.uteMoving && onRoad(h.ute.x, h.ute.z)) {
+            const d = sp.junction - along;
+            const t = quickest(d, Math.min(closing, CLOSURE.uteSpeed));
+            if (d > 0 && t >= CLOSURE.leadS && t <= CLOSURE.leadS + CLOSURE.uteWindowS) take(d);
+        }
         return best;
     }
 
@@ -284,4 +312,13 @@ function rotate(
         y: y + q.w * ty + (q.z * tx - q.x * tz),
         z: z + q.w * tz + (q.x * ty - q.y * tx)
     };
+}
+
+/** The least time (s) the ute could take to cover d (m) from speed v: flat out, capped at top speed. */
+export function quickest(d: number, v: number): number {
+    const a = CLOSURE.uteAccel;
+    const top = CLOSURE.uteSpeed;
+    const da = (top * top - v * v) / (2 * a);
+    if (d <= da) return (-v + Math.sqrt(v * v + 2 * a * d)) / a;
+    return (top - v) / a + (d - da) / top;
 }

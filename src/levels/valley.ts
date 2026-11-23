@@ -472,6 +472,7 @@ function valleyPieces(): StaticPiece[] {
                 darkTimber
             )
         );
+    P.push(...closurePosts());
     P.push(...signpost(8, roadT(8) - 2.4, 2));
     P.push(...flag(CHECKPOINTS[2].u, CHECKPOINTS[2].t - 2.2, STAGE_COLOURS[2]));
 
@@ -1138,6 +1139,39 @@ const VALLEY_FORESTRY: ForestryDef = (() => {
  * its cleared verges at u = 22. Take the track, or shift the barrier.
  */
 export const CLOSURE_AT = { junction: 11, rejoin: 35.5, barrierU: 22, signU: 9, signT: 2.4 };
+
+/**
+ * The old fence line the barrier stands in: posts across the valley floor at u = 22, from the
+ * barrier's ends out to the terraced valley sides (|t| 18: their 0.3 m benches stop the ute), with
+ * a gap where the logging track crosses (the log dump, beside the road, is part of the line). The
+ * gaps (about 1.1 m) let a beaver squeeze through but not the ute: on foot, going round the barrier
+ * is a way past; in the ute it is the track, or shift the barrier.
+ */
+export const CLOSURE_POSTS = { spacing: 1.25, gap: 1.1, reach: 18, half: { x: 0.08, y: 0.5, z: 0.08 } };
+function closurePosts(): StaticPiece[] {
+    const u = CLOSURE_AT.barrierU;
+    const t0 = roadT(u);
+    const H = CLOSURE_POSTS.half;
+    const out: StaticPiece[] = [];
+    for (const side of [-1, 1]) {
+        // the first post a squeeze past the barrier's end (on the +t side, past the log dump)
+        const first = side < 0 ? BARRIER_HALF.x + CLOSURE_POSTS.gap + H.x : 5.4;
+        for (let a = first; a <= CLOSURE_POSTS.reach; a += CLOSURE_POSTS.spacing) {
+            const t = t0 + side * a;
+            if (nearestPath(SIDE_PATHS, u, t, 1.6 + 0.4)) continue;
+            // a little crooked: old posts
+            const lean = 0.05 * Math.sin(a * 7.3 + side);
+            out.push(
+                piece('fence-post', boxS(H.x, H.y, H.z), u, groundUT(u, t) + H.y - 0.08, t, darkTimber, {
+                    yaw: 0.4 * Math.sin(a * 3.1),
+                    roll: lean
+                })
+            );
+        }
+    }
+    return out;
+}
+
 export const VALLEY_ROAD_CLOSURE: RoadClosureSpec = (() => {
     const u = CLOSURE_AT.barrierU;
     const t = roadT(u);
