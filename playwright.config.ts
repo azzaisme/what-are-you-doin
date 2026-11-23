@@ -9,6 +9,8 @@ import { defineConfig } from '@playwright/test';
 // SwiftShader frame rates are NOT representative of real hardware.
 const systemChrome = '/usr/bin/google-chrome';
 const executablePath = process.env.CHROME_PATH || (fs.existsSync(systemChrome) ? systemChrome : undefined);
+// PW_PORT: serve the build on another port (several Playwright runs on one machine)
+const port = Number(process.env.PW_PORT) || 4173;
 const software = process.env.SOFTWARE_GL === '1' || (!process.env.CHROME_PATH && executablePath === systemChrome);
 
 export default defineConfig({
@@ -17,7 +19,7 @@ export default defineConfig({
     workers: 1,
     reporter: [['list']],
     use: {
-        baseURL: 'http://localhost:4173',
+        baseURL: `http://localhost:${port}`,
         viewport: { width: 1280, height: 720 },
         launchOptions: {
             executablePath,
@@ -38,8 +40,8 @@ export default defineConfig({
         }
     },
     webServer: {
-        command: 'npx vite preview --port 4173 --strictPort',
-        url: 'http://localhost:4173',
+        command: `npx vite preview --port ${port} --strictPort`,
+        url: `http://localhost:${port}`,
         reuseExistingServer: true,
         timeout: 60_000
     }

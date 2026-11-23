@@ -61,7 +61,7 @@ import type { Quality } from './render/scene.ts';
 import { VoxelClient } from './render/voxel-pipeline.ts';
 import type { LaneSpec } from './render/voxel-pipeline.ts';
 import { VoxelRenderer } from './render/voxel-renderer.ts';
-import { FixedStepClock, SIM_DT, VOXEL_RATES, VoxelClock } from './sim/clock.ts';
+import { FAST_CATCHUP_STEPS, FixedStepClock, SIM_DT, VOXEL_RATES, VoxelClock } from './sim/clock.ts';
 import type { VoxelRate } from './sim/clock.ts';
 import { ACTION_DROP_TEST, ACTION_RAGDOLL, ACTION_RESET_PROPS, neutralCommand } from './sim/commands.ts';
 import type { PlayerCommand } from './sim/commands.ts';
@@ -414,6 +414,15 @@ let localSlot2 = -1;
 /** Test hook: fields merged into player 2's next command (no real pad in headless tests). */
 let p2Injected: Partial<PlayerCommand> | null = null;
 const clock = new FixedStepClock();
+/**
+ * Browser tests only: a Playwright init script sets `window.__uncivilFastClock = true` before the
+ * page loads (no URL, setting or key turns it on). Software GL draws about one frame a second, and
+ * the normal clock (the engine's dt, capped at 0.1 s, at most 4 steps a frame) then runs the game
+ * 10-20x slower than real time. The fast clock takes the wall time since the last frame (up to 1 s)
+ * and runs up to 60 steps a frame: the same steps in the same order, only more per drawn frame.
+ */
+const fastClock = (window as { __uncivilFastClock?: unknown }).__uncivilFastClock === true;
+if (fastClock) clock.maxSteps = FAST_CATCHUP_STEPS;
 const voxelClock = new VoxelClock();
 
 // ------------------------------------------------------------------------------------- state
@@ -581,6 +590,7 @@ class LabDirector extends Script {
 
     postUpdate(dt: number): void {
         const now = performance.now();
+        const wallDt = (now - lastFrameStamp) / 1000;
         frameTimes[frameTimeHead] = now - lastFrameStamp;
         frameTimeHead = (frameTimeHead + 1) % frameTimes.length;
         frameTimeCount = Math.min(frameTimes.length, frameTimeCount + 1);
@@ -617,7 +627,7 @@ class LabDirector extends Script {
             else if (guestSession.hostGone) leaveOnline('The host left the game.');
             else noteReconnect(guestSession);
         } else if (!state.paused) {
-            const steps = clock.advance(dt);
+            const steps = clock.advance(fastClock ? Math.min(1, wallDt) : dt);
             for (let s = 0; s < steps; s++) {
                 const c = slotCommands();
                 sim.step(playerOneCommand(), c[1], c.slice(2));
@@ -1730,6 +1740,7 @@ function collectStats() {
         drawables: t.drawables,
         heapMB: mem ? mem.usedJSHeapSize / 1e6 : null,
         droppedTicks: clock.droppedTicks,
+        fastClock,
         physics: {
             props: sim.propsMode,
             tickMsAvg: physAvg(),
