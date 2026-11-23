@@ -72,7 +72,7 @@ The rest:
 - **Timber, measured:** a plank (2.4 m) and a beam (3.2 m) can each be carried over all three
   detours by one beaver. So a crossing can be built from either side. Only the bucket is held back.
 - Valley planks stay 2.4 m, and the bucket's throw is unchanged.
-- npm test 882/882 (5 cm and 10 cm).
+- npm test 884/884 (5 cm and 10 cm).
 
 ## Valley flags want water in the bucket: the empty-bucket throw is closed (2026-11-23, Epic 9)
 

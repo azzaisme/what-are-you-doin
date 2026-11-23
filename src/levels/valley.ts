@@ -472,7 +472,7 @@ export const CHECKPOINTS = [
     { u: 174.2, t: roadT(174.2) }, // 6: past the crevasse, on the level bench
     { u: SUMMIT_U, t: 0 } // 7: the flower
 ];
-export const STAGE_COLOURS = [M.HiVis, M.TestOrange, M.Grass, M.TestBlue, M.Brick, M.Snow, M.Flower];
+export const STAGE_COLOURS = [M.HiVis, M.LeafGold, M.Grass, M.UtePaint, M.Brick, M.Snow, M.Flower];
 
 function valleyPieces(): StaticPiece[] {
     const P: StaticPiece[] = [];

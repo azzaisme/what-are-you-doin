@@ -8,6 +8,7 @@ import {
     DETOUR_PATHS,
     ROUTE_YAW,
     SIDE_PATHS,
+    STAGE_COLOURS,
     VALLEY_STAGES,
     roadT,
     routeT,
@@ -25,6 +26,7 @@ import type { PlayerCommand } from '../../src/sim/commands.ts';
 import { EYE_HEIGHT, HANDOVER_REACH, LabSim } from '../../src/sim/lab-sim.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
 import { pose, quatFromYawPitchRoll } from '../../src/voxels/math.ts';
+import { M } from '../../src/voxels/palette.ts';
 
 import { Player } from './play.ts';
 import { bridge, hAt } from './valley-play.ts';
@@ -679,6 +681,12 @@ describe('timber over the detours (measured)', () => {
 });
 
 describe('players are told', () => {
+    it('each area’s colour (its flags and route signs) is a real material, all different', () => {
+        expect(STAGE_COLOURS).not.toContain(M.TestOrange);
+        expect(STAGE_COLOURS).not.toContain(M.TestBlue);
+        expect(new Set(STAGE_COLOURS).size).toBe(STAGE_COLOURS.length);
+    });
+
     it('each detour stage’s objective says its detour is for feet only', () => {
         expect(VALLEY_STAGES[CREEK.stage].objective).toContain('stepping stones are feet only');
         expect(VALLEY_STAGES[CULVERT.stage].objective).toContain('fallen trunk is feet only');
