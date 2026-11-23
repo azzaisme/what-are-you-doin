@@ -20,6 +20,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 
 import { quatMul, quatRotate, vec3 } from '../../voxels/math.ts';
 import type { Vec3 } from '../../voxels/math.ts';
+import { SIM_DT } from '../clock.ts';
 import { viewDir } from '../physics/grab.ts';
 import type { Quat, Vec3Like } from '../physics/grab.ts';
 import { LAYER, groups } from '../physics/world.ts';
@@ -321,11 +322,26 @@ export class JointSystem {
         const proto = RAPIER.SphericalImpulseJoint.prototype;
         // about the nails (X): their couple; across them: the faces' bedding (stone's or timber's)
         const across = this.angularStiffness(c);
-        for (const [axis, k] of [
-            [RAPIER.JointAxis.AngX, twistStiffness(c)],
-            [RAPIER.JointAxis.AngY, across],
-            [RAPIER.JointAxis.AngZ, across]
+        // an anchor's, each no stiffer than the 60 Hz step can follow (omega dt <= 2) on the piece's
+        // inertia about that axis: a beam's bedding about its own long axis (0.19 kg m2) rang at
+        // 1000 rad/s, and an idle beam nailed at one end rolled 4 degrees onto its edge and back;
+        // that roll is its stone seat's contact's to hold anyway. (Timber to timber the joint
+        // stands in for the faces, so it keeps its full bedding.)
+        const A = this.pw.bodies.get(c.a)?.body;
+        const B = c.b === GROUND ? null : this.pw.bodies.get(c.b)?.body;
+        const f = A ? quatMul(A.rotation(), j.frameX1()) : null;
+        for (const [axis, k0, e] of [
+            [RAPIER.JointAxis.AngX, twistStiffness(c), [1, 0, 0]],
+            [RAPIER.JointAxis.AngY, across, [0, 1, 0]],
+            [RAPIER.JointAxis.AngZ, across, [0, 0, 1]]
         ] as const) {
+            let k = k0;
+            if (A && f && c.b === GROUND) {
+                const u = quatRotate(f, e[0], e[1], e[2], vec3());
+                const ia = inertiaAbout(A, u);
+                const ieff = B ? (ia * inertiaAbout(B, u)) / (ia + inertiaAbout(B, u)) : ia;
+                k = Math.min(k, ieff * MAX_RING * MAX_RING);
+            }
             proto.configureMotorModel.call(j, axis, RAPIER.MotorModel.ForceBased);
             const damp = axis === RAPIER.JointAxis.AngX ? NAIL.twistDamping : NAIL.angularDamping;
             proto.configureMotorPosition.call(j, axis, 0, k, k * damp);
@@ -399,4 +415,17 @@ function fromXTo(v: Vec3): { x: number; y: number; z: number; w: number } {
     // axis = X cross v = (0, -v.z, v.y); q = (axis, 1 + v.x), normalised
     const l = Math.hypot(v.z, v.y, 1 + v.x);
     return { x: 0, y: -v.z / l, z: v.y / l, w: (1 + v.x) / l };
+}
+
+/** The fastest a joint spring may ring on its pieces (rad/s): two radians a 60 Hz step. */
+const MAX_RING = 2 / SIM_DT;
+
+/** A body's moment of inertia about a world axis through its centre of mass (kg m^2). */
+function inertiaAbout(b: RAPIER.RigidBody, u: Vec3): number {
+    const I = b.effectiveAngularInertia();
+    return (
+        u.x * (I.m11 * u.x + I.m12 * u.y + I.m13 * u.z) +
+        u.y * (I.m12 * u.x + I.m22 * u.y + I.m23 * u.z) +
+        u.z * (I.m13 * u.x + I.m23 * u.y + I.m33 * u.z)
+    );
 }

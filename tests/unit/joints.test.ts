@@ -5,7 +5,7 @@ import { GROUND, JointGraph, NAIL, twistStiffness } from '../../src/sim/joints/g
 import { JointSystem } from '../../src/sim/joints/joints.ts';
 import { PhysicsWorld, initPhysics } from '../../src/sim/physics/world.ts';
 import type { BodyOptions } from '../../src/sim/physics/world.ts';
-import { pose, quatFromYawPitchRoll } from '../../src/voxels/math.ts';
+import { pose, quatFromYawPitchRoll, quatRotate, vec3 } from '../../src/voxels/math.ts';
 
 beforeAll(() => initPhysics());
 
@@ -771,7 +771,8 @@ describe('joint stiffness (#47 audit)', () => {
             pb.body.applyImpulseAtPoint({ x: 0, y: 0, z: load / 60 }, { x: t.x + 1.5, y: t.y, z: t.z }, true);
             pw.step();
             const q = pb.body.rotation();
-            yaw = Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.x * q.x));
+            // (its mean over the last second: one nail is a soft spring, still swinging a little)
+            if (i >= 180) yaw += Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.x * q.x)) / 60;
         }
         const arm = pb.body.translation().x + 1.5 - c.anchorB.x;
         return { turn: Math.abs(yaw), M: load * arm, k: twistStiffness(c), nails: c.nails.length };
@@ -790,7 +791,9 @@ describe('joint stiffness (#47 audit)', () => {
             pose(-1.2, 0.05, 0, quatFromYawPitchRoll(Math.PI / 2, 0, 0)),
             { ...TIMBER, friction: 0 }
         );
-        // (frictionless: the faces' contact stays on now, and only the spring is measured)
+        // (frictionless, and its free end resting on a frictionless block: only the spring holds
+        // the turn, and the joint does not also carry the beam's weight)
+        pw.addStatic(RAPIER.ColliderDesc.cuboid(0.15, 0.05, 0.3).setTranslation(1.2, 0.05, 0).setFriction(0));
         const pb = pw.addDynamic(1, { type: 'box', hx: 1.6, hy: 0.075, hz: 0.1 }, pose(0, 0.176, 0), {
             ...TIMBER,
             friction: 0
@@ -816,9 +819,12 @@ describe('joint stiffness (#47 audit)', () => {
             pb.body.applyImpulseAtPoint({ x: 0, y: 0, z: load / 60 }, { x: t.x + 1.5, y: t.y, z: t.z }, true);
             pw.step();
             const q = pb.body.rotation();
-            yaw = Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.x * q.x));
+            // (its mean over the last second: one nail is a soft spring, still swinging a little)
+            if (i >= 180) yaw += Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.x * q.x)) / 60;
         }
-        const arm = pb.body.translation().x + 1.5 - pw.bodies.get(1)!.body.translation().x - (c.anchorA.x ?? 0);
+        // from the nail (where the beam turns about) to where the load pushes
+        const nail = quatRotate(pb.body.rotation(), c.anchorA.x, c.anchorA.y, c.anchorA.z, vec3());
+        const arm = 1.5 - nail.x;
         return { turn: Math.abs(yaw), M: load * arm, k: twistStiffness(c), c };
     }
 
@@ -826,15 +832,15 @@ describe('joint stiffness (#47 audit)', () => {
     // them alone, as a couple: k = stiffness x K_ser x sum(lever^2 + r^2), EN 1995-1-1 7.1, r from
     // the nail group's centre (graph.ts twistStiffness); one nail is nearly a pivot)
     it('timber to timber: a nailed joint between two pieces turns flat by M/k, k the nails couple at 0.8 stiffness', () => {
-        const one = timberSideways(1, 50);
-        const four = timberSideways(4, 50);
+        const one = timberSideways(1, 20);
+        const four = timberSideways(4, 20);
         expect(one.c.type).toBe('nail');
         expect(one.c.b).toBe(2);
         expect(one.c.stiffness).toBe(NAIL.stiffness);
         expect(four.c.nails.length).toBe(4);
         expect(one.k).toBe(NAIL.stiffness * NAIL.slipModulus * NAIL.lever ** 2);
         console.log(
-            `timber to timber, 50 N at the tip: one nail turns ${(one.turn * 1000).toFixed(2)} mrad (M/k ${((one.M / one.k) * 1000).toFixed(2)}), four ${(four.turn * 1000).toFixed(2)} mrad (M/k ${((four.M / four.k) * 1000).toFixed(2)})`
+            `timber to timber, 20 N at the tip: one nail turns ${(one.turn * 1000).toFixed(2)} mrad (M/k ${((one.M / one.k) * 1000).toFixed(2)}), four ${(four.turn * 1000).toFixed(2)} mrad (M/k ${((four.M / four.k) * 1000).toFixed(2)})`
         );
         for (const r of [one, four]) {
             expect(r.turn).toBeGreaterThan(0.9 * (r.M / r.k));

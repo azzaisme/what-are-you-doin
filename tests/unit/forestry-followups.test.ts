@@ -410,6 +410,9 @@ function walkOver(g: Play, planks: { pose: { p: { y: number } } }[]): void {
     // (player 1 first stands back further, off player 0's way to the bridge end: walked into, a
     // player is shoved)
     g.walkTo(1, BRIDGE_X + 3, BRIDGE.nearEdge + 5.5);
+    // (round the yard's beams' east end, as the other walks go: straight there, player 0 stepped
+    // onto the end of a loose one and, its weight on it, shoved it 8 cm)
+    g.walkTo(0, 0.2, 3.0);
     g.walkTo(0, BRIDGE_X, BRIDGE.nearEdge + 1.2);
     g.turn(0, 0);
     let topY = 0;

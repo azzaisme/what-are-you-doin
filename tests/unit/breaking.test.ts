@@ -12,9 +12,9 @@ import { BREAK, JointHealth, capacity, utilization } from '../../src/sim/joints/
 import { GROUND, NAIL } from '../../src/sim/joints/graph.ts';
 import type { Connection } from '../../src/sim/joints/graph.ts';
 import { JointSystem } from '../../src/sim/joints/joints.ts';
-import { LabSim } from '../../src/sim/lab-sim.ts';
 import { FRICTION } from '../../src/sim/joints/stress.ts';
 import type { JointLoad } from '../../src/sim/joints/stress.ts';
+import { LabSim } from '../../src/sim/lab-sim.ts';
 import { CHARACTER, PhysicsWorld, initPhysics } from '../../src/sim/physics/world.ts';
 import { pose, quatFromYawPitchRoll } from '../../src/voxels/math.ts';
 
@@ -499,9 +499,7 @@ describe('the tipping spring, both ways (#49)', () => {
         let peak = 0;
         for (let k = 0; k < 600; k++) {
             s.step(neutralCommand(s.tick + 1));
-            for (const [id, st] of s.joints.health.states) {
-                peak = Math.max(peak, st.util);
-            }
+            for (const st of s.joints.health.states.values()) peak = Math.max(peak, st.util);
         }
         const dropped = beams.map((b, i) => before[i] - b.pose.p.y);
         console.log(
