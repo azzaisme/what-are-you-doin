@@ -57,25 +57,36 @@ tell whether it held water. It also held none: the asset had a water level but n
     - Each lattice's worker also rasterizes, at its own cell size, every object of another lattice
       that outranks one of its own: priority, then lower id, as within a lattice, except that your
       own first-person limbs win ties.
-    - Such a mask is sampled only inside one box per part: where that part's bounds meet the bounds
-      of the parts it outranks. It samples cell centres only.
+    - Such a mask tests only the cells this lattice's outranked objects hold, inside one box per
+      part: where that part's bounds meet the bounds of the parts it outranks. It tests cell
+      centres only, exactly as the rasterizer's 'center' sampling would.
     - Where a mask wins a cell, this lattice leaves the cell empty and only the winner's lattice
       draws it: the 1 cm bucket hanging in the 5 cm paw shows its handle, not the paw through it.
     - A cell gives way when its centre lies inside the winner, so the seam is within half a cell of
       the true surface.
     - Only objects take part: the static world stays on the base lattice, and dynamic-over-static
       still resolves there.
-    - **Budget:** a lattice samples at most 12,000 candidate cells for masks a voxel frame
-      (`MASK_BUDGET`). Masks are served highest priority first; one that would overrun the budget is
-      skipped that frame, and its object and this lattice's simply intersect again. The stats count
-      skipped masks (`maskSkipped`) and rejected mask parts (`maskRejected`).
-    - **Cost** (`scripts/bench-lattice.ts`, 200 frames with everything moving, masks off and on run
-      side by side; median over 200 frames):
-        - +0.16 ms on the base lattice with the bucket in a paw;
-        - 0 ms on the first-person limbs holding the bucket, with three other players beside you;
-        - +1.5 to +2.7 ms (over runs) on the 1 cm lattice at the budget: the ragdoll's head with
-          three players' beavers half a metre away;
-        - crowded scenes beyond the budget skip their masks.
+    - **Budget** (amended 2026-11-23, after the re-audit): a lattice's masks test at most
+      `MASK_BUDGET` (12,000) of its cells a voxel frame, or as many cells as its own objects hold
+      when that is more (`maskLimit`). So the first mask can always cover everything: a beaver
+      over the 1 cm ragdoll head keeps priority however deep it goes. The first version sampled every
+      cell of the boxes within a fixed 12,000; deep overlap at 1 cm never fitted.
+        - Masks are served highest priority first; one that would overrun what is left is skipped
+          that frame, and its object and this lattice's simply intersect again.
+        - Hysteresis: the first mask served, and any mask that ran last frame, may use the whole
+          budget; a later new one only 80 % of it. A cost hovering at the limit does not switch a
+          mask on and off.
+        - The stats count skipped masks (`maskSkipped`) and rejected mask parts (`maskRejected`:
+          a part posed out of bounds, such as a non-finite animation channel).
+    - **Cost** (`scripts/bench-lattice.ts`, everything moving, masks off and on run side by side;
+      median over 200 frames, an idle Xeon at 2.1 GHz):
+        - +0.2 ms on the base lattice with the bucket in a paw;
+        - +0.3 ms on the first-person limbs holding the bucket, with three other players beside you;
+        - on the 1 cm lattice with the ragdoll's head (18–19 ms a frame without masks): +4.0 ms with
+          three players half a metre away, +5.7 ms with the beaver standing in it (every head cell
+          tested, 46,414 hidden), +8.0 ms with the beaver and four players around it. A cell tested
+          costs one sample, as each of the lattice's own candidate cells does, so masks stay within
+          about the lattice's own rasterizing time.
     - `?masks=off` turns it off, for comparisons.
 - **The fine lattice reaches ±160 m across and ±18 m up** (its chunk coordinates are limited;
   widened from ±80 m for the Valley). Beyond that, a fine object is not drawn instead of crashing
