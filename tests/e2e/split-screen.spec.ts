@@ -19,7 +19,7 @@ type Lab = {
     look(yaw: number, pitch: number): void;
     lookView(v: number, yaw: number, pitch: number): void;
     inputView(v: number, c: Record<string, unknown>): void;
-    views(): { slots: number[]; rects: Rect[] };
+    views(): { slots: number[]; rects: Rect[]; shadows: { cast: boolean; cascades: number } };
     entities(): Record<string, { x: number; z: number; visible: boolean }>;
     stats(): { voxel: { objects: number; rejected: number } };
     seek(t: number): void;
@@ -99,8 +99,14 @@ test('split screen for four, then three: every view draws, every HUD sits in its
     test.setTimeout(900_000);
     const problems = await boot(page, '?level=yard&t=0.01&quality=low#cell100');
     await lab(page, (l) => l.action('pause')); // play live
+    // the sun's shadows on Low (two cascades) stay as they are for one and two views...
+    expect((await lab(page, (l) => l.views())).shadows).toEqual({ cast: true, cascades: 2 });
+    await lab(page, (l) => l.setPlayers(2));
+    expect((await lab(page, (l) => l.views())).shadows).toEqual({ cast: true, cascades: 2 });
     await lab(page, (l) => l.setPlayers(4));
     const v4 = await lab(page, (l) => l.views());
+    // ...and go off for four (the engine draws them again for every view)
+    expect(v4.shadows.cast).toBe(false);
     expect(v4.slots.length).toBe(4);
     expect(new Set(v4.slots).size).toBe(4);
     // four quarters
@@ -184,6 +190,8 @@ test('split screen for four, then three: every view draws, every HUD sits in its
     await lab(page, (l) => l.setPlayers(3));
     const v3 = await lab(page, (l) => l.views());
     expect(v3.slots).toEqual(v4.slots.slice(0, 3));
+    // three views: one shadow cascade
+    expect(v3.shadows).toEqual({ cast: true, cascades: 1 });
     expect(v3.rects).toEqual([
         { x: 0, y: 0, w: 1, h: 0.5 },
         { x: 0, y: 0.5, w: 0.5, h: 0.5 },
@@ -212,6 +220,7 @@ test('split screen for four, then three: every view draws, every HUD sits in its
             timeout: 120_000
         }
     );
+    expect((await lab(page, (l) => l.views())).shadows).toEqual({ cast: true, cascades: 2 });
     h = await hud(page);
     expect(h.crosshairs.length).toBe(1);
     expect(h.tags.length).toBe(0);

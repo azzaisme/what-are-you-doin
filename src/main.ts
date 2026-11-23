@@ -2721,7 +2721,12 @@ window.__riverLab = {
     },
     lookView: (v: number, yaw: number, pitch: number) => lookView(v, yaw, pitch),
     /** Local views and their sim slots, and each view's screen rectangle. */
-    views: () => ({ slots: [...localSlots], rects: scene.viewRects(localViews()) }),
+    views: () => ({
+        slots: [...localSlots],
+        rects: scene.viewRects(localViews()),
+        /** The sun's shadows now (fewer at three or four views: `splitShadows`). */
+        shadows: { cast: scene.sun.light!.castShadows, cascades: scene.sun.light!.numCascades }
+    }),
     /** Merges fields into the next player command (grab / throw / move edges for tests). */
     input: (c: Record<string, unknown>) => fpInput.inject(c),
     player: () => ({ ...sim.player, holding: sim.physics.heldId, eyeHeight: EYE_HEIGHT }),

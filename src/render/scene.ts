@@ -71,6 +71,17 @@ export interface Quality {
 /** Local players (views) one device can show at once: split screen up to quarters. */
 export const MAX_VIEWS = 4;
 
+/**
+ * The sun's shadows for split screen: the engine draws its shadow cascades again for every view, and
+ * at three or four views they become most of the frame's draw calls. One or two views keep the
+ * preset's shadows; three or four draw one cascade fewer (Low: one), and four views on Low none.
+ */
+export function splitShadows(q: Quality, views: number): { cast: boolean; cascades: number } {
+    if (views < 3) return { cast: true, cascades: q.cascades };
+    if (q.name === 'low') return views >= 4 ? { cast: false, cascades: 1 } : { cast: true, cascades: 1 };
+    return { cast: true, cascades: Math.max(1, q.cascades - 1) };
+}
+
 export const QUALITY: Record<Quality['name'], Quality> = {
     high: {
         name: 'high',
@@ -460,6 +471,7 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
             const was = scene.views;
             scene.views = n;
             scene.split = n > 1;
+            applySunShadows();
             for (let v = 1; v < MAX_VIEWS; v++) {
                 if (v < n) ensureFrame(v);
                 cameras[v].enabled = v < n;
@@ -535,11 +547,17 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
                 f.update();
             }
             sun.light!.shadowResolution = q.shadowResolution;
-            sun.light!.numCascades = q.cascades;
+            applySunShadows();
             water.refraction = scene.split ? false : q.refraction;
             water.textureScale = q.reflectionScale;
         }
     };
+    /** The sun's shadows for the preset and the number of views (`splitShadows`). */
+    function applySunShadows(): void {
+        const sh = splitShadows(scene.quality, scene.views);
+        sun.light!.castShadows = sh.cast;
+        sun.light!.numCascades = sh.cascades;
+    }
     scene.setSun(scene.sunElevation, scene.sunAzimuth);
     return scene;
 }
