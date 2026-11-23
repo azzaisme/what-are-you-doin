@@ -2754,8 +2754,8 @@ window.__riverLab = {
         connections: sim.joints.graph.size,
         nails: sim.joints.graph.nailCount,
         drawn: nailMarkers.drawn,
-        /** Per local view (0 top / full screen, 1 player 2's), the slots whose hammer outline it drew. */
-        outlines: nailMarkers.outlineSlots,
+        /** Per local view shown (0 top / full screen, then the others), the slots whose hammer outline it drew. */
+        outlines: nailMarkers.outlineSlots.slice(0, localViews()),
         /** The per-view outline layers each camera renders (main camera, then the other views'). */
         viewLayers: scene.cameras
             .slice(0, 2)
