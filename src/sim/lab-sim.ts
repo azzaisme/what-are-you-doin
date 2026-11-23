@@ -284,6 +284,8 @@ export class LabSim {
     readonly sawmill: Sawmill | null;
     /** The road closure's barrier and sign (#77: the hazard places and shows them). */
     readonly closure: ClosureEntities & { barrier: SimEntity; sign: SimEntity };
+    /** The goose (#78: the hazard moves and shows it). */
+    readonly goose: SimEntity;
 
     constructor(opts: LabSimOptions = {}) {
         this.level = opts.level ?? riverLabLevel;
@@ -321,6 +323,7 @@ export class LabSim {
             barrier: c.entities.find((e) => e.name === 'barrier')!,
             sign: c.entities.find((e) => e.name === 'closure-sign')!
         };
+        this.goose = c.entities.find((e) => e.name === 'goose')!;
         const sp = this.level.spawn;
         this.player.x = sp.x;
         this.player.z = sp.z;

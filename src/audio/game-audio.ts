@@ -16,6 +16,7 @@ import { Asset, Entity, Sound } from 'playcanvas';
 import type { AppBase } from 'playcanvas';
 
 import type { LevelDef } from '../levels/level.ts';
+import { GOOSE_BORED, GOOSE_DECOY, GOOSE_PECK, GOOSE_TELL } from '../sim/hazard-goose.ts';
 import { CLOSURE_OPEN, CLOSURE_SHUT, CLOSURE_TELL } from '../sim/hazard-road.ts';
 import { TREE_TELL } from '../sim/hazard-tree.ts';
 import { PHASE } from '../sim/hazards.ts';
@@ -588,6 +589,9 @@ const EVENT_SOUNDS: Record<SimEvent['kind'], (text: string) => EventSound[]> = {
     hazard: (text) => {
         if (text === CLOSURE_TELL || text === CLOSURE_OPEN || text === CLOSURE_SHUT)
             return soft('clunk', 1, text === CLOSURE_TELL ? 1 : 1.1);
+        // the goose: a honk as it comes (or goes for the decoy); a sharper one as it pecks, a lower one as it gives up
+        if (text === GOOSE_TELL || text === GOOSE_DECOY) return soft('honk', 1, 1);
+        if (text === GOOSE_PECK || text === GOOSE_BORED) return soft('honk', 0.7, text === GOOSE_PECK ? 1.15 : 0.9);
         if (text === TREE_TELL)
             return [
                 { name: 'snap', gain: 1, pitch: 0.8 },

@@ -1,5 +1,42 @@
 # Progress log
 
+## Epic 8: the goose (2026-11-23, #78)
+
+A goose lives on the bank by the bucket's stump, in the Timber Yard and in the Valley's yard. Carry
+the bucket near it and it honks, rears up, and comes for the bucket.
+
+- **Where:** its patch is on the near bank, 4.3 m from the bucket's stump. It never goes more than
+  12 m from there, and never onto the bridge or into the water. In the Valley it stays on its bank
+  too (tested: walking off along the water with it after you, it never goes over the edge).
+- **When:** someone carrying the bucket comes within 5 m of its patch. It goes through the shared
+  budget: not in the first 20 s, one hazard at a time, at most twice a run, a minute apart.
+- **The tell:** a honk (a new sound: two nasal blasts, the second lower) and a toast: "HONK! The
+  goose has seen your bucket. Put it down, dodge, or get someone to distract it!" It rears up (neck
+  tall, wings spread, beak opening and shutting) and stands still for 2 s. Only then does it come,
+  at 3.6 m/s: faster than a walk (2.2), slower than a run (4.2).
+- **The peck:** reaching the bucket in someone's hands, it knocks it out of them with a small shove.
+  The bucket's own water physics decides what spills: in the test it kept 7.5 L of 10. Then it
+  waddles home. Water and time, never the run.
+- **Lead time, measured by input:** walking straight at it with the bucket, the peck came 2.50 s
+  after the honk. It can't come sooner than 2 s: it doesn't move during the tell.
+- **Ways to deal with it, each tested by input:**
+    - put the bucket down: it loses interest, honks once and goes home;
+    - run off with it: it gives up at the edge of its patch (or after 8 s);
+    - get someone else to run at it: it turns on them for 4 s, harmlessly, while the bucket gets
+      away, then goes home.
+- **No timer on the player:** it's over when the goose is back on its patch.
+- **Online, tested:** a guest carrying the bucket is chased and pecked just the same (the host
+  runs the goose), and the guest gets the toasts (so the honks) and sees the goose where the host
+  has it.
+- **It has no physics body:** the sim walks it over the ground, so it can't shove props about or be
+  launched.
+- **Code:** `src/sim/hazard-goose.ts`, `src/assets/goose.ts` (a grey-brown goose with a black neck
+  and head and a white chin strap, from the existing palette), the honk in `synth.ts`, the patch in
+  `timber-yard.ts` and `valley.ts`, and a few lines in the director, lab-sim and lab-entities. No
+  new HazardNet fields.
+- **Tests:** `tests/unit/goose.test.ts` (8 tests, at both voxel sizes), and the honk in
+  `audio.test.ts`.
+
 ## Epic 8: the barrier holds when you drag it forward round a corner (2026-11-27, #77)
 
 Dragging the road closure's barrier forward round a corner, with it trailing behind you, used to
@@ -517,6 +554,7 @@ build match exactly in all ten scenes.
 
 - With `?props=scripted` the River Lab leaves the spare planks, beams, logs, crates and the ragdoll
   piled at the origin, in the river, where they show above the water. To be fixed with #110.
+
 
 ## Epic 8: the road closure sign swap (2026-11-23, #77)
 

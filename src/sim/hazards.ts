@@ -23,6 +23,8 @@
 import type { LevelDef } from '../levels/level.ts';
 
 import { SIM_HZ } from './clock.ts';
+import { GooseHazard } from './hazard-goose.ts';
+import type { GooseEntity, GooseSpec } from './hazard-goose.ts';
 import { RoadClosure } from './hazard-road.ts';
 import type { ClosureEntities, RoadClosureSpec } from './hazard-road.ts';
 import { TreeHazard } from './hazard-tree.ts';
@@ -79,6 +81,8 @@ export interface HazardSpec {
     tree?: boolean;
     /** The road closure sign swap (#77, src/sim/hazard-road.ts). */
     roadClosure?: RoadClosureSpec;
+    /** The goose that goes for the bucket (#78, src/sim/hazard-goose.ts). */
+    goose?: GooseSpec;
 }
 
 /** Timings (seconds) and budgets. */
@@ -163,6 +167,8 @@ export interface HazardHost {
     readonly forestry?: TreeHazardHost['forestry'];
     /** The road closure's barrier and sign. */
     readonly closure?: ClosureEntities;
+    /** The goose (#78). */
+    readonly goose?: GooseEntity;
 }
 
 interface Quat4 {
@@ -221,6 +227,8 @@ export class HazardDirector {
     readonly tree = new TreeHazard();
     /** The road closure (#77), in levels that have one. */
     road: RoadClosure | null = null;
+    /** The goose (#78), in levels that have one. */
+    goose: GooseHazard | null = null;
     /** The handbrake prank: phase, ticks in it, count, how long the ute has stood parked. */
     brakePhase: number = PHASE.idle;
     brakeT = 0;
@@ -256,6 +264,7 @@ export class HazardDirector {
     constructor(level: LevelDef, enabled = true) {
         this.spec = enabled ? level.hazards : undefined;
         if (this.spec?.roadClosure) this.road = new RoadClosure(this.spec.roadClosure);
+        if (this.spec?.goose) this.goose = new GooseHazard(this.spec.goose);
         this.weather = this.spec?.weather ? new WeatherScheduler(this.spec.weather) : null;
         this.seed = level.hazards?.seed ?? 1;
         this.baseY = level.water.y;
@@ -271,6 +280,7 @@ export class HazardDirector {
         this.road?.reset();
         this.outcomes.length = 0;
         this.brakeChockedEver = false;
+        this.goose?.reset();
         this.waterY = this.baseY;
         this.rise = 0;
         this.floodPhase = this.gustPhase = PHASE.idle;
@@ -300,6 +310,7 @@ export class HazardDirector {
             this.brakePhase !== PHASE.idle ||
             this.tree.busy ||
             !!this.road?.busy ||
+            !!this.goose?.busy ||
             this.floodPending >= 0
         );
     }
@@ -347,6 +358,7 @@ export class HazardDirector {
             );
         }
         if (this.road && h.closure) this.stepRoadClosure(h, this.road, h.closure, tick);
+        if (this.goose && h.goose) this.stepGoose(h, this.goose, h.goose, tick);
         if (this.busy) this.quietFrom = tick + S(HAZARD.safeS);
         if (this.weather) this.stepWeather(h, this.weather, tick);
     }
@@ -370,6 +382,26 @@ export class HazardDirector {
                 ute,
                 say: (t) => this.say(h, t),
                 outcome: (t) => this.outcome(tick, 'road closure', t)
+            },
+            this.canStart(h, tick)
+        );
+    }
+
+    /** The goose (#78): who is on their feet, and what each holds. */
+    private stepGoose(h: HazardHost, goose: GooseHazard, entity: GooseEntity, tick: number): void {
+        const players: { slot: number; x: number; z: number; held: number }[] = [];
+        h.players.forEach((p, i) => {
+            if (h.isSlotActive(i) && h.seatOf(i) < 0)
+                players.push({ slot: i, x: p.x, z: p.z, held: h.physics.heldIdOf(i) });
+        });
+        goose.step(
+            {
+                tick,
+                physics: h.physics,
+                goose: entity,
+                bucketId: h.bucket.id,
+                players,
+                say: (t) => this.say(h, t)
             },
             this.canStart(h, tick)
         );

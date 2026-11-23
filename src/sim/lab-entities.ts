@@ -14,6 +14,7 @@ import {
     shortLogAsset,
     standMarkerAsset
 } from '../assets/forestry.ts';
+import { gooseAsset } from '../assets/goose.ts';
 import { BODY } from '../assets/player-body.ts';
 import {
     LONG_PLANK_LENGTH,
@@ -200,6 +201,9 @@ export function createLabEntities(): LabEntities {
     const barrier = add(444, 'barrier', barrierAsset(), 2);
     const closureSign = add(445, 'closure-sign', closureSignAsset(M.HiVis, 'right'), 3);
     barrier.visible = closureSign.visible = false;
+    // the goose (Epic 8, #78): shown by the hazard in levels that have one
+    const goose = add(446, 'goose', gooseAsset(), 3);
+    goose.visible = false;
     const needles = add(443, 'needles-fx', counterAsset('needles-fx'), 0);
     const forestry: ForestryEntities = { markers, crowns, felled, short, sawn, beams, axe, sawmill, chips, needles };
     for (const e of [...markers, ...crowns, ...felled, ...short, ...sawn, ...beams, axe, sawmill, chips, needles])

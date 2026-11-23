@@ -55,6 +55,9 @@ Then start a timer and stay quiet.
       crack, see the tree lean and read the warning? Do they move the ute, go round to cut from its side, or carry on?
     - **The road closure** (the Valley, coming up the forest road): do they hear the clunk and read
       the sign? Do they take the old logging track, shift the barrier, or squeeze past it on foot (and what about the ute)?
+    - **The goose** (carrying the bucket past its patch on the bank, east of the stump): do they
+      hear the honk and see it rear up? Do they put the bucket down, run, or send someone at it?
+      Does a peck feel fair?
     - **Every fall into the creek:** what were they trying to do?
     - **Stuck:** a minute or more with no progress. Note what they are trying.
 

@@ -545,6 +545,17 @@ export const yardButt = () => waterButt('water butt', YARD_TAP.x, YARD_TAP.z, YA
  * clear of the paths to the bridge, the logging stand and the sawmill (its post stands to the north).
  */
 export const YARD_TAP = { x: -4.4, z: 10.4 };
+/**
+ * The goose's patch (Epic 8, #78, src/sim/hazard-goose.ts): on the near bank, east of the bucket's
+ * stump, facing it. Its territory: dry bank within 12 m, never the water or the bridge.
+ */
+export const GOOSE_PATCH = { x: 8.6, z: 1.3, yaw: Math.atan2(5.6 - 8.6, 4.4 - 1.3), reach: 12 };
+export function gooseAllowed(x: number, z: number): boolean {
+    return (
+        Math.hypot(x - GOOSE_PATCH.x, z - GOOSE_PATCH.z) <= GOOSE_PATCH.reach && z >= 0.8 && yardHeight(x, z) >= 0.35
+    );
+}
+
 /** Far-bank goal area for the bucket. */
 export const YARD_GOAL = { minX: BRIDGE_X - 3.5, maxX: BRIDGE_X + 3.5, minZ: -9.5, maxZ: -5.2 };
 
@@ -797,7 +808,9 @@ export const timberYardLevel: LevelDef = {
         // parked on a slope (3.5 degrees or more) and left: the handbrake lets go
         handbrake: { slope: 0.06 },
         // a stand tree cut with the ute within its reach leans towards the ute
-        tree: true
+        tree: true,
+        // carry the bucket near the goose's patch and it comes for it
+        goose: { x: GOOSE_PATCH.x, z: GOOSE_PATCH.z, yaw: GOOSE_PATCH.yaw, allowed: gooseAllowed, ground: yardHeight }
     },
     spawn: { x: 1.2, z: 6.2, yaw: 0.12, pitch: -0.1 },
     orbitHome: { pos: [9, 4.2, 12], focus: [-1, 0.5, 0] },

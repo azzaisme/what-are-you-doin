@@ -81,9 +81,11 @@ import {
     CREEK_WATER_Y,
     WINDSOCK,
     YARD_Y,
+    GOOSE_PATCH,
     creekCenterZ,
     creekHalfWidth,
     floodWashup,
+    gooseAllowed,
     yardButt,
     yardHeight,
     YARD_FORESTRY,
@@ -117,6 +119,10 @@ const yardU = (z: number) => -(z - creekCenterZ(BRIDGE_X));
 const yardT = (x: number) => x - BRIDGE_X;
 export function yardToWorld(x: number, z: number): { x: number; z: number } {
     return routeToWorld(yardU(z), yardT(x));
+}
+/** The world in the Timber Yard's frame (yardToWorld's inverse). */
+export function worldToYard(x: number, z: number): { x: number; z: number } {
+    return { x: routeT(x, z) + BRIDGE_X, z: creekCenterZ(BRIDGE_X) - routeU(x, z) };
 }
 /** A pose in the Timber Yard's frame, in the world. */
 function fromYard(p: Pose): Pose {
@@ -1503,7 +1509,21 @@ export const VALLEY_HAZARDS: HazardSpec = (() => {
             // (the yard at 0.4 m) are lower than the flood's peak
             channel: inCreek
         },
-        weather: { zones: VALLEY_WEATHER_ZONES }
+        weather: { zones: VALLEY_WEATHER_ZONES },
+        // the Timber Yard's goose, on its bank by the bucket's stump (#78)
+        goose: (() => {
+            const g = yardToWorld(GOOSE_PATCH.x, GOOSE_PATCH.z);
+            return {
+                x: g.x,
+                z: g.z,
+                yaw: GOOSE_PATCH.yaw + ROUTE_YAW,
+                allowed: (x: number, z: number) => {
+                    const y = worldToYard(x, z);
+                    return gooseAllowed(y.x, y.z);
+                },
+                ground: valleyHeight
+            };
+        })()
     };
 })();
 
