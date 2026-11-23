@@ -49,6 +49,7 @@ type Lab = {
         outlines: number[][];
         viewLayers: string[][];
         slot2: number;
+        structure: { on: boolean; recording: boolean; joints: number; forces: number; contacts: number };
     };
     teleport(x: number, z: number, yaw?: number): void;
     ute(): { x: number; y: number; z: number; yaw: number; speed: number; driver: number; drivable: boolean };
@@ -842,6 +843,20 @@ test('the Timber Yard hammer: look at a beam, F nails it down and the nail head 
     expect(await lab(page, (l) => l.joints())).toMatchObject({ connections: 1, nails: 1 });
     expect(await lab(page, (l) => l.interaction().nail)).toBeGreaterThan(1);
     await page.screenshot({ path: 'test-results/hammer-nail.png' });
+    // the structural debug overlay (#51): F4 draws the joint, F4 again turns it (and the meter's
+    // contact recording) off
+    expect(await lab(page, (l) => l.joints().structure)).toMatchObject({ on: false, recording: false, joints: 0 });
+    await page.keyboard.press('F4');
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.joints().structure.joints === 1,
+        null,
+        { timeout: 30_000 }
+    );
+    expect(await lab(page, (l) => l.joints().structure)).toMatchObject({ on: true, recording: true });
+    await page.screenshot({ path: 'test-results/structure-overlay.png' });
+    await page.keyboard.press('F4');
+    await page.waitForTimeout(200);
+    expect(await lab(page, (l) => l.joints().structure)).toMatchObject({ on: false, recording: false, joints: 0 });
     expect(problems).toEqual([]);
 });
 

@@ -72,6 +72,7 @@ import type { JointEvent } from './joints/breaking.ts';
 import { GROUND, nailCode } from './joints/graph.ts';
 import { JointSystem } from './joints/joints.ts';
 import type { NailPreview } from './joints/joints.ts';
+import { RopeSystem } from './joints/rope.ts';
 import { MAX_PLAYERS, MAX_STRESS, createLabEntities } from './lab-entities.ts';
 import type { SimEntity } from './lab-entities.ts';
 import { addDummy, addLabKinematics, buildLabPhysics, launchDummy, propBody, stressDef } from './lab-physics.ts';
@@ -142,6 +143,8 @@ export class LabSim {
     private uteSpin = 0;
     /** What is nailed to what (Epic 5), rebuilt with the physics world. */
     joints!: JointSystem;
+    /** Ropes (#52; hazards, #75): rebuilt with the physics. */
+    ropes!: RopeSystem;
     /** The drivable ute's physics (levels whose ute is 'drivable'), or null. */
     vehicle: UteVehicle | null = null;
     /** Recovery: the last place the ute stood level on solid ground, and how long it has lain tipped. */
@@ -349,6 +352,7 @@ export class LabSim {
         addLabKinematics(pw, this.beaver.id, drivable ? -1 : this.ute.id, this.beaver.pose, this.ute.pose);
         this.vehicle = drivable ? new UteVehicle(pw, this.ute.id, ute.pose) : null;
         this.joints = new JointSystem(pw);
+        this.ropes = new RopeSystem(pw);
         this.seats.fill(-1);
         this.uteSafeSet = false;
         this.uteTipped = 0;

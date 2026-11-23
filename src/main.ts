@@ -17,6 +17,7 @@ import { BUCKET_CAPACITY } from './assets/props.ts';
 import { GameAudio, soundBodies } from './audio/game-audio.ts';
 import { DebugPanel } from './debug/panel.ts';
 import type { PanelHost } from './debug/panel.ts';
+import { emptyLines, structureLines } from './debug/structure-overlay.ts';
 import { DESIGN_KEY, Designer, loadDraft } from './editor/designer.ts';
 import { ParticleFX } from './fx/particles.ts';
 import type { WatchedEntity } from './fx/particles.ts';
@@ -468,6 +469,8 @@ interface State {
     forceVoxel: boolean;
     props: PropsMode;
     colliders: boolean;
+    /** The structural debug overlay (#51): joint loads and contacts. */
+    structure: boolean;
     players: number;
     particles: boolean;
     look: 'default' | 'pixel';
@@ -500,6 +503,7 @@ const state: State = {
     forceVoxel: true,
     props: sim.propsMode,
     colliders: false,
+    structure: false,
     players: 1,
     particles: settings.particles,
     look: settings.look,
@@ -578,6 +582,17 @@ let physCount = 0;
 let physHead = 0;
 const COLLIDER_COLOR = new Color(1, 0.35, 0.8);
 const colliderPoints: Vec3[] = [];
+const STRAIN_COLORS = [
+    new Color(0.3, 0.9, 0.35),
+    new Color(1, 0.85, 0.2),
+    new Color(1, 0.5, 0.1),
+    new Color(1, 0.15, 0.15)
+];
+const FORCE_COLOR = new Color(1, 1, 1);
+const FOLDED_COLOR = new Color(0.2, 0.9, 1);
+const FREE_COLOR = new Color(0.6, 0.6, 0.6);
+const structure = emptyLines();
+const structurePoints: Vec3[] = [];
 let frameTimeCount = 0;
 let frameTimeHead = 0;
 let lastFrameStamp = performance.now();
@@ -755,6 +770,7 @@ class LabDirector extends Script {
         reference.update(renderTime);
         updateNails(renderTime);
         if (state.colliders) drawColliders();
+        if (state.structure) drawStructure();
         // gusts stir the water
         windAt(renderTime, level.wind ?? CALM, windNow);
         scene.water.rippleSpeed = 0.03 + 0.012 * windNow.speed;
@@ -961,6 +977,36 @@ function drawColliders(): void {
     if (n >= 2) app.drawLines(colliderPoints.slice(0, n & ~1), COLLIDER_COLOR, false, scene.immediateLayer);
 }
 
+/**
+ * Debug only (#51): what the host's joints carry and the contacts its stress meter reads (on a
+ * guest, which runs no physics, there is nothing to draw). Off, the meter records nothing.
+ */
+function setStructure(on: boolean): void {
+    state.structure = on;
+    sim.joints.stress.debugContacts = on ? [] : null;
+}
+
+function drawStructure(): void {
+    if (guestSession) return;
+    // (the physics, and so the meter, is rebuilt when the props mode changes)
+    sim.joints.stress.debugContacts ??= [];
+    structureLines(sim.joints, sim.joints.stress.debugContacts, structure);
+    structure.bands.forEach((v, i) => drawFlat(v, STRAIN_COLORS[i]));
+    drawFlat(structure.forces, FORCE_COLOR);
+    drawFlat(structure.folded, FOLDED_COLOR);
+    drawFlat(structure.free, FREE_COLOR);
+}
+
+/** Draws flat x, y, z pairs as lines (pooling its points). */
+function drawFlat(v: readonly number[], color: Color): void {
+    const n = (v.length / 3) & ~1;
+    if (n < 2) return;
+    while (structurePoints.length < n) structurePoints.push(new Vec3());
+    const pts = structurePoints.slice(0, n);
+    for (let i = 0; i < n; i++) pts[i].set(v[i * 3], v[i * 3 + 1], v[i * 3 + 2]);
+    app.drawLines(pts, color, false, scene.immediateLayer);
+}
+
 // ------------------------------------------------------------------------------------- actions
 
 function setPaused(p: boolean): void {
@@ -1130,6 +1176,9 @@ const host: PanelHost = {
             case 'colliders':
                 state.colliders = Boolean(v);
                 break;
+            case 'structure':
+                setStructure(Boolean(v));
+                break;
             case 'players':
                 setPlayers(Number(v));
                 break;
@@ -1184,6 +1233,7 @@ const panel = new DebugPanel(host, [
             { kind: 'button', id: 'dropTest', label: 'Drop test' },
             { kind: 'button', id: 'resetProps', label: 'Reset props' },
             { kind: 'toggle', id: 'colliders', label: 'Physics colliders' },
+            { kind: 'toggle', id: 'structure', label: 'Structure loads (F4)' },
             { kind: 'toggle', id: 'particles', label: 'Leaves & particles' },
             {
                 kind: 'select',
@@ -1678,6 +1728,11 @@ window.addEventListener('keydown', (e) => {
             break;
         case 'F3':
             panel.visible = !panel.visible;
+            e.preventDefault();
+            break;
+        case 'F4':
+            setStructure(!state.structure);
+            panel.sync();
             e.preventDefault();
             break;
     }
@@ -2720,7 +2775,15 @@ window.__riverLab = {
         ),
         /** Split screen: player 2's slot (-1 when one player). */
         slot2: localSlot2,
-        preview: sim.nailPreview(0)
+        preview: sim.nailPreview(0),
+        /** The structural overlay (#51, F4): on, and what it drew last frame (segments). */
+        structure: {
+            on: state.structure,
+            recording: sim.joints.stress.debugContacts !== null,
+            joints: state.structure ? structure.bands.reduce((n, b) => n + b.length / 18, 0) : 0,
+            forces: state.structure ? structure.forces.length / 6 : 0,
+            contacts: state.structure ? (structure.folded.length + structure.free.length) / 6 : 0
+        }
     }),
     /** The hazards (Epic 8): water level, phases, and the rendered water plane's height. */
     hazards: () => ({
