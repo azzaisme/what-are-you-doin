@@ -70,6 +70,7 @@ function buildAndCross(pullPlankNails = false) {
     let floodWas: number = PHASE.idle;
     let floodBefore = new Map<number, { x: number; y: number; z: number }>();
     const onCrossing = () => [...beams, ...landed.map((l) => s.entities.find((e) => e.id === l.id)!)];
+    const flagged = new Set<number>();
     const rawStep = s.step.bind(s);
     s.step = ((...args: Parameters<LabSim['step']>) => {
         const px = s.player.x,
@@ -78,6 +79,17 @@ function buildAndCross(pullPlankNails = false) {
             falls = s.progress.falls;
         const gw = s.hazards.gustPhase;
         rawStep(...args);
+        if (process.env.GATE_DEBUG)
+            for (const c of s.joints.graph.connections()) {
+                const h = s.joints.health.states.get(c.id);
+                const l = s.joints.stress.loads.get(c.id);
+                if (!h || !l || h.util < 0.55 || flagged.has(c.id)) continue;
+                flagged.add(c.id);
+                const nm = (id: number) => (id < 0 ? 'ground' : s.entities.find((e) => e.id === id)?.name);
+                log.push(`STRAIN t ${(s.tick / 60).toFixed(1)} ${nm(c.a)}-${nm(c.b)} nails ${c.nails.length}: u ${h.util.toFixed(2)} shear ${l.shear.toFixed(0)} pull ${l.pull.toFixed(0)} bearing ${l.bearing.toFixed(0)} moment ${l.moment.toFixed(0)}; player (${s.player.x.toFixed(2)}, ${s.player.y.toFixed(2)}, ${s.player.z.toFixed(2)}) holding ${s.physics.heldId}`);
+            }
+        if (process.env.GATE_DEBUG && s.tick % 300 === 0 && s.hazards.floodPhase !== PHASE.idle)
+            log.push(`flood t ${(s.tick / 60).toFixed(0)} water ${s.hazards.net().waterY.toFixed(2)}: ${[...s.joints.graph.connections()].map((c) => `c${c.id} u ${(s.joints.health.states.get(c.id)?.util ?? 0).toFixed(2)} fat ${c.fatigue.toFixed(2)} f ${(s.joints.stress.loads.get(c.id)?.force ?? 0).toFixed(0)} m ${(s.joints.stress.loads.get(c.id)?.moment ?? 0).toFixed(0)}`).join('; ')}`);
         if (process.env.GATE_DEBUG && gw === PHASE.idle && s.hazards.gustPhase !== PHASE.idle)
             log.push(
                 `gust at ${(s.tick / 60).toFixed(1)} s holding ${s.physics.heldId} at (${s.player.x.toFixed(2)}, ${s.player.z.toFixed(2)})`
@@ -234,7 +246,13 @@ function buildAndCross(pullPlankNails = false) {
         step({}, 120);
         // into the capstone, well back from the beam's end
         const end = beam.pose.p.z + 1.6;
-        for (const dz of [0.07, 0.14]) nail(onBeam(beam, end - dz), `beam ${b} near end`);
+        // four nails, spread along it and across it: together they hold its end down and stop it
+        // swinging round when the flood comes (it is nailed at this end only until the deck is down)
+        for (const dz of [0.07, 0.15])
+            for (const dx of [-0.05, 0.05]) {
+                const at = onBeam(beam, end - dz);
+                nail({ ...at, x: at.x + dx }, `beam ${b} near end`);
+            }
     }
     // the beams span the gap: the flood comes. Back off the crossing into the yard and wait it out:
     // the beams are nailed down at their near ends
@@ -350,7 +368,11 @@ function buildAndCross(pullPlankNails = false) {
     waitForSafe(60);
     // ---- 3. out on the deck: nail both beams' far ends into the far capstone
     walkTo(BRIDGE_X, deck[deck.length - 2] + 0.5);
-    for (let b = 0; b < 2; b++) nail(onBeam(beams[b], farNailZ), `beam ${b} far end`, deck[deck.length - 2]);
+    for (let b = 0; b < 2; b++)
+        for (const dx of [-0.05, 0.05]) {
+            const at = onBeam(beams[b], farNailZ);
+            nail({ ...at, x: at.x + dx }, `beam ${b} far end`, deck[deck.length - 2]);
+        }
     walkTo(BRIDGE_X, deck[deck.length - 2] + 1.2);
     layPlank(deck[deck.length - 1]);
     phase('to the ute');
@@ -477,6 +499,10 @@ function report(name: string, r: ReturnType<typeof buildAndCross>) {
     for (const e of r.s.events)
         if (e.kind === 'fell')
             console.log('   FELL at tick', e.tick, r.phases.filter((ph) => ph.tick <= e.tick).pop()?.name);
+    if (process.env.GATE_DEBUG)
+        for (const e of r.s.events)
+            if (e.kind === 'break' || e.kind === 'creak')
+                console.log('   JOINT', e.kind, (e.tick / 60).toFixed(1), r.phases.filter((ph) => ph.tick <= e.tick).pop()?.name, e.text);
     return { anchors, deckJoints };
 }
 

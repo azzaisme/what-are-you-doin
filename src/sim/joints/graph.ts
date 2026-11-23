@@ -53,18 +53,51 @@ export const NAIL = {
      * K_ser = rho_m^1.5 d^0.8 / 30 per shear plane (rho_m 420 kg/m3 softwood, d 8 mm): 1.5 kN/mm.
      */
     slipModulus: 1.5e6,
-    /** Angular stiffness of one nail at stiffness 1 (N m/rad), and the damping time of its spring (s). */
-    angularStiffness: 200000,
+    /**
+     * A nail's own lever against a turn (m): how deep below the face it bears in bending. With the
+     * slip modulus it gives a nail's turn stiffness (K_ser x lever^2) and, with its shear, its
+     * moment capacity (strength x lever); see angularStiffness and breaking.ts.
+     */
+    lever: 0.04,
+    /**
+     * Turn stiffness of the faces a joint presses together (N m/rad): timber bedding on its seat,
+     * E_90,mean x I / t, C24 (EN 338: E_90,mean 370 MPa) on a 20 x 15 cm face (I = b h^3 / 12 =
+     * 5.6e-5 m^4) crushing through 10 cm: 2.1e5. The nails are softer in a turn (K_ser x lever^2 =
+     * 2.4e3 for one), but it is the pressed faces that hold a seated piece square; with only the
+     * nails' spring Rapier let a cantilevered beam rock on its pin (up to 12 rad/s).
+     */
+    bedding: 2.1e5,
+    /** How far from a nail the faces it holds together count as its own (m; stress.ts). */
+    faceReach: 0.6,
+    /** The damping time of the joint springs (s). */
     angularDamping: 0.005,
     /** Relative stiffness of a joint: timber to timber flexes more than a spike into stone. */
     stiffness: 0.8,
     anchorStiffness: 1
 } as const;
 
-/** Angular stiffness of a connection's joint (N m/rad); 0 for an anchor (a pin). */
-export function angularStiffness(c: { b: number; stiffness: number; nails: unknown[] }): number {
-    if (c.b === GROUND) return 0;
-    return c.stiffness * Math.max(1, c.nails.length) * NAIL.angularStiffness;
+/**
+ * Angular stiffness of a connection's joint (N m/rad). Timber to timber: about every axis. An
+ * anchor (a spike into stone or ground) is a pin in bending, and stiff only about the nails' own
+ * axis (two nails side by side resist a turn about it as a couple: a beam spiked down at one end
+ * does not swing round in the current).
+ */
+export function angularStiffness(c: { stiffness: number; nails: Vec3[] }): number {
+    // a nail group's rotational stiffness: K_ser x sum(lever^2 + r^2), r from the group's centre
+    // (EN 1995-1-1 slip modulus, as for its linear stiffness), times the joint's stiffness
+    const n = c.nails.length;
+    if (!n) return c.stiffness * Math.max(NAIL.bedding, NAIL.slipModulus * NAIL.lever * NAIL.lever);
+    let cx = 0;
+    let cy = 0;
+    let cz = 0;
+    for (const p of c.nails) {
+        cx += p.x / n;
+        cy += p.y / n;
+        cz += p.z / n;
+    }
+    let sum = 0;
+    for (const p of c.nails) sum += NAIL.lever * NAIL.lever + (p.x - cx) ** 2 + (p.y - cy) ** 2 + (p.z - cz) ** 2;
+    return c.stiffness * Math.max(NAIL.bedding, NAIL.slipModulus * sum);
 }
 
 /** Linear stiffness of a connection's joint (N/m): its nails' slip modulus. */
@@ -86,10 +119,16 @@ export interface Connection {
     /** Nail heads, in a's local frame (the visual markers and the nail count). */
     nails: Vec3[];
     /**
-     * Into b, in a's local frame (unit): against the face of b the first nail entered. Pressing a
-     * against b along it is bearing (the pieces carry it, not the nails); see stress.ts.
+     * Into b, in b's local frame (world for an anchor; unit): against the face of b the first nail
+     * entered. Pressing a against b along it is bearing (the pieces carry it, not the nails); see
+     * stress.ts.
      */
     axis?: Vec3;
+    /**
+     * Where the pieces touched when nailed (a's local frame): the faces they bear on each other
+     * with. A moment across the nails tips the pieces onto the edge of these (stress.ts).
+     */
+    faces?: Vec3[];
     stiffness: number;
     /** Load the connection takes before it breaks (N); grows with nails. */
     strength: number;
@@ -213,6 +252,7 @@ export class JointGraph {
             rel: { ...c.rel },
             nails: c.nails.map((n) => ({ ...n })),
             axis: c.axis ? { ...c.axis } : undefined,
+            faces: c.faces?.map((p) => ({ ...p })),
             strength: c.strength ?? NAIL.strength * Math.max(1, c.nails.length),
             fatigue: 0
         };

@@ -1,4 +1,7 @@
 /** Shared set-ups for the bridge tests: the Timber Yard with its beams laid and nailed, and a careful driver. */
+import RAPIER from '@dimforge/rapier3d-compat';
+
+import { BEAM_HALF } from '../../src/assets/props.ts';
 import { UTE_TRACK_HALF } from '../../src/assets/ute.ts';
 import { BRIDGE, BRIDGE_X, YARD_Y, timberYardLevel } from '../../src/levels/timber-yard.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
@@ -44,6 +47,40 @@ export function yardBridge(
                 hammerAt(s.joints, { x: LINES[i], y: beams[i].pose.p.y + 0.12, z }, n);
             }
     return { s, beams, tick: () => n };
+}
+
+/**
+ * Underbuilt: both beams laid on the yard road and run out over the creek, short of the far seat
+ * (cantilevers off the bank's lip), propped while `nails` nails per beam go through them into
+ * the lip near its edge, where they rest on it (pairs 10 cm apart across, 6 cm along), then let go. Only the nails
+ * hold their back ends down.
+ */
+export function shortBridge(nails: number): { s: LabSim; beams: LabSim['entities'] } {
+    const s = new LabSim({ level: timberYardLevel });
+    const beams = ['beam-0', 'beam-1'].map((name) => s.entities.find((e) => e.name === name)!);
+    const back = BRIDGE.nearEdge + 1.1;
+    const zc = back - BEAM_HALF.x;
+    beams.forEach((b, i) => s.physics.place(b.id, pose(LINES[i], YARD_Y + BEAM_HALF.y + 0.03, zc, FLAT_ALONG_Z)));
+    const props = LINES.map((x) =>
+        s.physics.addStatic(
+            RAPIER.ColliderDesc.cuboid(0.15, 0.5, 0.15).setTranslation(x, YARD_Y - 0.5, back - 2 * BEAM_HALF.x + 0.2)
+        )
+    );
+    let n = 0;
+    for (; n < 60; n++) s.step(neutralCommand(n));
+    for (let i = 0; i < 2; i++)
+        for (let k = 0; k < nails; k++)
+            hammerAt(
+                s.joints,
+                {
+                    x: LINES[i] + (k % 2 ? 0.05 : -0.05),
+                    y: beams[i].pose.p.y + 0.12,
+                    z: BRIDGE.nearEdge - 0.12 + 0.06 * (k >> 1)
+                },
+                n
+            );
+    for (const c of props) s.physics.world.removeCollider(c, true);
+    return { s, beams };
 }
 
 /** Puts the ute on the yard bank facing the bridge, seats player 1 and drives it over carefully. */

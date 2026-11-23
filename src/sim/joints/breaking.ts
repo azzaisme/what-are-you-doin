@@ -5,7 +5,10 @@
  * - utilization u = sqrt((F / F_cap)^2 + (M / M_cap)^2), smoothed over ~0.1 s, with the capacity
  *   worn down by fatigue;
  * - u past CREAK creaks, past GROAN groans (events, rate limited per connection);
- * - sustained u past 1 breaks it; so does a single blow past IMPACT (a dropped log, a hard landing);
+ * - sustained u past 1 breaks it; so does a blow past IMPACT (a dropped log, a hard landing), which
+ *   cracks it: it gives way after the tell, whatever it carries then;
+ * - never without warning: a connection breaks only after it has creaked for TELL (a load that
+ *   comes on fast creaks the moment it passes 1 and breaks TELL later, if it is still there);
  * - time spent past FATIGUE_FROM wears it (fatigue 0..1 takes up to 60 % off its capacity), so a
  *   bridge that holds a load at the edge for long enough lets go.
  *
@@ -30,8 +33,8 @@ export const BREAK = {
     fatigueRate: 0.25,
     /** Capacity lost at full fatigue. */
     fatigueLoss: 0.6,
-    /** Lever of a single nail against bending (m); spreading nails adds half their spread. */
-    momentArm: 0.04,
+    /** A connection creaks at least this long (s) before it can break. */
+    tell: 0.5,
     /** A connection warns at most this often (s). */
     warnEvery: 1.5,
     /**
@@ -61,12 +64,15 @@ export interface JointHealthState {
     warned: number;
     /** The previous step's utilization was past BREAK.impact (an impact must last two steps). */
     hit: boolean;
+    /** Tick it started creaking (-1: calm); it can break BREAK.tell after. */
+    creaked: number;
+    /** Cracked by an impact: it gives way once the tell is over. */
+    cracked: boolean;
 }
 
 /**
  * What a connection holds before fatigue: shear and withdrawal (N) of its nails, and bending
- * moment (N m): the nails' shear at a lever of BREAK.momentArm plus half their spread. An anchor
- * is a pin (no moment).
+ * moment (N m): the nails' shear at a lever of NAIL.lever plus half their spread.
  */
 export function capacity(c: Connection): { shear: number; pull: number; moment: number } {
     let spread = 0;
@@ -80,7 +86,7 @@ export function capacity(c: Connection): { shear: number; pull: number; moment: 
     return {
         shear: NAIL.strength * n,
         pull: NAIL.withdrawal * n,
-        moment: NAIL.strength * n * (BREAK.momentArm + spread / 2)
+        moment: NAIL.strength * n * (NAIL.lever + spread / 2)
     };
 }
 
@@ -106,7 +112,11 @@ export class JointHealth {
         for (const c of conns) {
             live.add(c.id);
             let s = this.states.get(c.id);
-            if (!s) this.states.set(c.id, (s = { util: 0, raw: 0, level: 0, warned: -1e9, hit: false }));
+            if (!s)
+                this.states.set(
+                    c.id,
+                    (s = { util: 0, raw: 0, level: 0, warned: -1e9, hit: false, creaked: -1, cracked: false })
+                );
             const load = loads.get(c.id);
             // asleep (no load measured): it keeps what it last carried
             if (!load) continue;
@@ -117,18 +127,27 @@ export class JointHealth {
             s.util += (raw - s.util) * k;
             if (s.util > BREAK.fatigueFrom)
                 c.fatigue = Math.min(1, c.fatigue + (s.util - BREAK.fatigueFrom) * BREAK.fatigueRate * SIM_DT);
-            const impact = raw >= BREAK.impact && s.hit;
+            if (raw >= BREAK.impact && s.hit) s.cracked = true;
             s.hit = raw >= BREAK.impact;
-            if (s.util >= 1 || impact) {
-                out.push({ kind: 'break', conn: c, util: Math.max(s.util, raw) });
-                continue;
+            if (s.util >= 1 || s.cracked) {
+                if (s.creaked < 0) {
+                    // past its limit with no warning yet: the tell starts now
+                    out.push({ kind: 'creak', conn: c, util: Math.max(s.util, raw) });
+                    s.creaked = s.warned = tick;
+                    s.level = Math.max(s.level, 1);
+                } else if ((tick - s.creaked) * SIM_DT >= BREAK.tell - 1e-9) {
+                    out.push({ kind: 'break', conn: c, util: Math.max(s.util, raw) });
+                    continue;
+                }
             }
             const level = s.util >= BREAK.groan ? 2 : s.util >= BREAK.creak ? 1 : 0;
+            if (level >= 1 && s.creaked < 0) s.creaked = tick;
             if (level > s.level && (tick - s.warned) * SIM_DT >= BREAK.warnEvery) {
                 out.push({ kind: level === 2 ? 'groan' : 'creak', conn: c, util: s.util });
                 s.warned = tick;
             }
             // calm down with some hysteresis
+            if (s.cracked) continue;
             s.level =
                 level > s.level
                     ? level
@@ -137,6 +156,7 @@ export class JointHealth {
                       : s.util < BREAK.groan * 0.85
                         ? Math.min(1, s.level)
                         : s.level;
+            if (s.level === 0) s.creaked = -1;
         }
         for (const id of [...this.states.keys()]) if (!live.has(id)) this.states.delete(id);
         return out;
