@@ -8,13 +8,15 @@ import type { BrowserContext, Page, TestInfo } from '@playwright/test';
  * on by `window.__uncivilFastClock`, which only an init script like this one sets before the page
  * loads (src/main.ts); players never get it.
  *
- * Every test runs with it, on a smaller page (fewer pixels to draw in software), except those tagged
- * `REALTIME`: what is drawn, or real-time input, matters there, so they run as a player's game does.
+ * Every test runs with it, on a smaller page (fewer pixels to draw in software), except those tagged:
+ * - `REALTIME`: what is drawn matters, so they run as a player's game does (normal clock, full page);
+ * - `REALCLOCK`: real-time input or networking matters, so they keep the normal clock (small page).
  */
 export const REALTIME = '@realtime';
+export const REALCLOCK = '@realclock';
 
-/** The page size of fast-clock tests: the desktop layout (wider than 700 px), 16:9 like 1280 x 720. */
-export const FAST_VIEWPORT = { width: 960, height: 540 };
+/** The page size of fast-clock tests: still the desktop layout (wider than 700 px), 16:9 like 1280 x 720. */
+export const FAST_VIEWPORT = { width: 720, height: 405 };
 
 export async function fastClock(
     context: BrowserContext,
@@ -23,12 +25,14 @@ export async function fastClock(
     opts: { viewport?: boolean } = {}
 ): Promise<void> {
     if (info.tags.includes(REALTIME)) return;
+    if (opts.viewport !== false) {
+        await page.setViewportSize(FAST_VIEWPORT);
+        // (a page the test opens later, before it loads anything)
+        context.on('page', (p) => void p.setViewportSize(FAST_VIEWPORT).catch(() => undefined));
+    }
+    if (info.tags.includes(REALCLOCK)) return;
     // every page of the context: a second device's page in the online tests, and iframes
     await context.addInitScript(() => {
         (window as unknown as { __uncivilFastClock?: boolean }).__uncivilFastClock = true;
     });
-    if (opts.viewport === false) return;
-    await page.setViewportSize(FAST_VIEWPORT);
-    // (a page the test opens later, before it loads anything)
-    context.on('page', (p) => void p.setViewportSize(FAST_VIEWPORT).catch(() => undefined));
 }

@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import pngjs from 'pngjs';
 
-import { fastClock, REALTIME } from './fast-clock.ts';
+import { fastClock, REALCLOCK } from './fast-clock.ts';
 import { startRelay } from './nostr-relay.ts';
 
 const { PNG } = pngjs;
@@ -114,7 +114,8 @@ async function ticks(page: Page, n: number): Promise<void> {
     );
 }
 
-// the fast clock (and a smaller page) for every test without @realtime in its title: see fast-clock.ts
+// the fast clock (and a smaller page) for every test without @realtime (or @realclock: the clock only) in
+// its title: see fast-clock.ts
 test.beforeEach(({ context, page }, info) => fastClock(context, page, info));
 
 test('boots the River Lab with no console errors and a non-blank frame @realtime', async ({ page }) => {
@@ -317,8 +318,8 @@ test('settings menu: mouse, keyboard and gamepad reach every setting, and it is 
     expect(problems).toEqual([]);
 });
 
-// (real speed: it catches the top of each jump between frames, so a frame must not hold a whole jump)
-test('remappable controls: rebind a key and a pad button in Settings; they work and are saved @realtime', async ({
+// (the normal clock: it catches the top of each jump between frames, so a frame must not hold a whole jump)
+test('remappable controls: rebind a key and a pad button in Settings; they work and are saved @realclock', async ({
     page
 }) => {
     test.setTimeout(600_000); // two boots of the game page
@@ -1046,7 +1047,7 @@ test("split screen: player 2's hammer aim shows player 2's nail outline in playe
 // claude.ai room in the published artifact); ?net=p2p is the itch.io transport, WebRTC between the
 // pages, signalled through a local Nostr relay instead of the public ones
 for (const transport of ['local', 'p2p'] as const)
-    test(`online co-op (${transport}): a second device joins the host, plays as player 2 and renders the host world${transport === 'p2p' ? ` ${REALTIME}` : ''}`, async ({
+    test(`online co-op (${transport}): a second device joins the host, plays as player 2 and renders the host world${transport === 'p2p' ? ` ${REALCLOCK}` : ''}`, async ({
         page,
         context
     }) => {
