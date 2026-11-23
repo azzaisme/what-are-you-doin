@@ -53,6 +53,7 @@ import type { GameAd } from './net/session.ts';
 import { localTransport, roomTransport } from './net/transport.ts';
 import type { NetTransport } from './net/transport.ts';
 import { PLAYTEST_STORAGE_KEY, PlaytestLog } from './playtest/telemetry.ts';
+import { FogDome } from './render/fog-dome.ts';
 import { NailMarkers } from './render/nail-markers.ts';
 import { ReferenceRenderer } from './render/reference.ts';
 import { QUALITY, createLabScene } from './render/scene.ts';
@@ -91,7 +92,7 @@ import {
     OLD_CELL_SIZE_STORAGE_KEYS,
     clampCellSizeCm
 } from './voxels/grid.ts';
-import { pose } from './voxels/math.ts';
+import { pose, quatFromYawPitchRoll } from './voxels/math.ts';
 import { SAMPLING_POLICIES } from './voxels/rasterizer.ts';
 import type { SamplingPolicy } from './voxels/rasterizer.ts';
 
@@ -345,7 +346,12 @@ function playtestFrame(t: number): void {
 if (level.forestry) {
     const f = sim.forestry.ents;
     fx.wood = new WoodFX(
-        { chips: f.chips.slot, needles: f.needles.slot, sawmill: f.sawmill.slot },
+        {
+            chips: f.chips.slot,
+            needles: f.needles.slot,
+            sawmill: f.sawmill.slot,
+            markers: f.markers.map((m) => m.slot)
+        },
         level.forestry.sawmill
     );
 }
@@ -539,6 +545,8 @@ let renderTime = 0;
 let prevGustPhase = 0;
 /** How far the camera is under the weather's area (eased, so its fog fades in and out at the edge). */
 let weatherUnder = 0;
+/** The fog's sky (created with the first weather): the sky turns the fog colour as it closes in. */
+let fogDome: FogDome | null = null;
 const playerPose = pose();
 const playerAnim = new Float64Array(ANIM_MAX);
 const bodyPose = pose();
@@ -746,6 +754,8 @@ class LabDirector extends Script {
             );
             scene.app.scene.fog.start = f.start;
             scene.app.scene.fog.end = f.end;
+            fogDome ??= new FogDome(scene.app, scene.worldLayer);
+            fogDome.update(c, f.end);
             const zone = wz >= 0 ? wSpec.zones[wz] : undefined;
             fx.weather.kind = zone?.kind ?? 0;
             fx.weather.strength = k;
@@ -1416,7 +1426,7 @@ function pollEvents(): void {
             if (e.n <= guestEventsSeen) continue;
             guestEventsSeen = e.n;
             showToast(e.text, e.kind);
-            audio.onEvent(e.kind);
+            audio.onEvent(e.kind, e.text);
             playtest.note(performance.now(), e.kind, e.text);
         }
         updateObjective();
@@ -1426,7 +1436,7 @@ function pollEvents(): void {
     while (seenEvents < sim.events.length) {
         const e = sim.events[seenEvents++];
         showToast(e.text, e.kind);
-        audio.onEvent(e.kind);
+        audio.onEvent(e.kind, e.text);
         playtest.note(performance.now(), e.kind, e.text);
         updateObjective();
     }
@@ -2563,6 +2573,15 @@ window.__riverLab = {
     player: () => ({ ...sim.player, holding: sim.physics.heldId, eyeHeight: EYE_HEIGHT }),
     /** Puts player 1 somewhere (tests and screenshots of big levels). */
     teleport: (x: number, z: number, yaw?: number) => sim.placePlayer(x, z, yaw ?? sim.player.yaw, 0),
+    /** Puts the ute down at (x, z), facing yaw, on the ground there (tests: a ute by the logging stand). */
+    placeUte: (x: number, z: number, yaw = 0) => {
+        if (!sim.vehicle) return false;
+        sim.physics.place(
+            sim.vehicle.id,
+            pose(x, (level.forestry?.ground(x, z) ?? sim.ute.pose.p.y) + 0.3, z, quatFromYawPitchRoll(yaw, 0, 0))
+        );
+        return true;
+    },
     /** Streamed levels: near tiles built so far. */
     nearTiles: () => pipeline.nearTiles.size,
     /** Streamed levels: whether the near world is built over a square around (x, z). */
@@ -2604,6 +2623,7 @@ window.__riverLab = {
         tick: sim.tick,
         floods: sim.hazards.floodCount,
         gusts: sim.hazards.gustCount,
+        tree: sim.hazards.tree.phase,
         planeY: scene.waterEntity.getPosition().y
     }),
     /** The playtest log as text. */

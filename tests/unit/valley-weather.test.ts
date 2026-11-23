@@ -39,6 +39,8 @@ import { initPhysics } from '../../src/sim/physics/world.ts';
 import { W_PHASE, WEATHER, WeatherScheduler, fogOpacity, weatherCovers, weatherFog } from '../../src/sim/weather.ts';
 import { pose, quatFromYawPitchRoll, quatMul } from '../../src/voxels/math.ts';
 
+import { Player } from './play.ts';
+
 beforeAll(() => initPhysics());
 
 const S = (s: number) => Math.round(s * SIM_HZ);
@@ -85,14 +87,15 @@ const RAIN = () => zoneOf(WEATHER.rain);
 
 /**
  * Carriers pick up beam-2 at the log dump by its road-side end (by input: look at it, grab, lift),
- * turn up the road and walk 12 m along it. `send` steps the simulation with one command per
+ * turn up the road and walk 12 m along it, holding it at view pitch `lift`. `send` steps the simulation with one command per
  * player slot (undefined: that slot's neutral command). Returns where the beam was dropped (m
  * walked; -1 never) and how many still hold it at the end.
  */
 function carryUpTheRoad(
     s: LabSim,
     slots: number[],
-    send: (cmds: (Partial<PlayerCommand> | undefined)[]) => void
+    send: (cmds: (Partial<PlayerCommand> | undefined)[]) => void,
+    lift = -0.25
 ): { dropAt: number; holders: number; beam: { x: number; y: number; z: number }; dropU: number } {
     const beam = byName(s, 'beam-2');
     const b0 = beam.pose.p;
@@ -135,10 +138,14 @@ function carryUpTheRoad(
     step(slots.map(() => ({ grab: true })));
     expect(s.physics.holders(beam.id), 'picked up by each carrier').toBe(slots.length);
     ease(() => ({ yaw: along }), 20);
-    ease(() => ({ pitch: -0.25 }), 40);
+    ease(() => ({ pitch: lift }), 40);
     // turn up the road (+u)
     ease(() => ({ yaw: ROUTE_YAW }), 90);
-    expect(s.physics.holders(beam.id), 'still held, facing up the road').toBe(slots.length);
+    // (slipped already while turning: dropped at 0 m)
+    if (s.physics.holders(beam.id) < slots.length) {
+        const p = s.players[slots[0]];
+        return { dropAt: 0, holders: s.physics.holders(beam.id), beam: { ...beam.pose.p }, dropU: routeU(p.x, p.z) };
+    }
     const lead = slots[0];
     const u0 = routeU(s.players[lead].x, s.players[lead].z);
     let dropAt = -1;
@@ -382,7 +389,7 @@ describe('the Valley’s flood at Shallow Creek (the Timber Yard’s, turned wit
             hazards: { ...VALLEY_HAZARDS, flood: { ...VALLEY_HAZARDS.flood!, channel: undefined } }
         });
         expect(channel).toBeLessThan(FLOOD_TICKS);
-        expect(Math.abs(channel - everywhere)).toBeLessThanOrEqual(Math.max(30, everywhere * 0.1));
+        expect(Math.abs(channel - everywhere)).toBeLessThanOrEqual(5);
     }, 120_000);
 });
 
@@ -471,6 +478,18 @@ describe('weather along the Valley (#88): each comes with its counterplay', () =
         expect(Math.abs(routeU(r.beam.x, r.beam.z) - r.dropU)).toBeLessThan(4);
     }, 180_000);
 
+    it('carried alone, holding it lower is no reliable answer: of six heights in the rain at most one holds', () => {
+        // (measured: of pitches -0.25 to -1.2, only -1.0 held all 12 m; the toast says what works,
+        // carrying it together)
+        const held: number[] = [];
+        for (const lift of [-0.25, -0.6, -0.8, -1.0, -1.05, -1.2]) {
+            const s = inTheRain();
+            const r = carryUpTheRoad(s, [0], hostSend(s), lift);
+            if (r.dropAt < 0) held.push(lift);
+        }
+        expect(held.length, `held at ${held.join(', ')}`).toBeLessThanOrEqual(1);
+    }, 900_000);
+
     it('counterplay: carried together, two beavers hold it all the way in the rain', () => {
         const s = inTheRain(2);
         const r = carryUpTheRoad(s, [0, 1], hostSend(s));
@@ -518,8 +537,20 @@ describe('weather along the Valley (#88): each comes with its counterplay', () =
         const fog = zoneOf(WEATHER.fog);
         const start = routeToWorld(138.5, roadT(138.5));
         s.placePlayer(start.x, start.z, ROUTE_YAW);
-        s.step(cmd(s.tick, { yaw: ROUTE_YAW }));
+        // (the debug hook waits for the grace period like any hazard; waiting outside any weather
+        // area, so the fog does not come on its own first)
+        const waiting = routeToWorld(120, roadT(120));
+        s.placePlayer(waiting.x, waiting.z, ROUTE_YAW);
+        runUntil(
+            s,
+            () => s.tick >= S(HAZARD.graceS),
+            S(HAZARD.graceS) + 5,
+            () => ({ yaw: ROUTE_YAW })
+        );
+        expect(s.hazards.weather!.busy).toBe(false);
         expect(s.hazards.startWeatherNow(s, fog)).toBe(true);
+        s.placePlayer(start.x, start.z, ROUTE_YAW);
+        s.step(cmd(s.tick, { yaw: ROUTE_YAW }));
         // what can be seen: as far as the fog's end on the Low preset (the nearest it closes in)
         const v = viewDistance(valleyLevel.stream!, 'low');
         const seeing = weatherFog(
@@ -530,6 +561,14 @@ describe('weather along the Valley (#88): each comes with its counterplay', () =
             v.radius
         ).end;
         expect(seeing).toBeLessThanOrEqual(v.radius);
+        // a post counts as seen only where the fog leaves it clear enough to pick out (under 0.9)
+        const fogNow = weatherFog(
+            VALLEY_HAZARDS.weather,
+            fog,
+            1,
+            { start: v.fogStart, end: valleyLevel.stream!.fog.end },
+            v.radius
+        );
         const posts = valleyLayout(1)
             .pieces.filter((p) => p.name === 'road-post')
             .map((p) => ({ x: p.pose.p.x, z: p.pose.p.z }));
@@ -544,7 +583,7 @@ describe('weather along the Valley (#88): each comes with its counterplay', () =
             const seen = posts
                 .map((q) => ({ q, dx: q.x - p.x, dz: q.z - p.z }))
                 .map((o) => ({ ...o, d: Math.hypot(o.dx, o.dz) }))
-                .filter((o) => o.d > 2 && o.d <= seeing && (o.dx * fx + o.dz * fz) / o.d > 0.5)
+                .filter((o) => o.d > 2 && fogOpacity(fogNow, o.d) < 0.9 && (o.dx * fx + o.dz * fz) / o.d > 0.5)
                 .sort((a, b) => a.d - b.d)[0];
             if (seen) {
                 // the posts mark the road's right-hand edge: aim 2.6 m to the left of the next one
@@ -565,7 +604,7 @@ describe('weather along the Valley (#88): each comes with its counterplay', () =
         expect(s.progress.falls).toBe(0);
         expect(s.progress.recoveries).toBe(0);
         // on the road all the way (the posts stand 2.6 m out from its middle)
-        expect(worstOff).toBeLessThan(2.2);
+        expect(worstOff).toBeLessThan(1.2);
     }, 180_000);
 
     it('the fog comes, holds and goes: back to the level’s own afterwards', () => {
@@ -756,6 +795,42 @@ describe('weather and the one-hazard-at-a-time budget', () => {
         expect(f.tick - floodEnd).toBeGreaterThanOrEqual(S(HAZARD.safeS) - 1);
     }, 240_000);
 
+    it('the debug hook only starts weather when a hazard could start: not in the grace period, a flood, its quiet spell or other weather', () => {
+        const s = valley();
+        s.fpActive = true;
+        s.progress.step = 1;
+        s.step(cmd(0));
+        const fog = zoneOf(WEATHER.fog);
+        const snow = zoneOf(WEATHER.snow);
+        // the grace period
+        expect(s.hazards.startWeatherNow(s, fog)).toBe(false);
+        s.runTo(S(HAZARD.graceS) - 5);
+        expect(s.hazards.startWeatherNow(s, fog)).toBe(false);
+        // a flood running
+        s.runTo(S(HAZARD.graceS) + 10);
+        const flat = quatMul(quatFromYawPitchRoll(Math.PI / 2, 0, 0), quatFromYawPitchRoll(0, Math.PI / 2, 0));
+        ['beam-0', 'beam-1'].forEach((n, i) =>
+            s.physics.place(byName(s, n).id, yardPose(BRIDGE_X - 0.105 + i * 0.21, YARD_Y + 0.35, BRIDGE.zc, flat))
+        );
+        runUntil(s, () => s.hazards.floodPhase === PHASE.tell, TO_SIREN);
+        expect(s.hazards.floodPhase).toBe(PHASE.tell);
+        expect(s.hazards.startWeatherNow(s, fog)).toBe(false);
+        // the quiet spell after it
+        runUntil(s, () => s.hazards.floodPhase === PHASE.idle, FLOOD_TICKS);
+        const over = s.tick;
+        s.runTo(over + S(HAZARD.safeS) - 10);
+        expect(s.hazards.busy).toBe(false);
+        expect(s.hazards.startWeatherNow(s, fog)).toBe(false);
+        expect(s.hazards.weather!.busy).toBe(false);
+        // once a hazard could start, it does
+        s.runTo(over + S(HAZARD.safeS) + 2);
+        expect(s.hazards.startWeatherNow(s, fog)).toBe(true);
+        expect(s.hazards.weather!.zone).toBe(fog);
+        // and never over other weather
+        expect(s.hazards.startWeatherNow(s, snow)).toBe(false);
+        expect(s.hazards.weather!.zone).toBe(fog);
+    }, 180_000);
+
     it('and with the aimed gust (a Timber Yard with weather over it): neither starts while the other runs', () => {
         const over: LevelDef = {
             ...timberYardLevel,
@@ -780,12 +855,19 @@ describe('weather and the one-hazard-at-a-time budget', () => {
         expect(s.hazards.weather!.busy).toBe(true);
         // a plank carried by the creek all through it brings no gust
         s.fpActive = true;
+        // the plank laid on the bank in front of player 1, who picks it up by input
         const plank = byName(s, 'plank');
-        const z = creekCenterZ(4) + 1.0 + 2.2;
+        // (on the bank, a metre clear of the creek's edge, near enough the water for the gust)
+        const pz = creekCenterZ(4) + creekHalfWidth(4) + 1.0;
+        const z = pz + 1.1;
         s.placePlayer(4, z, 0);
-        const y = s.players[0].y + EYE_HEIGHT - 0.45;
-        s.physics.place(plank.id, pose(4.3, y, z - 1.1, quatFromYawPitchRoll(0, Math.PI / 2, 0)));
-        s.physics.grabById(plank.id, { x: 4.3, y, z: z - 1.1 }, 1.2, 0);
+        s.physics.place(plank.id, pose(4, yardHeight(4, pz) + 0.1, pz, quatFromYawPitchRoll(0, Math.PI / 2, 0)));
+        const pl = new Player(s);
+        pl.step({}, 30);
+        pl.lookAt(plank.pose.p.x, plank.pose.p.y + 0.05, plank.pose.p.z, 20);
+        pl.step({ grab: true });
+        pl.step({}, 5);
+        expect(s.physics.heldIdOf(0), 'player 1 picked the plank up').toBe(plank.id);
         let gustDuringWeather = false;
         runUntil(
             s,

@@ -8,7 +8,7 @@
  * finished buffers. The main thread only uploads them, all at once.
  */
 
-import { TREE_STATE } from '../assets/forestry.ts';
+import { TREE_STATE, TREE_SWAY } from '../assets/forestry.ts';
 import { parseLevelData, levelFromData } from '../levels/data.ts';
 import { clearStandTree, drawStandTree, drawStump } from '../levels/forestry.ts';
 import type { ForestryDef } from '../levels/forestry.ts';
@@ -53,6 +53,9 @@ export function trackedEntityOrder(sim: { entities: SimEntity[] }): number[] {
     return sim.entities.filter((e) => e.asset.parts.length > 0).map((e) => e.slot);
 }
 
+/** How the static layer draws a stand tree. */
+type StandDrawn = 'standing' | 'stump' | 'none';
+
 export class VoxelService {
     readonly world = new VoxelWorld();
     private readonly tracked: Tracked[] = [];
@@ -81,7 +84,8 @@ export class VoxelService {
      * (tracked index) and whether the static layer shows it felled. The sim publishes each tree's
      * state in its marker's channels; a change re-draws that tree's static voxels (tree or stump).
      */
-    private wood: { def: ForestryDef; markers: number[]; drawnDown: boolean[] } | null = null;
+    /** Each stand tree as the static layer draws it: standing, a stump, or not at all (it leans: its marker draws it). */
+    private wood: { def: ForestryDef; markers: number[]; drawn: StandDrawn[] } | null = null;
     /** Cameras the near world follows (x, z pairs), from the last frame request. */
     private focus: Float32Array | null = null;
     /**
@@ -138,7 +142,7 @@ export class VoxelService {
         if (def.forestry && this.withWorld) {
             const ents = createLabEntities().entities.filter((e) => e.asset.parts.length > 0);
             const markers = def.forestry.trees.map((_, k) => ents.findIndex((e) => e.name === `tree-${k}`));
-            this.wood = { def: def.forestry, markers, drawnDown: markers.map(() => false) };
+            this.wood = { def: def.forestry, markers, drawn: markers.map((): StandDrawn => 'standing') };
         }
         let r = { columns: 0, staticCells: 0, trees: 0, ms: 0 };
         if (far || (withWorld && !def.stream)) r = def.build(this.world, seed);
@@ -352,7 +356,7 @@ export class VoxelService {
                 this.wood.def.trees.forEach((t, k) => {
                     const i = cellIndexX(t.x);
                     const kk = cellIndexZ(t.z);
-                    if (i >= r.i0 && i <= r.i1 && kk >= r.k0 && kk <= r.k1) this.wood!.drawnDown[k] = false;
+                    if (i >= r.i0 && i <= r.i1 && kk >= r.k0 && kk <= r.k1) this.wood!.drawn[k] = 'standing';
                 });
             if (performance.now() - t0 > budgetMs || ++n >= maxTiles) break;
         }
@@ -361,8 +365,9 @@ export class VoxelService {
 
     /**
      * Stand trees whose state changed in the snapshots: a felled one leaves the static layer (a
-     * stump stays), a regrown one comes back. Only where the world is built (streamed levels: the
-     * tree's tile).
+     * stump stays), a regrown one comes back, and a leaning one (the falling-tree hazard, #74)
+     * leaves it whole while its marker draws it tilted, coming back if it stands up again. Only
+     * where the world is built (streamed levels: the tree's tile).
      */
     private updateStand(states: Float64Array): void {
         const w = this.wood!;
@@ -373,8 +378,9 @@ export class VoxelService {
             const o = n * STATE_STRIDE;
             // a hidden marker says nothing (no snapshot yet)
             if (!(states[o] > 0.5)) continue;
-            const down = states[o + 8 + TREE_STATE] > 0.5;
-            if (down === w.drawnDown[k]) continue;
+            const want: StandDrawn =
+                states[o + 8 + TREE_STATE] > 0.5 ? 'stump' : states[o + 8 + TREE_SWAY] > 0.001 ? 'none' : 'standing';
+            if (want === w.drawn[k]) continue;
             const t = w.def.trees[k];
             if (this.stream) {
                 const T = this.world.tileCells;
@@ -384,9 +390,9 @@ export class VoxelService {
             }
             const g = w.def.ground(t.x, t.z);
             clearStandTree(this.world, t, k, g, this.raster);
-            if (down) drawStump(this.world, t, g, this.raster);
-            else drawStandTree(this.world, t, k, g, this.raster);
-            w.drawnDown[k] = down;
+            if (want === 'stump') drawStump(this.world, t, g, this.raster);
+            else if (want === 'standing') drawStandTree(this.world, t, k, g, this.raster);
+            w.drawn[k] = want;
             changed = true;
         }
         if (changed) this.world.finalizeStatic();
