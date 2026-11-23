@@ -21,25 +21,34 @@ An existing cheat: the Valley could be finished without building a single bridge
     - Spares at the other stages stay empty: they have water nearby.
     - Thrown, a 3 L spare also lands nearly empty, so it doesn't reopen the cheat.
 - **Beavers can jump three of the crossings; the bucket can't.** Measured by input, with no bridge,
-  sprinting along the road: a beaver jumps the culvert, the gorge (onto the old pier and on: two
-  2.3 m gaps) and the crevasse, with no falls. Only Shallow Creek (4.3 m) is too wide. That's fine:
-  it's the bucket that needs the bridge. Three small rules make sure it does:
+  sprinting along the road: a beaver jumps the culvert, the gorge (onto the old pier and on) and the
+  crevasse, with no falls. At the gorge the ground gaps are 2.3 m, but the stone caps on the rims
+  and the pier leave only about 2.15 m between cap and pier. Only Shallow Creek (4.3 m) is too wide.
+  That's fine: it's the bucket that needs the bridge. Four small rules make sure it does:
     - **No jumping while holding the bucket.** Any beaver holding it, a co-carrier too. A press of
       jump gets a small dip (as if bracing) and, the first time, "Too heavy to jump with the bucket:
       build the crossing to get it over." Before the rule, sprint-jumping with the full bucket got it
       over each of the three, landing with 0.05 to 1.09 L: enough for the crevasse's 1 L flag.
-    - **Handed over only standing close** (feet within 1.9 m). Before the rule, a beaver at a rim's
-      very edge held it out and one at the far edge took it with all 10 L: at the culvert, the
-      crevasse, and at the gorge from the rim to a beaver on the pier and on to the far rim. Now
-      "Too far to hand the bucket over: stand close, or build the crossing." Side by side, hand-overs
-      work as before.
+    - **No taking hold of it in mid-air.** A beaver who jumps empty-handed and grabs it on the way
+      up or down is refused (the same toast). Before, grabbed on the first airborne tick, it went
+      over the culvert and the crevasse.
+    - **Handed over only standing close, with ground between** (feet within 1.9 m, and something to
+      stand on all along the line between them: the ground, a prop or a built span, checked every
+      15 cm and within 0.5 m under their feet). Measured where beavers can stand still at the very
+      edges: the gorge's rim cap at u 82.41 and the pier at 84.14 are 1.73 m apart, and so are the
+      pier at 85.86 and the far cap at 87.59. So closeness alone didn't stop it: the bucket was handed
+      rim → pier → far rim with all 10 L and the Gorge completed with no bridge. With the ground
+      check, that's refused ("Can't hand the bucket over a gap or from far off: stand close, or build
+      the crossing."). Across the culvert and the crevasse, edge to edge, it's refused too. Side by
+      side, and along a built span (rim → a beaver on the beams → the far rim), hand-overs work. With
+      the ground check switched off, both gorge tests fail.
     - **The water past a crossing stays shut until its stage.** The works tank (3 m past the Gorge
       flag) opens at the Old Industrial Works stage, and the mountain spring butt (0.8 m past the
       crevasse's flag) at Flower Summit. A dry bucket thrown over the gorge or the crevasse can't be
       refilled across before the flag ("The works water tank is shut until the Gorge stage is done.").
       It follows the stage, so a reset or a checkpoint sets it right.
     - So the 1 L flags rely on the bucket not getting over unbuilt: it can't be jumped with, handed
-      across, or refilled across. Each is tested by input, a guest too.
+      across, grabbed in mid-air, or refilled across. Each is tested by input, a guest too.
 - **The Old Industrial Works flag wants 1 L too, and the stage is fair for it.** The works tank is
   below the retaining wall, and a bucket jumped or thrown up the wall arrives dry. The way up keeps
   the water: set the bucket on a crate against the wall, climb a 1-then-2 crate stair without it,
