@@ -53,7 +53,6 @@ const IGNORED = [
     /favicon/i,
     /status of 404/
 ];
-const BUILD = 'http://localhost:4173';
 
 /**
  * The iframe permissions the stand-in itch page grants: the features the game uses (sound,
@@ -74,9 +73,11 @@ const ITCH_PAGE = (src: string, w: number, h: number, allow: string) => `<!docty
 </body></html>`;
 
 async function routeEmbed(context: BrowserContext): Promise<void> {
+    // the built game, wherever this run's config serves it (a copy of the config may use another port)
+    const build = new URL(test.info().project.use.baseURL ?? 'http://localhost:4173').origin;
     await context.route('http://game.test/**', async (route) => {
         const u = new URL(route.request().url());
-        const res = await route.fetch({ url: BUILD + u.pathname + u.search });
+        const res = await route.fetch({ url: build + u.pathname + u.search });
         await route.fulfill({ response: res });
     });
     await context.route('http://itch.test/**', (route) => {
