@@ -167,6 +167,12 @@ export class StressMeter {
     private readonly mean = new Map<number, JointLoad>();
     /** Jointed pieces whose loads are still settling: kept awake (before). */
     private readonly unsettled = new Set<number>();
+    /** Loose pieces touching jointed ones: their velocity at the start of the step (before). */
+    private readonly outside = new Map<number, { pb: PhysBody; vx: number; vy: number; vz: number }>();
+    /** Scale loose pieces' contact impulses to their momentum (rescale; off only to show why, in tests). */
+    rescaleLoose = true;
+    /** This step's scale of each loose piece's reported contact impulses (after: rescale). */
+    private readonly scales = new Map<number, number>();
 
     constructor(pw: PhysicsWorld, graph: JointGraph) {
         this.pw = pw;
@@ -190,6 +196,7 @@ export class StressMeter {
 
     before(): void {
         this.states.clear();
+        this.outside.clear();
         if (this.graph.size === 0) return;
         for (const pb of this.jointed()) {
             const b = pb.body;
@@ -215,6 +222,76 @@ export class StressMeter {
                 I: [I.m11, I.m12, I.m13, I.m12, I.m22, I.m23, I.m13, I.m23, I.m33]
             });
         }
+        this.recordOutside();
+    }
+
+    /**
+     * The loose pieces touching these jointed ones (as last step left them), with their velocity
+     * now: after the step their momentum says what their contacts really did (rescale).
+     */
+    private recordOutside(): void {
+        const world = this.pw.world;
+        for (const s of this.states.values())
+            for (const col of s.pb.colliders)
+                world.contactPairsWith(col, (other) => {
+                    const ob = this.pw.bodyOfCollider(other.handle);
+                    if (
+                        !ob ||
+                        ob.kind !== 'dynamic' ||
+                        !ob.enabled ||
+                        this.states.has(ob.id) ||
+                        this.outside.has(ob.id)
+                    )
+                        return;
+                    if (ob.body.isSleeping()) return;
+                    const v = ob.body.linvel();
+                    this.outside.set(ob.id, { pb: ob, vx: v.x, vy: v.y, vz: v.z });
+                });
+    }
+
+    /**
+     * Rapier's reported contact impulse holds its penetration correction too, which moves nothing:
+     * a loose log lying still on the nailed (gently quivering) bridge read 1.3 x its weight, step
+     * after step, and the joints carried the difference (26 % heavy). A loose piece's own momentum
+     * says what its contacts did: m dv - m g dt. Each one's reported normal impulses are scaled to
+     * that, along their sum (friction, across it, is solved for), never up: an impact, which moves
+     * it, reads as reported.
+     */
+    private rescale(): void {
+        this.scales.clear();
+        if (!this.rescaleLoose) return;
+        const world = this.pw.world;
+        const dt = SIM_DT;
+        for (const [id, o] of this.outside) {
+            const b = o.pb.body;
+            const m = b.mass();
+            const v = b.linvel();
+            const ld = 1 + dt * b.linearDamping();
+            const tx = m * (v.x * ld - o.vx);
+            const ty = m * (v.y * ld - o.vy) + m * GRAVITY * dt * b.gravityScale();
+            const tz = m * (v.z * ld - o.vz);
+            let rx = 0;
+            let ry = 0;
+            let rz = 0;
+            for (const col of o.pb.colliders)
+                world.contactPairsWith(col, (other) =>
+                    world.contactPair(col, other, (man, flipped) => {
+                        if (man.numSolverContacts() === 0) return;
+                        const n = man.normal();
+                        const sign = flipped ? 1 : -1;
+                        for (let k = 0; k < man.numContacts(); k++) {
+                            const jn = man.contactImpulse(k);
+                            if (!(jn > 0)) continue;
+                            rx += sign * n.x * jn;
+                            ry += sign * n.y * jn;
+                            rz += sign * n.z * jn;
+                        }
+                    })
+                );
+            const r2 = rx * rx + ry * ry + rz * rz;
+            if (r2 <= 0) continue;
+            this.scales.set(id, Math.max(0, Math.min(1, (tx * rx + ty * ry + tz * rz) / r2)));
+        }
     }
 
     after(): void {
@@ -229,6 +306,7 @@ export class StressMeter {
             if (m) this.loads.set(c.id, { ...m });
         }
         if (this.graph.size === 0 || this.states.size === 0) return;
+        this.rescale();
         // groups of joined bodies (ground does not join groups)
         const seen = new Set<number>();
         for (const id of this.states.keys()) {
@@ -294,6 +372,8 @@ export class StressMeter {
                     // the faces a connection joins: their contact is part of that connection
                     const otherId = otherBody && otherBody.kind === 'dynamic' ? otherBody.id : GROUND;
                     const own = conns.filter((c) => (c.a === id && c.b === otherId) || (c.b === id && c.a === otherId));
+                    // a loose piece's contacts, scaled to what its momentum says they did
+                    const scale = otherBody && j < 0 ? (this.scales.get(otherBody.id) ?? 1) : 1;
                     world.contactPair(col, other, (man, flipped) => {
                         // a pair the solver does not push (a player's capsule; nailed pieces) did
                         // nothing, whatever impulse its manifold still holds
@@ -308,7 +388,7 @@ export class StressMeter {
                         const ct = col.translation();
                         const cq = col.rotation();
                         for (let k = 0; k < man.numContacts(); k++) {
-                            const jn = man.contactImpulse(k);
+                            const jn = man.contactImpulse(k) * scale;
                             if (!(jn > 0)) continue;
                             const lp = flipped ? man.localContactPoint2(k) : man.localContactPoint1(k);
                             if (!lp) continue;

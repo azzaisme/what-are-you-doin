@@ -38,6 +38,13 @@ limits are an 8 mm spike in C24 softwood, taken from EN 1995-1-1.
     - the contact at a joint's own faces, within 0.6 m of its nails, is part of the joint. Rapier's
       joint and contact fight over the same faces: a seated beam end read 18 kN of joint pulling
       against 20 kN of contact pushing. Only their sum is the joint's;
+    - a loose piece lying on a nailed one (a log, a plank, the bucket) presses with what its own
+      momentum says, not with Rapier's reported impulse. That impulse also holds Rapier's
+      penetration correction, which moves nothing. The nailed deck's quiver keeps that correction
+      busy: a still 1109 N log read about 1450 N, and the anchors carried 22.6 % too much. Each
+      loose piece touching a jointed one has its reported contact impulses scaled to
+      m dv - m g dt, along their sum. They are only ever scaled down, so an impact, which moves the
+      piece, reads as reported;
     - where that does not pin down each joint's share, the share is the elastic one (Menabrea:
       least sum F^2/2k), using the same stiffnesses the joints' springs have;
     - each joint's force and moment split into: bearing on its faces (the timber carries it);
@@ -116,6 +123,26 @@ limits are an 8 mm spike in C24 softwood, taken from EN 1995-1-1.
       8 cm. That is right for a 36 kg beam on gravel with a 60 kg beaver stepping onto its end;
     - the gate's builder spreads four nails across each beam's near end and two across each far
       end.
+
+### Loose loads on the bridge (`loose-loads.test.ts`, found building the #51 overlay)
+
+The yard bridge, nailed at both ends, with a deck plank nailed across it mid-span. Each load lies
+on the deck. The four anchors' upward force is averaged over a second, against the weight of
+everything on them:
+
+| Load                     | Anchors hold     | Error   |
+| ------------------------ | ---------------- | ------- |
+| Nothing                  | 944 N of 951 N   | -0.7 %  |
+| The log (1109 N)         | 2054 N of 2061 N | -0.3 %  |
+| A loose plank (235 N)    | 1186 N of 1187 N | -0.1 %  |
+| The bucket, full (113 N) | 1059 N of 1064 N | -0.5 %  |
+| The log, unscaled        | 2527 N of 2061 N | +22.6 % |
+
+A log dropped 1.5 m onto mid-span, far from every nail, peaks at 0.152 utilization and 1983 N of
+joint force. Unscaled, it peaks at 0.150 and 1954 N: the rescale hides no impact. Every number the
+other joint tests log (`breaking`, `joints`, `joints-sleep` and `yard-bridge`, 47 readings) is the
+same as before, to the last digit. That includes the four beavers (2356 N against 2354 N), the
+ute's 0.20, and the 1.5 m drop by the seats (0.128).
 
 ### #115's claims, measured again
 
