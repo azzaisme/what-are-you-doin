@@ -58,13 +58,15 @@ Add three repository secrets (Settings → Secrets and variables → Actions):
 The next release builds them in. They end up in the published game (every browser needs them), so
 use a free or capped plan. A guest uses about 12 KB/s, roughly 45 MB an hour.
 
-- The browser tests use software rendering on the GitHub runner, so they take about 10–15 minutes.
-  If one fails, the run uploads its screenshots and traces as `playwright-results`.
+- CI runs the checks, unit tests and build. It does not run the browser tests: on the runner's
+  software rendering they outgrew the job's time limit. The full browser suite
+  (`npx playwright test --trace off`) runs during development, before a branch is pushed for review
+  (see `AGENTS.md`).
 
 ## Embed checks (what itch's iframe needs)
 
 itch.io shows the game in a cross-origin iframe on its own page. `tests/e2e/embed.spec.ts` plays
-the game the same way on every pull request into `main`:
+the game the same way; it is part of the browser suite run before every push for review:
 
 - A stand-in itch page on one host frames the game on another.
 - The iframe grants `autoplay; fullscreen *; gamepad`: the features the game uses. This wasn't

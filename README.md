@@ -128,8 +128,9 @@ npm run test:e2e     # 9 Playwright browser tests against the production build (
 npm run check        # typecheck + lint + unit tests + build
 ```
 
-Merging into `main` runs all of these in GitHub Actions and releases the build to itch.io
-([`docs/releasing.md`](docs/releasing.md)).
+Pull requests into `main` run everything except the browser tests in GitHub Actions, and merging
+releases the build to itch.io ([`docs/releasing.md`](docs/releasing.md)). Run `npm run test:e2e`
+yourself before pushing a branch for review: CI doesn't.
 
 Measurement and evidence scripts:
 
