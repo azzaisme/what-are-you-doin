@@ -59,8 +59,9 @@ type Lab = {
     };
     placeUte(x: number, z: number, yaw?: number): boolean;
     audio(): { started: boolean; context: string; played: number; recent: string[]; loops: Record<string, number> };
+    standStatic(): Promise<{ drawn: string; trunk: number }[][]>;
     wood(): {
-        trees: { phase: string; cut: number }[];
+        trees: { phase: string; cut: number; lean: number; tiltX: number; tiltZ: number }[];
         sawmill: { phase: string; stopped: string; mode: string; taken: number; planks: number } | null;
     };
 };
@@ -1589,20 +1590,40 @@ test('the falling tree in the Timber Yard: a bite with the ute by the stand, and
     });
     await page.waitForTimeout(1500);
     await page.screenshot({ path: 'test-results/falling-tree-crack.png' });
-    // the tell: the static tree is gone and the marker draws it, leaning further over time
-    const t0 = await lab(page, (l) => l.hazards().tick);
-    await page.waitForFunction(
-        (t) => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().tick >= t + 5 * 60,
-        t0,
-        { timeout: 120_000 }
-    );
+    // the tell: the static tree is gone and the marker draws it, leaning further over time. Step
+    // the sim 5 s on by ticks (seek: a slow software renderer can take minutes of real time for
+    // it), then let the voxel frame catch up
+    const lean0 = (await lab(page, (l) => l.wood())).trees[1];
+    await lab(page, (l) => l.seek(l.hazards().tick / 60 + 5));
+    await page.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.voxelIdle(), null, {
+        timeout: 120_000
+    });
+    await page.waitForTimeout(1000);
     // 5 s into the 7 s tell
     expect(await lab(page, (l) => l.hazards().tree)).toBe(1);
-    await page.waitForTimeout(1500);
     await page.screenshot({ path: 'test-results/falling-tree-leaning.png' });
+    const lean1 = (await lab(page, (l) => l.wood())).trees[1];
+    // the lean, in the browser: most of the way into it, and tilted towards the ute (east, +x)
+    // well past the tree's own lean (none for tree 1)
+    expect(lean1.phase).toBe('standing');
+    expect(lean1.lean).toBeGreaterThan(0.6);
+    expect(lean1.lean).toBeGreaterThan(lean0.lean);
+    expect(lean1.tiltX).toBeGreaterThan(0.1);
+    expect(Math.abs(lean1.tiltZ)).toBeLessThan(0.02);
+    // the static tree is gone from every worker lane (its marker draws it), its trunk cell empty
+    // (lanes that draw no stand, such as a far lattice, list none)
+    const lanes = (
+        await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.standStatic())
+    ).filter((l) => l.length > 0);
+    expect(lanes.length).toBeGreaterThan(0);
+    for (const stand of lanes) {
+        expect(stand[1]).toEqual({ drawn: 'none', trunk: 0 });
+        // a neighbour still stands in the static layer
+        expect(stand[3].drawn).toBe('standing');
+        expect(stand[3].trunk).not.toBe(0);
+    }
     const cells1 = (await lab(page, (l) => l.stats())).dynamicCells;
     // a whole tree's worth of moving cells (at 10 cm: its trunk and four needle tiers)
     expect(cells1 - cells0).toBeGreaterThan(1000);
-    expect((await lab(page, (l) => l.wood())).trees[1].phase).toBe('standing');
     expect(problems).toEqual([]);
 });
