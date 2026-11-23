@@ -84,6 +84,57 @@ exactly in every scene.
 - With `?props=scripted` the River Lab leaves the spare planks, beams, logs, crates and the ragdoll
   piled at the origin, in the river, where they show above the water. To be fixed with #110.
 
+## Epic 8: a tree falls towards the ute (2026-11-22, #74)
+
+The logging stand can now fight back. Take a bite out of a stand tree with the ute parked close
+by, and the pine leans towards the ute.
+
+- **When:** a player bites or chops a stand tree while the ute stands within 5.5 m of it (trunk to
+  the ute's nearer end). Only a fresh bite or blow sets it off: a tree cut a little during the quiet
+  start, or left half cut, says nothing until someone cuts it again.
+- **The tell:** at that bite, a crack (a snap and a low creak) and a toast: "The pine is leaning
+  towards the ute! Move the ute, or cut from its side so it falls away." Then the whole tree leans
+  over towards the ute, to 0.2 rad (about 11°, its top moving about 1.4 m) over the tell, with a
+  shake, and sheds needles on that side every half second with a creak each time. It stays leaning
+  until it falls, and stands back up if the ute is moved out of reach or the hazard is given up.
+  The voxel worker takes the static tree away while the tree's marker draws it tilted, from its
+  channels in the snapshots, so a guest sees it too. Tested on the host and the guest (the drawn
+  crown moves towards the ute and further over time), in the worker (taken away, put back), and
+  in a browser test with a screenshot of the lean.
+- **Time to react: 7 s.** The tree can't fall sooner, however fast it is chewed: it hangs on its
+  last fibres, and the next bite after the tell fells it. Measured by input: from the crack, a
+  player at the tree walks to the ute, gets in and drives it out of reach in 5.0 s. The other 2 s
+  are for reading the toast.
+- **What happens:** while the ute is in reach, the tree's weight shifts towards the ute: its own
+  lean is replaced by a lean of 0.035 rad towards the ute.
+    - Cut from the far side, it comes down on the ute (tested: within 10°, on tree 1 and on the
+      leaning trees 0, 2 and 5).
+    - Cut square to the ute, it is pulled round towards it (tested: about 63° from the ute, at
+      least 20° nearer than the same cut with no hazard).
+- **Counterplay, true of every tree in the stand, each tested by player input:**
+    - **Cut from the ute's side:** the cut's push (0.07) beats the lean, whatever the tree's own
+      lean, so it falls straight away from the ute. Tested on all six trees, the leaning ones too:
+      more than 160° from the ute.
+    - **Move the ute:** at the crack, walk to the ute, drive it out of reach, walk back and finish
+      the tree. It falls as the same cut does with no hazard (tested: within 5°).
+    - **A rope** waits for ropes.
+- **Budget, tested so that removing each check fails a test:**
+    - not in the first 20 s;
+    - not within 60 s of the last one ending, even once the 15 s quiet spell is over (a cut 20 s
+      after gives nothing; the second cracks on the first bite after the 60 s);
+    - at most two (a third tree cut after another 60 s gives nothing);
+    - none while another hazard runs (a tree cut during the flood's warning brings nothing).
+- **Online, tested:** the guest gets the toast (and so the crack, which plays from it), sees the
+  tree lean over towards the ute and the trunk come down on it, all in the host's snapshots. A
+  guest who joins mid-tell sees the lean but missed the toast.
+- **The creak at 70% cut** names no direction while the hazard pulls the tree, because the ute
+  could still move ("The pine creaks: stand clear!").
+- **Playtest log:** the summary counts falling trees, and the script says what to watch for.
+- **Code:** `src/sim/hazard-tree.ts`, with three small hooks in the forestry (an extra lean on a
+  fall, a hold on it, the lean on the marker), four more marker channels, the leaning tree drawn
+  by the stand marker (`src/assets/forestry.ts`) while the worker leaves it out of the static layer,
+  the needles in `src/fx/wood-fx.ts`, a few lines in the director, and a `placeUte` test hook.
+
 ## Epic 5, part 1: nails and the joint graph (2026-11-22)
 
 You can now nail timber together, or nail it down to stone and ground. In the Timber Yard you can
