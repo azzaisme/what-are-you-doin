@@ -527,7 +527,9 @@ describe('placed setup: the player, put beside each beam, shoulders it onto a wh
             ease(-0.25, 40, (v) => (pitch = v), pitch);
             step({}, 30);
             ease(0, 120, (v) => (yaw = v), yaw);
-            goTo(lines[b], BRIDGE.nearEdge + 0.4);
+            // (a step closer to the gap than the near-end-only build stood: the beam goes down where
+            // you stand, and from here it reaches 20 cm onto its far seat, enough to nail that end)
+            goTo(lines[b], BRIDGE.nearEdge + 0.28);
             ease(-0.7, 40, (v) => (pitch = v), pitch);
             step({}, 30);
             step({ grab: true });
@@ -555,12 +557,44 @@ describe('placed setup: the player, put beside each beam, shoulders it onto a wh
         }
         expect(s.joints.graph.size).toBe(2);
         expect(s.joints.graph.nailCount).toBe(4);
+        // then the far ends, from the far bank (put there: setup), two nails each, with F
+        for (let b = 0; b < 2; b++) {
+            const beam = beams[b];
+            // two nails 8 cm apart along it, 6 and 14 cm in from its end: both over the seat
+            const end = beam.pose.p.z - 1.6;
+            expect(BRIDGE.farFace - end).toBeGreaterThan(0.15);
+            const at = { x: beam.pose.p.x, y: beam.pose.p.y + 0.1, z: end + 0.06 };
+            yaw = Math.PI; // facing +z, back over the creek
+            pitch = 0;
+            s.placePlayer(at.x, at.z - 1.2, yaw);
+            step({}, 30);
+            const near = () => s.player.y + EYE_HEIGHT - at.y;
+            for (let i = 0; i < 300 && Math.hypot(at.x - s.player.x, at.z - s.player.z) > 0.55 * near(); i++)
+                step({ moveZ: 0.3 });
+            step({}, 20);
+            const eye = { x: s.player.x, y: s.player.y + EYE_HEIGHT, z: s.player.z };
+            ({ yaw, pitch } = aim(eye, at));
+            step({}, 3);
+            expect(s.interactionIds(0).nail, `far end of beam ${b}: ${JSON.stringify(s.nailPreview(0))}`).toBe(1);
+            step({ action: ACTION_NAIL });
+            ({ yaw, pitch } = aim(eye, { ...at, z: at.z + 0.08 }));
+            step({}, 3);
+            expect(
+                s.interactionIds(0).nail,
+                `far end of beam ${b}, second nail: ${JSON.stringify(s.nailPreview(0))}`
+            ).toBe(1);
+            step({ action: ACTION_NAIL });
+            yaw = Math.PI;
+            pitch = 0;
+            step({}, 10);
+        }
+        expect(s.joints.graph.size).toBe(4);
+        expect(s.joints.graph.nailCount).toBe(8);
         expect(s.progress.falls).toBe(0);
         for (const c of s.joints.graph.connections()) expect(c.b).toBe(GROUND);
-        // nailed down: a hard sideways shove (a tyre walking it) for a second barely moves either
-        // beam (#115 said under 1 cm, with its stiff 200 kN m/rad turn spring; two nails 8 cm apart
-        // hold a turn flat by their couple alone, 9.6 kN m/rad, so the beam swings a little on
-        // them, its far end sliding on its seat: 13 mm)
+        // nailed down at both ends, a hard sideways shove (a tyre walking it) for a second barely
+        // moves either beam. (Nailed at one end only, a beam swings on its two nails' couple: the
+        // next test.)
         const before = beams.map((b) => ({ ...b.pose.p }));
         for (let k = 0; k < 60; k++) {
             for (const b of beams) s.physics.bodies.get(b.id)!.body.applyImpulse({ x: 400 / 60, y: 0, z: 0 }, true);
@@ -569,11 +603,50 @@ describe('placed setup: the player, put beside each beam, shoulders it onto a wh
         beams.forEach((b, i) => {
             const d = Math.hypot(b.pose.p.x - before[i].x, b.pose.p.y - before[i].y, b.pose.p.z - before[i].z);
             console.log(
-                `placed setup, beams nailed with F: beam ${i} moved ${(d * 1000).toFixed(1)} mm under a 400 N shove`
+                `placed setup, beams nailed at both ends with F: beam ${i} moved ${(d * 1000).toFixed(1)} mm under a 400 N shove`
             );
-            expect(d).toBeLessThan(0.02);
+            expect(d).toBeLessThan(0.01);
         });
     }, 120_000);
+
+    it('nailed at its near end only, a beam swings on its two nails under a held shove: the spring statics, both ways', async () => {
+        const { yardBridge } = await import('./bridge-helpers.ts');
+        const { neutralCommand } = await import('../../src/sim/commands.ts');
+        const { s, beams } = yardBridge([1], 2);
+        const step = () => s.step(neutralCommand(s.tick + 1));
+        // the far seat made frictionless: the nails' spring alone holds the turn. (With its
+        // friction the answer depends on how long the push is held: near its limit Rapier's
+        // friction creeps under a steady sideways load, a known limit, docs/progress.md)
+        const world = s.physics.world;
+        for (const b of beams)
+            for (const col of s.physics.bodies.get(b.id)!.colliders)
+                world.contactPairsWith(col, (other) => {
+                    if (!s.physics.bodyOfCollider(other.handle) && other.translation().z < b.pose.p.z)
+                        other.setFriction(0);
+                });
+        for (let k = 0; k < 60; k++) step();
+        const before = beams.map((b) => ({ ...b.pose.p }));
+        // 400 N at each beam's middle, grown over a second and held two more: the beam turns about
+        // its nails until their couple (K_ser x sum(lever^2 + r^2)) holds the push's moment
+        for (let k = 0; k < 180; k++) {
+            const f = 400 * Math.min(1, k / 60);
+            for (const b of beams) s.physics.bodies.get(b.id)!.body.applyImpulse({ x: f / 60, y: 0, z: 0 }, true);
+            step();
+        }
+        beams.forEach((b, i) => {
+            const pb = s.physics.bodies.get(b.id)!;
+            const d = Math.hypot(b.pose.p.x - before[i].x, b.pose.p.z - before[i].z);
+            const c = [...s.joints.graph.connections()].find((x) => x.a === b.id)!;
+            const P = s.joints.stress.anchorWorld(c);
+            const arm = Math.abs(pb.body.worldCom().z - P[2]);
+            const k = s.joints.springs(c.id)!.twist;
+            const statics = ((400 * arm) / k) * arm;
+            console.log(
+                `nailed at one end: beam ${i} swung ${(d * 1000).toFixed(1)} mm under a held 400 N shove (the nails' spring alone: ${(statics * 1000).toFixed(1)} mm, ${(k / 1000).toFixed(1)} kN m/rad at ${arm.toFixed(2)} m)`
+            );
+            expect(Math.abs(d - statics)).toBeLessThan(0.15 * statics);
+        });
+    }, 60_000);
 });
 
 describe('hammer refusals and limits (#48 audit)', () => {
@@ -854,10 +927,19 @@ describe('joint stiffness (#47 audit)', () => {
         expect(one.nails).toBe(1);
         expect(four.nails).toBe(4);
         expect(one.k).toBe(NAIL.anchorStiffness * NAIL.slipModulus * NAIL.lever ** 2);
-        expect(four.k / one.k).toBeGreaterThan(4);
         console.log(
             `sideways 50 N at the tip: one nail turns ${(one.turn * 1000).toFixed(2)} mrad (M/k ${((one.M / one.k) * 1000).toFixed(2)}), four nails ${(four.turn * 1000).toFixed(2)} mrad (M/k ${((four.M / four.k) * 1000).toFixed(2)})`
         );
+        // the ratio as simulated, under loads that turn them well over: one nail at 100 N (a
+        // seventh of a radian), four at 400 N. How much stiffer four nails are, read from turns
+        // (M / turn), is the couple's ratio (sum(lever^2 + r^2), four against one)
+        const oneBig = sideways(1, 100);
+        const fourBig = sideways(4, 400);
+        const measured = fourBig.M / fourBig.turn / (oneBig.M / oneBig.turn);
+        console.log(
+            `one nail at 100 N turns ${(oneBig.turn * 1000).toFixed(1)} mrad, four at 400 N ${(fourBig.turn * 1000).toFixed(1)} mrad: four are ${measured.toFixed(1)} x as stiff (the couples: ${(four.k / one.k).toFixed(1)} x)`
+        );
+        expect(Math.abs(measured / (four.k / one.k) - 1)).toBeLessThan(0.15);
         for (const r of [one, four]) {
             expect(r.turn).toBeGreaterThan(0.9 * (r.M / r.k));
             expect(r.turn).toBeLessThan(1.1 * (r.M / r.k));

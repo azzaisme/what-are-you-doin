@@ -282,8 +282,10 @@ export class JointSystem {
                 tick
             });
             if (conn) this.makeJoint(conn, A, B);
-            A.nailed = true;
-            if (B) B.nailed = true;
+            for (const pb of B ? [A, B] : [A]) {
+                pb.nailed = true;
+                pb.body.setAdditionalSolverIterations(NAIL.solverIterations);
+            }
         }
         for (const id of [pv.a, pv.b]) if (id >= 0) this.pw.releaseAll(id);
         return pv;
@@ -331,7 +333,6 @@ export class JointSystem {
         // that roll is its stone seat's contact's to hold anyway. (Timber to timber the joint
         // stands in for the faces, so it keeps its full bedding.)
         const A = this.pw.bodies.get(c.a)?.body;
-        const B = c.b === GROUND ? null : this.pw.bodies.get(c.b)?.body;
         const f = A ? quatMul(A.rotation(), j.frameX1()) : null;
         const set: number[] = [];
         for (const [axis, k0, e] of [
@@ -341,10 +342,9 @@ export class JointSystem {
         ] as const) {
             let k = k0;
             if (A && f && c.b === GROUND) {
+                // (into stone: the piece alone turns)
                 const u = quatRotate(f, e[0], e[1], e[2], vec3());
-                const ia = inertiaAbout(A, u);
-                const ieff = B ? (ia * inertiaAbout(B, u)) / (ia + inertiaAbout(B, u)) : ia;
-                k = Math.min(k, ieff * MAX_RING * MAX_RING);
+                k = Math.min(k, inertiaAbout(A, u) * MAX_RING * MAX_RING);
             }
             set.push(k);
             proto.configureMotorModel.call(j, axis, RAPIER.MotorModel.ForceBased);
@@ -394,6 +394,7 @@ export class JointSystem {
             if (!pb) continue;
             pb.body.wakeUp();
             pb.nailed = this.graph.of(b).length > 0;
+            pb.body.setAdditionalSolverIterations(pb.nailed ? NAIL.solverIterations : 0);
         }
         return c;
     }

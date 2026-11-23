@@ -78,7 +78,16 @@ export const NAIL = {
     angularDamping: 0.005,
     /** Relative stiffness of a joint: timber to timber flexes more than a spike into stone. */
     stiffness: 0.8,
-    anchorStiffness: 1
+    anchorStiffness: 1,
+    /**
+     * Extra solver iterations a nailed piece gets (Rapier's per-body count, on top of the world's
+     * 4). The timber springs are stiff for a 24 kg plank's roll at a 60 Hz step, and with the
+     * world's iterations the solve left a residue that kept an 8-plank deck quivering (up to 1.3
+     * rad/s) and awake forever, at about 1.2 ms a step; under a 113 kg crate it walked the crate
+     * 5.4 cm in 10 s. With 24 more the same deck sleeps within 3 s, idle or under the crate. The
+     * cost is paid only while the deck is awake.
+     */
+    solverIterations: 24
 } as const;
 
 /**

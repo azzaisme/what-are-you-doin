@@ -511,9 +511,13 @@ describe('the tipping spring, both ways (#49)', () => {
 
     it('a cantilever at rest stays still and finite (prying it open: the statics test above)', () => {
         const { pw, pb, js } = cantilever(4, 0.25);
-        // (how fast it actually turns, step to step: Rapier's reported angular velocity of a body
-        // its joint and contacts hold still reads a steady 0.06 rad/s while it does not move)
+        // (how fast it actually turns, step to step, not Rapier's reported angular velocity: with
+        // the world's 4 solver iterations, a body its joint and contacts held still read a steady
+        // velocity of up to 0.032 rad/s while it did not move, very likely the solve's unconverged
+        // velocity, which the position correction then held in place. With a nailed piece's extra
+        // iterations (NAIL.solverIterations) it reads under 0.001 rad/s)
         let wmax = 0;
+        let reported = 0;
         let finite = true;
         let q0 = { ...pb.body.rotation() };
         for (let i = 0; i < 300; i++) {
@@ -522,13 +526,25 @@ describe('the tipping spring, both ways (#49)', () => {
             const q = pb.body.rotation();
             const t = pb.body.translation();
             finite &&= [q.x, q.y, q.z, q.w, t.x, t.y, t.z].every(Number.isFinite);
-            const dot = Math.min(1, Math.abs(q.x * q0.x + q.y * q0.y + q.z * q0.z + q.w * q0.w));
-            if (i >= 120) wmax = Math.max(wmax, 2 * Math.acos(dot) * 60);
+            // the turn since the last step: 2 asin |vector part of q0* q| (acos of their dot, near
+            // 1 in f32, floors at about 0.03 rad/s)
+            const rx = q0.w * q.x - q0.x * q.w - q0.y * q.z + q0.z * q.y;
+            const ry = q0.w * q.y + q0.x * q.z - q0.y * q.w - q0.z * q.x;
+            const rz = q0.w * q.z - q0.x * q.y + q0.y * q.x - q0.z * q.w;
+            const turn = 2 * Math.asin(Math.min(1, Math.hypot(rx, ry, rz)));
+            if (i >= 120) {
+                wmax = Math.max(wmax, turn * 60);
+                const w = pb.body.angvel();
+                reported = Math.max(reported, Math.hypot(w.x, w.y, w.z));
+            }
             q0 = { ...q };
         }
-        console.log(`cantilever at rest: angular speed up to ${wmax.toFixed(4)} rad/s from 2 s on`);
+        console.log(
+            `cantilever at rest: angular speed up to ${wmax.toFixed(4)} rad/s from 2 s on (Rapier reports up to ${reported.toFixed(4)} rad/s)`
+        );
         expect(finite).toBe(true);
-        expect(wmax).toBeLessThan(0.05);
+        expect(wmax).toBeLessThan(0.005);
+        expect(reported).toBeLessThan(0.005);
         expect(js.graph.size).toBe(1);
     });
 

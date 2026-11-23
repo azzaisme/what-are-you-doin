@@ -175,6 +175,11 @@ export const CHARACTER = {
 
 /** What a character's feet rest on: a ball at the bottom of its capsule, a little wider. */
 const FOOT = new RAPIER.Ball(CHARACTER.radius + 0.02);
+/**
+ * A controller contact whose normal points up more than this is a step onto a piece, not a shove
+ * against its side (normal1.y: 0 a wall, 1 a floor; 0.7 is 45 degrees).
+ */
+const SHOVE_MAX_UP = 0.7;
 /** All of a character, a little wider: what it brushes against. */
 const BODY = new RAPIER.Capsule(CHARACTER.half + 0.05, CHARACTER.radius + 0.05);
 const _v = { x: 0, y: 0, z: 0 };
@@ -675,14 +680,24 @@ export class PhysicsWorld {
         // what the controller's move pushed into each body under the feet (it pushes every one)
         // the controller's push down on what is under the feet is replaced by the weight (below):
         // taken back here, its turn too (pushing at its own contact points, it rocked the deck
-        // and walked a loose plank along it); its push sideways (shoving a loose piece) stays
-        // (standing still, none at all: pressing down on a neighbour's edge, it shoved it sideways)
-        const walking = Math.hypot(wishX, wishZ) > 0.05;
+        // and walked a loose plank along it); its push sideways stays only for a loose piece it
+        // walked into from the side, a shove. Stepping onto a loose beam's end (its contact facing
+        // up, n.y 0.83 to 0.92) walked the 36 kg beam 10 cm along at a stroll; standing still,
+        // pressing down on a neighbour's edge, it shoved it sideways
+        // what the controller walked into from the side (a shove), not stepped onto
+        const shoved = new Set<PhysBody>();
+        if (Math.hypot(wishX, wishZ) > 0.05)
+            for (let i = 0; i < k.numComputedCollisions(); i++) {
+                const c = k.computedCollision(i);
+                const pb = c?.collider ? this.byCollider.get(c.collider.handle) : undefined;
+                if (pb && c && c.normal1.y <= SHOVE_MAX_UP) shoved.add(pb);
+            }
         for (const u of under) {
             if (!this.stoodOn.has(u.pb.id)) this.stoodOn.set(u.pb.id, { pushed: 0, m: 0, x: 0, z: 0 });
             const v = u.pb.body.linvel();
-            u.pb.body.setLinvel(walking && !u.pb.nailed ? { x: v.x, y: u.v.y, z: v.z } : u.v, true);
-            u.pb.body.setAngvel(u.w, true);
+            // (the controller's push just woke it: nothing to wake here)
+            u.pb.body.setLinvel(shoved.has(u.pb) && !u.pb.nailed ? { x: v.x, y: u.v.y, z: v.z } : u.v, false);
+            u.pb.body.setAngvel(u.w, false);
         }
         const m = k.computedMovement();
         const t = body.translation();
@@ -785,7 +800,10 @@ export class PhysicsWorld {
             const t = b.worldCom();
             const at = st.m > 0 ? { x: st.x, y: t.y, z: st.z } : t;
             const j = -st.m * GRAVITY * SIM_DT - pushed;
-            if (j !== 0) b.applyImpulseAtPoint({ x: 0, y: j, z: 0 }, at, true);
+            // (no need to wake it: Rapier keeps a body a character stands on awake, so this never
+            // lands on a sleeping one, where it would wait in its velocity and drop all at once
+            // when it woke; joints-sleep.test.ts stands a beaver still on a beam for 8 s)
+            if (j !== 0) b.applyImpulseAtPoint({ x: 0, y: j, z: 0 }, at, false);
         }
         this.stoodOn.clear();
     }

@@ -38,6 +38,12 @@ const MIN_REACH = 0.02;
 export const FRICTION = 0.5;
 /** The time a connection's load is averaged over, for what it carries asleep (s). */
 const REST_MEAN = 0.25;
+/**
+ * A load whose mean moves more than the steadiness margin within this long keeps its pieces awake
+ * (s): Rapier lets a piece sleep after 2 s still, so a load growing slowly enough to lag its mean by
+ * less than the margin would otherwise be slept through.
+ */
+const DRIFT_TIME = 2;
 
 export interface JointLoad {
     /** Force the nails carry (N): their shear and withdrawal together. */
@@ -167,6 +173,13 @@ export class StressMeter {
     private readonly mean = new Map<number, JointLoad>();
     /** Jointed pieces whose loads are still settling: kept awake (before). */
     private readonly unsettled = new Set<number>();
+    /**
+     * Each connection's mean load as it was up to DRIFT_TIME ago, and until when its pieces are
+     * kept awake for having drifted from it (a load that grows slowly never jumps from its mean).
+     */
+    private readonly drift = new Map<number, { ref: JointLoad; since: number; until: number }>();
+    /** Steps measured (the meter's clock). */
+    private steps = 0;
     /** Loose pieces touching jointed ones: their velocity at the start of the step (before). */
     private readonly outside = new Map<number, { pb: PhysBody; vx: number; vy: number; vz: number }>();
     /** Scale loose pieces' contact impulses to their momentum (rescale; off only to show why, in tests). */
@@ -205,7 +218,9 @@ export class StressMeter {
             // cycle of its springs and contacts that walked a loose plank off it at 1.5 cm/s
             // so a piece is kept awake while its joints' loads are still settling, and let sleep once
             // they are steady
-            if (b.isSleeping() && this.unsettled.has(pb.id)) b.wakeUp();
+            // (woken every step, not once asleep: that restarts Rapier's sleep timer, so it does
+            // not nap a step every half second while its load creeps up)
+            if (this.unsettled.has(pb.id)) b.wakeUp();
             // (read from its first step awake: what wakes it, a log landing on it, is a load)
             if (b.isSleeping()) continue;
             const v = b.linvel();
@@ -298,6 +313,7 @@ export class StressMeter {
         // connections gone since: forget them
         for (const id of [...this.loads.keys()]) if (!this.graph.get(id)) this.loads.delete(id);
         for (const id of [...this.mean.keys()]) if (!this.graph.get(id)) this.mean.delete(id);
+        for (const id of [...this.drift.keys()]) if (!this.graph.get(id)) this.drift.delete(id);
         // asleep, a connection carries what it carried on average as it came to rest (its last
         // step alone may be a settling wobble: a cantilever that slept on one read 11 % short)
         for (const c of this.graph.connections()) {
@@ -441,15 +457,29 @@ export class StressMeter {
             return null;
         });
         if (capped) x = this.solve(rows, r, index, com, conns, frictions, frictionFixed);
+        this.steps++;
         conns.forEach((c, k) => {
             const l = this.split(c, x, 6 * k);
             this.loads.set(c.id, l);
             this.average(c.id, l);
-            // still changing (by 2 % of the piece's weight from its mean)? keep its pieces awake
+            // still changing (by 2 % of the piece's weight from its mean, or its mean by as much
+            // within DRIFT_TIME)? keep its pieces awake
             const m = this.mean.get(c.id)!;
             const w = 0.02 * (this.pw.bodies.get(c.a)?.body.mass() ?? 1) * GRAVITY;
-            const steady =
-                Math.hypot(l.fx - m.fx, l.fy - m.fy, l.fz - m.fz) < w && Math.abs(l.moment - m.moment) < 0.1 * w;
+            const near = (a: JointLoad, b: JointLoad) =>
+                Math.hypot(a.fx - b.fx, a.fy - b.fy, a.fz - b.fz) < w && Math.abs(a.moment - b.moment) < 0.1 * w;
+            const span = Math.round(DRIFT_TIME / SIM_DT);
+            let d = this.drift.get(c.id);
+            if (!d) this.drift.set(c.id, (d = { ref: { ...m }, since: this.steps, until: 0 }));
+            if (!near(m, d.ref)) {
+                d.ref = { ...m };
+                d.since = this.steps;
+                d.until = this.steps + span;
+            } else if (this.steps - d.since >= span) {
+                d.ref = { ...m };
+                d.since = this.steps;
+            }
+            const steady = near(l, m) && this.steps >= d.until;
             for (const id of [c.a, c.b])
                 if (id !== GROUND) {
                     if (steady) this.unsettled.delete(id);

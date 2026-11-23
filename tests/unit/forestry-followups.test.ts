@@ -410,9 +410,6 @@ function walkOver(g: Play, planks: { pose: { p: { y: number } } }[]): void {
     // (player 1 first stands back further, off player 0's way to the bridge end: walked into, a
     // player is shoved)
     g.walkTo(1, BRIDGE_X + 3, BRIDGE.nearEdge + 5.5);
-    // (round the yard's beams' east end, as the other walks go: straight there, player 0 stepped
-    // onto the end of a loose one and, its weight on it, shoved it 8 cm)
-    g.walkTo(0, 0.2, 3.0);
     g.walkTo(0, BRIDGE_X, BRIDGE.nearEdge + 1.2);
     g.turn(0, 0);
     let topY = 0;
@@ -517,10 +514,12 @@ describe('beams by player input', () => {
             expect(Math.abs(b.pose.p.z - BRIDGE.zc)).toBeLessThan(0.3);
             expect(b.pose.p.y).toBeGreaterThan(YARD_Y);
         }
-        // and the yard's beams were never used
+        // and the yard's beams were never used (walked past and over their ends, not shoved)
         ['beam-0', 'beam-1'].forEach((n, i) => {
             const p = g.entity(n).pose.p;
-            expect(Math.hypot(p.x - yardBeams[i].x, p.z - yardBeams[i].z)).toBeLessThan(0.05);
+            const moved = Math.hypot(p.x - yardBeams[i].x, p.z - yardBeams[i].z);
+            console.log(`the yard's ${n} moved ${(moved * 1000).toFixed(1)} mm`);
+            expect(moved).toBeLessThan(0.05);
         });
     }, 300_000);
 });

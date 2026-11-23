@@ -1,8 +1,10 @@
 /**
- * Loose loads on a nailed bridge (Epic 5, #49): a log, a plank or the bucket lying on the bridge
- * weighs what it weighs. Rapier's reported contact impulses also hold its penetration correction,
- * which the nailed deck's quiver keeps busy: read as they are, a still log weighed 1.3 x and the
- * anchors carried 26 % too much. The meter scales a loose piece's contacts to its own momentum.
+ * Loose loads on a nailed bridge (Epic 5, #49): a log, a plank or the bucket on the bridge weighs
+ * what it weighs. Rapier's reported contact impulses also hold its penetration correction, which
+ * moves nothing. While the nailed deck quivered (before its pieces got their extra solver
+ * iterations, NAIL.solverIterations) that kept a still log reading 1.3 x its weight. Now a still
+ * load reads true as reported; a moving one does not (a log rolling along the beams reads 20 %
+ * heavy), so the meter scales a loose piece's contacts to its own momentum.
  */
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -24,33 +26,40 @@ const byName = (s: LabSim, n: string) => s.entities.find((e) => e.name === n)!;
 const massOf = (s: LabSim, id: number) => s.physics.bodies.get(id)!.body.mass();
 
 /**
- * The yard bridge (nailed at both ends), a deck plank nailed across it mid-span, and `load` laid
- * on it: what the four anchors hold up, averaged over a second once it has settled, against the
- * weight of everything on them.
+ * The yard bridge (nailed at both ends) with `planks` deck planks nailed across it mid-span (one,
+ * or a deck of eight), and `load` laid on it: what the four anchors hold up, averaged over a
+ * second once it has settled, against the weight of everything on them.
  */
-function weigh(load: 'log' | 'plank' | 'bucket' | 'none', rescale = true) {
+function weigh(load: 'log' | 'plank' | 'bucket' | 'none', planks: 1 | 8, rescale = true) {
     const { s, beams } = yardBridge([1, -1], 2);
     s.joints.stress.rescaleLoose = rescale;
     const top = Math.max(...beams.map((b) => b.pose.p.y)) + 0.075;
     const zc = BRIDGE.zc;
-    const deck = byName(s, 'extra-plank-0');
-    s.physics.place(deck.id, pose(BRIDGE_X, top + 0.06, zc, quatFromYawPitchRoll(0, Math.PI / 2, 0)));
+    const deck = Array.from({ length: planks }, (_, k) => byName(s, `extra-plank-${k + 2}`));
+    const zs = deck.map((_, k) => zc + (k - (planks - 1) / 2) * 0.22);
+    deck.forEach((p, k) =>
+        s.physics.place(p.id, pose(BRIDGE_X, top + 0.06, zs[k], quatFromYawPitchRoll(0, Math.PI / 2, 0)))
+    );
     run(s, 40);
-    for (const x of LINES) hammerAt(s.joints, { x, y: top + 0.1, z: zc }, s.tick);
-    expect(s.joints.graph.size).toBe(6);
-    const pieces = [...beams.map((b) => b.id), deck.id];
+    for (const z of zs) for (const x of LINES) hammerAt(s.joints, { x, y: top + 0.1, z }, s.tick);
+    expect(s.joints.graph.size).toBe(4 + 2 * deck.length);
+    const pieces = [...beams.map((b) => b.id), ...deck.map((p) => p.id)];
     let loose = -1;
     // laid on the deck between the beams (a log or a plank across it, along the beams)
     if (load === 'log') {
         loose = byName(s, 'log').id;
-        s.physics.place(loose, pose(BRIDGE_X, top + 0.4, zc + 0.6, quatFromYawPitchRoll(0, 0, 0)));
+        s.physics.place(loose, pose(BRIDGE_X, top + 0.4, planks === 1 ? zc + 0.6 : zc, quatFromYawPitchRoll(0, 0, 0)));
     } else if (load === 'plank') {
         loose = byName(s, 'extra-plank-1').id;
-        s.physics.place(loose, pose(BRIDGE_X, top + 0.25, zc + 0.4, quatFromYawPitchRoll(0, Math.PI / 2, 0)));
+        s.physics.place(
+            loose,
+            pose(BRIDGE_X, top + 0.25, planks === 1 ? zc + 0.4 : zc, quatFromYawPitchRoll(0, Math.PI / 2, 0))
+        );
     } else if (load === 'bucket') {
         loose = s.bucket.id;
         s.physics.place(loose, pose(BRIDGE_X, top + 0.25, zc, quatFromYawPitchRoll(0, 0, 0)));
     }
+    const p0 = loose >= 0 ? { ...s.physics.bodies.get(loose)!.body.translation() } : null;
     run(s, 120);
     let held = 0;
     const anchors = [...s.joints.graph.connections()].filter((c) => c.b === GROUND);
@@ -60,26 +69,29 @@ function weigh(load: 'log' | 'plank' | 'bucket' | 'none', rescale = true) {
     }
     const weight = [...pieces, ...(loose >= 0 ? [loose] : [])].reduce((w, id) => w + massOf(s, id) * GRAVITY, 0);
     const looseW = loose >= 0 ? massOf(s, loose) * GRAVITY : 0;
-    // the load still lies on the bridge (not rolled off)
+    // the load still lies on the deck, and how far it went (a log rolls on the deck's slope)
+    let moved = 0;
     if (loose >= 0) {
         const p = s.physics.bodies.get(loose)!.body.translation();
         expect(p.y).toBeGreaterThan(top);
+        moved = Math.hypot(p.x - p0!.x, p.z - p0!.z);
     }
-    return { held, weight, looseW, err: (held - weight) / weight };
+    return { held, weight, looseW, err: (held - weight) / weight, moved };
 }
 
 describe('loose loads on a nailed bridge (#49)', () => {
     it('a log, a plank and the bucket lying on it: the anchors hold their weight, to 5 %', () => {
         const rows: string[] = [];
-        for (const load of ['none', 'log', 'plank', 'bucket'] as const) {
-            const w = weigh(load);
-            rows.push(
-                `${load}: anchors hold ${w.held.toFixed(0)} N of ${w.weight.toFixed(0)} N (${(100 * w.err).toFixed(1)} %; the load ${w.looseW.toFixed(0)} N)`
-            );
-            expect(Math.abs(w.err)).toBeLessThan(0.05);
-        }
+        for (const planks of [1, 8] as const)
+            for (const load of ['none', 'log', 'plank', 'bucket'] as const) {
+                const w = weigh(load, planks);
+                rows.push(
+                    `${planks === 1 ? 'one deck plank' : 'eight deck planks'}, ${load}: anchors hold ${w.held.toFixed(0)} N of ${w.weight.toFixed(0)} N (${(100 * w.err).toFixed(1)} %; the load ${w.looseW.toFixed(0)} N, moved ${(100 * w.moved).toFixed(1)} cm)`
+                );
+                expect(Math.abs(w.err)).toBeLessThan(0.05);
+            }
         console.log(rows.join('\n'));
-    }, 120_000);
+    }, 240_000);
 
     it('it hides no impact: a log dropped 1.5 m onto the deck mid-span peaks as it did unscaled', () => {
         const drop = (rescale: boolean) => {
@@ -110,10 +122,12 @@ describe('loose loads on a nailed bridge (#49)', () => {
         expect(Math.abs(on.force - off.force) / off.force).toBeLessThan(0.05);
     }, 60_000);
 
-    it('without the rescale the log reads heavy: it is what the test above catches', () => {
-        const w = weigh('log', false);
+    it('without the rescale, a log rolling along the beams reads heavy: it is what the test above catches', () => {
+        // (the one-plank deck: the log lies across the beams themselves, and rolls down their
+        // 6 % slope, about 75 cm over the two seconds)
+        const w = weigh('log', 1, false);
         console.log(
-            `log, contacts as reported: anchors hold ${w.held.toFixed(0)} N of ${w.weight.toFixed(0)} N (${(100 * w.err).toFixed(1)} %)`
+            `log rolling along the beams (${(100 * w.moved).toFixed(0)} cm), contacts as reported: anchors hold ${w.held.toFixed(0)} N of ${w.weight.toFixed(0)} N (${(100 * w.err).toFixed(1)} %)`
         );
         expect(w.err).toBeGreaterThan(0.05);
     }, 60_000);
