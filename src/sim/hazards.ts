@@ -239,6 +239,8 @@ export class HazardDirector {
     /** Weather along the level (Epic 9), and the crosswind's hold on each carried piece. */
     readonly weather: WeatherScheduler | null;
     private readonly windOver = new Map<number, number>();
+    /** Was weather (a hazard) on last tick? Its end starts a quiet spell. */
+    private weatherWas = false;
     /** Telemetry: the largest push the snow's crosswind gave (N). */
     lastWindForce = 0;
 
@@ -255,6 +257,7 @@ export class HazardDirector {
     reset(): void {
         this.weather?.reset();
         this.windOver.clear();
+        this.weatherWas = false;
         this.lastWindForce = 0;
         this.tree.reset();
         this.road?.reset();
@@ -612,7 +615,9 @@ export class HazardDirector {
             rand: (k) => rand(this.seed, k, 0)
         });
         if (said) this.say(h, said);
-        if (w.hazardBusy) this.quietFrom = tick + S(HAZARD.safeS);
+        // the quiet spell after it, from when it is over (while it runs, canStart waits for it)
+        if (this.weatherWas && !w.hazardBusy) this.quietFrom = Math.max(this.quietFrom, tick + S(HAZARD.safeS));
+        this.weatherWas = w.hazardBusy;
         const pw = h.physics;
         // the river (never at the same time as a flood: one hazard at a time)
         if (this.floodPhase === PHASE.idle && this.floodPending < 0) {

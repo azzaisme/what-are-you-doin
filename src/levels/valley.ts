@@ -1138,37 +1138,71 @@ const VALLEY_FORESTRY: ForestryDef = (() => {
  * track's mouth clunks over to "closed, down the track", and a barrier stands across the road and
  * its cleared verges at u = 22. Take the track, or shift the barrier.
  */
-export const CLOSURE_AT = { junction: 11, rejoin: 35.5, barrierU: 22, signU: 9, signT: 2.4 };
+export const CLOSURE_AT = { junction: 11, rejoin: 35.5, barrierU: 22, signU: 9, signT: 3.2 };
 
 /**
- * The old fence line the barrier stands in: posts across the valley floor at u = 22, from the
- * barrier's ends out to the terraced valley sides (|t| 18: their 0.3 m benches stop the ute), with
- * a gap where the logging track crosses (the log dump, beside the road, is part of the line). The
- * gaps (about 1.1 m) let a beaver squeeze through but not the ute: on foot, going round the barrier
- * is a way past; in the ute it is the track, or shift the barrier.
+ * The old fence line the barrier stands in: posts at u = 22, evenly spaced, from the barrier's ends
+ * out across the valley floor, with a top rail between them at 1.5 m. The gaps under the rail
+ * (1.1 m between posts) let a beaver through but not the ute: on foot, going round the barrier is
+ * a way past; in the ute it is the logging track (the line leaves a gap where the track crosses),
+ * or shift the barrier. Where something else already stops the ute (the log dump, a pine, the
+ * terraced valley sides), there is no post: every post holds the ute somewhere, and the rail runs
+ * only between neighbouring posts (tests/unit/road-closure.test.ts).
  */
-export const CLOSURE_POSTS = { spacing: 1.25, gap: 1.1, reach: 18, half: { x: 0.08, y: 0.5, z: 0.08 } };
+export const CLOSURE_POSTS = {
+    spacing: 1.25,
+    gap: 1.1,
+    half: { x: 0.08, y: 0.8, z: 0.08 },
+    /** The rail's height (its middle, m above the ground at the posts). */
+    rail: 1.52
+};
+/** The posts: the side (-1: left going up the road, +1: right) and how far out (m, from the road's centre). */
+export function closurePostSpots(): { side: number; a: number }[] {
+    const out: { side: number; a: number }[] = [];
+    const runs: [number, number, number][] = [
+        // left: from the barrier's end up the valley side, as far as the ute can climb (23 m out)
+        [-1, BARRIER_HALF.x + CLOSURE_POSTS.gap + CLOSURE_POSTS.half.x, 24],
+        // right: past the log dump out to the logging track (its own gap), and beyond it (the ute
+        // climbs to 20 m out on this side)
+        [1, 5.4, 22]
+    ];
+    const u = CLOSURE_AT.barrierU;
+    // no post where something else already holds the ute (found by driving at the line every 0.2 m,
+    // straight and at an angle, with each post taken out in turn, outermost first): the pine just
+    // beyond the line at t -9.5, the log dump and the pine at t 4.7, and the terraces' benches
+    const needless = [-23.98, -22.73, -21.48, -17.73, -16.48, -10.23, -8.98, 5.4, 7.9, 16.65, 17.9, 19.15, 21.65];
+    for (const [side, first, last] of runs)
+        for (let a = first; a <= last + 1e-6; a += CLOSURE_POSTS.spacing) {
+            if (nearestPath(SIDE_PATHS, u, roadT(u) + side * a, 1.6 + 0.4)) continue;
+            if (needless.some((v) => Math.abs(side * a - v) < 0.02)) continue;
+            out.push({ side, a });
+        }
+    return out;
+}
 function closurePosts(): StaticPiece[] {
     const u = CLOSURE_AT.barrierU;
     const t0 = roadT(u);
     const H = CLOSURE_POSTS.half;
     const out: StaticPiece[] = [];
-    for (const side of [-1, 1]) {
-        // the first post a squeeze past the barrier's end (on the +t side, past the log dump)
-        const first = side < 0 ? BARRIER_HALF.x + CLOSURE_POSTS.gap + H.x : 5.4;
-        for (let a = first; a <= CLOSURE_POSTS.reach; a += CLOSURE_POSTS.spacing) {
-            const t = t0 + side * a;
-            if (nearestPath(SIDE_PATHS, u, t, 1.6 + 0.4)) continue;
-            // a little crooked: old posts
-            const lean = 0.05 * Math.sin(a * 7.3 + side);
-            out.push(
-                piece('fence-post', boxS(H.x, H.y, H.z), u, groundUT(u, t) + H.y - 0.08, t, darkTimber, {
-                    yaw: 0.4 * Math.sin(a * 3.1),
-                    roll: lean
-                })
-            );
-        }
-    }
+    const spots = closurePostSpots();
+    const top = (a: number, side: number) => groundUT(u, t0 + side * a);
+    spots.forEach((p, i) => {
+        const t = t0 + p.side * p.a;
+        out.push(piece('fence-post', boxS(H.x, H.y, H.z), u, groundUT(u, t) + H.y - 0.1, t, darkTimber));
+        // the rail to the next post out on this side (an old rail, up to 5 m long), not across the track
+        const q = spots[i + 1];
+        if (!q || q.side !== p.side || q.a - p.a > 5.1) return;
+        if (nearestPath(SIDE_PATHS, u, t0 + (p.side * (p.a + q.a)) / 2, 1.6 + 0.4)) return;
+        const y0 = top(p.a, p.side) + CLOSURE_POSTS.rail;
+        const y1 = top(q.a, q.side) + CLOSURE_POSTS.rail;
+        const tm = t0 + (p.side * (p.a + q.a)) / 2;
+        out.push(
+            piece('fence-rail', boxS((q.a - p.a) / 2 + H.x, 0.04, 0.05), u, (y0 + y1) / 2, tm, darkTimber, {
+                roll: Math.atan2(p.side * (y1 - y0), q.a - p.a),
+                collide: false
+            })
+        );
+    });
     return out;
 }
 
@@ -1179,11 +1213,11 @@ export const VALLEY_ROAD_CLOSURE: RoadClosureSpec = (() => {
     const slope = roadT(u + 0.5) - roadT(u - 0.5);
     const barrier = atUT(u, t, BARRIER_HALF.y + 0.02, Math.atan(slope));
     // the sign, right of the road: axis-aligned like the route signs (its face looks along -x, at
-    // traffic coming up the road), its board snapped to 10 cm lines so the arrow's pixels fall on
-    // whole cells (the board's middle is 1.6 m up the post: half a pixel off a line in height)
+    // traffic coming up the road), its board snapped to 10 cm lines so its pixels fall on whole
+    // cells (the board's middle is 1.6 m up the post, on a line: it is 12 pixels tall)
     const sw = routeToWorld(CLOSURE_AT.signU, roadT(CLOSURE_AT.signU) + CLOSURE_AT.signT);
     const snap = (v: number, off = 0) => Math.round((v - off) / 0.1) * 0.1 + off;
-    const sy = snap(groundUT(CLOSURE_AT.signU, roadT(CLOSURE_AT.signU) + CLOSURE_AT.signT) + 1.6, 0.05) - 1.6;
+    const sy = snap(groundUT(CLOSURE_AT.signU, roadT(CLOSURE_AT.signU) + CLOSURE_AT.signT) + 1.6) - 1.6;
     const sign = pose(snap(sw.x), sy, snap(sw.z), quatFromYawPitchRoll(-Math.PI / 2, 0, 0));
     return {
         along: routeU,

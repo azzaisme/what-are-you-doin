@@ -8,7 +8,7 @@ import { LOOPS, SOUND_NAMES, SYNTH_RATE, synthesize } from '../../src/audio/synt
 import type { SoundName, SynthSound } from '../../src/audio/synth.ts';
 import { timberYardLevel } from '../../src/levels/timber-yard.ts';
 import { valleyLevel } from '../../src/levels/valley.ts';
-import { CLOSURE_OPEN, CLOSURE_TELL } from '../../src/sim/hazard-road.ts';
+import { CLOSURE_OPEN, CLOSURE_SHUT, CLOSURE_TELL } from '../../src/sim/hazard-road.ts';
 import { TREE_TELL } from '../../src/sim/hazard-tree.ts';
 
 // a test that installs an sfx sink never leaves it installed for later tests, even on a failure
@@ -154,6 +154,7 @@ describe('sound: every sound is synthesized (original, nothing to license)', () 
         // the road closure's sign: a clunk as it swings closed, and as it swings back open
         expect(eventSounds('hazard', CLOSURE_TELL).map((x) => x.name)).toEqual(['clunk']);
         expect(eventSounds('hazard', CLOSURE_OPEN).map((x) => x.name)).toEqual(['clunk']);
+        expect(eventSounds('hazard', CLOSURE_SHUT).map((x) => x.name)).toEqual(['clunk']);
         expect(eventSounds('fell', 'Splash!')).toEqual([]);
     });
 

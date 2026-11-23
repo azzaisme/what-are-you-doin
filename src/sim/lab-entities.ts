@@ -192,7 +192,7 @@ export function createLabEntities(): LabEntities {
     const chips = add(442, 'chips-fx', counterAsset('chips-fx'), 0);
     // the road closure (Epic 8, #77): placed and shown by the hazard, hidden otherwise
     const barrier = add(444, 'barrier', barrierAsset(), 2);
-    const closureSign = add(445, 'closure-sign', closureSignAsset(M.TestOrange, 'right'), 3);
+    const closureSign = add(445, 'closure-sign', closureSignAsset(M.HiVis, 'right'), 3);
     barrier.visible = closureSign.visible = false;
     const needles = add(443, 'needles-fx', counterAsset('needles-fx'), 0);
     const forestry: ForestryEntities = { markers, crowns, felled, short, sawn, beams, axe, sawmill, chips, needles };

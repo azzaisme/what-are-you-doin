@@ -4,7 +4,6 @@ import { UTE_TRACK_HALF } from '../../src/assets/ute.ts';
 import { BRIDGE, BRIDGE_X, YARD_Y } from '../../src/levels/timber-yard.ts';
 import {
     CLOSURE_AT,
-    CLOSURE_POSTS,
     ROUTE_YAW,
     SIDE_PATHS,
     VALLEY_ROAD_CLOSURE as R,
@@ -20,11 +19,12 @@ import { GuestSession, HostSession, listGames } from '../../src/net/session.ts';
 import { MemoryHub } from '../../src/net/transport.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
-import { CLOSURE, CLOSURE_OPEN, CLOSURE_TELL, SIGN_SWING, quickest } from '../../src/sim/hazard-road.ts';
+import { CLOSURE, CLOSURE_OPEN, CLOSURE_SHUT, CLOSURE_TELL, SIGN_SWING, quickest } from '../../src/sim/hazard-road.ts';
 import { HAZARD } from '../../src/sim/hazards.ts';
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
 import { ANIM_MAX } from '../../src/sim/snapshots.ts';
+import { WEATHER } from '../../src/sim/weather.ts';
 import { pose, quatFromYawPitchRoll, quatMul, quatRotate } from '../../src/voxels/math.ts';
 
 beforeAll(() => initPhysics());
@@ -244,6 +244,82 @@ const roadPoints = (u0: number, u1: number, du = 3): [number, number][] => {
     return out;
 };
 
+/** The logging track's line across the fence (t from the road's centre at the fence). */
+function trackAtFence(): { at: number; half: number } {
+    const track = SIDE_PATHS.find((q) => q.name === 'logging-track')!;
+    const tp = track.points;
+    const j = tp.findIndex((q) => q[0] > CLOSURE_AT.barrierU);
+    const f = (CLOSURE_AT.barrierU - tp[j - 1][0]) / (tp[j][0] - tp[j - 1][0]);
+    return { at: tp[j - 1][1] + f * (tp[j][1] - tp[j - 1][1]) - roadT(CLOSURE_AT.barrierU), half: track.halfWidth };
+}
+
+/**
+ * Drives the ute (player 0 in it) at the fence line by input: set down 3 m short of it, at `off`
+ * (+ `k` across) from the road's centre on `side`, and driven flat out for 5 s through the line at
+ * `off`. Returns how far up the route it got, or NaN when there is no room to set it down there
+ * (in a pine's branches: set down inside them, it is thrown out).
+ */
+function fenceRun(s: LabSim, p: ReturnType<typeof inputs>, side: number, off: number, k: number): number {
+    const u0 = CLOSURE_AT.barrierU - 3;
+    const ta = roadT(u0) + side * (off + k);
+    const tg = roadT(CLOSURE_AT.barrierU) + side * off;
+    const lineT = (u: number) => ta + ((tg - ta) * (u - u0)) / 3;
+    const a = at(u0, ta);
+    const b = at(u0 + 1, lineT(u0 + 1));
+    s.physics.place(
+        s.ute.id,
+        pose(a.x, valleyHeight(a.x, a.z) + 0.4, a.z, quatFromYawPitchRoll(Math.atan2(b.x - a.x, b.z - a.z), 0, 0))
+    );
+    p.step({}, 30);
+    const set = s.ute.pose.p;
+    if (Math.hypot(set.x - a.x, set.z - a.z) > 0.3) return NaN;
+    let furthest = -99;
+    for (let i = 0; i < S(5); i++) {
+        const pp = s.ute.pose.p;
+        const u = routeU(pp.x, pp.z);
+        const c = at(u + 3, lineT(u + 3));
+        const e = Math.atan2(c.x - pp.x, c.z - pp.z) - yawOf(s.ute.pose.q);
+        const err = Math.atan2(Math.sin(e), Math.cos(e));
+        p.step({ moveZ: 1, moveX: Math.max(-1, Math.min(1, -2.5 * err)) });
+        furthest = Math.max(furthest, routeU(s.ute.pose.p.x, s.ute.pose.p.z));
+    }
+    return furthest;
+}
+
+/**
+ * The whole fence line, both sides, from the barrier's ends out past where the ute can climb to (23 m
+ * out: the test below): straight at it every 0.2 m, and at an angle (1.5 m across over the last
+ * 3 m, both ways) every 0.4 m. Through
+ * (past the line) anywhere but the logging track is listed in `through`.
+ */
+function scanFence(s: LabSim, p: ReturnType<typeof inputs>, sides = [-1, 1], from = 3, to = 24.6) {
+    const tr = trackAtFence();
+    const through: string[] = [];
+    let furthest = -99;
+    let track = -99;
+    let runs = 0;
+    let blocked = 0;
+    for (const side of sides)
+        for (let i = 0; from + i * 0.2 <= to + 1e-6; i++) {
+            const off = from + i * 0.2;
+            for (const k of i % 2 === 0 ? [0, -1.5, 1.5] : [0]) {
+                const got = fenceRun(s, p, side, off, k);
+                if (Number.isNaN(got)) {
+                    blocked++;
+                    continue;
+                }
+                runs++;
+                if (side > 0 && Math.abs(off - tr.at) < tr.half + 1.2) track = Math.max(track, got);
+                else {
+                    furthest = Math.max(furthest, got);
+                    if (got >= CLOSURE_AT.barrierU)
+                        through.push(`${side < 0 ? 'left' : 'right'} ${off.toFixed(1)} m out (${k})`);
+                }
+            }
+        }
+    return { through, furthest, track, runs, blocked };
+}
+
 describe('the road closure (#77): the sign swaps and a barrier closes the forest road', () => {
     it('the tell lands at least 2.5 s before the junction, at a run and at a walk; the sign swings over, the barrier stands across the road', () => {
         for (const sprint of [true, false]) {
@@ -280,6 +356,10 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
             let tellSpeed = 0;
             let junction = -1;
             let fastest = 0;
+            // its acceleration along the road (how fast it closes on the junction, over 0.25 s,
+            // as the trigger reckons it): the trigger assumes more than it ever makes
+            const alongs: number[] = [];
+            let hardest = 0;
             // flat out: over the beams on the crossing's line, then up the road (round the
             // checkpoint flag in the middle of it at u = 7.2), to the junction
             for (let k = 0; k < S(30) && junction < 0; k++) {
@@ -291,6 +371,13 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
                 p.step({ moveZ: 1, moveX: Math.max(-1, Math.min(1, -2.5 * err)) });
                 const v = Math.abs(s.vehicle!.speed());
                 fastest = Math.max(fastest, v);
+                alongs.push(routeU(s.ute.pose.p.x, s.ute.pose.p.z));
+                const n = alongs.length;
+                if (n > 30) {
+                    const now = (alongs[n - 1] - alongs[n - 16]) / 0.25;
+                    const then = (alongs[n - 16] - alongs[n - 31]) / 0.25;
+                    hardest = Math.max(hardest, (now - then) / 0.25);
+                }
                 if (tell < 0 && texts(s).includes(CLOSURE_TELL)) {
                     tell = s.tick;
                     tellSpeed = v;
@@ -301,8 +388,9 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
             expect(junction, `from u ${back}: reached the junction`).toBeGreaterThan(tell);
             const lead = (junction - tell) / 60;
             console.log(
-                `the ute from u ${back}: the tell at ${tellSpeed.toFixed(2)} m/s, ${lead.toFixed(2)} s before the junction (fastest ${fastest.toFixed(1)} m/s)`
+                `the ute from u ${back}: the tell at ${tellSpeed.toFixed(2)} m/s, ${lead.toFixed(2)} s before the junction (fastest ${fastest.toFixed(1)} m/s, hardest acceleration ${hardest.toFixed(2)} m/s²)`
             );
+            expect(hardest, 'the trigger assumes more acceleration than it makes').toBeLessThan(CLOSURE.uteAccel);
             expect(lead, `from u ${back}: lead ${lead.toFixed(2)} s`).toBeGreaterThanOrEqual(2.5);
             expect(s.hazards.road!.count).toBe(1);
         }
@@ -408,7 +496,7 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         }
     }, 300_000);
 
-    it('the ute cannot get round either end: driven round each end from the road, and along every line from the barrier out to the terraced valley sides, it stops short (only the logging track goes through)', () => {
+    it('the ute cannot get round either end: driven round each end from the road, by input, it stops short', () => {
         // round each end from the road, by input
         for (const side of [-1, 1]) {
             const s = closed();
@@ -430,51 +518,64 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
             );
             expect(furthest, `round the ${side < 0 ? 'left' : 'right'} end`).toBeLessThan(CLOSURE_AT.barrierU - 1);
         }
-        // every line across: the ute set down off the road before the fence line, driven flat out
-        // along it for 5 s by input; through only where the logging track crosses
-        const track = SIDE_PATHS.find((q) => q.name === 'logging-track')!;
-        const tp = track.points;
-        const j = tp.findIndex((q) => q[0] > CLOSURE_AT.barrierU);
-        const f = (CLOSURE_AT.barrierU - tp[j - 1][0]) / (tp[j][0] - tp[j - 1][0]);
-        const trackAt = tp[j - 1][1] + f * (tp[j][1] - tp[j - 1][1]) - roadT(CLOSURE_AT.barrierU);
+    }, 600_000);
+
+    it('the fence line holds the ute everywhere but the logging track: driven at it by input every 0.2 m, straight and at an angle', () => {
         const s = closed();
         inTheUte(s, 12);
         const p = inputs(s);
-        const stopped: string[] = [];
-        let through = -99;
+        const r = scanFence(s, p);
+        console.log(
+            `the fence line: ${r.runs} drives (${r.blocked} starts in a pine's branches), the furthest off the track u ${r.furthest.toFixed(2)} (the line at ${CLOSURE_AT.barrierU})`
+        );
+        for (const miss of r.through) expect.fail(`the ute got through: ${miss}`);
+        expect(r.track, 'along the logging track').toBeGreaterThan(30);
+        expect(r.furthest).toBeLessThan(CLOSURE_AT.barrierU);
+    }, 600_000);
+
+    it('the ute cannot climb round the fence line: driven up either valley side from the floor by input, it never gets as far out as the scan above covers', () => {
+        const s = closed();
+        inTheUte(s, 12);
+        const p = inputs(s);
+        let highest = 0;
+        let drives = 0;
         for (const side of [-1, 1])
-            for (let off = 3.2; off <= CLOSURE_POSTS.reach + 1.2; off += 0.8) {
-                const a = at(17.5, roadT(17.5) + side * off);
-                const b = at(18.5, roadT(18.5) + side * off);
-                const yaw = Math.atan2(b.x - a.x, b.z - a.z);
-                s.physics.place(
-                    s.ute.id,
-                    pose(a.x, valleyHeight(a.x, a.z) + 0.4, a.z, quatFromYawPitchRoll(yaw, 0, 0))
-                );
-                p.step({}, 30);
-                let furthest = -99;
-                for (let k = 0; k < S(5); k++) {
-                    const pp = s.ute.pose.p;
-                    const u = routeU(pp.x, pp.z);
-                    const c = at(u + 3, roadT(u + 3) + side * off);
-                    const e = Math.atan2(c.x - pp.x, c.z - pp.z) - yawOf(s.ute.pose.q);
-                    const err = Math.atan2(Math.sin(e), Math.cos(e));
-                    p.step({ moveZ: 1, moveX: Math.max(-1, Math.min(1, -2.5 * err)) });
-                    furthest = Math.max(furthest, routeU(s.ute.pose.p.x, s.ute.pose.p.z));
-                }
-                expect(s.driver).toBe(0);
-                // on the track (and its graded shoulders) it goes through: that is the way round
-                const onTrack = side > 0 && Math.abs(off - trackAt) < track.halfWidth + 1.2;
-                if (onTrack) through = Math.max(through, furthest);
-                else {
-                    expect(furthest, `${side < 0 ? 'left' : 'right'} ${off.toFixed(1)} m out`).toBeLessThan(
-                        CLOSURE_AT.barrierU - 1
+            for (const u0 of [14, 16, 18, 20, 21])
+                for (const ang of [0, 0.4, -0.4]) {
+                    // set down on the floor 10.5 m out, facing out up the side (and a little up or
+                    // down the route), and driven flat out for 20 s
+                    const t0 = roadT(u0) + side * 10.5;
+                    const dirU = Math.sin(ang);
+                    const dirT = side * Math.cos(ang);
+                    const a = at(u0, t0);
+                    const b = at(u0 + dirU, t0 + dirT);
+                    s.physics.place(
+                        s.ute.id,
+                        pose(
+                            a.x,
+                            valleyHeight(a.x, a.z) + 0.4,
+                            a.z,
+                            quatFromYawPitchRoll(Math.atan2(b.x - a.x, b.z - a.z), 0, 0)
+                        )
                     );
-                    stopped.push(`${(side * off).toFixed(1)}`);
+                    p.step({}, 30);
+                    if (Math.hypot(s.ute.pose.p.x - a.x, s.ute.pose.p.z - a.z) > 0.3) continue;
+                    drives++;
+                    for (let i = 0; i < S(20); i++) {
+                        const pp = s.ute.pose.p;
+                        const u = routeU(pp.x, pp.z);
+                        const t = routeT(pp.x, pp.z);
+                        const c = at(u + dirU * 3, t + dirT * 3);
+                        const e = Math.atan2(c.x - pp.x, c.z - pp.z) - yawOf(s.ute.pose.q);
+                        const err = Math.atan2(Math.sin(e), Math.cos(e));
+                        p.step({ moveZ: 1, moveX: Math.max(-1, Math.min(1, -2.5 * err)) });
+                        const q = s.ute.pose.p;
+                        highest = Math.max(highest, side * (routeT(q.x, q.z) - roadT(routeU(q.x, q.z))));
+                    }
                 }
-            }
-        expect(through, 'along the logging track').toBeGreaterThan(30);
-        expect(stopped.length).toBeGreaterThan(32);
+        console.log(`up the valley sides: ${drives} drives, the furthest out ${highest.toFixed(2)} m`);
+        expect(drives).toBeGreaterThan(20);
+        expect(highest).toBeLessThan(24.4);
     }, 600_000);
 
     it('the barrier is pinned: the ute at full throttle into it for 3 s stops; nothing moves, nothing flies', () => {
@@ -633,6 +734,108 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         }
         expect(s.hazards.road!.count).toBe(1);
         expect(s.closure.barrier.visible).toBe(true);
+    }, 300_000);
+
+    it('the budget: not while the weather is on, nor in the quiet spell after it; then it comes', () => {
+        // the closure-only Valley with a short spell of weather over the whole map, from the moment
+        // the quiet start is over
+        const level = {
+            ...CLOSURE_ONLY,
+            hazards: {
+                ...CLOSURE_ONLY.hazards,
+                weather: {
+                    zones: [
+                        {
+                            name: 'test shower',
+                            kind: WEATHER.rain,
+                            contains: () => true,
+                            tellS: 2,
+                            activeS: 6,
+                            clearS: 2,
+                            delayS: 0,
+                            delayJitterS: 0,
+                            tell: 'test shower',
+                            clear: 'test shower over'
+                        }
+                    ]
+                }
+            }
+        };
+        const s = valley(level);
+        const w = s.hazards.weather!;
+        expect(w.hazardBusy).toBe(true);
+        bridge(s);
+        const p = inputs(s);
+        /** From the yard side over the beams into the tell's window (set down short of it first). */
+        const cross = () => {
+            const start = at(-5, 0);
+            s.placePlayer(start.x, start.z, 0);
+            p.step({}, 20);
+            for (const u of [-2, 0, 2.5]) {
+                const g = at(u, 0);
+                p.walkTo(g.x, g.z);
+            }
+        };
+        // while the weather is on: nothing
+        cross();
+        expect(w.hazardBusy).toBe(true);
+        expect(s.hazards.road!.count).toBe(0);
+        // the weather over: in its quiet spell, nothing
+        for (let i = 0; i < S(20) && w.hazardBusy; i++) p.step();
+        expect(w.hazardBusy).toBe(false);
+        const over = s.tick;
+        cross();
+        expect(s.tick - over).toBeLessThan(S(HAZARD.safeS));
+        expect(s.hazards.road!.count).toBe(0);
+        expect(texts(s)).not.toContain(CLOSURE_TELL);
+        // once the quiet spell is out: it comes
+        p.step({}, Math.max(0, over + S(HAZARD.safeS) - s.tick) + 1);
+        cross();
+        expect(s.hazards.road!.count).toBe(1);
+        expect(texts(s)).toContain(CLOSURE_TELL);
+    }, 300_000);
+
+    it('the barrier dragged back across the road: the sign clunks closed again, with its toast', () => {
+        const s = closed();
+        const p = takeHold(s, 0, -2.3);
+        // just clear of the road (back down it, then out to the side), and wait there, holding it
+        const out = at(CLOSURE_AT.barrierU - 2.5, roadT(CLOSURE_AT.barrierU) - 10.5);
+        const back1 = at(CLOSURE_AT.barrierU - 2.5, roadT(CLOSURE_AT.barrierU) - 2.3);
+        p.walkTo(back1.x, back1.z);
+        try {
+            p.walkTo(out.x, out.z, false, () => {
+                if (!s.hazards.road!.blocking(s.physics, s.closure.barrier.id)) throw new Error('clear');
+            });
+        } catch (e) {
+            if ((e as Error).message !== 'clear') throw e;
+        }
+        p.step({}, S(CLOSURE.swingS) + 5);
+        expect(s.interaction().holding).toBe('barrier');
+        expect(s.closure.sign.anim[SIGN_SWING]).toBe(0);
+        expect(texts(s).filter((t) => t === CLOSURE_OPEN)).toHaveLength(1);
+        // let go, take hold of its end nearer the road, and pull it back across to the far side
+        p.step({ grab: true });
+        p.step({}, 30);
+        const tOf = (lx: number) => {
+            const w = byBarrier(s, lx, 0);
+            return Math.abs(routeT(w.x, w.z) - roadT(routeU(w.x, w.z)));
+        };
+        const q = takeHold(s, 0, tOf(-2.3) < tOf(2.3) ? -2.3 : 2.3);
+        expect(s.interaction().holding).toBe('barrier');
+        const across = at(CLOSURE_AT.barrierU - 2.5, roadT(CLOSURE_AT.barrierU) + 1.5);
+        q.walkTo(across.x, across.z);
+        q.step({}, 10);
+        const bb = s.closure.barrier.pose.p;
+        const ww = (x: number, z: number) =>
+            `${routeU(x, z).toFixed(1)}/${(routeT(x, z) - roadT(routeU(x, z))).toFixed(1)}`;
+        expect(
+            s.hazards.road!.blocking(s.physics, s.closure.barrier.id),
+            `holding ${s.interaction().holding} barrier ${ww(bb.x, bb.z)} yaw ${yawOf(s.closure.barrier.pose.q).toFixed(2)} player ${ww(s.player.x, s.player.z)}`
+        ).toBe(true);
+        q.step({}, S(CLOSURE.swingS) + 5);
+        expect(s.closure.sign.anim[SIGN_SWING]).toBe(1);
+        expect(texts(s).filter((t) => t === CLOSURE_SHUT)).toHaveLength(1);
+        expect(texts(s).filter((t) => t === CLOSURE_TELL)).toHaveLength(1);
     }, 300_000);
 
     it('the same commands give the same closure (deterministic)', () => {

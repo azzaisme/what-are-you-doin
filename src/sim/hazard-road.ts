@@ -22,7 +22,8 @@
  *   the creek, does not count). No timer: waiting is not a way round.
  * - **The sign never lies:** it shows the closed face exactly while the barrier stands on the road;
  *   it clunks back to "the road goes on" once the barrier is clear, and stays closed if everyone took
- *   the track and left the barrier where it was. A run's reset (or a checkpoint's) puts both back.
+ *   the track and left the barrier where it was; dragged back onto the road, it clunks closed again
+ *   (CLOSURE_SHUT). A run's reset puts both back.
  *
  * Host only, like the rest of the director: guests see the barrier (a prop) and the sign (its swing
  * on its channel) in the snapshots, and hear the clunk from the toast (src/audio/game-audio.ts).
@@ -42,13 +43,14 @@ export const CLOSURE = {
     /** On foot: a run (m/s). */
     runSpeed: 4.2,
     /**
-     * The ute: its top speed (m/s) and, to be safe, more than its best acceleration (m/s^2: from a
-     * standstill it makes 3.5 for the first moment, 0.9 m/s at 0.25 s, then less). Its tell comes
+     * The ute: its top speed (m/s) and, to be safe, more than its best acceleration (m/s^2: measured
+     * by input, 3.5 from a standstill on the road, 3.1 along it, and 4.6 at its peak, coming off the
+     * creek's bridge on its slope down; tests/unit/road-closure.test.ts). Its tell comes
      * when the quickest it could reach the junction from where and how fast it is going drops to
      * leadS + uteWindowS: so its own lead is at least leadS however it is driven.
      */
     uteSpeed: 10,
-    uteAccel: 3.6,
+    uteAccel: 5,
     uteWindowS: 0.5,
     /** The ute counts as coming only while it closes on the junction at least this fast (m/s). */
     uteMoving: 1,
@@ -69,6 +71,8 @@ export const CLOSURE_PHASE = { idle: 0, tell: 1, active: 2 } as const;
 export const CLOSURE_TELL =
     '🚧 Clunk! Road closed ahead: drive round by the old logging track, or shift the barrier. On foot, you can squeeze past.';
 export const CLOSURE_OPEN = '🚧 Clunk. The road is open again.';
+/** The barrier put back across the road (by hand): the sign clunks closed again. */
+export const CLOSURE_SHUT = '🚧 Clunk! The barrier is back across the road: road closed.';
 
 /** Stand marker channel for the sign: its board's swing, 0 (the road goes on) to 1 (closed). */
 export const SIGN_SWING = 0;
@@ -213,6 +217,9 @@ export class RoadClosure {
         // the sign: closed exactly while the barrier stands on the road
         const target = blocking ? 1 : 0;
         if (this.swing > 0.5 && target === 0 && this.swing === 1) h.say(CLOSURE_OPEN);
+        // put back across the road (not the closure's own tell, this tick): it says so as it closes
+        const told = this.phase === CLOSURE_PHASE.tell && this.since === h.tick;
+        if (target === 1 && this.swing === 0 && !told) h.say(CLOSURE_SHUT);
         const k = 1 / S(CLOSURE.swingS);
         this.swing = target > this.swing ? Math.min(target, this.swing + k) : Math.max(target, this.swing - k);
         copyPose(sp.sign, e.sign.pose);
