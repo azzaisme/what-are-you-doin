@@ -257,6 +257,9 @@ test("four views: a player's hammer outline shows in that player's quarter only"
     expect(j.viewLayers).toEqual([['View1'], ['View2'], ['View3'], ['View4']]);
     // on screen: the pixels that change with the outline (the same in every shot with it and in
     // every shot without, and different between) are all in player 3's quarter
+    // with the world paused (still drawing), so animated things don't change between shots
+    await lab(page, (l) => l.action('pause'));
+    await page.waitForTimeout(1500);
     const shots: PNG[] = [];
     for (const [on, frames] of [
         [true, 3],
@@ -277,15 +280,22 @@ test("four views: a player's hammer outline shows in that player's quarter only"
     const { width: w, height: h } = shots[0];
     const ons = [shots[0], shots[2], shots[4]];
     const offs = [shots[1], shots[3]];
-    const at = (p: PNG, i: number) => p.data[i] * 65536 + p.data[i + 1] * 256 + p.data[i + 2];
+    // a channel-wise difference: the software renderer jitters some far pixels by one step between
+    // frames, while an outline is a full-colour line, so "changed" means by more than 8 levels in
+    // some channel with every shot on (and every shot off) within 2 of each other
+    const diff = (a: PNG, b: PNG, i: number) =>
+        Math.max(
+            Math.abs(a.data[i] - b.data[i]),
+            Math.abs(a.data[i + 1] - b.data[i + 1]),
+            Math.abs(a.data[i + 2] - b.data[i + 2])
+        );
     const inView = [0, 0, 0, 0];
     let outside = 0;
     for (let y = 0; y < h; y++)
         for (let x = 0; x < w; x++) {
             const i = (y * w + x) * 4;
-            const on = at(ons[0], i);
-            const off = at(offs[0], i);
-            if (on === off || ons.some((p) => at(p, i) !== on) || offs.some((p) => at(p, i) !== off)) continue;
+            if (diff(ons[0], offs[0], i) <= 8) continue;
+            if (ons.some((p) => diff(p, ons[0], i) > 2) || offs.some((p) => diff(p, offs[0], i) > 2)) continue;
             const v = rects.findIndex(
                 (r) => x >= r.x * w && x < (r.x + r.w) * w && y >= r.y * h && y < (r.y + r.h) * h
             );
