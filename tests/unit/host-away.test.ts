@@ -10,17 +10,14 @@ import { initPhysics } from '../../src/sim/physics/world.ts';
 beforeAll(() => initPhysics());
 
 describe('a host whose page goes to the background (#103)', () => {
-    it('tells its guests the world is waiting, and that it is back; the guest does not leave', async () => {
+    it('tells its guests, and that it is back (what a long absence does: hidden-host.test.ts)', async () => {
         const hub = new MemoryHub();
         const host = new LabSim({ level: timberYardLevel });
         host.step(neutralCommand(0));
         host.fpActive = true;
         const hs = await HostSession.start(hub.transport('host'), host, 'yard', 'away');
         const ad = listGames(hub.channel('lobby', 'w'))[0];
-        let clock = 0;
-        const gs = await GuestSession.join(hub.transport('guest'), new LabSim({ level: timberYardLevel }), ad, {
-            now: () => clock
-        });
+        const gs = await GuestSession.join(hub.transport('guest'), new LabSim({ level: timberYardLevel }), ad);
         for (let n = 0; n < 30; n++) {
             host.step(neutralCommand(n));
             hs.afterStep((s) => host.interactionIds(s));
@@ -29,10 +26,6 @@ describe('a host whose page goes to the background (#103)', () => {
         expect(gs.hostAway).toBe(false);
         hs.setAway(true);
         expect(gs.hostAway).toBe(true);
-        // a hidden page draws no frames: no snapshots for a long while, and the guest stays
-        clock += 120_000;
-        expect(gs.reconnecting).toBe(false);
-        expect(gs.hostGone).toBe(false);
         hs.setAway(false);
         expect(gs.hostAway).toBe(false);
         hs.stop();

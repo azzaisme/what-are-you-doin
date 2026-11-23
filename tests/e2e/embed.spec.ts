@@ -27,7 +27,10 @@ type Lab = {
     ready: boolean;
     action(id: string): void;
     paused(): boolean;
-    player(): { holding: number };
+    player(): { x: number; y: number; z: number; yaw: number; holding: number; eyeHeight: number };
+    placeProp(name: string, x: number, y: number, z: number, yaw?: number): boolean;
+    interaction(): { holding: string | null; target: string | null };
+    look(yaw: number, pitch: number): void;
     audio(): { started: boolean; context: string };
     net: {
         host(): Promise<void>;
@@ -51,12 +54,20 @@ const IGNORED = [
 ];
 const BUILD = 'http://localhost:4173';
 
+/**
+ * The iframe permissions the stand-in itch page grants: the features the game uses (sound,
+ * full screen, gamepads), as itch's embed is understood to grant them. NOT checked against the live
+ * itch.io page (this environment can't reach itch.io): the full screen switch is also tested with an
+ * embed that forbids full screen, so either way the game's behaviour is covered.
+ */
+const ITCH_ALLOW = 'autoplay; fullscreen *; gamepad';
+
 /** itch's embed: the game in a sized iframe, and the page's own full screen button. */
-const ITCH_PAGE = (src: string, w: number, h: number) => `<!doctype html>
+const ITCH_PAGE = (src: string, w: number, h: number, allow: string) => `<!doctype html>
 <html><head><meta charset="utf-8"><title>itch embed</title></head>
 <body style="margin:0;background:#2b2b2b">
   <div id="wrap"><iframe id="game" src="${src}" width="${w}" height="${h}" frameborder="0" scrolling="no"
-    allow="autoplay; fullscreen *; gamepad; accelerometer; gyroscope"></iframe></div>
+    allow="${allow}"></iframe></div>
   <button id="fs" type="button">Full screen (the page's button)</button>
   <script>document.getElementById('fs').onclick = () => document.getElementById('game').requestFullscreen();</script>
 </body></html>`;
@@ -72,19 +83,65 @@ async function routeEmbed(context: BrowserContext): Promise<void> {
         const q = u.searchParams.get('q') ?? '';
         const w = Number(u.searchParams.get('w') ?? 640);
         const h = Number(u.searchParams.get('h') ?? 360);
-        return route.fulfill({ contentType: 'text/html', body: ITCH_PAGE(`http://game.test/${q}`, w, h) });
+        const allow = u.searchParams.get('allow') ?? ITCH_ALLOW;
+        return route.fulfill({ contentType: 'text/html', body: ITCH_PAGE(`http://game.test/${q}`, w, h, allow) });
+    });
+    // the browser's own sound state in the game's frame, from the very start (before any test code
+    // runs in the page): every AudioContext made, and a probe made at load with no user gesture yet
+    await context.addInitScript(() => {
+        if (location.host !== 'game.test') return;
+        const w = window as unknown as {
+            __audio: { atLoad: { activated: boolean | null }; probe: AudioContext; all: AudioContext[] };
+        };
+        const Orig = window.AudioContext;
+        const all: AudioContext[] = [];
+        window.AudioContext = class extends Orig {
+            constructor(...a: ConstructorParameters<typeof AudioContext>) {
+                super(...a);
+                all.push(this);
+            }
+        };
+        const nav = navigator as unknown as { userActivation?: { hasBeenActive: boolean } };
+        w.__audio = {
+            atLoad: { activated: nav.userActivation?.hasBeenActive ?? null },
+            probe: new window.AudioContext(),
+            all
+        };
     });
 }
 
+/** The browser's sound state in the frame: the load-time probe's, and every other context's. */
+const browserAudio = (f: Frame) =>
+    f.evaluate(() => {
+        const a = (
+            window as unknown as {
+                __audio: { atLoad: { activated: boolean | null }; probe: AudioContext; all: AudioContext[] };
+            }
+        ).__audio;
+        return {
+            activatedAtLoad: a.atLoad.activated,
+            probe: a.probe.state,
+            game: a.all.filter((c) => c !== a.probe).map((c) => c.state)
+        };
+    });
+
 /** Opens an itch page with the game in it; returns the page, the game's frame and its problems. */
-async function openEmbed(page: Page, query: string, w = 640, h = 360): Promise<{ frame: Frame; problems: string[] }> {
+async function openEmbed(
+    page: Page,
+    query: string,
+    w = 640,
+    h = 360,
+    allow = ITCH_ALLOW
+): Promise<{ frame: Frame; problems: string[] }> {
     const problems: string[] = [];
     page.on('console', (m) => {
         if ((m.type() === 'error' || m.type() === 'warning') && !IGNORED.some((r) => r.test(m.text())))
             problems.push(`${m.type()}: ${m.text()}`);
     });
     page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
-    await page.goto(`http://itch.test/game?w=${w}&h=${h}&q=${encodeURIComponent(query)}`);
+    await page.goto(
+        `http://itch.test/game?w=${w}&h=${h}&allow=${encodeURIComponent(allow)}&q=${encodeURIComponent(query)}`
+    );
     const frame = (await (await page.$('#game'))!.contentFrame())!;
     await frame.waitForFunction(() => (window as unknown as { __riverLab?: Lab }).__riverLab?.ready === true, null, {
         timeout: 150_000
@@ -136,17 +193,47 @@ test('itch embed: in a cross-origin iframe, a click takes the mouse and starts s
     await lab(frame, (l) => l.action('pause')); // ?t= seeks and pauses: play live from here
     const dpr = await frame.evaluate(() => devicePixelRatio);
 
-    // before any gesture: no sound, no pointer lock; the canvas fills the 640 x 360 frame
-    expect(await lab(frame, (l) => l.audio())).toMatchObject({ started: false, context: 'locked' });
+    // before any gesture: the browser blocks sound in this frame (no user activation at load, an
+    // AudioContext made then stays suspended; any the game made too), no pointer lock; the canvas
+    // fills the 640 x 360 frame
+    const audioNow = await browserAudio(frame);
+    expect(audioNow.activatedAtLoad).toBe(false);
+    expect(audioNow.probe).toBe('suspended');
+    expect(audioNow.game.every((s) => s === 'suspended')).toBe(true);
     let v = await view(frame);
     expect(v).toMatchObject({ w: 640, h: 360, locked: false, menu: false });
     expect(v.canvasW).toBe(Math.round(640 * dpr));
 
-    // the first click inside the frame: the mouse is taken and the sound starts; nothing is grabbed
-    await page.locator('#game').click({ position: { x: 320, y: 200 } });
+    // the bucket under the crosshair: a click on the game would grab it
+    const p = await lab(frame, (l) => l.player());
+    await frame.evaluate(
+        ([x, y, z]) => (window as unknown as { __riverLab: Lab }).__riverLab.placeProp('bucket', x, y, z),
+        [p.x - Math.sin(p.yaw) * 1.3, p.y + 0.3, p.z - Math.cos(p.yaw) * 1.3]
+    );
+    await frame.evaluate(
+        ([yaw, pitch]) => (window as unknown as { __riverLab: Lab }).__riverLab.look(yaw, pitch),
+        [p.yaw, -Math.atan2(p.eyeHeight - 0.15, 1.3)]
+    );
+    await expect.poll(() => lab(frame, (l) => l.interaction().target), { timeout: 20_000 }).toBe('bucket');
+
+    // the first click inside the frame, at the crosshair: the mouse is taken and the browser's sound
+    // runs; the bucket is not grabbed
+    await page.locator('#game').click({ position: { x: 320, y: 180 } });
     await expect.poll(async () => (await view(frame)).locked).toBe(true);
-    await expect.poll(async () => (await lab(frame, (l) => l.audio())).context).toBe('running');
+    await expect.poll(async () => (await browserAudio(frame)).game.includes('running')).toBe(true);
+    await page.waitForTimeout(500);
     expect((await lab(frame, (l) => l.player())).holding).toBe(-1);
+    expect(await lab(frame, (l) => l.interaction().target)).toBe('bucket');
+
+    // Esc: the browser releases the mouse, and the menu opens; Resume takes it back
+    await page.keyboard.press('Escape');
+    await expect.poll(async () => (await view(frame)).locked).toBe(false);
+    await expect.poll(async () => (await view(frame)).menu).toBe(true);
+    await frame.locator('.settings-row button', { hasText: 'Resume' }).click();
+    await expect.poll(async () => (await view(frame)).locked).toBe(true);
+    expect((await lab(frame, (l) => l.player())).holding).toBe(-1);
+    // (the game's own record agrees: sound started)
+    expect((await lab(frame, (l) => l.audio())).started).toBe(true);
 
     // the embedding page resizes the frame: the canvas and the HUD follow
     await page.evaluate(() => {
@@ -227,7 +314,7 @@ test('itch embed, online: a host in the background tells its guests; a guest who
     // the host's tab goes to the background: the guest is told why the world stopped, and stays
     await setHidden(host, true);
     await expect.poll(async () => (await status(guest)).guest?.hostAway, { timeout: 30_000 }).toBe(true);
-    await expect(guest.locator('.toast')).toContainText('in the background');
+    await expect(guest.locator('.toast')).toContainText('in the background: it may stop until they come back');
     await setHidden(host, false);
     await expect.poll(async () => (await status(guest)).guest?.hostAway, { timeout: 30_000 }).toBe(false);
     expect((await status(guest)).guest).not.toBeNull();
@@ -270,7 +357,7 @@ test('credits and licences: Settings → Game → Credits lists what the game is
     await frame.locator('.settings-row button', { hasText: 'Credits & licences' }).click();
     const dialog = frame.locator('.credits[role=dialog]');
     await expect(dialog).toBeVisible();
-    for (const name of ['PlayCanvas Engine', 'Rapier', 'Trystero', 'noble-secp256k1'])
+    for (const name of ['PlayCanvas Engine', 'Rapier', 'Trystero', 'Vite', 'noble-secp256k1'])
         await expect(dialog.locator('.credits-third-party')).toContainText(name);
     await expect(dialog).toContainText('Every sound is synthesised in code');
     // the full texts sit beside the game (a relative URL, so it works wherever the build is served)
@@ -294,5 +381,26 @@ test('credits and licences: Settings → Game → Credits lists what the game is
     await page.keyboard.press('Escape');
     await expect(dialog).toBeHidden();
     await expect(frame.locator('.settings-backdrop')).toBeVisible();
+    expect(problems).toEqual([]);
+});
+
+test('itch embed without full screen permission: the in-game Full screen switch is not offered', async ({
+    page,
+    context
+}) => {
+    test.setTimeout(300_000);
+    await routeEmbed(context);
+    const { frame, problems } = await openEmbed(
+        page,
+        '?level=yard&t=1&quality=low#cell100',
+        640,
+        360,
+        'autoplay; gamepad'
+    );
+    expect(await frame.evaluate(() => document.fullscreenEnabled)).toBe(false);
+    await frame.locator('.settings-chip').click();
+    await frame.locator('.settings-tabs button', { hasText: 'Game' }).click();
+    await expect(frame.locator('.settings-row', { hasText: 'Resume' })).toBeVisible();
+    await expect(frame.locator('.settings-row', { hasText: 'Full screen' })).toHaveCount(0);
     expect(problems).toEqual([]);
 });

@@ -5,7 +5,9 @@
  * with each bundled package's name, version, licence and full licence text, read from the installed
  * packages (the lockfile says which are production dependencies).
  *
- * Type-only packages (@types/..., @webgpu/types) put no code in the build and are left out.
+ * Type-only packages (@types/..., @webgpu/types) put no code in the build and are left out. One
+ * development package does put code in it: Vite, whose small module-preload helper is bundled
+ * with the dynamic import of the online code (BUILD_TIME_CODE).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,6 +23,13 @@ export interface ThirdPartyPackage {
 }
 
 const TYPES_ONLY = /^@types\/|\/types$/;
+
+/** Development packages whose own code ends up in the bundle, and the part of their licence file to ship. */
+export const BUILD_TIME_CODE: { name: string; why: string; cut?: RegExp }[] = [
+    // Vite's LICENSE.md is its MIT notice, then the licences of what Vite bundles into itself
+    // (which stay in Vite, not in our game): only the first part applies
+    { name: 'vite', why: 'its module-preload helper', cut: /^# Licenses of bundled dependencies/m }
+];
 
 /** The production packages the build can contain, sorted by name. */
 export function productionPackages(root = process.cwd()): ThirdPartyPackage[] {
@@ -42,6 +51,18 @@ export function productionPackages(root = process.cwd()): ThirdPartyPackage[] {
             license: p.license ?? 'unknown',
             text: file ? fs.readFileSync(path.join(dir, file), 'utf8').trim() : ''
         });
+    }
+    for (const b of BUILD_TIME_CODE) {
+        const dir = path.join(root, 'node_modules', b.name);
+        const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')) as {
+            version: string;
+            license: string;
+        };
+        const file = fs.readdirSync(dir).find((f) => /^(licen[cs]e|copying)(\.(md|txt))?$/i.test(f));
+        let text = file ? fs.readFileSync(path.join(dir, file), 'utf8') : '';
+        const at = b.cut ? text.search(b.cut) : -1;
+        if (at > 0) text = text.slice(0, at);
+        out.push({ name: b.name, version: pkg.version, license: pkg.license, text: text.trim() });
     }
     return out.sort((a, b) => a.name.localeCompare(b.name));
 }
