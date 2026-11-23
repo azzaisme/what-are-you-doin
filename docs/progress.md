@@ -95,7 +95,7 @@ beyond it. Drive round by the track, or shift the barrier; on foot you can also 
   in every worker lane.
 - **Tests:** `tests/unit/road-closure.test.ts` has 18 tests. All but two use the Valley with
   only the closure among its hazards, so the flood the test's bridge brings doesn't get in first.
-  Unit tests: UNITCOUNT pass at both voxel sizes.
+  Unit tests: 796 pass at both voxel sizes.
 
 ## Credits and licences (2026-11-23, Epic 10, #104)
 
