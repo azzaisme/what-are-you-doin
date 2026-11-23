@@ -433,33 +433,62 @@ describe('lattice priority (#107)', () => {
             expect(deep.latticeMasks).toBe(1);
             expect(deep.latticeHidden).toBeGreaterThan(0.99 * svc.world.objectCellCount(head.id));
 
-            // hysteresis, with the budget pinned to the mask's cost at 0.490 m: once running it
-            // stays while the cost hovers at the limit; once skipped it stays off until well under
+            // starting already deep inside (no frames to come in): masked from the first frame
+            const fresh = new Service(new Set([head.id]));
+            fresh.build(1, 'yard', undefined, false);
+            const first = fresh.frame(0, 0, 'coverage50', false, at(0)).stats;
+            expect(first.latticeMasks).toBe(1);
+            expect(first.maskSkipped).toBe(0);
+            expect(first.latticeHidden).toBe(deep.latticeHidden);
+
+            // hysteresis, between masks: the bucket (priority 4) is served first and always fits;
+            // the beaver's mask comes second, the budget pinned to what is left at its cost at
+            // 0.490 m. Once running it stays while its cost hovers at the limit; once skipped it
+            // stays off until well under.
+            const withBucket = (y: number) =>
+                states([
+                    { e: head, x: 0, y: 0.5, z: 0 },
+                    { e: bucket, x: 0, y: 0.45, z: 0.05 },
+                    { e: beaver, x: 0, y, z: 0 }
+                ]);
+            // the costs, measured with no budget to speak of
+            const probe = new Service(new Set([head.id]));
+            probe.build(1, 'yard', undefined, false);
+            probe.maskOwnBudget = false;
+            probe.maskBudget = 1e9;
+            const bucketOnly = probe.frame(
+                0,
+                0,
+                'coverage50',
+                false,
+                states([
+                    { e: head, x: 0, y: 0.5, z: 0 },
+                    { e: bucket, x: 0, y: 0.45, z: 0.05 }
+                ])
+            ).stats.maskCells;
+            expect(bucketOnly).toBeGreaterThan(0);
+            const both = (y: number) => probe.frame(1, 0, 'coverage50', false, withBucket(y)).stats;
+            const lo = both(0.488).maskCells - bucketOnly;
+            const hi = both(0.492).maskCells - bucketOnly;
+            expect(lo).toBeGreaterThan(hi); // deeper costs more
             const pinned = new Service(new Set([head.id]));
             pinned.build(1, 'yard', undefined, false);
-            const cost = (y: number) => {
-                const probe = new Service(new Set([head.id]));
-                probe.build(1, 'yard', undefined, false);
-                return probe.frame(0, 0, 'coverage50', false, at(y)).stats.maskCells;
-            };
-            const lo = cost(0.488);
-            const hi = cost(0.492);
-            expect(lo).toBeGreaterThan(hi); // deeper costs more
             pinned.maskOwnBudget = false;
-            pinned.maskBudget = Math.floor((lo + hi) / 2);
-            // it starts further out, where it costs under 80 % of the budget, and comes in
+            pinned.maskBudget = bucketOnly + Math.floor((lo + hi) / 2);
+            // the beaver starts further out, where it costs under 80 % of the budget, and comes in
             let g = 0;
-            for (let y = 0.58; y > 0.492; y -= 0.002) pinned.frame(g++, 0, 'coverage50', false, at(y));
-            const states1: number[] = [];
+            for (let y = 0.58; y > 0.492; y -= 0.002) pinned.frame(g++, 0, 'coverage50', false, withBucket(y));
+            const ran: number[] = [];
             for (let n = 0; n < 30; n++) {
-                const s = pinned.frame(g++, 0, 'coverage50', false, at(n % 2 ? 0.492 : 0.488)).stats;
+                const s = pinned.frame(g++, 0, 'coverage50', false, withBucket(n % 2 ? 0.492 : 0.488)).stats;
                 expect(s.maskCells).toBeLessThanOrEqual(pinned.maskBudget);
-                states1.push(s.latticeMasks);
+                expect(pinned.world.objectCellCount(bucket.id)).toBeGreaterThan(0); // always served
+                ran.push(s.latticeMasks);
             }
-            // at most one change (running, then skipped at the first deeper frame), never back
-            const changes = states1.filter((v, n) => n > 0 && v !== states1[n - 1]).length;
+            // at most one change (both running, then the beaver skipped at a deeper frame), never back
+            const changes = ran.filter((v, n) => n > 0 && v !== ran[n - 1]).length;
             expect(changes).toBeLessThanOrEqual(1);
-            expect(states1[29]).toBe(0);
+            expect(ran[29]).toBe(1);
         } finally {
             delete (globalThis as { __UE_CELL_CM__?: number }).__UE_CELL_CM__;
             vi.resetModules();

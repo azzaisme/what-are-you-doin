@@ -440,9 +440,10 @@ export class VoxelService {
      * Budget: the cells tested, at most MASK_BUDGET a frame on this lattice, or the cells its own
      * objects hold when more (so one mask can always cover them all). Masks are taken in compositor
      * order (the highest priority first); one that would overrun what is left is skipped this frame
-     * (its object and this lattice's simply intersect, as before #107) and counted. Hysteresis: a
-     * mask that ran last frame may use the whole budget, a new one only 80 % of it, so a cost that
-     * hovers at the limit does not switch the mask on and off every frame.
+     * (its object and this lattice's simply intersect, as before #107) and counted. Hysteresis: the
+     * first mask served and a mask that ran last frame may use the whole budget, a later new one only
+     * 80 % of it, so a cost that hovers at the limit does not switch a mask on and off every frame.
+     * The first always fits: it can test no more cells than this lattice holds.
      */
     private rasterizeMasks(states: Float64Array, reference: boolean, cull: number): void {
         const st = this.maskStats;
@@ -527,9 +528,10 @@ export class VoxelService {
                     this.maskCand[m++] = c | (n << 24);
                 }
             }
-            // hysteresis: a mask that ran last frame keeps running up to the budget; a new one
-            // starts only within 80 % of it, so a cost hovering at the limit does not toggle
-            const limit = ran.has(t.id) ? budget : budget * 0.8;
+            // hysteresis: the first mask served (the highest priority) and a mask that ran last
+            // frame may use the whole budget; a new one after them starts only within 80 % of it,
+            // so a cost hovering at the limit does not toggle
+            const limit = st.cells === 0 || ran.has(t.id) ? budget : budget * 0.8;
             if (m === 0 || st.cells + m > limit) {
                 if (m > 0) st.skipped++;
                 if (this.world.objectCellCount(t.id) > 0) this.world.clearObject(t.id);
