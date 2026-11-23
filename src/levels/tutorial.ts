@@ -151,10 +151,10 @@ export const TUTORIAL_DATA: LevelData = {
         { name: 'cube', x: 2, z: 0.6 },
         { name: 'sphere', x: 2.2, z: -3.2 },
         // the long plank (3.8 m, only here) already points across the ditch, its far end 10 cm short
-        // of the edge (and clear of the bin). It is carried balanced, its middle ahead of your grip
-        // wherever you take it, so carried to the edge (or 0.4 m short of it) and let go,
-        // it lies on both banks: measured 0.56 to 0.94 m on each, grabbed by its end, a quarter along
-        // or its middle and let go 0.1 or 0.4 m short (tests/unit/tutorial.test.ts).
+        // of the edge (and clear of the bin). It is carried balanced, its middle 2.2 m ahead of you
+        // wherever you grab it and wherever you look: let go with your toes 0.4 to 1.0 m short of the
+        // edge and it lies 0.3 m or more on each bank (tests/unit/tutorial.test.ts). Dropped into the
+        // ditch, it comes back here.
         { name: 'long-plank', x: -0.75, z: -6.85, yaw: Math.PI / 2 },
         { name: 'bucket', x: 1.6, z: -6.8 }
     ],
@@ -184,7 +184,7 @@ export const TUTORIAL_DATA: LevelData = {
         },
         {
             kind: 'reach',
-            text: 'Lay the plank across the ditch: grab it, carry it to the edge, let go, walk over.',
+            text: 'Lay the plank across the ditch: carry it toward the ditch and let go a step before the edge, then walk over.',
             rect: { minX: -4, maxX: 4, minZ: -14, maxZ: -11.2 }
         },
         { kind: 'goal', text: 'Bring the bucket to the flag. (Falling in? You are fished out.)' }

@@ -52,11 +52,12 @@ const PLANK_DENSITY = 500;
 
 /**
  * The tutorial's long plank is carried balanced (BodyOptions.carryAhead): wherever you grab it, your
- * grip slides to this far behind its middle, so the rest reaches ahead of you. Its middle then
- * rides about 1.4 m ahead of your toes, so walked to the ditch's edge (or 0.4 m short of it)
- * and let go, it lies on both banks.
+ * grip slides to this far behind its middle, and it is held low in front of you whatever you look
+ * at (CARRY_PITCH). Its middle rides 2.2 m ahead of where you stand, so the whole plank is ahead of
+ * you; let go with your toes 0.4 to 1.0 m short of the tutorial ditch's edge and it lies 0.3 m or
+ * more on each bank. Let go at the edge itself and its near end is already past it.
  */
-export const LONG_PLANK_CARRY_AHEAD = 0.5;
+export const LONG_PLANK_CARRY_AHEAD = 1.3;
 
 /** A plank of a length: 0.2 x 0.1 m timber with the plank throw. */
 function plankBody(length: number): { shape: ShapeSpec; opts: BodyOptions } {

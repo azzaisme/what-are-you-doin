@@ -75,13 +75,24 @@ interface Throw {
     turned: number;
     /** Its touch-down point's distance from the line the thrower looked along (m). */
     offLine: number;
+    /** Its sideways speed just after the throw, and the thrower's when they threw (m/s). */
+    sideSpeed: number;
+    throwerSide: number;
 }
 
 /**
  * One player walks up to `name`, looks at it and grabs it, raises the view to `pitch`, holds still
  * for a second, optionally turns at `turn` rad/s for a tenth of a second, and throws.
  */
-function throwIt(s: LabSim, name: string, pitch: number, turn = 0, emptyFirst = false, run = false): Throw {
+function throwIt(
+    s: LabSim,
+    name: string,
+    pitch: number,
+    turn = 0,
+    emptyFirst = false,
+    run = false,
+    strafe = false
+): Throw {
     const pl = new Player(s);
     const e = s.entities.find((x) => x.name === name)!;
     s.placePlayer(e.pose.p.x, e.pose.p.z + 1.4, 0);
@@ -104,7 +115,8 @@ function throwIt(s: LabSim, name: string, pitch: number, turn = 0, emptyFirst = 
         pl.step();
     }
     // stand still for a second, or run (sprint) for one and throw on the run
-    pl.step(run ? { moveZ: 1, sprint: true } : {}, 60);
+    const moving = run ? { moveZ: 1, sprint: true } : strafe ? { moveX: 1 } : {};
+    pl.step(moving, 60);
     for (let i = 0; i < 6 && turn; i++) {
         pl.yaw += turn / 60;
         pl.step();
@@ -112,8 +124,14 @@ function throwIt(s: LabSim, name: string, pitch: number, turn = 0, emptyFirst = 
     const feet = { x: s.player.x, z: s.player.z };
     const q0 = { ...e.pose.q };
     const yaw = pl.yaw;
-    pl.step(run ? { throw: true, moveZ: 1, sprint: true } : { throw: true });
+    // still in the hands when thrown (a throw of nothing would prove nothing)
+    expect(s.physics.heldId).toBe(e.id);
+    const st = s.physics.rig(0)!.state;
+    const carried = { vx: st.vx, vz: st.vz };
+    pl.step({ ...moving, throw: true });
     expect(s.physics.heldId).toBe(-1);
+    const v0 = s.physics.bodies.get(e.id)!.body.linvel();
+    const side = { x: Math.cos(pl.yaw), z: -Math.sin(pl.yaw) };
     let out: Throw | null = null;
     for (let i = 0; i < 300; i++) {
         pl.step();
@@ -126,7 +144,9 @@ function throwIt(s: LabSim, name: string, pitch: number, turn = 0, emptyFirst = 
                 touch: Math.hypot(dx, dz),
                 rest: 0,
                 turned: 2 * Math.acos(Math.min(1, dot)),
-                offLine: Math.abs(dx * Math.cos(yaw) - dz * Math.sin(yaw))
+                offLine: Math.abs(dx * Math.cos(yaw) - dz * Math.sin(yaw)),
+                sideSpeed: v0.x * side.x + v0.z * side.z,
+                throwerSide: carried.vx * side.x + carried.vz * side.z
             };
         }
     }
@@ -188,6 +208,16 @@ describe('throwing a plank (owner request: further and straighter)', () => {
         expect(t.turned).toBeLessThan(0.02);
     });
 
+    it('thrown while strafing, a plank keeps the thrower’s sideways speed (only its swing in the hands goes)', () => {
+        const t = throwIt(range(), 'plank', 0.3, 0, false, false, true);
+        console.info(
+            `thrown strafing: thrower ${t.throwerSide.toFixed(2)} m/s sideways, plank ${t.sideSpeed.toFixed(2)} m/s`
+        );
+        expect(t.throwerSide).toBeGreaterThan(1);
+        expect(Math.abs(t.sideSpeed - t.throwerSide)).toBeLessThan(0.05 * t.throwerSide);
+        expect(t.turned).toBeLessThan(0.02);
+    });
+
     it('only planks: the general throw (speed and impulse cap) is as it was', () => {
         expect(GRAB.throwSpeed).toBe(9);
         expect(GRAB.maxThrowImpulse).toBe(45);
@@ -206,7 +236,7 @@ describe('throwing a plank (owner request: further and straighter)', () => {
         expect(Math.abs(t.rest - BUCKET_BEFORE.rest)).toBeLessThan(0.01);
     });
 
-    it('a beam and a log are thrown exactly as before (only planks have their own throw)', () => {
+    it('a beam and a crate are thrown exactly as before (only planks have their own throw)', () => {
         for (const [name, before] of Object.entries(OTHERS_BEFORE)) {
             const s = range([{ name, x: 12, z: 3.6 }]);
             const t = throwIt(s, name, 0.3);
@@ -260,10 +290,10 @@ describe('throwing a plank (owner request: further and straighter)', () => {
     });
 });
 
-/** A beam's and a log's throw before this change, measured with throwIt on epics-5-10 (m). */
+/** A beam's and a crate's throw before this change, measured with throwIt on epics-5-10 (m). */
 const OTHERS_BEFORE: Record<string, { touch: number; rest: number }> = {
     'beam-0': { touch: 1.372, rest: 1.146 },
-    log: { touch: 1.46, rest: 0.984 }
+    cube: { touch: 1.769, rest: 1.765 }
 };
 
 /** The empty bucket's throw before this change, measured with throwIt (m). */

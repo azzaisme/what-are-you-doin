@@ -158,38 +158,134 @@ describe('the long plank spans the ditch, laid by a player from the bank (3.8 m,
         expect(LONG_PLANK_LENGTH / 2 - (LIP_NEAR - LIP_FAR) / 2).toBeCloseTo(0.75, 9);
     });
 
-    // wherever you grab it (by the end nearest you, a quarter along, or the middle), carried to the
-    // edge (toes at the lip, or stopping 0.4 m short) and let go, it lies on both banks: you carry
-    // it balanced, its middle ahead of your grip (LONG_PLANK_CARRY_AHEAD)
+    // wherever you grab it (the end nearest you, a quarter along, the middle), wherever you look
+    // (level to 1.2 rad down), walking slowly or at full speed (W), carried toward the ditch and let
+    // go with your toes 0.4 to 1.0 m short of the lip, it lies on both banks: you carry it balanced,
+    // low in front of you whatever you look at, its middle 2.2 m ahead (LONG_PLANK_CARRY_AHEAD)
     for (const [grab, behind] of [
         ['its near end', LONG_PLANK_HALF.x - 0.1],
         ['a quarter along', LONG_PLANK_HALF.x / 2],
         ['its middle', 0]
     ] as const)
-        for (const short of [0.1, 0.4])
-            it(`grabbed by ${grab}, carried to ${short} m short of the lip and let go, it lies 0.4 m or more on each bank, and carries you over`, () => {
-                const { s, p } = takePlank(behind);
-                lookAhead(p);
-                for (let i = 0; i < 600 && s.player.z > LIP_NEAR + short; i++) p.step({ moveZ: 0.3 });
-                p.step({}, 30);
-                expect(s.physics.heldId).toBe(plankOf(s).id);
-                // carried level, along the lane
-                expect(bearing(s).tilt).toBeLessThan(0.05);
-                p.step({ grab: true });
-                p.step({}, 120);
-                const b = bearing(s);
-                console.info(
-                    `grabbed by ${grab}, let go ${short} m short: ${b.near.toFixed(2)} m on the near bank, ${b.far.toFixed(2)} m on the far bank`
-                );
-                expect(b.near).toBeGreaterThan(0.4);
-                expect(b.far).toBeGreaterThan(0.4);
-                expect(b.tilt).toBeLessThan(0.03);
-                // walk over it
-                expect(p.walkTo(plankOf(s).pose.p.x, LIP_FAR - 1.5, 0.3, 900, 0.5)).toBe(true);
-                expect(s.player.z).toBeLessThan(LIP_FAR - 1);
-                expect(s.player.y).toBeGreaterThan(height(s.player.x, s.player.z) - 0.05);
-                expect(s.progress.falls).toBe(0);
-            });
+        for (const short of [0.4, 0.7, 1.0])
+            it(`grabbed by ${grab}, let go with your toes ${short} m short of the lip: 0.3 m or more on each bank, level and walkable, at any pitch and speed`, () => {
+                let least = Infinity;
+                for (let pitch = 0; pitch >= -1.2 - 1e-9; pitch -= 0.2)
+                    for (const speed of [0.3, 1]) {
+                        const { s, p } = takePlank(behind);
+                        const p0 = p.pitch;
+                        for (let i = 1; i <= 30; i++) {
+                            p.pitch = p0 + ((pitch - p0) * i) / 30;
+                            p.step();
+                        }
+                        const at = LIP_NEAR + short + BODY_RADIUS;
+                        for (let i = 0; i < 900 && s.player.z > at; i++) p.step({ moveZ: speed });
+                        p.step({}, 30);
+                        const where = `pitch ${pitch.toFixed(1)}, speed ${speed}`;
+                        expect(s.physics.heldId, where).toBe(plankOf(s).id);
+                        const toes = s.player.z - BODY_RADIUS - LIP_NEAR;
+                        p.step({ grab: true });
+                        p.step({}, 120);
+                        const b = bearing(s);
+                        least = Math.min(least, b.near, b.far);
+                        expect(b.near, `${where}: near bank (toes ${toes.toFixed(2)} m short)`).toBeGreaterThan(0.3);
+                        expect(b.far, `${where}: far bank (toes ${toes.toFixed(2)} m short)`).toBeGreaterThan(0.3);
+                        expect(b.tilt, where).toBeLessThan(0.03);
+                        // walk over it
+                        p.pitch = 0;
+                        expect(p.walkTo(plankOf(s).pose.p.x, LIP_FAR - 1.5, 0.3, 900, 0.5), where).toBe(true);
+                        expect(s.player.y, where).toBeGreaterThan(height(s.player.x, s.player.z) - 0.05);
+                        expect(s.progress.falls, where).toBe(0);
+                    }
+                console.info(`grabbed by ${grab}, toes ${short} m short: at least ${least.toFixed(2)} m on a bank`);
+            }, 120_000);
+
+    /** From the bank: look at the plank, take it, back off, carry it to 0.7 m short and lay it. */
+    function relay(s: LabSim, p: Player): { near: number; far: number; tilt: number } {
+        const pk = plankOf(s).pose.p;
+        p.lookAt(pk.x, pk.y + 0.05, pk.z, 30);
+        p.step({ grab: true });
+        p.step({}, 30);
+        expect(s.physics.heldId).toBe(plankOf(s).id);
+        p.lookAt(pk.x, height(0, LIP_NEAR + 1), LIP_FAR - 3, 30);
+        for (let i = 0; i < 150; i++) p.step({ moveZ: -0.5 });
+        p.step({}, 60);
+        expect(plankOf(s).pose.p.y).toBeGreaterThan(height(0, LIP_NEAR + 1));
+        for (let i = 0; i < 900 && s.player.z > LIP_NEAR + 0.7 + BODY_RADIUS; i++) p.step({ moveZ: 0.3 });
+        p.step({}, 30);
+        p.step({ grab: true });
+        p.step({}, 120);
+        return bearing(s);
+    }
+
+    it('let go with your toes at the lip (too far), it hangs off the near lip; you take it again and lay it', () => {
+        const { s, p } = takePlank(0);
+        for (let i = 0; i < 900 && s.player.z > LIP_NEAR + BODY_RADIUS; i++) p.step({ moveZ: 0.3 });
+        p.step({}, 30);
+        p.step({ grab: true });
+        p.step({}, 180);
+        const miss = bearing(s);
+        console.info(`let go at the lip: ${miss.near.toFixed(2)} m on the near bank, tilted ${miss.tilt.toFixed(2)}`);
+        expect(miss.near).toBeLessThan(0.3);
+        const b = relay(s, p);
+        console.info(`laid again: ${b.near.toFixed(2)} m on the near bank, ${b.far.toFixed(2)} m on the far bank`);
+        expect(b.near).toBeGreaterThan(0.3);
+        expect(b.far).toBeGreaterThan(0.3);
+        expect(s.progress.falls).toBe(0);
+    });
+
+    it('carried across you and let go at the lip, it falls into the ditch (out of reach): it comes back where it was, with a toast, and you lay it from there', () => {
+        const s = fresh();
+        const p = new Player(s);
+        const start = { ...plankOf(s).pose.p };
+        // from its side, so it lies across you
+        s.placePlayer(start.x + 1.2, start.z, 0);
+        p.yaw = Math.PI / 2;
+        p.step({}, 20);
+        p.lookAt(start.x, start.y + 0.05, start.z, 20);
+        p.step({ grab: true });
+        expect(s.physics.heldId).toBe(plankOf(s).id);
+        // turn to face the ditch (it turns with you: still across you) and walk to the lip
+        p.lookAt(start.x, height(0, LIP_NEAR + 1), LIP_FAR, 40);
+        for (let i = 0; i < 900 && s.player.z > LIP_NEAR + BODY_RADIUS; i++) p.step({ moveZ: 0.3 });
+        p.step({}, 30);
+        p.step({ grab: true });
+        let lowest = Infinity;
+        for (let i = 0; i < 60; i++) {
+            p.step();
+            lowest = Math.min(lowest, plankOf(s).pose.p.y);
+        }
+        console.info(`dropped across the ditch: down to y ${lowest.toFixed(2)}`);
+        expect(lowest).toBeLessThan(height(0, LIP_NEAR + 1) - 0.6);
+        // out of reach from the bank (the grab finds nothing)
+        const pk = plankOf(s).pose.p;
+        p.lookAt(pk.x, pk.y + 0.05, pk.z, 20);
+        p.step({ grab: true });
+        expect(s.physics.heldId).toBe(-1);
+        // 1.5 s in the ditch: back where it was, and a toast says how to lay it
+        p.step({}, 120);
+        const back = plankOf(s).pose.p;
+        expect(Math.hypot(back.x - start.x, back.z - start.z)).toBeLessThan(0.05);
+        expect(s.events.some((e) => e.kind === 'recovered' && e.text.includes('a step before the edge'))).toBe(true);
+        // walk round to its near end, take it, carry it to 0.7 m short and lay it
+        p.pitch = 0;
+        expect(p.walkTo(start.x, start.z + LONG_PLANK_HALF.x + 0.4, 0.15, 1200, 0.5)).toBe(true);
+        p.yaw = 0;
+        p.lookAt(start.x, start.y + 0.05, start.z, 20);
+        p.step({ grab: true });
+        expect(s.physics.heldId).toBe(plankOf(s).id);
+        for (let i = 0; i < 900 && s.player.z > LIP_NEAR + 0.7 + BODY_RADIUS; i++) p.step({ moveZ: 0.3 });
+        p.step({}, 30);
+        p.step({ grab: true });
+        p.step({}, 120);
+        const b = bearing(s);
+        console.info(
+            `laid after it came back: ${b.near.toFixed(2)} m on the near bank, ${b.far.toFixed(2)} m on the far bank`
+        );
+        expect(b.near).toBeGreaterThan(0.3);
+        expect(b.far).toBeGreaterThan(0.3);
+        expect(s.progress.falls).toBe(0);
+    });
 
     it('thrown by input from a step back from the edge, it lands across the ditch with 0.4 m or more on each bank', () => {
         const { s, p } = takePlank(0);
@@ -221,8 +317,11 @@ describe('the long plank spans the ditch, laid by a player from the bank (3.8 m,
     });
 });
 
+/** The player's body radius (m): your toes are this far ahead of where you stand. */
+const BODY_RADIUS = 0.3;
+
 /** How far back from the near lip the throw test stands (m). */
-const THROW_BACK = 1.65;
+const THROW_BACK = 2.25;
 
 function run(s: LabSim, k: number, c: Partial<PlayerCommand> = {}): void {
     for (let i = 0; i < k; i++) s.step(cmd(5000 + i, c));

@@ -140,6 +140,8 @@ export const SET_DOWN = { speed: 1.2, slack: 0.12, reach: 2.2 } as const;
 /** How far a poured bucket tips from hanging (rad): past horizontal, mouth down towards the view. */
 export const POUR_ANGLE = (115 * Math.PI) / 180;
 export const RELEASE_MIN_CAP = 8;
+/** Long timber carried balanced (BodyOptions.carryAhead) is held as if looking this far down (rad). */
+export const CARRY_PITCH = -0.35;
 
 export interface PhysicsStats {
     /** Wall time of the last Rapier step and of everything this adapter does around it (ms). */
@@ -331,7 +333,7 @@ export class PhysicsWorld {
     /** How many rigs hold each body (two beavers can carry one log; forces add, each bounded). */
     private readonly holdCount = new Map<number, number>();
     // a just-released body may be pressed into geometry (a snag); bound the energy it can pick up
-    private readonly releasedGuards: { pb: PhysBody; ticks: number; cap: number }[] = [];
+    private readonly releasedGuards: { pb: PhysBody; ticks: number; cap: number; noPlayers?: boolean }[] = [];
 
     constructor() {
         this.world = new RAPIER.World({ x: 0, y: -GRAVITY, z: 0 });
@@ -856,12 +858,17 @@ export class PhysicsWorld {
         if (n <= 0) {
             this.holdCount.delete(pb.id);
             pb.body.setAngularDamping(pb.baseAngularDamping);
-            for (const c of pb.colliders) c.setCollisionGroups(groups(LAYER.prop, ALL));
+            // long timber carried balanced comes down clear of whoever let it go: it passes through
+            // players until its release guard ends
+            const noPlayers = pb.carryAhead !== undefined;
+            for (const c of pb.colliders)
+                c.setCollisionGroups(groups(LAYER.prop, noPlayers ? ALL & ~LAYER.player : ALL));
             const v = pb.body.linvel();
             this.releasedGuards.push({
                 pb,
                 ticks: RELEASE_GUARD_TICKS,
-                cap: Math.max(RELEASE_MIN_CAP, 1.2 * Math.hypot(v.x, v.y, v.z))
+                cap: Math.max(RELEASE_MIN_CAP, 1.2 * Math.hypot(v.x, v.y, v.z)),
+                noPlayers
             });
         } else {
             this.holdCount.set(pb.id, n);
@@ -947,6 +954,9 @@ export class PhysicsWorld {
         const r = this.rigs[p];
         const pb = r?.held;
         if (!r || !pb) return;
+        // long timber carried balanced (carryAhead) is held the same way whatever you look at: low
+        // in front of you, at arm's length, so laying it is the same wherever you look
+        if (pb.carryAhead !== undefined) pitch = CARRY_PITCH;
         const d = viewDir(yaw, pitch, _dir);
         // carried in your hands: the hold distance follows arm's length from the shoulders for where
         // you look (things grabbed from further away are drawn in at 3 m/s; the mouse wheel can only
@@ -1251,7 +1261,11 @@ export class PhysicsWorld {
                 b.setLinvel({ x: lv.x * k, y: lv.y * k, z: lv.z * k }, true);
                 s.releaseClamps++;
             }
-            if (--g.ticks <= 0 || this.holders(g.pb.id) > 0) this.releasedGuards.splice(i, 1);
+            if (--g.ticks <= 0 || this.holders(g.pb.id) > 0) {
+                if (g.noPlayers && this.holders(g.pb.id) === 0)
+                    for (const c of g.pb.colliders) c.setCollisionGroups(groups(LAYER.prop, ALL));
+                this.releasedGuards.splice(i, 1);
+            }
         }
         s.activeBodies = active;
         s.enabledBodies = enabled;

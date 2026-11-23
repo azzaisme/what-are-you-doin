@@ -1576,7 +1576,7 @@ async function atRest(page: Page, name: string): Promise<void> {
     throw new Error(`${name} never came to rest`);
 }
 
-test('the tutorial: the 3.8 m long plank, grabbed by its near end and let go short of the ditch, spans it bank to bank, and you walk over', async ({
+test('the tutorial: the 3.8 m long plank, grabbed by its near end and let go a step before the ditch, spans it bank to bank, and you walk over', async ({
     page
 }) => {
     test.setTimeout(300_000);
@@ -1609,32 +1609,18 @@ test('the tutorial: the 3.8 m long plank, grabbed by its near end and let go sho
         null,
         { timeout: 30_000 }
     );
-    // look ahead, walk it forward (W) and stop 0.3 m short of the lip, then let go
-    await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.look(0, -0.35));
-    await ticks(page, 30);
+    // walk it toward the ditch (W) and stop a step before the edge: toes about 0.7 m short
     await page.keyboard.down('KeyW');
     await page.waitForFunction(
-        (lip) => (window as unknown as { __riverLab: Lab }).__riverLab.player().z <= lip + 0.8,
-        LIP_NEAR,
+        (stop) => (window as unknown as { __riverLab: Lab }).__riverLab.player().z <= stop,
+        LIP_NEAR + 0.7 + 0.3,
         { timeout: 120_000, polling: 'raf' }
     );
     await page.keyboard.up('KeyW');
-    await ticks(page, 30);
-    expect((await lab(page, (l) => l.player())).z).toBeGreaterThan(LIP_NEAR + 0.3);
-    await page.evaluate(
-        (lip) =>
-            new Promise<void>((done) => {
-                const l = (window as unknown as { __riverLab: Lab }).__riverLab;
-                const tick = () => {
-                    if (l.player().z <= lip + 0.3) return done();
-                    l.input({ moveZ: 0.5 });
-                    requestAnimationFrame(tick);
-                };
-                tick();
-            }),
-        LIP_NEAR
-    );
-    await ticks(page, 30);
+    await ticks(page, 20);
+    const toes = (await lab(page, (l) => l.player())).z - 0.3 - LIP_NEAR;
+    expect(toes).toBeGreaterThan(0.4);
+    expect(toes).toBeLessThan(1.0);
     await lab(page, (l) => l.input({ grab: true }));
     await page.waitForFunction(
         () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().holding === null,
@@ -1642,66 +1628,27 @@ test('the tutorial: the 3.8 m long plank, grabbed by its near end and let go sho
         { timeout: 30_000 }
     );
     await atRest(page, 'long-plank');
-    // it lies flat on both banks, 0.4 m or more past each lip
+    // it lies flat on both banks, 0.3 m or more past each lip
     const laid = (await lab(page, (l) => l.entities()))['long-plank'];
-    expect(laid.z + HALF - LIP_NEAR).toBeGreaterThan(0.4);
-    expect(LIP_FAR - (laid.z - HALF)).toBeGreaterThan(0.4);
+    expect(laid.z + HALF - LIP_NEAR).toBeGreaterThan(0.3);
+    expect(LIP_FAR - (laid.z - HALF)).toBeGreaterThan(0.3);
     expect(Math.abs(laid.y - pk.y)).toBeLessThan(0.03);
-    // a picture of it across the ditch (its near end is behind the beaver): back off and walk to the
-    // side along the bank (S, D), look at it over your shoulder (C)
-    await page.keyboard.down('KeyS');
-    await page.waitForFunction(
-        (lip) => (window as unknown as { __riverLab: Lab }).__riverLab.player().z > lip + 1.6,
-        LIP_NEAR,
-        { timeout: 120_000, polling: 'raf' }
-    );
-    await page.keyboard.up('KeyS');
-    await page.keyboard.down('KeyD');
-    await page.waitForFunction(
-        (x) => (window as unknown as { __riverLab: Lab }).__riverLab.player().x > x + 2.6,
-        laid.x,
-        { timeout: 120_000, polling: 'raf' }
-    );
-    await page.keyboard.up('KeyD');
-    await page.evaluate(
-        ([x, y, z]) => {
-            const l = (window as unknown as { __riverLab: Lab }).__riverLab;
-            const p = l.player();
-            // a little to the right of it, so the beaver (over whose shoulder you look) is not in the way
-            const yaw = Math.atan2(-(x - p.x), -(z - p.z)) + 0.3;
-            l.look(yaw, Math.atan2(y - (p.y + p.eyeHeight), Math.hypot(x - p.x, z - p.z)) - 0.15);
-        },
-        [laid.x, laid.y, laid.z]
-    );
+    // a picture of it across the ditch, over your shoulder (C) from where you let go
+    await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.look(0, -0.45));
     await page.keyboard.press('KeyC');
-    await ticks(page, 60);
+    await ticks(page, 10);
     await idleFrames(page);
     await page.screenshot({ path: 'test-results/tutorial-plank-span.png' });
     await page.keyboard.press('KeyC');
-    // walk back to the plank's near end, then over it (W, turning to face where you go)
-    const walkTo = async (x: number, z: number) => {
-        await page.evaluate(
-            ([x, z]) => {
-                const l = (window as unknown as { __riverLab: Lab }).__riverLab;
-                const p = l.player();
-                l.look(Math.atan2(-(x - p.x), -(z - p.z)), 0);
-            },
-            [x, z]
-        );
-        await page.keyboard.down('KeyW');
-        await page.waitForFunction(
-            ([x, z]) => {
-                const p = (window as unknown as { __riverLab: Lab }).__riverLab.player();
-                return Math.hypot(x - p.x, z - p.z) < 0.35;
-            },
-            [x, z],
-            { timeout: 120_000, polling: 'raf' }
-        );
-        await page.keyboard.up('KeyW');
-        await ticks(page, 20);
-    };
-    await walkTo(laid.x, LIP_NEAR + 1.2);
-    await walkTo(laid.x, LIP_FAR - 1.2);
+    // walk over it (W): it lies straight ahead
+    await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.look(0, 0));
+    await page.keyboard.down('KeyW');
+    await page.waitForFunction(
+        (far) => (window as unknown as { __riverLab: Lab }).__riverLab.player().z < far - 1,
+        LIP_FAR,
+        { timeout: 120_000, polling: 'raf' }
+    );
+    await page.keyboard.up('KeyW');
     expect(await lab(page, (l) => l.progress().falls)).toBe(0);
     expect(problems).toEqual([]);
 });
