@@ -72,6 +72,7 @@ import { initPhysics } from './sim/physics/world.ts';
 import { ANIM_MAX } from './sim/snapshots.ts';
 import { WATER } from './sim/water.ts';
 import type { CameraControlsApi } from './types/engine-scripts.ts';
+import { CreditsPanel } from './ui/credits.ts';
 import { fullscreenAvailable, isFullscreen, onPageHidden, setFullscreen } from './ui/embed.ts';
 import { withHammer } from './ui/hammer-hud.ts';
 import { OnlinePanel } from './ui/online-panel.ts';
@@ -2098,6 +2099,8 @@ function menuPad(): Gamepad | null {
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 const times = (v: number) => `${v.toFixed(1)}×`;
+// credits and licences (#104), from Settings → Game
+const credits = new CreditsPanel();
 const menu = new SettingsMenu(
     {
         get(key): SettingValue {
@@ -2160,6 +2163,9 @@ const menu = new SettingsMenu(
                     break;
                 case 'playtest':
                     playtestPanel.open();
+                    break;
+                case 'credits':
+                    credits.show();
                     break;
                 case 'applyCell':
                     applyCellSize(cellPending);
@@ -2273,6 +2279,7 @@ const menu = new SettingsMenu(
                     hint: 'What happened this session, to note, copy or save'
                 },
                 { kind: 'toggle', key: 'fullscreen', label: 'Full screen' },
+                { kind: 'button', id: 'credits', label: 'Credits & licences…' },
                 { kind: 'toggle', key: 'uiHidden', label: 'Hide HUD', hint: 'H' },
                 { kind: 'toggle', key: 'debugPanel', label: 'Debug panel', hint: 'F3' }
             ]

@@ -80,3 +80,10 @@ Chrome blocking sound until a gesture, as real browsers do.
 
 Headless Chrome never hides a tab. The test hides the page the way the browser announces it: the
 visibility state changes, and a `visibilitychange` event fires.
+
+## Credits and licences
+
+The build writes `third-party-licenses.txt` next to `index.html`. It holds the licence notice of
+every bundled package (`scripts/third-party-licenses.ts`), and Settings → Game → Credits & licences
+links to it. Adding a production dependency means adding its credit to `src/ui/credits.ts`:
+`tests/unit/credits.test.ts` fails until it is there with the right licence.

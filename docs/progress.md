@@ -1,5 +1,38 @@
 # Progress log
 
+## Credits and licences (2026-11-23, Epic 10, #104)
+
+The game now says what it is made with, and ships the licence notices its parts ask for.
+
+- **In the game:** Settings → Game → **Credits & licences…** opens a dialog with three sections:
+    - **The game's own work:** the code, levels, voxel models and animation; every sound
+      (synthesised in code, no recordings); and the text, which uses your device's fonts.
+    - **Made with:**
+
+        | Package           | Licence    | What it does                                         |
+        | ----------------- | ---------- | ---------------------------------------------------- |
+        | PlayCanvas Engine | MIT        | the 3D engine, and its camera, sky and water scripts |
+        | Rapier            | Apache-2.0 | physics                                              |
+        | Trystero          | MIT        | connects players peer to peer                        |
+        | noble-secp256k1   | MIT        | signs the matchmaking messages (used by Trystero)    |
+
+    - **Online services:** public Nostr relays help players find each other, and a TURN relay is
+      used if one is configured.
+- **Full licence texts:** the build writes `third-party-licenses.txt` beside the game (18 KB),
+  with every bundled package's name, version, licence and licence text, read from the installed
+  packages. The dialog links to it. Minifying drops the notices from the code, and MIT and
+  Apache-2.0 ask for them to travel with it.
+- **Kept honest:** a unit test fails if a production dependency is added without a credit, or if
+  its licence differs from the one credited. Type-only packages (`@types/webxr`, `@webgpu/types`)
+  put no code in the build and are left out.
+- **Tests:**
+    - unit (`tests/unit/credits.test.ts`): the credits match the production packages and their
+      licences, and each licence text is in the file;
+    - browser, inside the itch embed: the dialog lists all four, the licence file loads from
+      its relative URL with the Apache and MIT texts, and Esc closes the credits but not the menu.
+- **Not decided here:** the game's own licence. The repository has none; that's the owner's
+  choice.
+
 ## The game in itch's embed: checked in the browser (2026-11-23, Epic 10, #103)
 
 itch.io shows the game in a cross-origin iframe on its own page. A new browser test plays it that

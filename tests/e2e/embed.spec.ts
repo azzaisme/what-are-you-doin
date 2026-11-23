@@ -257,3 +257,42 @@ test('itch embed, online: a host in the background tells its guests; a guest who
     expect(guestProblems).toEqual([]);
     expect(guest2Problems).toEqual([]);
 });
+
+test('credits and licences: Settings → Game → Credits lists what the game is made with; the licence texts load beside the game', async ({
+    page,
+    context
+}) => {
+    test.setTimeout(300_000);
+    await routeEmbed(context);
+    const { frame, problems } = await openEmbed(page, '?level=yard&t=1&quality=low#cell100');
+    await frame.locator('.settings-chip').click();
+    await frame.locator('.settings-tabs button', { hasText: 'Game' }).click();
+    await frame.locator('.settings-row button', { hasText: 'Credits & licences' }).click();
+    const dialog = frame.locator('.credits[role=dialog]');
+    await expect(dialog).toBeVisible();
+    for (const name of ['PlayCanvas Engine', 'Rapier', 'Trystero', 'noble-secp256k1'])
+        await expect(dialog.locator('.credits-third-party')).toContainText(name);
+    await expect(dialog).toContainText('Every sound is synthesised in code');
+    // the full texts sit beside the game (a relative URL, so it works wherever the build is served)
+    const href = await dialog.locator('a.credits-licenses').getAttribute('href');
+    expect(href).toBe('./third-party-licenses.txt');
+    const txt = await frame.evaluate(async (h) => {
+        const r = await fetch(h);
+        return { ok: r.ok, text: await r.text() };
+    }, href!);
+    expect(txt.ok).toBe(true);
+    for (const s of [
+        'playcanvas',
+        '@dimforge/rapier3d-compat',
+        'trystero',
+        'Apache License',
+        'Permission is hereby granted'
+    ])
+        expect(txt.text).toContain(s);
+    // Esc closes the credits, not the menu below; Close (or a click outside) too
+    await frame.locator('.credits-close').focus();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(frame.locator('.settings-backdrop')).toBeVisible();
+    expect(problems).toEqual([]);
+});
