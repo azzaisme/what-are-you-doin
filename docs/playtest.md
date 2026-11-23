@@ -120,11 +120,14 @@ slice may be too short.
   little and left alone sets nothing off until someone cuts it again.
 - **The road closure** (the Valley only): crossing Shallow Creek up the forest road (on foot, or
   the ute coming at it), a clunk and a toast, and the sign at the old logging track's mouth swings
-  over to a red arrow down the track. A striped barrier stands across the road 11 m further on; the
-  ute stops against it (it is fixed until someone takes hold of it). Ways round: the logging track
-  (on foot or in the ute), or drag the barrier off the road (one beaver, or two together). Beyond
-  its ends is forest, not a wall: note if they pick a way round through the trees. It is over when the barrier is off the road or everyone has
-  gone round; the sign only says the road is open when it is. Once a run.
+  over to "ROAD CLOSED / DETOUR" and an arrow down the track. A striped barrier stands across the
+  road 11 m further on, in an old post-and-rail fence across the valley floor; the ute stops
+  against it (it is fixed until someone takes hold of it). Ways round: the logging track (on foot
+  or in the ute), drag the barrier off the road (one beaver, or two together), or on foot squeeze
+  between the fence posts. The valley sides beyond the fence's ends are not a wall: note if anyone
+  tries to drive the ute up and round that way, and how long it takes them. It is over when the
+  barrier is off the road or everyone has gone round; the sign only says the road is open when it
+  is. Once a run.
 - There is only one hazard at a time, and 15 s of quiet after each one.
 
 ## Recording the results

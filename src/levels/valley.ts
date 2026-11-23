@@ -1145,9 +1145,11 @@ export const CLOSURE_AT = { junction: 11, rejoin: 35.5, barrierU: 22, signU: 9, 
  * out across the valley floor, with a top rail between them at 1.5 m. The gaps under the rail
  * (1.1 m between posts) let a beaver through but not the ute: on foot, going round the barrier is
  * a way past; in the ute it is the logging track (the line leaves a gap where the track crosses),
- * or shift the barrier. Where something else already stops the ute (the log dump, a pine, the
- * terraced valley sides), there is no post: every post holds the ute somewhere, and the rail runs
- * only between neighbouring posts (tests/unit/road-closure.test.ts).
+ * or shift the barrier. The line holds the valley floor; the terraced sides beyond are not a wall
+ * (the ute can climb them, 26 m out at most: a long way round, never quicker than the track in the
+ * tests). Where something else already stops the ute (the log dump, a pine, the terraces), there is
+ * no post: every post holds the ute somewhere, and the rail runs between neighbouring posts, up to
+ * 5 m apart (tests/unit/road-closure.test.ts).
  */
 export const CLOSURE_POSTS = {
     spacing: 1.25,

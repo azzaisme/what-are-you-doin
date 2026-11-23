@@ -3,38 +3,57 @@
 ## Epic 8: the road closure sign swap (2026-11-23, #77)
 
 The Valley's forest road can now be closed on you. Come up from Shallow Creek and the sign at the
-old logging track's mouth clunks over to "closed, down the track", with a barrier across the road
+old logging track's mouth clunks over to "ROAD CLOSED / DETOUR →", with a barrier across the road
 beyond it. Drive round by the track, or shift the barrier; on foot you can also squeeze past.
 
 - **Where:** the forest road between the logging track's two ends (Epic 9's side path, from u = 11
-  to 35.5). The sign stands at the track's mouth (u = 9); the barrier, 5.6 m of striped board on
-  trestles, stands across the road and its verges at u = 22, 1.2 m past each edge. It stands in an
-  old fence line: timber posts across the valley floor, from the barrier's ends out to the terraced
-  valley sides (18 m each way), with a gap where the logging track crosses. On the right, the log
-  dump is part of the line. The posts are about 1.1 m apart: a beaver fits between them, the ute
-  doesn't.
+  to 35.5). The sign stands at the track's mouth (u = 9). The barrier, 5.6 m of striped board on
+  trestles, stands across the road and its verges at u = 22, 1.2 m past each edge.
+- **The old fence line:** the barrier stands in a post-and-rail fence across the valley floor.
+    - The posts are evenly spaced, 1.1 m apart. The rail, at 1.5 m, is above a beaver's head, so a
+      beaver fits between two posts and the ute doesn't.
+    - There's a gap where the logging track crosses, and the log dump is part of the line.
+    - Where something else already stops the ute (a pine, the dump, the terraces), there is no
+      post. Each of the 15 posts holds the ute somewhere: take any one away and the fence test
+      fails (checked post by post).
+- **What the fence holds, and what it doesn't:** it holds the valley floor. Driven at the line by
+  input every 0.2 m, straight and at an angle (330 drives, out to 24.6 m from the road on both
+  sides), the ute never gets past it; the only way through is the logging track.
+- **The valley sides are not a wall.** Driven up them from the floor (27 tries: 5 places, 3
+  angles, each side), the ute climbs as far as 26.1 m out, which took 24.5 s.
+    - Then driven along the side, up the route, for 20 s more, it never got past the line in any
+      try.
+    - So it is at best a long way round. The logging track takes 11.2 s from its mouth to the road
+      beyond. The test checks that any way round by the side takes longer than that.
 - **When:** a player crossing the creek on foot reaches the tell's window: 2.5 s from the
   junction at a run (4.2 m/s), 1.5 m deep. Or the ute, coming up the road, gets close enough that,
-  flat out from the speed it's going, it could reach the junction in 3 s (with a safe, higher
-  acceleration than it really has, up to its 10 m/s top speed). One already closer when it could
-  not start gets no closure at all rather than a late one.
-  Fixed while measuring: the ute's old window was 25 m out at its top speed, behind where it
-  parks. So a ute driven from its park to the creek never got a tell. Once a run, and through the shared budget: not in the first 20 s, one hazard at a time,
-  and not during the weather. Tested on the full Valley: crossing the creek on a finished bridge
-  brings the flood first and no closure; after the flood and its quiet spell the next one in the
-  window gets it; while it runs, the forest road's rain waits.
+  flat out from the speed it's going, it could reach the junction in 3 s.
+    - That reckoning assumes 5 m/s² of acceleration, more than the ute makes: measured by input,
+      its peak along the road is 3.7 m/s² (asserted in the test).
+    - One already closer when it could not start gets no closure at all rather than a late one.
+    - Once a run, through the shared budget: not in the first 20 s, one hazard at a time, and not
+      during the weather or the quiet spell after it (each tested: the test fails if either
+      check is removed).
+    - Tested on the full Valley too: crossing the creek on a finished bridge brings the flood
+      first and no closure; after the flood and its quiet spell the next one in the window gets
+      it; while it runs, the forest road's rain waits.
 - **Lead time, measured by input:** at a run 3.03 s before the junction, at a walk 5.65 s.
     - **The ute, on the real layout:** driven flat out from the yard's side over the creek, on two
       beams nailed under its wheels, then up the road past the checkpoint flag. From 12 m before
-      the creek it got the tell at 2.49 m/s, 4.33 s before the junction. From 16 m before, the tell
-      came at 3.38 m/s, with even more lead. The fastest it got on that stretch is 7.1 m/s: from a
-      standstill it takes about 4 s to reach 6.8 m/s.
+      the creek, the tell came 4.18 s before the junction; from 16 m before, 4.08 s. The fastest it
+      went on that stretch is 7.6 and 7.8 m/s.
     - **Extra test, not the real layout:** the same closure, moved up the forest road beyond the
       culvert, with the ute already at top speed: 3.10 s at 9.1 m/s.
-- **The tell:** a clunk (a latch click, then a metal thunk) and a toast: "Road closed ahead: drive round
-  by the old logging track, or shift the barrier. On foot, you can squeeze past." The sign's board swings half round over 1.2 s to its
-  closed face, a red arrow down the track on white in a striped border. It stands square to the
-  voxel grid, like Epic 9's route signs, so its arrow comes out crisp.
+- **The tell:** a clunk (a latch click, then a metal thunk) and a toast: "Road closed ahead: drive
+  round by the old logging track, or shift the barrier. On foot, you can squeeze past."
+    - The sign's board (2.4 × 1.2 m) swings half round over 1.2 s. Its closed face says "ROAD
+      CLOSED" and "DETOUR" in black 5 cm letters on white, with a big red arrow towards the track
+      in a striped border.
+    - The arrow points right: going up the road, the track leaves to the right (the approved
+      design said ←).
+    - Every pixel falls on whole voxel cells. At the 10 cm quality setting the letters can't be
+      drawn (they'd be noise), so the board shows its stripes and the arrow.
+    - The open face is the area's route sign ("2", straight on), in orange.
 - **The barrier is pinned:** its movement is locked until someone takes hold of it. Tested: the ute
   driven into it at full throttle for 3 s stops; the barrier moves under 0.1 m, nothing goes over
   15 m/s, nothing breaks. Any player's grab frees it (a guest's too: tested through real sessions),
@@ -45,35 +64,38 @@ beyond it. Drive round by the track, or shift the barrier; on foot you can also 
     - drag the barrier off the road: one player, by its end, straight back down the road first,
       since it stands in the fence line, then out to the side;
     - two players carry it off together;
-    - on foot, squeeze round either end or between two fence posts, then on up the road (each
-      tested: round the left end, round the right end between the barrier and the log dump, and
-      between two posts).
-- **The ute can't get round:** tested by input.
-    - Driven round each end from the road, it never gets within 1 m of the barrier's line.
-    - Set down off the road before the fence line, every 0.8 m from the barrier's ends out past the
-      fence line's reach, and driven flat out along that line for 5 s, it stops short every time.
-      The terraced valley sides stop it beyond the posts.
-    - The only way through is along the logging track.
+    - on foot, squeeze round either end or between two fence posts, then on up the road.
 - **No timer:** the closure ends when the barrier is clear of the road (every corner more than 1 m
   past the edge), or when every player, and the ute if it has come up the road, is past it. A ute
   left behind in the yard does not keep it going.
-- **The sign never lies:** it shows "closed" exactly while the barrier stands on the road. Cleared,
-  it clunks back to "the road goes on" (once). If everyone took the track and left the barrier, it
-  stays closed. A run's reset puts the barrier away and the sign back. (There is no checkpoint
-  reset in the game: a lost bucket comes back at the stage's start, and the closure stays as it is.)
+- **The sign never lies:** it shows "closed" exactly while the barrier stands on the road.
+    - Cleared, it clunks back to "the road goes on" (once).
+    - Dragged back onto the road, it clunks closed again, with a toast ("The barrier is back across
+      the road"). Tested.
+    - If everyone took the track and left the barrier, it stays closed.
+    - A run's reset puts the barrier away and the sign back. (There is no checkpoint reset in the
+      game: a lost bucket comes back at the stage's start, and the closure stays as it is.)
 - **Online, tested:** the guest gets the toast (and so the clunk), the sign's swing on its channel,
   and the barrier where the host has it.
-- **In the browser:** a new test brings the closure on in the Valley and photographs the sign and
-  the barrier (`test-results/road-closure-*.png`).
-- **Code:** `src/sim/hazard-road.ts` (the closure), `src/assets/road-closure.ts` (the barrier and
-  the sign), the Valley's spec and the barrier's place in `valley.ts`, the barrier in the prop list
-  and its body, the clunk in `synth.ts`, and a few lines in the director. No new HazardNet fields.
+- **Network budget:** the Valley's worst-case host state (8 players, every entity visible, long
+  events) is now 4041 of the room's 4096 bytes. That leaves little room for more entities.
+- **In the browser:** a test brings the closure on in the Valley and photographs the sign and the
+  barrier (`test-results/road-closure-*.png`).
+- **Code:**
+    - `src/sim/hazard-road.ts`: the closure;
+    - `src/assets/road-closure.ts`: the barrier and the sign;
+    - `valley.ts`: the Valley's spec, the barrier's place and the fence;
+    - the barrier in the prop list and its body;
+    - the clunk in `synth.ts`;
+    - a few lines in the director: the closure's step, and the weather's quiet spell starting when
+      it ends.
+    - No new HazardNet fields.
 - **Also in this PR (the #127 audit's follow-ups):** the falling-tree browser test steps the sim by
   ticks instead of waiting in real time, and now checks the lean and that the static tree is gone
   in every worker lane.
-- **Tests:** `tests/unit/road-closure.test.ts` (14 tests; all but the budget test use the Valley
-  with only the closure among its hazards, so the flood the test's bridge brings does not get in
-  first). Unit tests: 772 pass at both voxel sizes, with Epic 9's weather merged in.
+- **Tests:** `tests/unit/road-closure.test.ts` has 18 tests. All but two use the Valley with
+  only the closure among its hazards, so the flood the test's bridge brings doesn't get in first.
+  Unit tests: UNITCOUNT pass at both voxel sizes.
 
 ## Credits and licences (2026-11-23, Epic 10, #104)
 

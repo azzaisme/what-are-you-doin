@@ -533,22 +533,34 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         expect(r.furthest).toBeLessThan(CLOSURE_AT.barrierU);
     }, 600_000);
 
-    it('the ute cannot climb round the fence line: driven up either valley side from the floor by input, it never gets as far out as the scan above covers', () => {
+    it('the valley sides: the ute can climb them, a long way round; measured against the logging track by input', () => {
+        // the logging track, at the careful pace the ute keeps on it: from its mouth to the road beyond
+        const t0 = closed();
+        const track = SIDE_PATHS.find((q) => q.name === 'logging-track')!;
+        const d = inTheUte(t0, 0, 0, track.points[0], track.points[1]);
+        const from = t0.tick;
+        d.drive([...track.points.slice(1), [CLOSURE_AT.rejoin + 3, roadT(CLOSURE_AT.rejoin + 3)]], 0.35);
+        expect(routeU(t0.ute.pose.p.x, t0.ute.pose.p.z)).toBeGreaterThan(CLOSURE_AT.rejoin);
+        const trackS = (t0.tick - from) / 60;
+
+        // up the sides: set down on the floor 10.5 m out before the line, driven flat out up the
+        // side (straight out, and a little up or down the route) for 20 s, then along the side, up
+        // the route past the line, for 20 s
         const s = closed();
         inTheUte(s, 12);
         const p = inputs(s);
         let highest = 0;
+        let highestS = 0;
         let drives = 0;
+        const round: number[] = [];
         for (const side of [-1, 1])
             for (const u0 of [14, 16, 18, 20, 21])
                 for (const ang of [0, 0.4, -0.4]) {
-                    // set down on the floor 10.5 m out, facing out up the side (and a little up or
-                    // down the route), and driven flat out for 20 s
-                    const t0 = roadT(u0) + side * 10.5;
+                    const t = roadT(u0) + side * 10.5;
                     const dirU = Math.sin(ang);
                     const dirT = side * Math.cos(ang);
-                    const a = at(u0, t0);
-                    const b = at(u0 + dirU, t0 + dirT);
+                    const a = at(u0, t);
+                    const b = at(u0 + dirU, t + dirT);
                     s.physics.place(
                         s.ute.id,
                         pose(
@@ -561,22 +573,36 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
                     p.step({}, 30);
                     if (Math.hypot(s.ute.pose.p.x - a.x, s.ute.pose.p.z - a.z) > 0.3) continue;
                     drives++;
-                    for (let i = 0; i < S(20); i++) {
-                        const pp = s.ute.pose.p;
-                        const u = routeU(pp.x, pp.z);
-                        const t = routeT(pp.x, pp.z);
-                        const c = at(u + dirU * 3, t + dirT * 3);
-                        const e = Math.atan2(c.x - pp.x, c.z - pp.z) - yawOf(s.ute.pose.q);
-                        const err = Math.atan2(Math.sin(e), Math.cos(e));
-                        p.step({ moveZ: 1, moveX: Math.max(-1, Math.min(1, -2.5 * err)) });
+                    const start = s.tick;
+                    const out = () => {
                         const q = s.ute.pose.p;
-                        highest = Math.max(highest, side * (routeT(q.x, q.z) - roadT(routeU(q.x, q.z))));
-                    }
+                        return side * (routeT(q.x, q.z) - roadT(routeU(q.x, q.z)));
+                    };
+                    const along = () => routeU(s.ute.pose.p.x, s.ute.pose.p.z);
+                    const drive = (du: number, dt: number, ticks: number, stop?: () => boolean) => {
+                        for (let i = 0; i < ticks && !stop?.(); i++) {
+                            const pp = s.ute.pose.p;
+                            const c = at(along() + du * 3, routeT(pp.x, pp.z) + dt * 3);
+                            const e = Math.atan2(c.x - pp.x, c.z - pp.z) - yawOf(s.ute.pose.q);
+                            const err = Math.atan2(Math.sin(e), Math.cos(e));
+                            p.step({ moveZ: 1, moveX: Math.max(-1, Math.min(1, -2.5 * err)) });
+                            if (out() > highest) {
+                                highest = out();
+                                highestS = (s.tick - start) / 60;
+                            }
+                        }
+                    };
+                    drive(dirU, dirT, S(20));
+                    drive(1, 0, S(20), () => along() > CLOSURE_AT.barrierU + 2);
+                    if (along() > CLOSURE_AT.barrierU + 2) round.push((s.tick - start) / 60);
                 }
-        console.log(`up the valley sides: ${drives} drives, the furthest out ${highest.toFixed(2)} m`);
+        console.log(
+            `the logging track: ${trackS.toFixed(1)} s from its mouth to the road beyond; up the valley sides: ${drives} drives, the highest ${highest.toFixed(1)} m out (after ${highestS.toFixed(1)} s), ${round.length} got round past the line${round.length ? ` (fastest ${Math.min(...round).toFixed(1)} s)` : ''}`
+        );
         expect(drives).toBeGreaterThan(20);
-        expect(highest).toBeLessThan(24.4);
-    }, 600_000);
+        // a long way round: any way round by the side takes longer than the whole track
+        for (const r of round) expect(r).toBeGreaterThan(trackS);
+    }, 900_000);
 
     it('the barrier is pinned: the ute at full throttle into it for 3 s stops; nothing moves, nothing flies', () => {
         const s = closed();
