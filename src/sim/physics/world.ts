@@ -95,6 +95,8 @@ export interface PhysBody {
     enabled: boolean;
     /** Average projected area (m^2) the wind acts on (surface area / 4 for convex shapes). */
     windArea: number;
+    /** Nailed into a structure (Epic 5 joints set it): a character's controller does not shove it. */
+    nailed?: boolean;
     /** Body-local grab anchor override (see BodyOptions.grabPoint). */
     grabPoint?: { x: number; y: number; z: number };
     /** See BodyOptions.wristTorque. */
@@ -173,6 +175,8 @@ export const CHARACTER = {
 
 /** What a character's feet rest on: a ball at the bottom of its capsule, a little wider. */
 const FOOT = new RAPIER.Ball(CHARACTER.radius + 0.02);
+/** All of a character, a little wider: what it brushes against. */
+const BODY = new RAPIER.Capsule(CHARACTER.half + 0.05, CHARACTER.radius + 0.05);
 const _v = { x: 0, y: 0, z: 0 };
 const _dir = { x: 0, y: 0, z: 0 };
 const _target = { x: 0, y: 0, z: 0 };
@@ -677,7 +681,7 @@ export class PhysicsWorld {
         for (const u of under) {
             if (!this.stoodOn.has(u.pb.id)) this.stoodOn.set(u.pb.id, { pushed: 0, m: 0, x: 0, z: 0 });
             const v = u.pb.body.linvel();
-            u.pb.body.setLinvel(walking ? { x: v.x, y: u.v.y, z: v.z } : u.v, true);
+            u.pb.body.setLinvel(walking && !u.pb.nailed ? { x: v.x, y: u.v.y, z: v.z } : u.v, true);
             u.pb.body.setAngvel(u.w, true);
         }
         const m = k.computedMovement();
@@ -733,26 +737,34 @@ export class PhysicsWorld {
     private underFoot(r: Rig): { pb: PhysBody; v: Vec3Like; w: Vec3Like }[] {
         const t = r.body.translation();
         const out: { pb: PhysBody; v: Vec3Like; w: Vec3Like }[] = [];
-        this.world.intersectionsWithShape(
-            { x: t.x, y: t.y, z: t.z },
-            { x: 0, y: 0, z: 0, w: 1 },
-            FOOT,
-            (col) => {
-                const pb = this.byCollider.get(col.handle);
-                if (
-                    pb &&
-                    pb.kind === 'dynamic' &&
-                    pb.enabled &&
-                    this.holders(pb.id) === 0 &&
-                    !out.some((u) => u.pb === pb)
-                )
-                    out.push({ pb, v: { ...pb.body.linvel() }, w: { ...pb.body.angvel() } });
-                return true;
-            },
-            RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
-            groups(ALL, LAYER.prop),
-            r.collider
-        );
+        // and anything nailed the capsule brushes: a nailed deck does not give to a shove, and the
+        // controller's push on it (a capsule pressed against a nailed plank's edge read 1.5 kN on
+        // its nails) is taken back whole
+        for (const [shape, y, nailedOnly] of [
+            [FOOT, t.y, false],
+            [BODY, t.y + CHARACTER.half + CHARACTER.radius, true]
+        ] as const)
+            this.world.intersectionsWithShape(
+                { x: t.x, y, z: t.z },
+                { x: 0, y: 0, z: 0, w: 1 },
+                shape,
+                (col) => {
+                    const pb = this.byCollider.get(col.handle);
+                    if (
+                        pb &&
+                        pb.kind === 'dynamic' &&
+                        pb.enabled &&
+                        (!nailedOnly || pb.nailed) &&
+                        this.holders(pb.id) === 0 &&
+                        !out.some((u) => u.pb === pb)
+                    )
+                        out.push({ pb, v: { ...pb.body.linvel() }, w: { ...pb.body.angvel() } });
+                    return true;
+                },
+                RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+                groups(ALL, LAYER.prop),
+                r.collider
+            );
         return out;
     }
 

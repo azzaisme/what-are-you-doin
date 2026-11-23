@@ -281,6 +281,8 @@ export class JointSystem {
                 tick
             });
             if (conn) this.makeJoint(conn, A, B);
+            A.nailed = true;
+            if (B) B.nailed = true;
         }
         for (const id of [pv.a, pv.b]) if (id >= 0) this.pw.releaseAll(id);
         return pv;
@@ -377,7 +379,12 @@ export class JointSystem {
             this.pw.world.removeImpulseJoint(j, true);
             this.rapier.delete(id);
         }
-        for (const b of c ? [c.a, c.b] : []) this.pw.bodies.get(b)?.body.wakeUp();
+        for (const b of c ? [c.a, c.b] : []) {
+            const pb = this.pw.bodies.get(b);
+            if (!pb) continue;
+            pb.body.wakeUp();
+            pb.nailed = this.graph.of(b).length > 0;
+        }
         return c;
     }
 
