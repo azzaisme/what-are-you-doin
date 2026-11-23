@@ -1525,7 +1525,6 @@ test('logging in the Timber Yard: chew a pine down, the voxel tree becomes a stu
     await ticks(page, 240);
     await lab(page, (l) => l.look(-Math.PI / 2 + 0.3, -0.45));
     await ticks(page, 90);
-    await idle(page);
     await page.screenshot({ path: 'test-results/logging-felled.png' });
     // a grab press that landed after the fall picks the log up (on a slow software renderer the
     // presses queue up), and full hands never aim at the lever: let go first
@@ -1619,7 +1618,7 @@ test('the falling tree in the Timber Yard: a bite with the ute by the stand, and
         l.teleport(20.0, 1.5, Math.atan2(4, -3));
         l.look(Math.atan2(4, -3), 0.3);
     });
-    await idle(page);
+    await page.waitForTimeout(1500);
     await page.screenshot({ path: 'test-results/falling-tree-crack.png' });
     // the tell: the static tree is gone and the marker draws it, leaning further over time
     await page.waitForFunction(
