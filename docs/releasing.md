@@ -59,14 +59,15 @@ The next release builds them in. They end up in the published game (every browse
 use a free or capped plan. A guest uses about 12 KB/s, roughly 45 MB an hour.
 
 - CI runs the checks, unit tests and build. It does not run the browser tests: on the runner's
-  software rendering they outgrew the job's time limit. The full browser suite
-  (`npx playwright test --trace off`) runs during development, before a branch is pushed for review
-  (see `AGENTS.md`).
+  software rendering they outgrew the job's time limit. Each branch runs the browser
+  tests that cover its change before review; the full browser suite (`npx playwright test --trace off`)
+  runs on the integration branch after each batch of merges and must pass before it merges into
+  `main` (see `AGENTS.md`).
 
 ## Embed checks (what itch's iframe needs)
 
 itch.io shows the game in a cross-origin iframe on its own page. `tests/e2e/embed.spec.ts` plays
-the game the same way; it is part of the browser suite run before every push for review:
+the game the same way; it is part of the full browser suite run before every release:
 
 - A stand-in itch page on one host frames the game on another.
 - The iframe grants `autoplay; fullscreen *; gamepad`: the features the game uses. This wasn't
