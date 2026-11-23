@@ -58,9 +58,32 @@ less than one view with them (1991). The Valley's shadow count barely grows with
 shadowed ground near the camera is already merged into few pieces. Four views on a real phone GPU
 are untested.
 
-- Cutting each view's draw calls (#109) helps every view.
-- For split screen, the bigger lever is the sun's shadows: fewer cascades, or none, at three or
-  four views on Low.
+**What changed for it: fewer shadow cascades at three and four views.** One or two views keep
+each preset's shadows exactly as before.
+
+- **Low:** three views draw one cascade instead of two; four views draw no sun shadows.
+- **High:** three and four views draw two cascades instead of three.
+- There is no cap on the number of views.
+
+Yard, Low, draw calls (averaged over 5 samples):
+
+| Views | 2 cascades | 1 cascade | Off  | Now               |
+| ----- | ---------- | --------- | ---- | ----------------- |
+| 1     | 1991       | 1515      | 727  | 1991 (2 cascades) |
+| 2     | 2443       | 1840      | 1052 | 2443 (2 cascades) |
+| 3     | 3286       | 2525      | 1343 | 2525 (1 cascade)  |
+| 4     | 4137       | 3188      | 1612 | 1612 (off)        |
+
+Four views with one cascade still cost 1.6 times one view, so four views on Low go without.
+
+Cutting each view's draw calls (#109) pays again for every view: shadows are drawn per camera.
+No phone GPU was measured.
+
+Tests:
+
+- `tests/unit/split-shadows.test.ts`: one and two views keep each preset unchanged; three and four
+  views on each preset.
+- The four-view browser test reads the sun's settings at 1, 2, 4, 3 and back to 1 views on Low.
 
 ## Input and accessibility: text size everywhere, less motion, menus never grab (2026-11-23, Epic 10, #21)
 
