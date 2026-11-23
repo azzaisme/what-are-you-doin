@@ -74,7 +74,7 @@ interface Tracked {
  * The most any object may reach from its root (m), animation included (checked when a service
  * starts, see maskReach). A mask is looked for only within its own reach of this lattice's objects.
  */
-export const MASK_REACH = 8;
+export const MASK_REACH = 12;
 
 /** How far an asset's parts may reach from its root: at rest, a quarter more and 0.5 m for animation. */
 export function maskReach(b: AABB): number {
