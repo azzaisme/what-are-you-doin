@@ -39,7 +39,7 @@ a built bridge). Each of these fails to get the bucket over:
 
 - carried onto the stepping stones: it was held on a stone for at most 1 tick, then dropped and
   went back to the start;
-- carried with a running jump onto the stones;
+- carried with a running jump onto the stones (the jump is refused while holding the bucket);
 - alone: set down on a stone from the bank, then reached for from the bank, and from a stone;
 - passed from a beaver on the bank to one on a stone;
 - set on a boulder from the near rim, then reached for from the far rim;
@@ -50,6 +50,17 @@ a built bridge). Each of these fails to get the bucket over:
 - online: a guest on a stone can't take it from the host. The guest is told it holds nothing, sees
   the toast, and its snapshots show the bucket within 0.3 m of where the host has it.
 
+Each detour's "goes back" toast names its own stage and spare: "A spare (empty) one is waiting at
+the Shallow Creek start" at the creek, "A spare bucket (3 L) is waiting at the Forest Road start" at
+the culvert, and the Mountain Approach's 3 L at the crevasse. Only a bucket that rests on a piece
+counts: one flying up the boulders, clipping the first and flying on, touched them for under a third
+of a second and landed on the far rim with no respawn (tested).
+
+These work alongside the rules that keep the bucket off the bare crossings (#132): no jumping
+holding it, hand-overs only standing close, and the taps past a crossing shut until its stage. So
+the crevasse detour can't be used to fetch a thrown bucket and refill it at the spring butt either:
+the butt is shut until the Mountain Approach is done.
+
 The rest:
 
 - **Control:** the same hand-over over the built crevasse crossing works (the beaver on the beams
@@ -59,7 +70,7 @@ The rest:
 - **Timber, measured:** a plank (2.4 m) and a beam (3.2 m) can each be carried over all three
   detours by one beaver. So a crossing can be built from either side. Only the bucket is held back.
 - Valley planks stay 2.4 m, and the bucket's throw is unchanged.
-- npm test 822/822 (5 cm and 10 cm).
+- npm test 872/872 (5 cm and 10 cm).
 
 ## Valley flags want water in the bucket: the empty-bucket throw is closed (2026-11-23, Epic 9)
 

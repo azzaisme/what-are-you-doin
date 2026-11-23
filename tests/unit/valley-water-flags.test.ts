@@ -14,6 +14,7 @@ import {
     routeT,
     routeToWorld,
     routeU,
+    valleyHeight,
     valleyLevel
 } from '../../src/levels/valley.ts';
 import { GuestSession, HostSession, listGames } from '../../src/net/session.ts';

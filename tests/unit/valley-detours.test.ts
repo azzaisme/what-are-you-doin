@@ -22,7 +22,7 @@ import { GuestSession, HostSession, listGames } from '../../src/net/session.ts';
 import { MemoryHub } from '../../src/net/transport.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
-import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
+import { EYE_HEIGHT, HANDOVER_REACH, LabSim } from '../../src/sim/lab-sim.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
 import { pose, quatFromYawPitchRoll } from '../../src/voxels/math.ts';
 
@@ -446,7 +446,10 @@ describe('the bucket can’t go over a detour (each way of trying, by input)', (
         stand(a, CREEK.near - 2.1, CREEK.t);
         standOn(b, DETOURS.creek.stones[0], CREEK.t, DETOURS.creek.tops[0], false);
         expect(a.grabBucket()).toBe(true);
+        // (to the bank's very edge: within a hand-over of the stone, so it's the stone that refuses)
+        walkAlong(a, CREEK.t, -1.8);
         faceAcross(a, CREEK.t, -0.3);
+        expect(Math.hypot(b.p.x - a.p.x, b.p.z - a.p.z)).toBeLessThan(HANDOVER_REACH);
         a.step({}, 40);
         expect(takeFromHands(b)).toBe(false);
         expect(texts(s, 'hint')[0]).toContain('stepping stones');
@@ -542,7 +545,10 @@ describe('the bucket can’t go over a detour (each way of trying, by input)', (
         stand(a, CREEK.near - 2.1, CREEK.t);
         standOn(g, DETOURS.creek.stones[0], CREEK.t, DETOURS.creek.tops[0], false);
         expect(a.grabBucket()).toBe(true);
+        // (to the bank's very edge: within a hand-over of the stone, so it's the stone that refuses)
+        walkAlong(a, CREEK.t, -1.8);
         faceAcross(a, CREEK.t, -0.3);
+        expect(Math.hypot(g.p.x - a.p.x, g.p.z - a.p.z)).toBeLessThan(HANDOVER_REACH);
         a.step({}, 40);
         guestCmd = neutralCommand(0, g.yaw, g.pitch);
         expect(takeFromHands(g)).toBe(false);
@@ -654,4 +660,50 @@ describe('players are told', () => {
         expect(VALLEY_STAGES[CRACK.stage].objective).toContain('boulders are feet only');
         expect(VALLEY_STAGES[CRACK.stage].objective).toContain('the bucket goes over the bridge');
     });
+});
+
+describe('a bucket left on a detour piece goes back, said right for each stage', () => {
+    for (const [which, d, what, x] of [
+        ['creek', CREEK, 'stepping stones', DETOURS.creek.stones[1]],
+        ['culvert', CULVERT, 'fallen trunk', (DETOURS.culvert.from + DETOURS.culvert.to) / 2],
+        ['crevasse', CRACK, 'boulders', DETOURS.crevasse.boulders[1]]
+    ] as const)
+        it(`the ${which}: the toast names its own stage and its spare`, () => {
+            const s = run(d.stage);
+            const piece = valleyLayout(1).pieces.find(
+                (p) => p.detour === what && Math.abs(routeU(p.pose.p.x, p.pose.p.z) - x) < 0.5
+            )!;
+            const top = piece.shape.type === 'box' ? piece.pose.p.y + piece.shape.hy : NaN;
+            s.physics.place(s.bucket.id, pose(piece.pose.p.x, top + 0.01, piece.pose.p.z));
+            for (let i = 0; i < 60; i++) s.step(neutralCommand(s.tick));
+            const st = VALLEY_STAGES[d.stage];
+            const spare = st.spareLitres
+                ? `A spare bucket (${st.spareLitres} L) is waiting at the ${st.name} start.`
+                : `A spare (empty) one is waiting at the ${st.name} start.`;
+            expect(texts(s, 'recovered')).toEqual([`The bucket can't be carried on the ${what}. ${spare}`]);
+            expect(backAtStart(s, d.stage)).toBe(true);
+            expect(s.water.volume).toBe(st.spareLitres ?? 0);
+        }, 60_000);
+
+    it('a bucket that bounces off a boulder in mid-air and carries on is not sent back', () => {
+        const s = run(CRACK.stage);
+        // flying up the detour's line just above the boulders, low enough to clip the first one
+        const [b0] = DETOURS.crevasse.boulders;
+        const w = routeToWorld(b0 - 0.2, CRACK.t);
+        s.physics.place(s.bucket.id, pose(w.x, DETOURS.crevasse.top + 0.25, w.z));
+        const body = s.physics.bodies.get(s.bucket.id)!.body;
+        const a = routeToWorld(b0, CRACK.t);
+        const b = routeToWorld(b0 + 1, CRACK.t);
+        body.setLinvel({ x: (b.x - a.x) * 7, y: -1.5, z: (b.z - a.z) * 7 }, true);
+        let touched = 0;
+        for (let i = 0; i < 120; i++) {
+            s.step(neutralCommand(s.tick));
+            if (s.bucketOnDetour()) touched++;
+        }
+        // it touched the boulders, briefly, and flew on onto the far rim
+        expect(touched).toBeGreaterThan(0);
+        expect(touched).toBeLessThan(20);
+        expect(s.progress.recoveries).toBe(0);
+        expect(bucketU(s)).toBeGreaterThan(FAR_BANK.crevasse);
+    }, 60_000);
 });
