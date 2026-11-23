@@ -1627,3 +1627,57 @@ test('the falling tree in the Timber Yard: a bite with the ute by the stand, and
     expect(cells1 - cells0).toBeGreaterThan(1000);
     expect(problems).toEqual([]);
 });
+
+test('the road closure in the Valley: the sign swings to closed, a barrier stands across the forest road', async ({
+    page
+}) => {
+    test.setTimeout(300_000);
+    const problems = await boot(page, '?level=valley&t=0.01&quality=low#cell100');
+    // past the quiet start (seek steps the sim by ticks, then let it run on)
+    await lab(page, (l) => {
+        l.seek(21);
+        l.action('pause');
+    });
+    // step onto the creek crossing, in the tell's window (route u = 0: world -64, 62)
+    await lab(page, (l) => l.teleport(-64, 62, 0));
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().closure >= 1,
+        null,
+        { timeout: 120_000 }
+    );
+    // let the sign swing over (1.2 s of sim), then look at it from the road short of the junction
+    // (straight on, 4 m short of it, route u = 5: world -58.4, 60.6), and at the barrier from 6 m short
+    // of it (u = 16: world -51.4, 52.0); forward is (-sin yaw, -cos yaw)
+    await lab(page, (l) => {
+        l.seek(l.hazards().tick / 60 + 1.5);
+        // run on (seek pauses): the camera follows the snapshots
+        l.action('pause');
+    });
+    for (const [x, z, yaw, file] of [
+        [-58.35, 60.58, Math.atan2(-1, 1), 'road-closure-sign'],
+        [-51.37, 52.0, -0.872, 'road-closure-barrier']
+    ] as const) {
+        await page.evaluate(
+            ([px, pz, py]) => {
+                const l = (window as unknown as { __riverLab: Lab }).__riverLab;
+                l.teleport(px, pz, py);
+                l.look(py, -0.08);
+            },
+            [x, z, yaw] as const
+        );
+        const t0 = await lab(page, (l) => l.hazards().tick);
+        await page.waitForFunction(
+            (t) => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().tick > t + 6,
+            t0,
+            { timeout: 120_000 }
+        );
+        // (the streamed world keeps building while the sim runs: give it a moment)
+        await page.waitForTimeout(4000);
+        await page.screenshot({ path: `test-results/${file}.png` });
+    }
+    expect(await lab(page, (l) => l.hazards().closureSign)).toBeCloseTo(1, 2);
+    const e = await lab(page, (l) => l.entities());
+    expect(e['barrier'].visible).toBe(true);
+    expect(e['closure-sign'].visible).toBe(true);
+    expect(problems).toEqual([]);
+});

@@ -23,6 +23,8 @@
 import type { LevelDef } from '../levels/level.ts';
 
 import { SIM_HZ } from './clock.ts';
+import { RoadClosure } from './hazard-road.ts';
+import type { ClosureEntities, RoadClosureSpec } from './hazard-road.ts';
 import { TreeHazard } from './hazard-tree.ts';
 import type { TreeHazardHost } from './hazard-tree.ts';
 import type { SimEvent } from './lab-sim.ts';
@@ -63,6 +65,8 @@ export interface HazardSpec {
     handbrake?: HandbrakeSpec;
     /** The tree that falls towards the ute (#74, src/sim/hazard-tree.ts). */
     tree?: boolean;
+    /** The road closure sign swap (#77, src/sim/hazard-road.ts). */
+    roadClosure?: RoadClosureSpec;
 }
 
 /** Timings (seconds) and budgets. */
@@ -137,6 +141,8 @@ export interface HazardHost {
     readonly driver: number;
     /** The logging stand (the falling-tree hazard). */
     readonly forestry?: TreeHazardHost['forestry'];
+    /** The road closure's barrier and sign. */
+    readonly closure?: ClosureEntities;
 }
 
 interface Quat4 {
@@ -193,6 +199,8 @@ export class HazardDirector {
     private gustOver = 0;
     /** The tree that falls towards the ute (#74). */
     readonly tree = new TreeHazard();
+    /** The road closure (#77), in levels that have one. */
+    road: RoadClosure | null = null;
     /** The handbrake prank: phase, ticks in it, count, how long the ute has stood parked. */
     brakePhase: number = PHASE.idle;
     brakeT = 0;
@@ -211,6 +219,7 @@ export class HazardDirector {
     /** `enabled` false: no hazards at all (tests of other mechanics in hazard levels). */
     constructor(level: LevelDef, enabled = true) {
         this.spec = enabled ? level.hazards : undefined;
+        if (this.spec?.roadClosure) this.road = new RoadClosure(this.spec.roadClosure);
         this.seed = level.hazards?.seed ?? 1;
         this.baseY = level.water.y;
         this.waterY = this.baseY;
@@ -218,6 +227,7 @@ export class HazardDirector {
 
     reset(): void {
         this.tree.reset();
+        this.road?.reset();
         this.waterY = this.baseY;
         this.rise = 0;
         this.floodPhase = this.gustPhase = PHASE.idle;
@@ -246,6 +256,7 @@ export class HazardDirector {
             this.gustPhase !== PHASE.idle ||
             this.brakePhase !== PHASE.idle ||
             this.tree.busy ||
+            !!this.road?.busy ||
             this.floodPending >= 0
         );
     }
@@ -282,7 +293,22 @@ export class HazardDirector {
                 this.canStart(h, tick)
             );
         }
+        if (this.road && h.closure) this.stepRoadClosure(h, this.road, h.closure, tick);
         if (this.busy) this.quietFrom = tick + S(HAZARD.safeS);
+    }
+
+    /** The road closure (#77): who could be coming, on foot or in the ute. */
+    private stepRoadClosure(h: HazardHost, road: RoadClosure, closure: ClosureEntities, tick: number): void {
+        const walkers: { x: number; z: number }[] = [];
+        h.players.forEach((p, i) => {
+            if (h.isSlotActive(i) && h.seatOf(i) < 0) walkers.push(p);
+        });
+        const b = h.vehicle?.pb.body;
+        const ute = b ? { ...b.translation(), speed: Math.hypot(b.linvel().x, b.linvel().z) } : null;
+        road.step(
+            { tick, physics: h.physics, entities: closure, walkers, ute, say: (t) => this.say(h, t) },
+            this.canStart(h, tick)
+        );
     }
 
     /** May a new hazard start now? */

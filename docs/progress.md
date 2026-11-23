@@ -1,5 +1,55 @@
 # Progress log
 
+## Epic 8: the road closure sign swap (2026-11-23, #77)
+
+The Valley's forest road can now be closed on you. Come up from Shallow Creek and the sign at the
+old logging track's mouth clunks over to "closed, down the track", with a barrier across the road
+beyond it. Take the track, or shift the barrier.
+
+- **Where:** the forest road between the logging track's two ends (Epic 9's side path, from u = 11
+  to 35.5). The sign stands at the track's mouth (u = 9); the barrier, 5.6 m of striped board on
+  trestles, stands across the road and its verges at u = 22, 1.2 m past each edge.
+- **When:** a player crossing the creek on foot, or the ute coming up at speed, reaches the tell's
+  window: 2.5 s from the junction at the fastest it can go there (a run, 4.2 m/s; the ute, 10 m/s),
+  and 1.5 m deep. One already closer when it could not start gets no closure at all rather than a
+  late one. Once a run, and through the shared budget: not in the first 20 s, one hazard at a time.
+- **Lead time, measured by input:** at a run 3.03 s before the junction, at a walk 5.65 s; the ute
+  at 9.1 m/s, 3.10 s. (The ute was tested on the same closure moved up the forest road, beyond the
+  culvert: the Valley's own junction is just past the creek, which the ute cannot take at speed.)
+- **The tell:** a clunk (a latch click, then a metal thunk) and a toast: "Road closed ahead: take the
+  old logging track, or shift the barrier." The sign's board swings half round over 1.2 s to its
+  closed face, a red arrow down the track on white in a striped border. It stands square to the
+  voxel grid, like Epic 9's route signs, so its arrow comes out crisp.
+- **The barrier is pinned:** its movement is locked until someone takes hold of it. Tested: the ute
+  driven into it at full throttle for 3 s stops; the barrier moves under 0.1 m, nothing goes over
+  15 m/s, nothing breaks. Any player's grab frees it (a guest's too: tested through real sessions),
+  and it is then a 45 kg prop.
+- **Ways round, each tested by input:**
+    - walk the logging track and rejoin the road beyond;
+    - drive the ute round the track;
+    - drag the barrier off the road (one player, by its end, out to the open side);
+    - two players carry it off together.
+    - Beyond its ends is forest, not a wall: someone on foot may pick a way round through the trees.
+      That is not tested, and neither is the ute trying to drive round it (only head-on, above).
+- **No timer:** the closure ends when the barrier is clear of the road (every corner more than 1 m
+  past the edge), or when every player, and the ute if it has come up the road, is past it. A ute
+  left behind in the yard does not keep it going.
+- **The sign never lies:** it shows "closed" exactly while the barrier stands on the road. Cleared,
+  it clunks back to "the road goes on" (once). If everyone took the track and left the barrier, it
+  stays closed. A run's reset puts the barrier away and the sign back. (There is no checkpoint
+  reset in the game: a lost bucket comes back at the stage's start, and the closure stays as it is.)
+- **Online, tested:** the guest gets the toast (and so the clunk), the sign's swing on its channel,
+  and the barrier where the host has it.
+- **In the browser:** a new test brings the closure on in the Valley and photographs the sign and
+  the barrier (`test-results/road-closure-*.png`).
+- **Code:** `src/sim/hazard-road.ts` (the closure), `src/assets/road-closure.ts` (the barrier and
+  the sign), the Valley's spec and the barrier's place in `valley.ts`, the barrier in the prop list
+  and its body, the clunk in `synth.ts`, and a few lines in the director. No new HazardNet fields.
+- **Also in this PR (the #127 audit's follow-ups):** the falling-tree browser test steps the sim by
+  ticks instead of waiting in real time, and now checks the lean and that the static tree is gone
+  in every worker lane.
+- **Tests:** `tests/unit/road-closure.test.ts` (10 tests). Unit tests: 712 pass at both voxel sizes.
+
 ## Epic 8: a tree falls towards the ute (2026-11-22, #74)
 
 The logging stand can now fight back. Take a bite out of a stand tree with the ute parked close

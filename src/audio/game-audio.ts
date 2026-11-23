@@ -16,6 +16,7 @@ import { Asset, Entity, Sound } from 'playcanvas';
 import type { AppBase } from 'playcanvas';
 
 import type { LevelDef } from '../levels/level.ts';
+import { CLOSURE_OPEN, CLOSURE_TELL } from '../sim/hazard-road.ts';
 import { TREE_TELL } from '../sim/hazard-tree.ts';
 import { PHASE } from '../sim/hazards.ts';
 import type { HazardNet } from '../sim/hazards.ts';
@@ -569,6 +570,8 @@ export function eventSounds(kind: string, text: string): { name: SfxName; gain: 
     if (kind === 'step') return [{ name: 'ding', gain: 0.6, pitch: 1 }];
     if (kind === 'goal') return [{ name: 'fanfare', gain: 0.8, pitch: 1 }];
     if (kind === 'recovered') return [{ name: 'ding', gain: 0.45, pitch: 0.75 }];
+    if (kind === 'hazard' && (text === CLOSURE_TELL || text === CLOSURE_OPEN))
+        return [{ name: 'clunk', gain: 1, pitch: text === CLOSURE_TELL ? 1 : 1.1 }];
     if (kind === 'hazard' && text === TREE_TELL)
         return [
             { name: 'snap', gain: 1, pitch: 0.8 },

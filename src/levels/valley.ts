@@ -24,6 +24,8 @@
  * Pure module (no engine).
  */
 
+import { BARRIER_HALF } from '../assets/road-closure.ts';
+import type { RoadClosureSpec } from '../sim/hazard-road.ts';
 import { GRID_SIZE, cellCenterX, cellCenterZ, cellIndexX, cellIndexZ } from '../voxels/grid.ts';
 import { pose, quatFromYawPitchRoll, quatMul } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
@@ -1122,6 +1124,40 @@ const VALLEY_FORESTRY: ForestryDef = (() => {
     };
 })();
 
+/**
+ * The road closure (Epic 8, #77, src/sim/hazard-road.ts) on the forest road: the old logging track
+ * (SIDE_PATHS) leaves the road at u = 11 and rejoins it at 35.5. Coming up the road, the sign at the
+ * track's mouth clunks over to "closed, down the track", and a barrier stands across the road and
+ * its cleared verges at u = 22. Take the track, or shift the barrier.
+ */
+export const CLOSURE_AT = { junction: 11, rejoin: 35.5, barrierU: 22, signU: 9, signT: 2.4 };
+export const VALLEY_ROAD_CLOSURE: RoadClosureSpec = (() => {
+    const u = CLOSURE_AT.barrierU;
+    const t = roadT(u);
+    // the barrier's long axis (local x) across the road, square to it where it bends
+    const slope = roadT(u + 0.5) - roadT(u - 0.5);
+    const barrier = atUT(u, t, BARRIER_HALF.y + 0.02, Math.atan(slope));
+    // the sign, right of the road: axis-aligned like the route signs (its face looks along -x, at
+    // traffic coming up the road), its board snapped to 10 cm lines so the arrow's pixels fall on
+    // whole cells (the board's middle is 1.6 m up the post: half a pixel off a line in height)
+    const sw = routeToWorld(CLOSURE_AT.signU, roadT(CLOSURE_AT.signU) + CLOSURE_AT.signT);
+    const snap = (v: number, off = 0) => Math.round((v - off) / 0.1) * 0.1 + off;
+    const sy = snap(groundUT(CLOSURE_AT.signU, roadT(CLOSURE_AT.signU) + CLOSURE_AT.signT) + 1.6, 0.05) - 1.6;
+    const sign = pose(snap(sw.x), sy, snap(sw.z), quatFromYawPitchRoll(-Math.PI / 2, 0, 0));
+    return {
+        along: routeU,
+        junction: CLOSURE_AT.junction,
+        rejoin: CLOSURE_AT.rejoin,
+        // past the creek (the yard's side is before it)
+        from: 2,
+        across: (x, z) => routeT(x, z) - roadT(routeU(x, z)),
+        roadHalf: 1.6,
+        barrier,
+        barrierHalf: BARRIER_HALF,
+        sign
+    };
+})();
+
 /** How many of each prop the Valley uses (sim/lab-entities.ts sizes its pools from these). */
 export const VALLEY_PROPS = { planks: 12, beams: 12, crates: 6 };
 
@@ -1135,6 +1171,8 @@ function valleyProps(): PropPlacement[] {
     for (let n = 0; n < 4; n++) P.push({ name: `beam-${5 + n}`, pose: atUT(gu - 0.7 + n * 0.45, gt, 0.08, 0, FLAT) });
     for (let n = 0; n < 4; n++)
         P.push({ name: `extra-plank-${5 + n}`, pose: atUT(gu - 3, gt + 0.4, 0.06 + n * 0.105, 0, FLAT) });
+    // the road closure's barrier (hidden until the closure sets it across the road)
+    P.push({ name: 'barrier', pose: VALLEY_ROAD_CLOSURE.barrier });
     // the works: six crates in the lower yard
     const [cu, ct] = STAGING[2];
     for (let n = 0; n < 6; n++)
@@ -1294,6 +1332,7 @@ export const valleyLevel: LevelDef = {
         ute: { mode: 'drivable', pose: yardActors.ute }
     },
     props: valleyProps(),
+    hazards: { seed: 1, roadClosure: VALLEY_ROAD_CLOSURE },
     forestry: VALLEY_FORESTRY,
     rules: {
         objective: 'Bring water to the flower on the summit',

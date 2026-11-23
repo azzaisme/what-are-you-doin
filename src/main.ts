@@ -2591,6 +2591,8 @@ window.__riverLab = {
         floods: sim.hazards.floodCount,
         gusts: sim.hazards.gustCount,
         tree: sim.hazards.tree.phase,
+        closure: sim.hazards.road?.phase ?? -1,
+        closureSign: sim.closure.sign.anim[0],
         planeY: scene.waterEntity.getPosition().y
     }),
     /** The playtest log as text. */
