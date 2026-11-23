@@ -21,8 +21,8 @@ import {
     STUMP_HEIGHT,
     needleCone
 } from '../levels/forestry.ts';
-import { aabb, composePose, pose, quatFromAxisAngle, quatMul, quatRotate } from '../voxels/math.ts';
-import type { Pose } from '../voxels/math.ts';
+import { aabb, composePose, pose, quatFromAxisAngle, quatIdentity, quatMul, quatRotate } from '../voxels/math.ts';
+import type { Pose, Quat } from '../voxels/math.ts';
 import { M, voxel } from '../voxels/palette.ts';
 import { box, cylinder, implicit, latticeShade, solid } from '../voxels/volumes.ts';
 
@@ -32,9 +32,20 @@ import { LOG_RADIUS } from './props.ts';
 
 // ------------------------------------------------------------------------------- stand marker
 
-/** Stand marker channels: cut progress (0-1), state (TREE_*), unused. */
+/**
+ * Stand marker channels: cut progress (0-1), state (TREE_*), and a hazard's lean (the falling
+ * tree, #74): how far into it (0-1, 0 none), its direction (yaw, rad, as atan2(x, z)), and the
+ * tree's whole tilt while it leans (a horizontal vector, its length in rad, as StandTree.lean).
+ * While it leans the marker draws the whole tree tilted by it (the voxel worker takes the static
+ * one away, and puts it back if the lean ends with the tree standing), and src/fx/wood-fx.ts sheds
+ * needles on that side.
+ */
 export const TREE_CUT = 0;
 export const TREE_STATE = 1;
+export const TREE_SWAY = 2;
+export const TREE_SWAY_YAW = 3;
+export const TREE_TILT_X = 4;
+export const TREE_TILT_Z = 5;
 export const TREE_STANDING = 0;
 export const TREE_DOWN = 1;
 /** Number of notch sizes drawn (the cut is shown in this many steps). */
@@ -47,6 +58,8 @@ const NOTCH_STEPS = 4;
  */
 export function standMarkerAsset(): VoxelAsset {
     const parts: AssetPart[] = [];
+    /** Each leaning-tree part's height up the trunk (m from the foot). */
+    const treeY: number[] = [];
     const bandY = STUMP_HEIGHT + 0.04;
     for (let n = 0; n < NOTCH_STEPS; n++) {
         const half = ((n + 1) / NOTCH_STEPS) * Math.PI;
@@ -65,17 +78,64 @@ export function standMarkerAsset(): VoxelAsset {
             refColor: 0xdbb07a
         });
     }
+    // the whole tree, drawn here only while it leans (the same volumes as the static one: the
+    // trunk from the ground, the hi-vis band, the needle tiers)
+    const s = STAND_SCALE;
+    const trunkHalf = CROWN_TRUNK_TOP / 2;
+    parts.push({
+        name: 'lean-trunk',
+        volume: cylinder('y', LOG_RADIUS, trunkHalf, (x, y, z) => voxel(M.Bark, latticeShade(x, y * 0.5, z, 0.1, 4))),
+        priority: 1,
+        refColor: 0x5a3e2a
+    });
+    treeY.push(trunkHalf - 0.05);
+    parts.push({
+        name: 'lean-band',
+        volume: cylinder('y', LOG_RADIUS + 0.02, 0.05, solid(M.HiVis, 0)),
+        priority: 3,
+        refColor: 0xff7a00
+    });
+    treeY.push(0.95);
+    PINE_TIERS.forEach((t, n) => {
+        parts.push({
+            name: `lean-tier-${n}`,
+            volume: needleCone(t.r * s, t.h * s, 51 + n),
+            priority: 2,
+            refColor: 0x2f5a35
+        });
+        treeY.push(t.y * s + STAND_CROWN_LIFT);
+    });
+    const tilt = quatIdentity();
+    const v = { x: 0, y: 0, z: 0 };
     return {
         schema: ASSET_SCHEMA_VERSION,
         name: 'stand-marker',
         parts,
-        animChannels: 2,
+        animChannels: 6,
         cellTier: 'base',
-        evaluate(root: Pose, _anim: ArrayLike<number>, out: Pose[]) {
-            for (let i = 0; i < parts.length; i++) composePose(root, IDENTITY, out[i]);
+        evaluate(root: Pose, anim: ArrayLike<number>, out: Pose[]) {
+            standLeanTilt(anim, tilt);
+            for (let i = 0; i < NOTCH_STEPS; i++) {
+                // the notch leans with the trunk
+                out[i].p.x = root.p.x;
+                out[i].p.y = root.p.y;
+                out[i].p.z = root.p.z;
+                quatMul(tilt, root.q, out[i].q);
+            }
+            for (let i = NOTCH_STEPS; i < parts.length; i++) {
+                quatRotate(tilt, 0, treeY[i - NOTCH_STEPS], 0, v);
+                out[i].p.x = root.p.x + v.x;
+                out[i].p.y = root.p.y + v.y;
+                out[i].p.z = root.p.z + v.z;
+                out[i].q.x = tilt.x;
+                out[i].q.y = tilt.y;
+                out[i].q.z = tilt.z;
+                out[i].q.w = tilt.w;
+            }
         },
         partHidden(anim: ArrayLike<number>, part: number) {
             if (anim[TREE_STATE] > 0.5) return true;
+            if (part >= NOTCH_STEPS) return !standLeaning(anim);
             const cut = anim[TREE_CUT];
             if (!(cut > 0.001)) return true;
             const step = Math.min(NOTCH_STEPS - 1, Math.floor(cut * NOTCH_STEPS));
@@ -84,7 +144,19 @@ export function standMarkerAsset(): VoxelAsset {
     };
 }
 
-const IDENTITY = pose();
+/** Whether a stand marker's channels say its tree leans (the marker draws it; the worker does not). */
+export function standLeaning(anim: ArrayLike<number>): boolean {
+    return anim[TREE_STATE] < 0.5 && anim[TREE_SWAY] > 0.001;
+}
+
+/** The tilt a leaning stand tree is drawn with (identity when it does not lean). */
+export function standLeanTilt(anim: ArrayLike<number>, out: Quat): Quat {
+    const lean = standLeaning(anim);
+    const tx = lean ? anim[TREE_TILT_X] : 0;
+    const tz = lean ? anim[TREE_TILT_Z] : 0;
+    // up x lean: turning about it tips the top towards the lean (as standTilt; no lean: identity)
+    return quatFromAxisAngle(tz, 0, -tx, Math.hypot(tx, tz), out);
+}
 
 // ------------------------------------------------------------------------------- crown
 

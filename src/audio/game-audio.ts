@@ -16,6 +16,7 @@ import { Asset, Entity, Sound } from 'playcanvas';
 import type { AppBase } from 'playcanvas';
 
 import type { LevelDef } from '../levels/level.ts';
+import { TREE_TELL } from '../sim/hazard-tree.ts';
 import { PHASE } from '../sim/hazards.ts';
 import type { HazardNet } from '../sim/hazards.ts';
 import { ANIM_MAX } from '../sim/snapshots.ts';
@@ -262,11 +263,9 @@ export class GameAudio implements SfxSink {
         if (at) e.setPosition(at.x, at.y, at.z);
     }
 
-    /** A level event (a step done, the goal). */
-    onEvent(kind: string): void {
-        if (kind === 'step') this.play('ding', null, { gain: 0.6 });
-        else if (kind === 'goal') this.play('fanfare', null, { gain: 0.8 });
-        else if (kind === 'recovered') this.play('ding', null, { gain: 0.45, pitch: 0.75 });
+    /** A level event (a step done, the goal, a hazard's toast). */
+    onEvent(kind: string, text = ''): void {
+        for (const s of eventSounds(kind, text)) this.play(s.name, null, { gain: s.gain, pitch: s.pitch });
     }
 
     /** Every frame: what the world sounds like now. */
@@ -560,4 +559,21 @@ export function soundBodies(entities: readonly { name: string; slot: number }[])
         if (kind) out.push({ slot: e.slot, kind });
     }
     return out;
+}
+
+/**
+ * What a level event sounds like (heard everywhere): from the event itself, so a guest, who gets
+ * the host's events, hears the same. Hazards whose tell is a state (the flood, the gust, the
+ * handbrake) sound from that state instead (update); the falling tree's crack is its toast.
+ */
+export function eventSounds(kind: string, text: string): { name: SfxName; gain: number; pitch: number }[] {
+    if (kind === 'step') return [{ name: 'ding', gain: 0.6, pitch: 1 }];
+    if (kind === 'goal') return [{ name: 'fanfare', gain: 0.8, pitch: 1 }];
+    if (kind === 'recovered') return [{ name: 'ding', gain: 0.45, pitch: 0.75 }];
+    if (kind === 'hazard' && text === TREE_TELL)
+        return [
+            { name: 'snap', gain: 1, pitch: 0.8 },
+            { name: 'creak', gain: 1, pitch: 0.65 }
+        ];
+    return [];
 }

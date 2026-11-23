@@ -118,14 +118,24 @@ export async function roomTransport(): Promise<NetTransport | null> {
 
 // ------------------------------------------------------------------------------------- local
 
-const PEER_TIMEOUT_MS = 10_000;
+export const PEER_TIMEOUT_MS = 10_000;
+/**
+ * A peer whose page is hidden: browsers throttle its timers (after 5 minutes, chained timers run
+ * about once a minute), so its heartbeat comes late. It is kept this long instead.
+ */
+export const HIDDEN_PEER_TIMEOUT_MS = 10 * 60_000;
 
-type LocalMsg = { t: 'state'; id: string; state: NetState } | { t: 'bye'; id: string } | { t: 'hello'; id: string };
+type LocalMsg =
+    | { t: 'state'; id: string; state: NetState; hidden?: boolean }
+    | { t: 'bye'; id: string }
+    | { t: 'hello'; id: string };
+
+const pageHidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
 
 class LocalChannel implements NetChannel {
     readonly me: string;
     private state: NetState = {};
-    private readonly others = new Map<string, { state: NetState; seen: number }>();
+    private readonly others = new Map<string, { state: NetState; seen: number; hidden: boolean }>();
     private readonly listeners = new Set<() => void>();
     private readonly bc: BroadcastChannel;
     private pending = false;
@@ -144,15 +154,19 @@ class LocalChannel implements NetChannel {
             const now = Date.now();
             let changed = false;
             for (const [id, p] of this.others) {
-                if (now - p.seen > PEER_TIMEOUT_MS) {
+                if (now - p.seen > (p.hidden ? HIDDEN_PEER_TIMEOUT_MS : PEER_TIMEOUT_MS)) {
                     this.others.delete(id);
                     changed = true;
                 }
             }
             if (changed) this.emit();
         }, 1000);
-        addEventListener('pagehide', () => this.leave());
+        if (typeof addEventListener === 'function') addEventListener('pagehide', () => this.leave());
+        // say at once that this page is hidden (or back): its next heartbeats may come late
+        if (typeof document !== 'undefined') document.addEventListener('visibilitychange', this.onVisibility);
     }
+
+    private readonly onVisibility = () => this.send();
 
     private receive(m: LocalMsg): void {
         if (!m || typeof m !== 'object' || m.id === this.me) return;
@@ -165,7 +179,7 @@ class LocalChannel implements NetChannel {
             return;
         }
         if (m.t === 'state' && m.state && typeof m.state === 'object') {
-            this.others.set(m.id, { state: m.state, seen: Date.now() });
+            this.others.set(m.id, { state: m.state, seen: Date.now(), hidden: m.hidden === true });
             this.emit();
         }
     }
@@ -176,7 +190,7 @@ class LocalChannel implements NetChannel {
 
     private send(): void {
         this.lastSent = Date.now();
-        this.bc.postMessage({ t: 'state', id: this.me, state: this.state } satisfies LocalMsg);
+        this.bc.postMessage({ t: 'state', id: this.me, state: this.state, hidden: pageHidden() } satisfies LocalMsg);
     }
 
     setState(patch: NetState): void {
@@ -210,6 +224,7 @@ class LocalChannel implements NetChannel {
 
     leave(): void {
         clearInterval(this.timer);
+        if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.onVisibility);
         try {
             this.bc.postMessage({ t: 'bye', id: this.me } satisfies LocalMsg);
             this.bc.close();
