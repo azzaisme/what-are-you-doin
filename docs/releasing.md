@@ -69,7 +69,7 @@ the game the same way on every pull request into `main`:
 - A stand-in itch page on one host frames the game on another.
 - The iframe grants `autoplay; fullscreen *; gamepad`: the features the game uses. This wasn't
   checked against the live itch.io page, so an embed without full screen is tested too.
-- Chrome blocks sound until a gesture, as real browsers do.
+- Chrome blocks sound until a gesture, as real browsers do. The test's `--autoplay-policy=user-gesture-required` flag is a safeguard for a browser whose default allows autoplay: this Chrome blocks it by default.
 
 | Check                 | What the game does (and the test checks)                                                                                        |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------- |

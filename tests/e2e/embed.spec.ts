@@ -15,7 +15,8 @@ import { expect, test } from '@playwright/test';
 
 import config from '../../playwright.config.ts';
 
-// real browsers block sound until a gesture; the default headless policy would not
+// real browsers block sound until a gesture; this Chrome does by default too, and the flag is a
+// safeguard for a browser whose default allows autoplay (the asserts don't depend on it)
 test.use({
     launchOptions: {
         ...config.use?.launchOptions,
@@ -225,7 +226,9 @@ test('itch embed: in a cross-origin iframe, a click takes the mouse and starts s
     expect((await lab(frame, (l) => l.player())).holding).toBe(-1);
     expect(await lab(frame, (l) => l.interaction().target)).toBe('bucket');
 
-    // Esc: the browser releases the mouse, and the menu opens; Resume takes it back
+    // Esc (a real key press): the menu opens and the mouse is released. In a desktop browser the
+    // browser itself releases it on Esc; headless Chrome passes the key to the page, so here it is
+    // the game's own Esc handling (the menu opens and lets go of the mouse). Resume takes it back.
     await page.keyboard.press('Escape');
     await expect.poll(async () => (await view(frame)).locked).toBe(false);
     await expect.poll(async () => (await view(frame)).menu).toBe(true);

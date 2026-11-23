@@ -76,23 +76,23 @@ The setup:
 - The iframe grants `autoplay; fullscreen *; gamepad`: the features the game uses, as itch's embed
   is understood to grant them. This was **not** checked against the live itch.io page, because this
   environment can't reach itch.io. Full screen is also tested with an embed that forbids it.
-- Chrome blocks sound until a gesture.
+- Chrome blocks sound until a gesture. This Chrome does so by default; the `--autoplay-policy=user-gesture-required` flag is a safeguard for browsers whose default allows autoplay, so the asserts don't depend on it.
 - The browser's own audio state is recorded by a script that runs at page load, before any test
   code.
 
-| Check                                       | Result                                                                                                |
-| ------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Before any click                            | No user activation at load; an AudioContext made then is suspended; no pointer lock; canvas 640 × 360 |
-| The bucket under the crosshair, first click | Pointer lock taken, the game's AudioContext running, the bucket **not** grabbed (still the target)    |
-| Esc                                         | The browser releases the mouse, the menu opens; Resume takes it back, nothing grabbed                 |
-| The page resizes the frame                  | Canvas 960 × 540, HUD inside                                                                          |
-| itch's full screen button                   | Canvas 1280 × 720, the menu opens (the mouse was released); back to 960 × 540                         |
-| Settings → Full screen                      | The game itself goes full screen and back; the switch shows On, then Off                              |
-| An embed without full screen                | No Full screen switch in Settings                                                                     |
-| Tab hidden / shown                          | Sound suspended / running; the solo game paused at the menu                                           |
-| Online, host hidden / shown                 | The guest's status and toast say the host is in the background, then back                             |
-| Online, guest's tab closes                  | The host holds player 2 (`dropped` is `[1]`)                                                          |
-| Online, host's tab closes                   | The guest shows "reconnecting", then after 20 s "The host left the game"                              |
+| Check                                       | Result                                                                                                                                                        |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Before any click                            | No user activation at load; an AudioContext made then is suspended; no pointer lock; canvas 640 × 360                                                         |
+| The bucket under the crosshair, first click | Pointer lock taken, the game's AudioContext running, the bucket **not** grabbed (still the target)                                                            |
+| Esc (a real key press)                      | The menu opens and the mouse is released (here by the game's own Esc handling: headless Chrome passes Esc to the page); Resume takes it back, nothing grabbed |
+| The page resizes the frame                  | Canvas 960 × 540, HUD inside                                                                                                                                  |
+| itch's full screen button                   | Canvas 1280 × 720, the menu opens (the mouse was released); back to 960 × 540                                                                                 |
+| Settings → Full screen                      | The game itself goes full screen and back; the switch shows On, then Off                                                                                      |
+| An embed without full screen                | No Full screen switch in Settings                                                                                                                             |
+| Tab hidden / shown                          | Sound suspended / running; the solo game paused at the menu                                                                                                   |
+| Online, host hidden / shown                 | The guest's status and toast say the host is in the background, then back                                                                                     |
+| Online, guest's tab closes                  | The host holds player 2 (`dropped` is `[1]`)                                                                                                                  |
+| Online, host's tab closes                   | The guest shows "reconnecting", then after 20 s "The host left the game"                                                                                      |
 
 - Three embed tests, and one for the credits (below), pass locally with no console errors or
   warnings.
@@ -109,6 +109,86 @@ The setup:
   secure context, such as peer-to-peer online play, aren't covered by these tests. The online
   embed test uses the local test transport.
 - **Not yet tried on the real itch.io page** in Safari, Firefox or on a phone.
+
+## Weather along the Valley, and its flood (2026-11-22, Epic 9, towards #88)
+
+Each Valley area past the creek now gets its own weather once per run. It comes a seeded 4–22 s
+after the first player gets there. The hazard director runs the weather that is a hazard, so it
+takes turns with the flood, the gust and the handbrake prank: only one hazard at a time, with a
+15 s quiet spell after each. Each hazard has a way to beat it, and a test plays it out by input.
+
+- **Rain on the Forest Road: wet timber slips.** While it rains, a player under it grips with
+  less force. It scales with the rain's strength: at full rain a grip gives about 400 N instead
+  of 650 N.
+    - Alone, a beaver carrying a heavy beam from the log dump up the road lost it after 1.43 m.
+      The same carry in the dry held all 12 m.
+    - Two beavers carrying it together held it all the way in the rain.
+    - Carrying it lower alone is no reliable answer. Of ten heights tried (view pitch −0.25 to
+      −1.2), only −1.0 held all the way; the others slipped within 1.6 m. So the toast only says
+      what works: "Wet timber slips: carry heavy pieces together". A test checks that, of six of
+      those heights, at most one holds.
+    - A guest's carry slips the same way: the host decides everyone's grip.
+    - The river also rises 0.35 m in the rain, but that is only scenery: it reaches no bridge.
+- **A fog bank on the mountain road.** At full strength the view closes in to the near world's
+  edge: 24 m on Low, 30 m on High (its own end).
+    - The fog fully covers the near world's edge on both presets (opacity at the edge 1.0), so
+      the coarse far ground behind it never shows through.
+    - It only hangs over its own area. The summit and its flower stay clear.
+    - **The sky turns the fog colour too.** At full fog the far world had shown as fog-coloured
+      outlines against a blue sky. Now a dome round the camera, far beyond the fog's end, is
+      fogged out like the far world and fades in as the fog closes in. A browser test measures the
+      colour where the far landmarks stand at full fog on Low: ΔE under 3 (it was about 18).
+    - Played: in the fog, a beaver walked the 27.5 m stretch by input, steering only by the edge
+      posts it could pick out (fog under 0.9). It never strayed more than 0.80 m from the road's
+      middle, with no falls.
+    - When it lifts, the view is back to the level's own.
+- **Mist over the gorge: atmosphere, not a hazard.** It closes the view in like the fog, but
+  there is nothing to beat. So it comes whatever else is going on, holds nothing up, and says
+  nothing.
+- **A snow squall at the crevasse.** A crosswind (up to 1000 N) pushes carried planks across the
+  road, like a weaker version of the Timber Yard's gust. All three cases start with the plank
+  picked up by input:
+    - carried at chest height alone, it was torn away (692 N against a 650 N grip);
+    - carried low, the push was 200 N, and it held;
+    - carried by two players, it held at 1000 N (two grips hold 1300 N).
+- **The Timber Yard's flood now happens at Shallow Creek too.** It is the same flood on the same
+  crossing, turned with the yard.
+    - Played: the flood washes both beams off and leaves them downstream on the near bank. A
+      beaver fetches them, rebuilds and carries the bucket to the far flag, all by input.
+    - The flood can leave a beam lying askew (13° in the test), so the player squares it up
+      before laying it, as a player would.
+    - **Fixed:** the Valley's water area covers the whole map, and the Timber Yard's ground
+      (0.4 m) is lower than the flood's peak (0.6 m). So the flood had been floating loose props
+      in the yard, with the water drawn over it. Now the flood's lift and current keep to the
+      creek's channel, and the drawn surface stops just under the banks.
+    - In a test, nine props lying in the yard didn't move during a flood.
+    - It is just as strong: the bridge floated off at the same tick (1175) as before.
+- **One at a time (tested):**
+    - a bridge finished in the rain waits for it and the quiet spell;
+    - rain waits out a flood;
+    - the aimed gust never comes during weather;
+    - the fog and the handbrake prank each wait for the other.
+- **Online:** guests get the weather's area and strength from the host (tested through real host
+  and guest sessions).
+    - An older host sends neither, and that reads as no weather.
+    - The Timber Yard sends nothing new.
+- **On screen:** rain and snow fall round the camera as voxel particles (at most 90 cells). Mist
+  and fog are drawn with the fog alone.
+- **Seen in a real browser** (`docs/screenshots/epic9/weather-*.jpg`): each area at full
+  strength, at Low and High.
+    - The screenshots switch each weather on with a debug hook (`__riverLab.weather(n)`), which
+      waits for the same moment any hazard would. It refuses in the grace period, during another
+      hazard, in its quiet spell and over other weather (tested). The browser test seeks past the
+      grace period first, which steps the simulation without drawing.
+    - They come from a committed browser test, `tests/e2e/weather.spec.ts`
+      (`WEATHER_SHOTS=1`).
+- **Known visuals:**
+    - The fog fades in with the frame time, which is capped. At normal frame rates it is most of
+      the way in about 4 s; in software rendering it takes much longer.
+    - At the flood's peak, a beam floating off the caps sits about 0.2 m above the drawn water.
+    - The rain's rise lifts the drawn water everywhere, so the gorge's waterfall foam sits a
+      little under the surface while it rains.
+- **Timber Yard unchanged:** all its hazard tests pass untouched.
 
 ## Epic 8: a tree falls towards the ute (2026-11-22, #74)
 

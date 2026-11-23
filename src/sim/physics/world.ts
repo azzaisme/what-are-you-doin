@@ -277,6 +277,11 @@ export class PhysicsWorld {
      */
     breakDistance: number = GRAB.breakDistance;
     breakTime: number = GRAB.breakTime;
+    /**
+     * Per player: how much of GRAB.maxForce their grip gives now (1 normally; less with wet hands
+     * in the rain, set by the hazard director each tick).
+     */
+    readonly gripScale: number[] = [];
     snapDistance: number = GRAB.snapDistance;
     readonly world: RAPIER.World;
     readonly bodies = new Map<number, PhysBody>();
@@ -987,7 +992,8 @@ export class PhysicsWorld {
                 target: _target,
                 targetVelocity: _tv
             },
-            _force
+            _force,
+            GRAB.maxForce * (this.gripScale[p] ?? 1)
         );
         b.applyImpulseAtPoint({ x: f.fx * SIM_DT, y: f.fy * SIM_DT, z: f.fz * SIM_DT }, anchor, true);
         r.grabError = f.error;
