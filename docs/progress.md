@@ -55,6 +55,116 @@ beyond it. Take the track, or shift the barrier.
   with only the closure among its hazards, so the flood the test's bridge brings does not get in
   first). Unit tests: 772 pass at both voxel sizes, with Epic 9's weather merged in.
 
+## Credits and licences (2026-11-23, Epic 10, #104)
+
+The game now says what it is made with, and ships the licence notices its parts ask for.
+
+- **In the game:** Settings → Game → **Credits & licences…** opens a dialog with three sections:
+    - **The game's own work:** the code, levels, voxel models and animation; every sound
+      (synthesised in code, no recordings); and the text, which uses your device's fonts.
+    - **Made with:**
+
+        | Package           | Licence    | What it does                                         |
+        | ----------------- | ---------- | ---------------------------------------------------- |
+        | PlayCanvas Engine | MIT        | the 3D engine, and its camera, sky and water scripts |
+        | Rapier            | Apache-2.0 | physics                                              |
+        | Trystero          | MIT        | connects players peer to peer                        |
+        | noble-secp256k1   | MIT        | signs the matchmaking messages (used by Trystero)    |
+
+    - **Online services:** public Nostr relays help players find each other, and a TURN relay is
+      used if one is configured.
+- **Full licence texts:** the build writes `third-party-licenses.txt` beside the game (19 KB),
+  with every bundled package's name, version, licence and licence text, read from the installed
+  packages. The dialog links to it. Minifying drops the notices from the code, and MIT and
+  Apache-2.0 ask for them to travel with it.
+- **Kept honest:** a unit test fails if a production dependency is added without a credit, or if
+  its licence differs from the one credited. Type-only packages (`@types/webxr`, `@webgpu/types`)
+  put no code in the build and are left out. Vite, a development package, is included: its small
+  module-preload helper is bundled. Only Vite's own MIT notice is shipped, not the licences of the
+  tools Vite bundles into itself.
+- **Tests:**
+    - unit (`tests/unit/credits.test.ts`): the credits match the production packages and their
+      licences, and each licence text is in the file;
+    - browser, inside the itch embed: the dialog lists all five, the licence file loads from
+      its relative URL with the Apache and MIT texts, and Esc closes the credits but not the menu.
+- **Not decided here:** the game's own licence. The repository has none; that's the owner's
+  choice.
+
+## The game in itch's embed: checked in the browser (2026-11-23, Epic 10, #103)
+
+itch.io shows the game in a cross-origin iframe on its own page. New browser tests play it that way
+on every pull request into `main`, and three things changed for players.
+
+### What changed for players
+
+- **Full screen from inside the game:** Settings → Game → **Full screen**. Handy on phones, where
+  itch's own button is small. It's only offered where the page around the game allows full screen.
+  A test checks it's hidden when the embed forbids it.
+- **Switching tabs in a solo game:** the game stops at the menu (paused). You come back to it
+  waiting instead of mid-fall. The sound pauses too (it did before).
+- **Online, the host switches tabs:** a page in the background draws no frames, so the host's game
+  may stop for everyone. Guests are now told: "The host's game is in the background: it may stop
+  until they come back". Then "The host is back".
+
+### What happens when the host stays hidden for minutes
+
+Browsers throttle a hidden page's timers. After 5 minutes, chained timers run about once a minute.
+
+- **Peer to peer (itch.io):** Trystero drops a peer only when its WebRTC connection fails or closes,
+  and the browser keeps that connection alive itself, whatever the page's timers do. Our channel has
+  no timeout of its own, so guests stay in the game however long the host is away. If the browser
+  discards the hidden tab (phones do) or the network drops, the connection closes. Guests then see
+  "reconnecting" and leave after 20 s.
+  Shown in `tests/unit/hidden-host.test.ts` with Trystero replaced by an in-memory stand-in on fake
+  timers: the host sends nothing for 15 minutes, the guest receives nothing and stays; then the
+  connection closes and the guest leaves after 20 s.
+- **The local test transport (`?net=local`)** used to forget a page silent for 10 s, which would
+  have dropped a throttled host. A page now says when it is hidden, and is then kept for 10 minutes.
+  Tested on fake timers: a silent visible page goes after 10 s, a silent hidden one stays 9 minutes
+  and goes after 10.
+
+### What the embed tests check (`tests/e2e/embed.spec.ts`, actual results)
+
+The setup:
+
+- A stand-in itch page on `itch.test` frames the game on `game.test` (routed to the build).
+- The iframe grants `autoplay; fullscreen *; gamepad`: the features the game uses, as itch's embed
+  is understood to grant them. This was **not** checked against the live itch.io page, because this
+  environment can't reach itch.io. Full screen is also tested with an embed that forbids it.
+- Chrome blocks sound until a gesture. This Chrome does so by default; the `--autoplay-policy=user-gesture-required` flag is a safeguard for browsers whose default allows autoplay, so the asserts don't depend on it.
+- The browser's own audio state is recorded by a script that runs at page load, before any test
+  code.
+
+| Check                                       | Result                                                                                                                                                        |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Before any click                            | No user activation at load; an AudioContext made then is suspended; no pointer lock; canvas 640 × 360                                                         |
+| The bucket under the crosshair, first click | Pointer lock taken, the game's AudioContext running, the bucket **not** grabbed (still the target)                                                            |
+| Esc (a real key press)                      | The menu opens and the mouse is released (here by the game's own Esc handling: headless Chrome passes Esc to the page); Resume takes it back, nothing grabbed |
+| The page resizes the frame                  | Canvas 960 × 540, HUD inside                                                                                                                                  |
+| itch's full screen button                   | Canvas 1280 × 720, the menu opens (the mouse was released); back to 960 × 540                                                                                 |
+| Settings → Full screen                      | The game itself goes full screen and back; the switch shows On, then Off                                                                                      |
+| An embed without full screen                | No Full screen switch in Settings                                                                                                                             |
+| Tab hidden / shown                          | Sound suspended / running; the solo game paused at the menu                                                                                                   |
+| Online, host hidden / shown                 | The guest's status and toast say the host is in the background, then back                                                                                     |
+| Online, guest's tab closes                  | The host holds player 2 (`dropped` is `[1]`)                                                                                                                  |
+| Online, host's tab closes                   | The guest shows "reconnecting", then after 20 s "The host left the game"                                                                                      |
+
+- Three embed tests, and one for the credits (below), pass locally with no console errors or
+  warnings.
+- Unit test (`tests/unit/host-away.test.ts`): the host's away flag reaches the guest and clears.
+- `docs/releasing.md` lists the embed checks.
+
+### Known limits
+
+- **Headless Chrome never hides a tab.** The test hides the page the way the browser announces it
+  (the visibility state and a `visibilitychange` event). What a real background tab does to frames
+  isn't reproduced: none are drawn, and when the page is back the game catches up at most 4 ticks
+  (the rest are skipped).
+- **The test pages are plain `http`.** itch serves the game over `https`. Features that need a
+  secure context, such as peer-to-peer online play, aren't covered by these tests. The online
+  embed test uses the local test transport.
+- **Not yet tried on the real itch.io page** in Safari, Firefox or on a phone.
+
 ## Weather along the Valley, and its flood (2026-11-22, Epic 9, towards #88)
 
 Each Valley area past the creek now gets its own weather once per run. It comes a seeded 4–22 s

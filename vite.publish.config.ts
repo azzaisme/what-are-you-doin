@@ -1,5 +1,7 @@
 import { defineConfig } from 'vite';
 
+import { thirdPartyLicenses } from './scripts/third-party-licenses.ts';
+
 // Build for hosted pages: the PlayCanvas engine and its shipped scripts load from the jsDelivr CDN
 // (pinned to the installed version) through an import map, so the published bundle contains only
 // this project's code. The regular `npm run build` bundles everything for itch.io.
@@ -24,6 +26,8 @@ export default defineConfig({
         }
     },
     plugins: [
+        // the bundled packages' licence notices, next to the game (#104)
+        thirdPartyLicenses(),
         {
             name: 'playcanvas-import-map',
             transformIndexHtml: () => [
