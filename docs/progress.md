@@ -9,8 +9,8 @@ limits are an 8 mm spike in C24 softwood, taken from EN 1995-1-1.
 ### How to play it
 
 - Build as before (F to nail). **Seat beams on both banks:** the stone seats carry the ute. Nailed
-  at both ends with two nails each, the yard bridge carries the ute at a fifth of what its nails
-  hold.
+  at both ends with two nails each, the yard bridge carries the ute at an eighth of what its
+  nails hold.
 - **Nails hold pieces in place; the seats and faces carry the weight.** A beam that rests on both
   seats and is nailed at its near end only holds too (the right physics: its nails carry next to
   nothing). A beam that sticks out over the creek with nothing under its far end is held up by its
@@ -73,98 +73,149 @@ limits are an 8 mm spike in C24 softwood, taken from EN 1995-1-1.
       either way only BREAK.tell = 0.5 s after it creaked;
     - fatigue above half of capacity takes up to 60 % off its strength;
     - a new joint settles 0.25 s before it is rated.
-- **Pieces that sleep:** a still structure sleeps once its joints' loads are steady (to 2 % of the
-  piece's weight), keeps what they carried, and is read again from its first step awake.
+- **Solver iterations for nailed pieces (`NAIL.solverIterations`):** each nailed piece gets 24
+  more of Rapier's solver iterations than the world's 4. With the world's 4, the stiff timber
+  springs on a 24 kg plank's roll never converged: an idle 8-plank deck kept quivering (up to 1.3
+  rad/s), never slept and cost 1.16 ms a step, and under a 113 kg crate it walked the crate 5.4 cm
+  in 10 s. Now both sleep within 3 s (0.23 and 0.20 ms a step). The springs are unchanged: timber is
+  still uncapped. The cost is paid only while a deck is awake (below).
+- **Pieces that sleep:** a still structure sleeps once its joints' loads are steady, and keeps what
+  they carried. Steady means each joint's load is within 2 % of the piece's weight of its 0.25 s
+  mean, and that mean has not moved by as much within the last 2 s (Rapier's time to sleep). Without
+  that second check, a load growing slowly lagged its mean by less than the margin, and the piece
+  slept through it. A piece that is not steady is woken every step, which restarts Rapier's sleep
+  timer. A woken piece is read from its first step awake.
 - **A beaver's weight (`world.ts`):** a kinematic character pressed on what it stood on only by the
   controller's push, about 0.8 of its weight, in fits, on every plank under its 0.6 m feet, and
   carried things weighed nothing. Now what is straight under its centre gets exactly its weight
   (60 kg, the same as it pushes with) plus its share of what it carries, and the controller's push
-  is taken back: down and turning, and sideways too while standing still. A nailed piece gets none
-  of the controller's shove: pressed against a nailed plank's edge, it read 1.5 kN on its nail.
+  is taken back: down and turning, and sideways too. A loose piece keeps the sideways push only
+  when the controller walked into its side (contact normal under 45 degrees from level): a shove.
+  Stepping onto a loose beam's end (contact normals 0.83 to 0.92 up) had walked the 36 kg beam 10 cm
+  along at a stroll. A nailed piece gets none of the controller's shove: pressed against a nailed
+  plank's edge, it read 1.5 kN on its nail.
 - **Sounds (Epic 8's `sfx`):** creaks and snaps come from what every device sees (the strain levels
   and the nails' disappearance), rate-limited per joint.
 - **Online:** guests get the same messages and sounds; a broken joint's nails disappear for them.
 
-### Test results (actual, both voxel sizes; `breaking.test.ts`, `joints-sleep.test.ts`, `joints.test.ts`, `yard-bridge.test.ts`)
+### Test results (actual, both voxel sizes; `breaking`, `joints-sleep`, `joints`, `yard-bridge`, `loose-loads`, `creep`)
 
-| Test                                                                                                           | Result                                                                                                                                                                                                                                                       |
-| -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Cantilever off a stone block on four spikes, tip load 0 / 200 / 400 N                                          | Force 358 / 558 / 759 N (statics 358 / 558 / 758); withdrawal 1331 / 3071 / 4806 N (statics 1432 / 3232 / 5032, band 0.9 to 1.1)                                                                                                                             |
-| A beam hung on one spike into a stone pier, 300 N                                                              | Across the spike 658 N (statics 658), withdrawal 475 N (statics 500), no moment                                                                                                                                                                              |
-| One spike: self weight; tip loads for 0.85 and 1.15 of its withdrawal                                          | 0.72 of capacity; held at 0.86; creaked at 0.35 s, broke at 0.85 s                                                                                                                                                                                           |
-| Fatigue on a steady load, u = 0.6 / 0.75 / 0.9                                                                 | Broke at 13.0 / 5.40 / 2.03 s (the law: 12.7 / 5.28 / 1.99 s)                                                                                                                                                                                                |
-| Cantilever on two spikes at u 0.71; at u 0.42                                                                  | First creak 0.7 s, broke at 6.9 s; no fatigue after 30 s                                                                                                                                                                                                     |
-| A blow past 2.5 x capacity, two steps running                                                                  | Creaks, breaks exactly 0.5 s later, under no load                                                                                                                                                                                                            |
-| **Proper yard bridge under the ute** (both ends, two nails each)                                               | Peak **0.20** of capacity; no creak                                                                                                                                                                                                                          |
-| Four beavers on a nailed deck patch                                                                            | The beams hold it up by 2356 N more (their weight 2354 N); peak 0.00                                                                                                                                                                                         |
-| **Underbuilt:** beams laid off the lip short of the far seat, four nails each                                  | Peak 3.73; creak at tick 218, breaks at 330 and 342 (first break 1.87 s after the creak); the ute drops into the creek; the same every run                                                                                                                   |
-| Settling: nailed at the near end, the far end propped 2 mm, the prop taken away                                | Peak 0.005, no creak                                                                                                                                                                                                                                         |
-| Cantilever at rest                                                                                             | Turns 0.0000 rad/s step to step (Rapier reports a steady 0.06 rad/s angular velocity for a body its joint and contact hold still: the test measures real motion)                                                                                             |
-| The faces' radius at 0.5 / 0.6 / 0.8 m                                                                         | Identical: withdrawal 3071 N, proper bridge peak 0.20                                                                                                                                                                                                        |
-| A sleeping bridge, then the ute                                                                                | Wakes; peak 0.20, as kept awake (0.20)                                                                                                                                                                                                                       |
-| A beaver onto a sleeping beam                                                                                  | Wakes, read at once                                                                                                                                                                                                                                          |
-| A load growing slowly on one spike                                                                             | Kept awake; creak at 0.4 s, break at 4.5 s                                                                                                                                                                                                                   |
-| A log dropped 1.5 m onto a sleeping bridge                                                                     | Peak 0.128, as on an awake one (0.128)                                                                                                                                                                                                                       |
-| Joint springs                                                                                                  | Timber to timber: the EN 1995 values as they stand; only stone anchors capped                                                                                                                                                                                |
-| **Gate, by input:** beams, an 11-plank nailed deck, both ends anchored, the ute driven from where it is parked | 4 anchors, 22 deck joints, 33 nails; planks within 0.1 cm of the deck plane, 3.3 cm of their spots; floods moved the crossing **0.7 and 0.1 cm**; standing empty a minute: peak **0.039**, no creak; no plank sank into a beam; the ute reached the far bank |
-| Online, host and 3 guests, the underbuilt bridge                                                               | Guests see strain level 2, the creak and the break; their nails go                                                                                                                                                                                           |
+| Test                                                                                                           | Result                                                                                                                                                                                                                                                                                                                                                                            |
+| -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cantilever off a stone block on four spikes, tip load 0 / 200 / 400 N                                          | Force 358 / 558 / 758 N (statics 358 / 558 / 758); withdrawal 1331 / 3073 / 4815 N (statics 1432 / 3232 / 5032, band 0.9 to 1.1)                                                                                                                                                                                                                                                  |
+| A beam hung on one spike into a stone pier, 300 N                                                              | Across the spike 658 N (statics 658), withdrawal 485 N (statics 500), no moment                                                                                                                                                                                                                                                                                                   |
+| One spike: self weight; tip loads for 0.85 and 1.15 of its withdrawal                                          | 0.71 of capacity; held at 0.85; creaked at 0.35 s, broke at 0.85 s                                                                                                                                                                                                                                                                                                                |
+| Fatigue on a steady load, u = 0.6 / 0.75 / 0.9                                                                 | Broke at 13.02 / 5.40 / 2.03 s (the law: 12.74 / 5.28 / 1.99 s)                                                                                                                                                                                                                                                                                                                   |
+| Cantilever on two spikes at u 0.71; at u 0.42                                                                  | First creak 0.7 s, broke at 7.0 s; no fatigue after 30 s                                                                                                                                                                                                                                                                                                                          |
+| A blow past 2.5 x capacity, two steps running                                                                  | Creaks, breaks exactly 0.5 s later, under no load                                                                                                                                                                                                                                                                                                                                 |
+| **Proper yard bridge under the ute** (both ends, two nails each)                                               | Peak **0.12** of capacity; no creak                                                                                                                                                                                                                                                                                                                                               |
+| Four beavers on a nailed deck patch                                                                            | The beams hold it up by 2354 N more (their weight 2354 N); peak 0.00                                                                                                                                                                                                                                                                                                              |
+| **Underbuilt:** beams laid off the lip short of the far seat, four nails each                                  | Peak 3.17; creak at tick 218, breaks at 318 and 329 (first break 1.67 s after the creak); the ute drops into the creek                                                                                                                                                                                                                                                            |
+| Settling: nailed at the near end, the far end propped 2 mm, the prop taken away                                | Peak 0.002, no creak                                                                                                                                                                                                                                                                                                                                                              |
+| Cantilever at rest                                                                                             | Turns 0.0000 rad/s step to step; Rapier reports under 0.001 rad/s (below)                                                                                                                                                                                                                                                                                                         |
+| The faces' radius at 0.5 / 0.6 / 0.8 m                                                                         | Identical: withdrawal 3073 N, proper bridge peak 0.12                                                                                                                                                                                                                                                                                                                             |
+| A sleeping bridge, then the ute; the reference kept awake every step                                           | Wakes; peak 0.12, the same as the bridge kept awake (0.12)                                                                                                                                                                                                                                                                                                                        |
+| A beaver onto a sleeping beam                                                                                  | Wakes; the joints hold 1304 N, the beams and the beaver (1304 N)                                                                                                                                                                                                                                                                                                                  |
+| A beaver standing still on a beam for 8 s                                                                      | Never asleep; the joints hold 1304 N, give or take 0 N, once something else wakes it                                                                                                                                                                                                                                                                                              |
+| A load growing slowly on one spike, applied without waking it                                                  | Never asleep (0 steps); creak at 0.4 s, break at 4.6 s                                                                                                                                                                                                                                                                                                                            |
+| A log dropped 1.5 m onto a sleeping bridge                                                                     | Peak 0.130 asleep first, 0.135 kept awake every step; a reading that skipped a woken piece's first three steps read 0.023 (the test fails on it)                                                                                                                                                                                                                                  |
+| Joint springs                                                                                                  | Timber to timber: the EN 1995 values as they stand. Stone anchors: no stiffer than omega dt = 2 (the stiffest at 2.000)                                                                                                                                                                                                                                                           |
+| **Gate, by input:** beams, an 11-plank nailed deck, both ends anchored, the ute driven from where it is parked | 4 anchors, 22 deck joints, 33 nails; planks within 0.2 cm of the deck plane, 4.2 cm of their spots, all on the first try; floods moved the crossing **0.5 and 0.0 cm**; standing empty a minute: peak **0.008**, no creak; every step from the finished deck to the far bank, no nailed plank sank into a beam or lifted off it by more than 1.2 mm; the ute reached the far bank |
+| The same deck, plank nails pulled                                                                              | The ute shoves its planks up to 93.5 cm                                                                                                                                                                                                                                                                                                                                           |
+| Online, host and 3 guests, the underbuilt bridge                                                               | Guests see strain level 2, the creak and the break; their nails go                                                                                                                                                                                                                                                                                                                |
 
-- Unit tests: 796 pass. Browser: 31 of 32 pass (the embed tests on their own port 4173). The
-  failing one, "physics sandbox: grab and carry the plank", fails the same way on epics-5-10
-  without this work.
+- Unit tests: 808 pass (96 files, both voxel sizes). Browser tests: listed in the pull request.
 - Other epics' tests changed, each for a measured reason:
     - Epic 7's bucket throw is thrown at 0.26, 0.28 and 0.30, and every one lands in the goal,
       empty. A single aim at 0.3 had landed by the goal's far edge, and once, with the player 5 mm
       further on after walking over the yard's beams with their weight on them, bounced out;
     - Epic 8's flood rebuild aims at where the washed-up beam's end really is (it lies 4.6 degrees
       off square, 11 cm off its centre line at the grip);
-    - Epic 6's forestry follow-up walks round the yard's beams' east end, as its other walks do:
-      straight there, the player stepped on a loose beam's end and, weighing 60 kg on it, shoved it
-      8 cm. That is right for a 36 kg beam on gravel with a 60 kg beaver stepping onto its end;
+    - Epic 6's forestry follow-up walks its original way again. The waypoint round the yard's beams
+      that an earlier version of this work added is gone: the controller no longer shoves a loose
+      beam a beaver steps onto. The yard's beams now move 5.6 and 0.1 mm on that walk (10.3 cm
+      before the fix);
     - the gate's builder spreads four nails across each beam's near end and two across each far
-      end.
+      end. When its shuffle stalls at the bank's edge with a plank held short, it steps up onto
+      the deck firmly, as a player does. At its 30 to 60 % creep the controller slid back off the
+      first plank's rounded edge, so the player let go 15 cm short, and the third plank landed on
+      its edge. Before: plank 3 landed on its edge twice and went down on the third try. After:
+      every plank lands on the first try, within 0.2 cm of the deck plane. The assertions are
+      unchanged.
 
 ### Loose loads on the bridge (`loose-loads.test.ts`, found building the #51 overlay)
 
-The yard bridge, nailed at both ends, with a deck plank nailed across it mid-span. Each load lies
-on the deck. The four anchors' upward force is averaged over a second, against the weight of
-everything on them:
+The yard bridge, nailed at both ends, with one deck plank, or a deck of eight, nailed across it
+mid-span. Each load lies on it. The four anchors' upward force is averaged over a second, against
+the weight of everything on them:
 
-| Load                     | Anchors hold     | Error   |
-| ------------------------ | ---------------- | ------- |
-| Nothing                  | 944 N of 951 N   | -0.7 %  |
-| The log (1109 N)         | 2054 N of 2061 N | -0.3 %  |
-| A loose plank (235 N)    | 1186 N of 1187 N | -0.1 %  |
-| The bucket, full (113 N) | 1059 N of 1064 N | -0.5 %  |
-| The log, unscaled        | 2527 N of 2061 N | +22.6 % |
+| Load                     | One deck plank            | Eight deck planks         |
+| ------------------------ | ------------------------- | ------------------------- |
+| Nothing                  | 949 N of 951 N (-0.2 %)   | 2598 N of 2599 N (-0.0 %) |
+| The log (1109 N)         | 2056 N of 2061 N (-0.2 %) | 3703 N of 3709 N (-0.2 %) |
+| A loose plank (235 N)    | 1182 N of 1187 N (-0.4 %) | 2834 N of 2835 N (-0.0 %) |
+| The bucket, full (113 N) | 1063 N of 1064 N (-0.1 %) | 2712 N of 2712 N (-0.0 %) |
 
-A log dropped 1.5 m onto mid-span, far from every nail, peaks at 0.152 utilization and 1983 N of
-joint force. Unscaled, it peaks at 0.150 and 1954 N: the rescale hides no impact. Every number the
-other joint tests log (`breaking`, `joints`, `joints-sleep` and `yard-bridge`, 47 readings) is the
-same as before, to the last digit. That includes the four beavers (2356 N against 2354 N), the
-ute's 0.20, and the 1.5 m drop by the seats (0.128).
+- Rapier's reported contact impulse holds its penetration correction too, which moves nothing.
+  While the deck quivered, that read a still log at 1.3 x its weight, and the anchors carried
+  23 % too much (the audit: 1366 N against 1109 N on an 8-plank deck). Converged, a still load
+  reads true as reported. A moving one does not: on the one-plank deck the log rolls 76 cm along
+  the beams' 6 % slope, and read as reported the anchors carry 20.0 % too much. So the meter
+  scales each loose piece's contacts to its own momentum, m dv - m g dt, along their sum, never
+  up. Without that, the test fails.
+- A round log cannot rest on this deck: the beams sit 11 mm apart in height, and the deck rises
+  6 % along the bridge, so a log rolls off it. The resting heavy load in the sleep measurements
+  is a 113 kg crate.
+- A log dropped 1.5 m onto mid-span peaks at 0.031 utilization and 400 N of joint force, scaled
+  or not: the rescale hides no impact.
+
+### Friction creep, measured in play (`creep.test.ts`)
+
+Rapier's friction does not quite stick under a steady sideways load. A beam nailed at its near end
+only, pushed sideways at its middle with 400 N held for 3 s, swung 55 mm, about what the nails'
+spring alone allows (57 mm), though its far seat's friction (486 N m) should have held the push's
+476 N m. On a properly built bridge it does not show:
+
+- four beavers standing on the decked bridge for 60 s: no piece moved more than 0.2 mm;
+- then the ute over it ten times (all ten reached the far bank): no piece moved more than 0.2 mm.
+
+### Performance
+
+- An idle finished deck sleeps: 0.23 ms a step for an 8-plank yard deck (it was 1.16 ms, awake
+  all the time).
+- Kept awake, an 8-plank deck costs 2.24 ms a step with the extra iterations, against 1.44 ms
+  without.
+- The Valley's worst case, measured: all 12 of its beams and 13 planks nailed into rafts, 21
+  joints, everything kept awake: 2.92 ms a step (2.80 ms without the extra iterations; 1.14 ms with
+  nothing nailed). Within a 16.7 ms frame.
 
 ### #115's claims, measured again
 
 - **Joint stiffness:** #115 had a fixed 200 kN m/rad per nail for every turn. A turn flat about
   the nails is now their couple (K_ser x sum(lever^2 + r^2)), so one nail is nearly a pivot. At
-  20 N, one nail timber to timber turns 27.85 mrad (M/k 28.61), four 1.72 (1.74); into stone, 50 N,
-  60.83 (59.26) and 2.52 (2.47).
-- **A nailed beam under a 400 N shove for a second:** #115 said under 1 cm. It moves 17.7 and
-  17.5 mm: it swings a little on its two nails' couple, its far end sliding on its seat.
+  20 N, one nail timber to timber turns 27.88 mrad (M/k 28.61), four 1.73 (1.74); into stone, 50 N,
+  61.16 (59.26) and 2.45 (2.47). Under loads that turn them well over (one nail at 100 N: 122.1
+  mrad; four at 400 N: 19.6 mrad), four nails are 25.0 x as stiff as one, as simulated (their
+  couples: 24.0 x).
+- **A nailed beam under a 400 N shove for a second:** #115 said under 1 cm. Nailed at both ends
+  (by input, from both banks), the beams move 0.1 mm. Nailed at one end only, a beam swings on its
+  two nails' couple: with the far seat made frictionless, 83.0 and 88.2 mm under a held shove,
+  against the spring statics' 87.0 and 86.7 mm. The 17.7 mm this log gave before was an
+  unconverged solve, which made the joint act stiffer than it is; #115's 1 cm came from its stiff
+  turn spring.
 - **The nailed crossing:** the ute reaches the far bank; the beams drift 2 mm and 2 mm (#115: 2 and
   3 mm).
 - **Nailed against loose:** a 400 N shove after the crossing moves loose beams 201 mm and nailed
-  ones 0.3 mm (#115: 0.2 mm). In the gate, the same deck with its plank nails pulled shoves its
-  planks up to 68.9 cm (#115: 361 cm) and the ute does not get over; nailed, 0.1 cm.
+  ones 0.1 mm (#115: 0.2 mm). In the gate, the same deck with its plank nails pulled shoves its
+  planks up to 93.5 cm (#115: 361 cm) and the ute does not get over; nailed, 0.0 cm.
 - **Each beam has two ground anchors**, one into each bank, and the gate's ute reaches the far bank:
   both still hold.
 
 ### Known limits
 
-- A finished nailed deck never quite sleeps: its planks quiver (up to 7 mrad a step at times). A
-  plank's roll inertia is too small for the timber bedding at a 60 Hz step, and capping it would need
-  the faces' contact back, which fought the joints.
+- Rapier's friction creeps under a steady sideways load (above). In play it moved nothing more than
+  0.2 mm; a beam nailed at one end only and pushed hard does swing on its nails.
+- A round log rolls on the bridge's 6 % slope, as it would.
 - Pieces are rigid: a joint's warning is the creak, the nail colour and the message, not a bend.
 - The one-way tipping spring (faces that push but do not pull) was tried and dropped: it ratcheted
   shut on vibration, and the settling it was for is the nails being pried, which they are.
