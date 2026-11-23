@@ -16,7 +16,8 @@ const software = process.env.SOFTWARE_GL === '1' || (!process.env.CHROME_PATH &&
 export default defineConfig({
     testDir: 'tests/e2e',
     timeout: 300_000,
-    workers: 1,
+    // one worker (two game pages in software GL already fill a machine); E2E_WORKERS=n opts in locally
+    workers: Number(process.env.E2E_WORKERS) || 1,
     reporter: [['list']],
     use: {
         baseURL: `http://localhost:${port}`,
