@@ -1,76 +1,146 @@
 # Progress log
 
-## Epic 5, part 2: joints strain, creak and break (2026-11-22)
+## Epic 5, part 2: joints strain, creak and break (2026-11-23, #49 #50)
 
-Nailed joints now carry real loads and can fail. A joint that is working hard creaks, a joint
-close to its limit groans, and an overloaded one cracks and lets go.
+Nailed joints now carry measured loads and can fail. A joint that is working hard creaks, one close
+to its limit groans, and an overloaded one cracks and lets go, never without a creak first. The
+limits are an 8 mm spike in C24 softwood, taken from EN 1995-1-1.
 
 ### How to play it
 
-- Build as before (F to nail). A bridge nailed at both ends with two nails per end carries the ute
-  quietly.
-- **Warnings:** listen and look. A joint under strain creaks, and its nail heads turn amber. Close
-  to breaking, it groans and the heads turn red. A message says so too ("⚠ Creak: a joint is
-  straining", "⚠ The bridge groans: a joint is close to breaking").
-- **Breaking:** an overloaded joint cracks ("Crack! A nailed joint gave way") and the pieces come
-  apart. The timber stays; only the nails let go.
-- **More nails, further apart, hold more.** One nail pins a piece but barely resists bending: a
-  beam cantilevered out on one nail tears loose under its own weight. Four nails spread 25 cm apart
-  hold the same beam easily.
-- **Holding a load at the limit wears a joint down.** Given time, it lets go.
+- Build as before (F to nail). **Seat beams on both banks:** the stone seats carry the ute. Nailed
+  at both ends with two nails each, the yard bridge carries the ute at a fifth of what its nails
+  hold.
+- **Nails hold pieces in place; the seats and faces carry the weight.** A beam that rests on both
+  seats and is nailed at its near end only holds too (the right physics: its nails carry next to
+  nothing). A beam that sticks out over the creek with nothing under its far end is held up by its
+  nails alone, and breaks under the ute.
+- **Spread your nails.** Two nails in a row resist a beam swinging round by their couple alone: a
+  gust on a beam spiked at one end puts about 3.75 kN on each. Four nails, spread along and across
+  the end, hold it.
+- **Warnings:** listen and look. A joint under strain creaks and its nail heads turn amber. Close to
+  breaking, it groans and the heads turn red. Every break comes at least 0.5 s after a creak, even
+  a hard blow's ("Crack! A nailed joint gave way").
+- **Holding a load near the limit wears a joint down** (fatigue), and given time it lets go.
 
 ### What was built
 
-- **Measuring joint loads (#49, `src/sim/joints/stress.ts`):** Rapier reports neither joint forces
-  nor (in this version) contact friction. So after every step:
-    - the meter takes each nailed piece's change of momentum;
-    - it removes gravity, damping and every contact's push (contact pushes are exact: a piece at
-      rest balances to within 0.0001);
-    - what is left is what its nails and friction did together;
-    - a small solve shares that between the connections and the contact friction, with friction
-      taking what it can first and capped at what friction can give.
-    - Checked against hand statics on a cantilevered beam: force and moment within 0.1 %.
-- **Breaking (#49, `src/sim/joints/breaking.ts`):**
-    - each connection holds 4 kN per nail;
-    - its bending strength grows with the number of nails and how far apart they are;
-    - load against capacity is smoothed over 0.1 s;
-    - it breaks past capacity, or at once on a blow of 2.5× capacity that lasts two steps;
-    - time spent above half of capacity builds fatigue, which takes up to 60 % off its strength;
-    - a new joint gets 0.25 s to settle first: the snap of taking hold is not a load.
-- **Break events (#50):**
-    - creaks at 55 % of capacity, groans at 80 % (each joint at most every 1.5 s, messages at most
-      every 2 s);
-    - breaks are removed after the physics step, never inside it, and both pieces wake up;
-    - synthesized creak, groan and crack sounds (Web Audio, no asset files);
-    - nail heads coloured by strain.
-- **Online:** guests get the same messages and sounds. A broken joint's nails disappear for them
-  (the nail list is resent on change). Each nail's strain level travels as one digit, sent only when
-  it changes.
-- **Epic 4 bridge test fixed:** its driver steered the wrong way. Steering correctly, the ute
-  drives over the two loose beams to the far bank. Placed as that test places them, the beams stay
-  across.
+- **Strength (#49, `src/sim/joints/graph.ts`), EN 1995-1-1, characteristic values:**
+    - shear per nail 4.0 kN: 8.2.2 (8.6 f), f_h,k = 15.4 MPa, M_y,Rk = 40.1 N m, 3.6 kN, plus the
+      rope effect;
+    - withdrawal per nail 2.0 kN: 8.3.2, f_ax,k = 20e-6 rho_k^2 = 2.45 MPa over 100 mm;
+    - the two combined as squares: 8.3.3 (8.28);
+    - no partial factor: the game breaks at the characteristic value. A design would allow
+      kmod / gamma_M = 0.69 of it.
+- **Measuring loads (`stress.ts`):**
+    - Rapier reports no joint forces, so after every step the meter takes each nailed piece's change
+      of momentum, less gravity, damping and the contacts that are not its own;
+    - the contact at a joint's own faces, within 0.6 m of its nails, is part of the joint. Rapier's
+      joint and contact fight over the same faces: a seated beam end read 18 kN of joint pulling
+      against 20 kN of contact pushing. Only their sum is the joint's;
+    - where that does not pin down each joint's share, the share is the elastic one (Menabrea:
+      least sum F^2/2k), using the same stiffnesses the joints' springs have;
+    - each joint's force and moment split into: bearing on its faces (the timber carries it);
+      withdrawal, including prying (T = along + |M| / reach, the reach being as far as both pieces'
+      faces go that way); shear, less the faces' friction (0.5 of the bearing, timber on timber or
+      stone); and the nails' own turn about their axis.
+- **The joints (`joints.ts`):** each is a six-way spring, not a pin:
+    - along every axis, the nails' slip modulus, K_ser = rho_m^1.5 d^0.8 / 30 = 1.5 kN/mm per nail
+      (EN 1995-1-1 7.1). As rigid pins, two anchors on one beam fought over its length, and the beam
+      jittered at 0.1 rad/s;
+    - turning about the nails, their couple: K_ser x sum(lever^2 + r^2), lever 4 cm, r from the group's
+      centre;
+    - tipping across the nails, the faces' bedding: E_90,mean x I / t for C24 (370 MPa, a 20 x 15 cm
+      face, 10 cm deep) = 2.1e5 N m/rad;
+    - **the anchor cap (a simulation limit, not timber):** a joint into stone is held to what a 60 Hz
+      step can follow, omega dt <= 2 on the piece's inertia about each axis. A beam's bedding about
+      its own long axis (0.19 kg m2) rang at 1000 rad/s, and an idle beam nailed at one end rolled
+      4 degrees onto its edge and back, reading 0.99 of its nails' strength. Its stone seat's contact
+      holds that roll. Timber to timber is not capped: there the joint stands in for the faces
+      (nailed timber gives up its contact, which fought the joint and shook a finished deck apart),
+      so it keeps the full EN 1995 values.
+- **Breaking (`breaking.ts`):**
+    - load against capacity smoothed over 0.1 s;
+    - creak at 55 %, groan at 80 %;
+    - break past capacity, or on a blow of 2.5 x capacity two steps running, which cracks the joint:
+      either way only BREAK.tell = 0.5 s after it creaked;
+    - fatigue above half of capacity takes up to 60 % off its strength;
+    - a new joint settles 0.25 s before it is rated.
+- **Pieces that sleep:** a still structure sleeps once its joints' loads are steady (to 2 % of the
+  piece's weight), keeps what they carried, and is read again from its first step awake.
+- **A beaver's weight (`world.ts`):** a kinematic character pressed on what it stood on only by the
+  controller's push, about 0.8 of its weight, in fits, on every plank under its 0.6 m feet, and
+  carried things weighed nothing. Now what is straight under its centre gets exactly its weight
+  (60 kg, the same as it pushes with) plus its share of what it carries, and the controller's push
+  is taken back: down and turning, and sideways too while standing still. A nailed piece gets none
+  of the controller's shove: pressed against a nailed plank's edge, it read 1.5 kN on its nail.
+- **Sounds (Epic 8's `sfx`):** creaks and snaps come from what every device sees (the strain levels
+  and the nails' disappearance), rate-limited per joint.
+- **Online:** guests get the same messages and sounds; a broken joint's nails disappear for them.
 
-### Test results (actual, `tests/unit/breaking.test.ts`, both voxel sizes)
+### Test results (actual, both voxel sizes; `breaking.test.ts`, `joints-sleep.test.ts`, `joints.test.ts`, `yard-bridge.test.ts`)
 
-| Test                                                      | Result                                                                  |
-| --------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Cantilevered beam, tip load 0 / 200 / 400 N               | Force 357.9 / 557.9 / 757.9 N, moment 537 / 1137 / 1737 N m (= statics) |
-| Beam cantilevered on one nail                             | Tears loose under its own weight (16 ticks, right after settling)       |
-| Same beam on four nails 25 cm apart                       | Holds; peak 20 % of capacity                                            |
-| A load held near the limit                                | Wears the joint out and breaks after 3.1 s                              |
-| A light load for 30 s                                     | No fatigue at all                                                       |
-| Yard bridge, both ends, two nails each, ute driven across | Crosses; peak **52 %** of capacity; no creak; no speed clamps           |
-| Yard bridge nailed at the near end only                   | Creak, then both joints break (ticks 289 and 291); the same every run   |
-| Online, host + 3 guests, the underbuilt bridge            | Guests see strain level 2, the creak and the break; their nails go      |
+| Test                                                                                                           | Result                                                                                                                                                                                                                                                       |
+| -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Cantilever off a stone block on four spikes, tip load 0 / 200 / 400 N                                          | Force 358 / 558 / 759 N (statics 358 / 558 / 758); withdrawal 1331 / 3071 / 4806 N (statics 1432 / 3232 / 5032, band 0.9 to 1.1)                                                                                                                             |
+| A beam hung on one spike into a stone pier, 300 N                                                              | Across the spike 658 N (statics 658), withdrawal 475 N (statics 500), no moment                                                                                                                                                                              |
+| One spike: self weight; tip loads for 0.85 and 1.15 of its withdrawal                                          | 0.72 of capacity; held at 0.86; creaked at 0.35 s, broke at 0.85 s                                                                                                                                                                                           |
+| Fatigue on a steady load, u = 0.6 / 0.75 / 0.9                                                                 | Broke at 13.0 / 5.40 / 2.03 s (the law: 12.7 / 5.28 / 1.99 s)                                                                                                                                                                                                |
+| Cantilever on two spikes at u 0.71; at u 0.42                                                                  | First creak 0.7 s, broke at 6.9 s; no fatigue after 30 s                                                                                                                                                                                                     |
+| A blow past 2.5 x capacity, two steps running                                                                  | Creaks, breaks exactly 0.5 s later, under no load                                                                                                                                                                                                            |
+| **Proper yard bridge under the ute** (both ends, two nails each)                                               | Peak **0.20** of capacity; no creak                                                                                                                                                                                                                          |
+| Four beavers on a nailed deck patch                                                                            | The beams hold it up by 2356 N more (their weight 2354 N); peak 0.00                                                                                                                                                                                         |
+| **Underbuilt:** beams laid off the lip short of the far seat, four nails each                                  | Peak 3.73; creak at tick 218, breaks at 330 and 342 (first break 1.87 s after the creak); the ute drops into the creek; the same every run                                                                                                                   |
+| Settling: nailed at the near end, the far end propped 2 mm, the prop taken away                                | Peak 0.005, no creak                                                                                                                                                                                                                                         |
+| Cantilever at rest                                                                                             | Turns 0.0000 rad/s step to step (Rapier reports a steady 0.06 rad/s angular velocity for a body its joint and contact hold still: the test measures real motion)                                                                                             |
+| The faces' radius at 0.5 / 0.6 / 0.8 m                                                                         | Identical: withdrawal 3071 N, proper bridge peak 0.20                                                                                                                                                                                                        |
+| A sleeping bridge, then the ute                                                                                | Wakes; peak 0.20, as kept awake (0.20)                                                                                                                                                                                                                       |
+| A beaver onto a sleeping beam                                                                                  | Wakes, read at once                                                                                                                                                                                                                                          |
+| A load growing slowly on one spike                                                                             | Kept awake; creak at 0.4 s, break at 4.5 s                                                                                                                                                                                                                   |
+| A log dropped 1.5 m onto a sleeping bridge                                                                     | Peak 0.128, as on an awake one (0.128)                                                                                                                                                                                                                       |
+| Joint springs                                                                                                  | Timber to timber: the EN 1995 values as they stand; only stone anchors capped                                                                                                                                                                                |
+| **Gate, by input:** beams, an 11-plank nailed deck, both ends anchored, the ute driven from where it is parked | 4 anchors, 22 deck joints, 33 nails; planks within 0.1 cm of the deck plane, 3.3 cm of their spots; floods moved the crossing **0.7 and 0.1 cm**; standing empty a minute: peak **0.039**, no creak; no plank sank into a beam; the ute reached the far bank |
+| Online, host and 3 guests, the underbuilt bridge                                                               | Guests see strain level 2, the creak and the break; their nails go                                                                                                                                                                                           |
 
-- Unit tests: 374 pass. Browser: the yard, ute, hammer and online co-op tests pass.
+- Unit tests: 796 pass. Browser: 31 of 32 pass (the embed tests on their own port 4173). The
+  failing one, "physics sandbox: grab and carry the plank", fails the same way on epics-5-10
+  without this work.
+- Other epics' tests changed, each for a measured reason:
+    - Epic 7's bucket throw is thrown at 0.26, 0.28 and 0.30, and every one lands in the goal,
+      empty. A single aim at 0.3 had landed by the goal's far edge, and once, with the player 5 mm
+      further on after walking over the yard's beams with their weight on them, bounced out;
+    - Epic 8's flood rebuild aims at where the washed-up beam's end really is (it lies 4.6 degrees
+      off square, 11 cm off its centre line at the grip);
+    - Epic 6's forestry follow-up walks round the yard's beams' east end, as its other walks do:
+      straight there, the player stepped on a loose beam's end and, weighing 60 kg on it, shoved it
+      8 cm. That is right for a 36 kg beam on gravel with a 60 kg beaver stepping onto its end;
+    - the gate's builder spreads four nails across each beam's near end and two across each far
+      end.
+
+### #115's claims, measured again
+
+- **Joint stiffness:** #115 had a fixed 200 kN m/rad per nail for every turn. A turn flat about
+  the nails is now their couple (K_ser x sum(lever^2 + r^2)), so one nail is nearly a pivot. At
+  20 N, one nail timber to timber turns 27.85 mrad (M/k 28.61), four 1.72 (1.74); into stone, 50 N,
+  60.83 (59.26) and 2.52 (2.47).
+- **A nailed beam under a 400 N shove for a second:** #115 said under 1 cm. It moves 17.7 and
+  17.5 mm: it swings a little on its two nails' couple, its far end sliding on its seat.
+- **The nailed crossing:** the ute reaches the far bank; the beams drift 2 mm and 2 mm (#115: 2 and
+  3 mm).
+- **Nailed against loose:** a 400 N shove after the crossing moves loose beams 201 mm and nailed
+  ones 0.3 mm (#115: 0.2 mm). In the gate, the same deck with its plank nails pulled shoves its
+  planks up to 68.9 cm (#115: 361 cm) and the ute does not get over; nailed, 0.1 cm.
+- **Each beam has two ground anchors**, one into each bank, and the gate's ute reaches the far bank:
+  both still hold.
 
 ### Known limits
 
-- The share between several joints on one piece is a least-squares estimate, not a true elastic
-  solve. It is exact for a single joint and close for symmetric cases.
-- Joints are rigid until they break: pieces don't visibly bend. The warning is the creak, the
-  colour and the message.
+- A finished nailed deck never quite sleeps: its planks quiver (up to 7 mrad a step at times). A
+  plank's roll inertia is too small for the timber bedding at a 60 Hz step, and capping it would need
+  the faces' contact back, which fought the joints.
+- Pieces are rigid: a joint's warning is the creak, the nail colour and the message, not a bend.
+- The one-way tipping spring (faces that push but do not pull) was tried and dropped: it ratcheted
+  shut on vibration, and the settling it was for is the nails being pried, which they are.
 
 ## Credits and licences (2026-11-23, Epic 10, #104)
 
@@ -354,7 +424,8 @@ build a real bridge, beams plus a nailed plank deck, and drive the ute over it.
 - **Joints flex by their stiffness:**
     - each joint holds its anchor points together rigidly;
     - its bending springs back with 200 kN m/rad per nail (× 0.8 timber to timber, × 1 into
-      stone), so one nail flexes four times as much as four.
+      stone), so one nail flexes four times as much as four. (Since part 2: the EN 1995 slip
+      modulus and bedding, see "#115's claims, measured again" there.)
 - **Hammer (#48, `src/sim/joints/joints.ts`):** the prompt and the blow run the same test:
     - a 30 cm nail from where you look;
     - it must pass through the piece and bite at least 4 cm into the next;
