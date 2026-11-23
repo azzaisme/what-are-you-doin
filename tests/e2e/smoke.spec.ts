@@ -197,7 +197,7 @@ test('first-person mode carries a voxelized plank', async ({ page }) => {
     const problems = await boot(page);
     await lab(page, (l) => l.setFirstPerson(0, 6, 0, -0.1));
     await lab(page, (l) => l.set('carry', true));
-    await ticks(page, 90);
+    await page.waitForTimeout(1500); // (the lab is paused here: the plank is drawn, not simulated)
     const e = await lab(page, (l) => l.entities());
     expect(e['held-plank'].visible).toBe(true);
     expect(problems).toEqual([]);
