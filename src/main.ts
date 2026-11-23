@@ -74,6 +74,8 @@ import { ANIM_MAX } from './sim/snapshots.ts';
 import { WATER } from './sim/water.ts';
 import { weatherCovers, weatherFog } from './sim/weather.ts';
 import type { CameraControlsApi } from './types/engine-scripts.ts';
+import { CreditsPanel } from './ui/credits.ts';
+import { fullscreenAvailable, isFullscreen, onPageHidden, setFullscreen } from './ui/embed.ts';
 import { withHammer } from './ui/hammer-hud.ts';
 import { OnlinePanel } from './ui/online-panel.ts';
 import { PlaytestPanel } from './ui/playtest-panel.ts';
@@ -1856,12 +1858,21 @@ const netConditions = parseConditions(params.get('netsim'));
 /** A game this tab was playing as a guest before a reload: rejoined (as the same player) when listed. */
 const rejoinCode = gameToRejoin(level.id);
 let wasReconnecting = false;
+let wasHostAway = false;
 
-/** Tells a guest when the host goes quiet and when it is back. */
+/** Tells a guest when the host goes quiet or to the background, and when it is back. */
 function noteReconnect(g: GuestSession): void {
     if (g.reconnecting !== wasReconnecting) {
         wasReconnecting = g.reconnecting;
         showToast(g.reconnecting ? 'Lost the host: reconnecting…' : 'Reconnected', g.reconnecting ? 'warn' : 'info');
+    }
+    if (g.hostAway !== wasHostAway) {
+        wasHostAway = g.hostAway;
+        showToast(
+            g.hostAway ? "The host's game is in the background: it may stop until they come back" : 'The host is back',
+            g.hostAway ? 'warn' : 'info'
+        );
+        online.render();
     }
     // keep the rejoin record fresh, so a reload within the host's grace period comes back
     const now = Date.now();
@@ -1970,6 +1981,7 @@ const online = new OnlinePanel(
                         code: guestSession.code,
                         slot: guestSession.slot,
                         waiting: guestSession.received === 0,
+                        hostAway: guestSession.hostAway,
                         lagMs: guestSession.lagMs,
                         reconnecting: guestSession.reconnecting
                     }
@@ -2125,15 +2137,25 @@ function menuPad(): Gamepad | null {
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 const times = (v: number) => `${v.toFixed(1)}×`;
+// credits and licences (#104), from Settings → Game
+const credits = new CreditsPanel();
 const menu = new SettingsMenu(
     {
         get(key): SettingValue {
+            if (key === 'fullscreen') return isFullscreen();
             if (key === 'cellCm') return cellPending;
             if (key === 'uiHidden') return state.uiHidden;
             if (key === 'debugPanel') return panel.visible;
             return settings[key as keyof Settings];
         },
         set(key, v) {
+            if (key === 'fullscreen') {
+                void setFullscreen(Boolean(v)).then((err) => {
+                    if (err) showToast(err, 'warn');
+                    menu.sync();
+                });
+                return;
+            }
             if (key === 'cellCm') {
                 cellPending = clampCellSizeCm(Number(v));
                 menu.sync();
@@ -2179,6 +2201,9 @@ const menu = new SettingsMenu(
                     break;
                 case 'playtest':
                     playtestPanel.open();
+                    break;
+                case 'credits':
+                    credits.show();
                     break;
                 case 'applyCell':
                     applyCellSize(cellPending);
@@ -2247,6 +2272,8 @@ const menu = new SettingsMenu(
             return true;
         },
         shown(key) {
+            // inside an embed that doesn't allow it, there is no full screen to offer
+            if (key === 'fullscreen') return fullscreenAvailable();
             // touch look speed only where there is touch; mouse rows everywhere else
             if (key === 'touchLookSpeed') return touchSeen;
             if (key === 'mouseSensitivity' || key === 'invertMouseY')
@@ -2289,6 +2316,8 @@ const menu = new SettingsMenu(
                     label: 'Playtest log…',
                     hint: 'What happened this session, to note, copy or save'
                 },
+                { kind: 'toggle', key: 'fullscreen', label: 'Full screen' },
+                { kind: 'button', id: 'credits', label: 'Credits & licences…' },
                 { kind: 'toggle', key: 'uiHidden', label: 'Hide HUD', hint: 'H' },
                 { kind: 'toggle', key: 'debugPanel', label: 'Debug panel', hint: 'F3' }
             ]
@@ -2461,6 +2490,14 @@ pads.onMenu = (pad) => {
     menuPadIndex = pad.index;
     menu.show();
 };
+// full screen changes from either side (our toggle, the embedding page's button, Esc)
+document.addEventListener('fullscreenchange', () => menu.sync());
+// the page hidden (another tab, the phone's home screen): a solo game stops at the menu, so the player
+// comes back to a paused game rather than mid-fall; a host tells its guests the world is waiting
+onPageHidden((hidden) => {
+    hostSession?.setAway(hidden);
+    if (hidden && !hostSession && !guestSession && state.mode === 'firstPerson' && !menu.open && !editing) menu.show();
+});
 document.addEventListener('pointerlockchange', () => {
     // Esc while playing: the browser releases the mouse (the key never reaches the page)
     if (!fpInput.locked && state.mode === 'firstPerson' && !menu.open && !editing) menu.show();
@@ -2549,7 +2586,8 @@ window.__riverLab = {
                       slot: guestSession.slot,
                       received: guestSession.received,
                       lagMs: guestSession.lagMs,
-                      reconnecting: guestSession.reconnecting
+                      reconnecting: guestSession.reconnecting,
+                      hostAway: guestSession.hostAway
                   }
                 : null
         })
