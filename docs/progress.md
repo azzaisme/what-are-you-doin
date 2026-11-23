@@ -20,6 +20,33 @@ An existing cheat: the Valley could be finished without building a single bridge
   empty spare would have meant a walk back to the yard.
     - Spares at the other stages stay empty: they have water nearby.
     - Thrown, a 3 L spare also lands nearly empty, so it doesn't reopen the cheat.
+- **Beavers can jump three of the crossings; the bucket can't.** Measured by input, with no bridge,
+  sprinting along the road: a beaver jumps the culvert, the gorge (onto the old pier and on: two
+  2.3 m gaps) and the crevasse, with no falls. Only Shallow Creek (4.3 m) is too wide. That's fine:
+  it's the bucket that needs the bridge. Three small rules make sure it does:
+    - **No jumping while holding the bucket.** Any beaver holding it, a co-carrier too. A press of
+      jump gets a small dip (as if bracing) and, the first time, "Too heavy to jump with the bucket:
+      build the crossing to get it over." Before the rule, sprint-jumping with the full bucket got it
+      over each of the three, landing with 0.05 to 1.09 L: enough for the crevasse's 1 L flag.
+    - **Handed over only standing close** (feet within 1.9 m). Before the rule, a beaver at a rim's
+      very edge held it out and one at the far edge took it with all 10 L: at the culvert, the
+      crevasse, and at the gorge from the rim to a beaver on the pier and on to the far rim. Now
+      "Too far to hand the bucket over: stand close, or build the crossing." Side by side, hand-overs
+      work as before.
+    - **The water past a crossing stays shut until its stage.** The works tank (3 m past the Gorge
+      flag) opens at the Old Industrial Works stage, and the mountain spring butt (0.8 m past the
+      crevasse's flag) at Flower Summit. A dry bucket thrown over the gorge or the crevasse can't be
+      refilled across before the flag ("The works water tank is shut until the Gorge stage is done.").
+      It follows the stage, so a reset or a checkpoint sets it right.
+    - So the 1 L flags rely on the bucket not getting over unbuilt: it can't be jumped with, handed
+      across, or refilled across. Each is tested by input, a guest too.
+- **The Old Industrial Works flag wants 1 L too, and the stage is fair for it.** The works tank is
+  below the retaining wall, and a bucket jumped or thrown up the wall arrives dry. The way up keeps
+  the water: set the bucket on a crate against the wall, climb a 1-then-2 crate stair without it,
+  hop onto the wall's coping (0.66 m: a jump clears about 0.9 m), reach down for the bucket and
+  carry it to the flag. A test plays it alone by input (the crates placed), and the bucket arrives
+  with all 10 L. The stage's objective now says so: "Stack crates to climb the wall: set the bucket
+  on one and lift it up from the top".
 - **Tests** (`tests/unit/valley-water-flags.test.ts`, by input; the bridges are placed):
     - at Shallow Creek, the culvert, the gorge and the crevasse, the bucket thrown over lands across
       with under 1 L, and a second beaver carrying it to the flag doesn't complete the stage;

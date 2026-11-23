@@ -99,6 +99,12 @@ export type PropsMode = 'physics' | 'scripted';
 
 /** The player body's eye height (beavers 1.22 m; the former stand-in people 1.86 m). */
 export const EYE_HEIGHT = BODY.eyeHeight;
+/** Said the first time a beaver tries to jump holding the bucket. */
+/** The farthest apart (feet, across the ground, m) two beavers can be to pass the bucket hand to hand. */
+export const HANDOVER_REACH = 1.9;
+/** Said the first time a beaver reaches for the bucket in another's hands from too far. */
+export const HANDOVER_TEXT = 'Too far to hand the bucket over: stand close, or build the crossing.';
+export const HEAVY_JUMP_TEXT = 'Too heavy to jump with the bucket: build the crossing to get it over.';
 /** Stress bodies get a deterministic upward kick this often (ticks), so 25 bodies keep moving. */
 export const STRESS_KICK_TICKS = 150;
 
@@ -115,7 +121,7 @@ export interface LabSimOptions {
 /** Something the player should be told (objective reached, fell in the creek, ...). */
 export interface SimEvent {
     tick: number;
-    kind: 'goal' | 'fell' | 'recovered' | 'step' | 'ute' | 'water' | 'hazard' | 'wood';
+    kind: 'goal' | 'fell' | 'recovered' | 'step' | 'ute' | 'water' | 'hazard' | 'wood' | 'hint';
     text: string;
 }
 
@@ -168,8 +174,15 @@ export class LabSim {
         grabbed: false,
         missed: false,
         thrown: false,
-        dropped: false
+        dropped: false,
+        balked: false
     }));
+    /** Each player's jump key last tick (a refused jump reacts on the press, not while held). */
+    private readonly jumpWas = new Uint8Array(MAX_PLAYERS);
+    /** Said once a run: no jumping with the bucket. */
+    private heavyNoticed = false;
+    /** Said once a run: the bucket is handed over only standing close. */
+    private farNoticed = false;
     private readonly landingVy = new Float64Array(MAX_PLAYERS);
     readonly player = this.players[0];
     /**
@@ -252,6 +265,7 @@ export class LabSim {
         this.player2Entity = c.player2;
         this.eyes = c.eyes;
         this.water = new BucketWaterState(this.level);
+        this.water.stageDone = (k) => `the ${this.level.rules?.stages?.[k]?.name ?? `stage ${k + 1}`} stage`;
         const levelLogs = c.entities.filter((e) => e.name === 'log' || e.name.startsWith('extra-log'));
         this.forestry = new Forestry(this.level, c.forestry, levelLogs);
         const saw = this.level.forestry?.sawmill;
@@ -296,6 +310,9 @@ export class LabSim {
         this.bucket.anim[BUCKET_LITRES] = this.water.volume;
         this.pouring.fill(false);
         this.dryNoticed = false;
+        this.heavyNoticed = false;
+        this.farNoticed = false;
+        this.jumpWas.fill(0);
         for (const pl of this.players) {
             pl.fallTicks = 0;
             pl.safe.valid = false;
@@ -583,7 +600,21 @@ export class LabSim {
         const rx = Math.cos(p.yaw);
         const rz = -Math.sin(p.yaw);
         const vyBefore = p.vy;
-        pw.moveCharacter((fx * mz + rx * mx) * run, (fz * mz + rz * mx) * run, cmd.jump, i);
+        // no jumping while holding the bucket (Epic 9): too heavy and awkward to hop with, so it
+        // can't be carried over a crossing a beaver could jump; a press gets a dip and, once, a toast
+        let jump = cmd.jump;
+        if (jump && pw.heldIdOf(i) === this.bucket.id) {
+            jump = false;
+            if (!this.jumpWas[i] && p.grounded) {
+                this.animEvents[i].balked = true;
+                if (!this.heavyNoticed) {
+                    this.heavyNoticed = true;
+                    this.events.push({ tick: this.tick, kind: 'hint', text: HEAVY_JUMP_TEXT });
+                }
+            }
+        }
+        this.jumpWas[i] = cmd.jump ? 1 : 0;
+        pw.moveCharacter((fx * mz + rx * mx) * run, (fz * mz + rz * mx) * run, jump, i);
         const c = pw.rig(i)!.state;
         this.landingVy[i] = vyBefore;
         // smooth step-ups (and only step-ups) for the camera
@@ -631,6 +662,21 @@ export class LabSim {
             else if (!this.enterUte(i, eye, cmd)) ev.missed = true;
         }
         pw.applyGrab(eye, cmd.yaw, cmd.pitch, i);
+        // the bucket passes hand to hand only between beavers standing close (Epic 9): reaching it
+        // out of another's hands across a gap would get it over a crossing nobody built
+        if (heldBefore !== this.bucket.id && pw.heldIdOf(i) === this.bucket.id) {
+            for (let j = 0; j < this.players.length; j++) {
+                if (j === i || pw.heldIdOf(j) !== this.bucket.id) continue;
+                const o = this.players[j];
+                if (Math.hypot(o.x - p.x, o.z - p.z) <= HANDOVER_REACH) continue;
+                pw.release(i);
+                if (!this.farNoticed) {
+                    this.farNoticed = true;
+                    this.events.push({ tick: this.tick, kind: 'hint', text: HANDOVER_TEXT });
+                }
+                break;
+            }
+        }
         const heldAfter = pw.heldIdOf(i);
         if (heldAfter !== this.bucket.id) this.pouring[i] = false;
         if (heldAfter >= 0 && heldAfter !== heldBefore) ev.grabbed = true;
@@ -845,6 +891,7 @@ export class LabSim {
         // the flower stage, and after the win too (more water is welcome)
         const flower = st?.flower ?? null;
         this.water.goalMet = this.progress.goalReached;
+        this.water.stage = this.progress.step;
         for (const text of this.water.step(pb, bk.pose, bk.anim, flower))
             this.events.push({ tick: this.tick, kind: 'water', text });
     }
@@ -1492,7 +1539,7 @@ export class LabSim {
                 SIM_DT,
                 _animOut
             );
-            ev.grabbed = ev.missed = ev.thrown = ev.dropped = false;
+            ev.grabbed = ev.missed = ev.thrown = ev.dropped = ev.balked = false;
             a.anim[BEAVER_ARM_RAISE] = o.raise;
             a.anim[BEAVER_ARM_REACH] = o.reach;
             a.anim[BEAVER_ARM_SPREAD] = o.spread;

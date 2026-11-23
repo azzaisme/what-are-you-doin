@@ -150,15 +150,26 @@ test('split screen at full fog: each view has its own fog sky, round its own cam
         type E = {
             enabled: boolean;
             getPosition(): { x: number; y: number; z: number };
+            render?: { layers: number[] };
+            camera?: { layers: number[] };
         };
-        const apps = (
-            globalThis as unknown as { __playcanvasApps: Map<{ root: { findByName(n: string): E | null } }, unknown> }
-        ).__playcanvasApps;
+        type App = {
+            root: { findByName(n: string): E | null };
+            scene: { layers: { getLayerById(id: number): { name: string } | null } };
+        };
+        const apps = (globalThis as unknown as { __playcanvasApps: Map<App, unknown> }).__playcanvasApps;
         const app = [...apps.keys()][0];
+        const names = (ids: number[] = []) => ids.map((id) => app.scene.layers.getLayerById(id)?.name ?? '?');
         const pos = (n: string) => {
             const e = app.root.findByName(n)!;
             const p = e.getPosition();
-            return { x: p.x, y: p.y, z: p.z, on: e.enabled };
+            return {
+                x: p.x,
+                y: p.y,
+                z: p.z,
+                on: e.enabled,
+                layers: names(e.render?.layers ?? e.camera?.layers)
+            };
         };
         return {
             dome1: pos('FogDome1'),
@@ -174,6 +185,14 @@ test('split screen at full fog: each view has its own fog sky, round its own cam
     expect(d(views.camera1, views.camera2), 'the two views are far apart').toBeGreaterThan(120);
     expect(d(views.dome1, views.camera1), "player 1's dome round player 1's camera").toBeLessThan(0.5);
     expect(d(views.dome2, views.camera2), "player 2's dome round player 2's camera").toBeLessThan(0.5);
+    // each dome is drawn in its own view only: dome 1 on View1, dome 2 on View2, and each camera
+    // draws its own view's layer and not the other's
+    expect(views.dome1.layers).toEqual(['View1']);
+    expect(views.dome2.layers).toEqual(['View2']);
+    expect(views.camera1.layers).toContain('View1');
+    expect(views.camera1.layers).not.toContain('View2');
+    expect(views.camera2.layers).toContain('View2');
+    expect(views.camera2.layers).not.toContain('View1');
 });
 
 for (const quality of ['low', 'high'] as const)

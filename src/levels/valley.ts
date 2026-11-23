@@ -1175,11 +1175,14 @@ const stump = yardToWorld(BUCKET_STUMP.x, BUCKET_STUMP.z);
  * spot, its barrel to the side of the road (+t).
  */
 function valleyButts(): ReturnType<typeof waterButt>[] {
-    const butt = (name: string, u: number, t: number, litres: number) => {
+    const butt = (name: string, u: number, t: number, litres: number, opensAt: number) => {
         const w = routeToWorld(u, t);
-        return waterButt(name, w.x, w.z, groundUT(u, t), groundUT(u, t + 0.62), -Math.PI / 4, litres);
+        const b = waterButt(name, w.x, w.z, groundUT(u, t), groundUT(u, t + 0.62), -Math.PI / 4, litres);
+        return { ...b, source: { ...b.source, opensAt } };
     };
-    return [butt('works water tank', 96, 1.8, 30), butt('mountain spring butt', 175, roadT(175) + 0.8, 20)];
+    // each past a crossing a beaver can jump: shut until the stage it serves (the Works, the summit),
+    // so a dry bucket thrown over can't be refilled before the crossing's flag
+    return [butt('works water tank', 96, 1.8, 30, 4), butt('mountain spring butt', 175, roadT(175) + 0.8, 20, 6)];
 }
 
 function valleySources(): WaterSource[] {
@@ -1235,7 +1238,7 @@ export const VALLEY_STAGES: LevelStage[] = [
     },
     {
         name: 'Old Industrial Works',
-        objective: 'Stack the crates and get the bucket up onto the works’ upper yard',
+        objective: 'Stack crates to climb the wall: set the bucket on one and lift it up from the top',
         goal: square(CHECKPOINTS[4].u, CHECKPOINTS[4].t, 3),
         start: restart(96, 1),
         bucket: bucketAt(96, 1.8),

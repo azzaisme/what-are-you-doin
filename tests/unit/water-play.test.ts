@@ -129,6 +129,8 @@ describe('refilling, played (#63)', () => {
         s.fpActive = true;
         for (const src of s.water.sources.slice(1)) {
             const d = src.def;
+            // (at the stage it serves: each is shut before then, valley-water-flags.test.ts)
+            s.progress.step = d.opensAt ?? 0;
             // start beside the butt with the bucket at your feet (where that stage's spare waits)
             s.physics.place(s.bucket.id, pose(d.x + 1.2, valleyHeight(d.x + 1.2, d.z) + 0.05, d.z));
             s.placePlayer(d.x + 2.2, d.z, Math.PI / 2);
