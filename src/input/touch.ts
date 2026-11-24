@@ -1,11 +1,12 @@
 /**
  * Touch controls for phones (first person): a floating stick on the left half (pushed to the edge
- * it sprints), drag on the right half to look, and buttons for jump, grab / release, throw and drop.
+ * it sprints), drag on the right half to look, and buttons for jump, grab / release, throw and drop
+ * (and pour, while you hold the bucket).
  * Produces the same command fields as the gamepad; look changes the shared yaw/pitch at display
  * rate. Shown on coarse-pointer devices, or after the first touch.
  */
 
-import { ACTION_DROP, ACTION_NONE, PITCH_LIMIT } from '../sim/commands.ts';
+import { ACTION_DROP, ACTION_NAIL, ACTION_NONE, ACTION_POUR, PITCH_LIMIT } from '../sim/commands.ts';
 import type { PlayerCommand } from '../sim/commands.ts';
 
 const STICK_RADIUS = 56;
@@ -30,6 +31,7 @@ export class TouchControls {
     private readonly knob: HTMLDivElement;
     private readonly base: HTMLDivElement;
     private readonly grabBtn: HTMLButtonElement;
+    private readonly pourBtn: HTMLButtonElement;
 
     constructor() {
         const el = document.createElement('div');
@@ -37,6 +39,8 @@ export class TouchControls {
         el.innerHTML = `
           <div class="touch-stick"><div class="touch-knob"></div></div>
           <div class="touch-buttons">
+            <button type="button" data-b="nail" class="touch-nail" aria-label="Nail">Nail</button>
+            <button type="button" data-b="pour" class="touch-pour" aria-label="Pour" hidden>Pour</button>
             <button type="button" data-b="drop" aria-label="Drop">Drop</button>
             <button type="button" data-b="throw" aria-label="Throw">Throw</button>
             <button type="button" data-b="grab" class="touch-grab" aria-label="Grab">Grab</button>
@@ -47,6 +51,7 @@ export class TouchControls {
         this.base = el.querySelector('.touch-stick')!;
         this.knob = el.querySelector('.touch-knob')!;
         this.grabBtn = el.querySelector('.touch-grab')!;
+        this.pourBtn = el.querySelector('.touch-pour')!;
         for (const b of el.querySelectorAll<HTMLButtonElement>('button')) {
             b.addEventListener('touchstart', (e) => {
                 e.preventDefault();
@@ -56,6 +61,8 @@ export class TouchControls {
                 else if (k === 'grab') this.q.grab = true;
                 else if (k === 'throw') this.q.throw = true;
                 else if (k === 'drop') this.q.action = ACTION_DROP;
+                else if (k === 'nail') this.q.action = ACTION_NAIL;
+                else if (k === 'pour') this.q.action = ACTION_POUR;
                 b.classList.add('down');
             });
             b.addEventListener('touchend', () => b.classList.remove('down'));
@@ -148,9 +155,10 @@ export class TouchControls {
     }
 
     /** "Release" instead of "Grab" while holding something. */
-    setHolding(holding: boolean): void {
+    setHolding(holding: boolean, bucket = false): void {
         const label = holding ? 'Release' : 'Grab';
         if (this.grabBtn.textContent !== label) this.grabBtn.textContent = label;
+        if (this.pourBtn.hidden === bucket) this.pourBtn.hidden = !bucket;
     }
 
     /** Applies and clears the look change since the last call. */

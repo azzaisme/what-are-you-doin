@@ -11,7 +11,7 @@ import {
     timberYardLevel,
     yardHeight
 } from '../../src/levels/timber-yard.ts';
-import { neutralCommand } from '../../src/sim/commands.ts';
+import { ACTION_POUR, neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
@@ -22,6 +22,7 @@ beforeAll(() => initPhysics());
 
 const cmd = (n: number, c: Partial<PlayerCommand> = {}): PlayerCommand => ({ ...neutralCommand(n), ...c });
 const yard = () => new LabSim({ level: timberYardLevel });
+const S_TICKS = (sec: number) => Math.round(sec * 60);
 const byName = (s: LabSim, n: string) => s.entities.find((e) => e.name === n)!;
 
 /** Lays both beams flat across the gap, side by side, long axis along Z. */
@@ -39,15 +40,7 @@ describe('level 1: the timber yard', () => {
         expect(r.columns).toBeGreaterThan(300_000);
         expect(r.trees).toBeGreaterThan(30);
         const l = timberYardLevel.layout(1);
-        for (const name of [
-            'abutment-near',
-            'abutment-far',
-            'shed-roof',
-            'saw-bench',
-            'stump',
-            'flag',
-            'flower-centre'
-        ])
+        for (const name of ['abutment-near', 'abutment-far', 'shed-roof', 'saw-beam', 'stump', 'flag', 'flower-centre'])
             expect(l.pieces.some((p) => p.name === name)).toBe(true);
         // nothing grows on the road, in the creek or in the yard
         for (const t of l.trees) expect(Math.abs(t.z - creekCenterZ(t.x))).toBeGreaterThan(2);
@@ -177,8 +170,10 @@ describe('level 1: the timber yard', () => {
         expect(maxTilt).toBeLessThan(22);
     });
 
-    it('finishable with inputs only: carry the bucket to the near abutment and throw it over', () => {
-        // the shortcut (freeform, design doc §2.1): played through player commands only, no bridge
+    it('the old shortcut no longer wins: a bucket thrown over the creek lands without its water', () => {
+        // Epic 7: the yard wants water delivered. A full bucket (11.5 kg) is too heavy to throw
+        // across, so pour it out and throw the empty one: it lands on the far bank, empty, and the
+        // level says so instead of completing. Played through player commands only.
         const s = yard();
         let n = 0;
         let pitch = 0;
@@ -199,19 +194,28 @@ describe('level 1: the timber yard', () => {
             step({ moveX: s.player.x > BRIDGE_X ? -0.6 : 0.6 });
         for (let i = 0; i < 900 && s.player.z > BRIDGE.nearFace + 0.25; i++) step({ moveZ: 0.6 });
         expect(s.progress.falls).toBe(0);
+        // carried steadily, it still holds (nearly) all its water
+        expect(s.water.volume).toBeGreaterThan(9.5);
         step({}, 30);
+        step({ action: ACTION_POUR });
+        step({}, 240);
+        expect(s.water.volume).toBeLessThan(0.25);
+        step({ action: ACTION_POUR });
+        step({}, 60);
         for (let i = 0; i < 20; i++) {
-            pitch += (0.5 - pitch) / 6;
+            pitch += (0.3 - pitch) / 6;
             step();
         }
         step({}, 20);
         step({ throw: true });
         step({}, 240);
-        expect(s.progress.goalReached).toBe(true);
+        expect(bucket.pose.p.z).toBeLessThan(YARD_GOAL.maxZ);
+        expect(s.progress.goalReached).toBe(false);
+        expect(s.events.filter((e) => e.kind === 'water' && e.text.includes('empty'))).toHaveLength(1);
         expect(s.player.z).toBeGreaterThan(BRIDGE.nearFace); // the player never crossed
     }, 60_000);
 
-    it('finishable with inputs only by building the bridge: shoulder both beams over, carry the bucket across', () => {
+    it('finishable by building the bridge (placed setup: the player is put beside each piece): shoulder both beams over, walk back for the bucket and carry it across at a normal pace', () => {
         const s = yard();
         let n = 0;
         let yaw = 0;
@@ -225,11 +229,22 @@ describe('level 1: the timber yard', () => {
                 step();
             }
         };
-        const goTo = (x: number, zStop: number) => {
+        const goTo = (x: number, zStop: number, pace = 0.4) => {
             for (let i = 0; i < 900 && Math.abs(s.player.x - x) > 0.05; i++)
-                step({ moveX: s.player.x > x ? -0.4 : 0.4 });
-            for (let i = 0; i < 900 && s.player.z > zStop; i++) step({ moveZ: 0.5 });
+                step({ moveX: (s.player.x > x ? -1 : 1) * Math.min(pace, Math.abs(s.player.x - x) * 2 + 0.1) });
+            for (let i = 0; i < 900 && s.player.z > zStop; i++) step({ moveZ: Math.max(0.5, pace) });
             step({}, 30);
+        };
+        /** Walks (full stick, no sprint) facing the way it goes, to within 0.3 m of (x, z). */
+        const walkTo = (x: number, z: number) => {
+            for (let i = 0; i < 1800; i++) {
+                const dx = x - s.player.x;
+                const dz = z - s.player.z;
+                if (Math.hypot(dx, dz) < 0.3) break;
+                // forward is (-sin yaw, -cos yaw)
+                yaw = Math.atan2(-dx, -dz);
+                step({ moveZ: 1 });
+            }
         };
         step({}, 60);
         s.fpActive = true;
@@ -262,21 +277,35 @@ describe('level 1: the timber yard', () => {
             expect(Math.abs(beam.pose.p.y - (YARD_Y + 0.12))).toBeLessThan(0.25);
         }
         expect(s.progress.falls).toBe(0);
-        // fetch the bucket and walk it over the new bridge to the flag
+        // walk back to the stump for the bucket (no teleport, no sprint) and carry it over the new
+        // bridge to the flag: the flood the finished bridge set off (Epic 8) leaves time for that
         const bucket = byName(s, 'bucket');
+        const bridgeDone = s.tick;
+        pitch = 0;
+        walkTo(BUCKET_STUMP.x, BUCKET_STUMP.z + 1);
         yaw = 0;
-        s.placePlayer(BUCKET_STUMP.x, BUCKET_STUMP.z + 1, 0);
-        step({}, 20);
+        step({}, 10);
         pitch = -Math.atan2(s.player.y + EYE_HEIGHT - bucket.pose.p.y, s.player.z - bucket.pose.p.z);
         step({}, 3);
         step({ grab: true });
         expect(s.physics.heldId).toBe(bucket.id);
         pitch = 0;
-        goTo(BRIDGE_X, (YARD_GOAL.minZ + YARD_GOAL.maxZ) / 2);
+        goTo(BRIDGE_X, (YARD_GOAL.minZ + YARD_GOAL.maxZ) / 2, 1);
+        // the finished bridge set off the flood, and a walk was quick enough: the water is still at
+        // least half a metre below the capstones (0.5 m) the beams rest on (measured: 0.61 m, 14.1 s)
+        expect(s.events.some((e) => e.kind === 'hazard' && e.text.includes('siren'))).toBe(true);
+        expect(0.5 - s.hazards.waterY).toBeGreaterThan(0.5);
+        expect(s.tick - bridgeDone).toBeLessThan(S_TICKS(20));
+        // carried steadily over the bridge: not a drop lost
+        expect(s.water.volume).toBe(10);
         expect(s.progress.falls).toBe(0);
         expect(s.player.z).toBeLessThan(BRIDGE.farEdge);
         step({ grab: true });
-        step({}, 90);
+        // letting go sets it down (lowered to the ground) before it is released
+        step({}, 240);
         expect(s.progress.goalReached).toBe(true);
+        // set down by the flag, it keeps (nearly) all its water
+        expect(s.water.volume).toBeGreaterThan(9.8);
+        expect(s.events.find((e) => e.kind === 'goal')!.text).toMatch(/with \d+\.\d L of water/);
     }, 120_000);
 });

@@ -25,7 +25,7 @@ import {
     BEAVER_WALK_PHASE
 } from '../assets/beaver.ts';
 import { BODY } from '../assets/player-body.ts';
-import { BUCKET_HANDLE_TOP, LOG_RADIUS } from '../assets/props.ts';
+import { BUCKET_HANDLE_TOP, BUCKET_LITRES, LOG_RADIUS } from '../assets/props.ts';
 import {
     UTE_ANIM_CHANNELS,
     UTE_DROP_0,
@@ -51,17 +51,26 @@ import {
     quatSlerp,
     vec3
 } from '../voxels/math.ts';
+import type { Vec3 } from '../voxels/math.ts';
 
+import { BucketWaterState } from './bucket-water.ts';
 import { SIM_DT } from './clock.ts';
 import {
     ACTION_DROP,
     ACTION_DROP_TEST,
+    ACTION_NAIL,
+    ACTION_POUR,
     ACTION_RAGDOLL,
     ACTION_RESET_PROPS,
     neutralCommand,
     sanitizeCommand
 } from './commands.ts';
 import type { PlayerCommand } from './commands.ts';
+import { Forestry } from './forestry.ts';
+import { HazardDirector, PHASE } from './hazards.ts';
+import { GROUND, nailCode } from './joints/graph.ts';
+import { JointSystem } from './joints/joints.ts';
+import type { NailPreview } from './joints/joints.ts';
 import { MAX_PLAYERS, MAX_STRESS, createLabEntities } from './lab-entities.ts';
 import type { SimEntity } from './lab-entities.ts';
 import { addDummy, addLabKinematics, buildLabPhysics, launchDummy, propBody, stressDef } from './lab-physics.ts';
@@ -71,13 +80,24 @@ import { CHARACTER } from './physics/world.ts';
 import type { HeldInfo, PhysicsWorld } from './physics/world.ts';
 import { PlayerAnimator } from './player-anim.ts';
 import type { AnimEvents, AnimOutput } from './player-anim.ts';
+import { Sawmill } from './sawmill.ts';
 import { ANIM_MAX, SnapshotRing, writeEntity } from './snapshots.ts';
+import { WATER } from './water.ts';
 
 export type { PlayerCommand, SimEntity };
 export { MAX_PLAYERS, MAX_STRESS };
+
+/**
+ * Where player slot i (1..) stands relative to player 1, in metres: rows of four to player 1's
+ * right (slots 1-4 on player 1's row, 5-7 a row behind), so eight players stay close together.
+ */
+export function slotOffset(i: number): { right: number; back: number } {
+    if (i <= 0) return { right: 0, back: 0 };
+    return { right: 1.2 * (((i - 1) % 4) + 1), back: 1.2 * Math.floor((i - 1) / 4) };
+}
 export type PropsMode = 'physics' | 'scripted';
 
-/** The player body's eye height (2026-11-21: the lanky stand-in people, 1.86 m; beavers 1.22 m). */
+/** The player body's eye height (beavers 1.22 m; the former stand-in people 1.86 m). */
 export const EYE_HEIGHT = BODY.eyeHeight;
 /** Stress bodies get a deterministic upward kick this often (ticks), so 25 bodies keep moving. */
 export const STRESS_KICK_TICKS = 150;
@@ -86,12 +106,16 @@ export interface LabSimOptions {
     props?: PropsMode;
     /** The level to simulate (default: the River Lab test scene). */
     level?: LevelDef;
+    /** The game's hazard seed (the host picks one per game); default: the level's. */
+    hazardSeed?: number;
+    /** False: the level's hazards are off (tests of other mechanics). Default true. */
+    hazards?: boolean;
 }
 
 /** Something the player should be told (objective reached, fell in the creek, ...). */
 export interface SimEvent {
     tick: number;
-    kind: 'goal' | 'fell' | 'recovered' | 'step' | 'ute';
+    kind: 'goal' | 'fell' | 'recovered' | 'step' | 'ute' | 'water' | 'hazard' | 'wood';
     text: string;
 }
 
@@ -115,6 +139,8 @@ export class LabSim {
     private beaverTheta = 0;
     private uteTheta = 0;
     private uteSpin = 0;
+    /** What is nailed to what (Epic 5), rebuilt with the physics world. */
+    joints!: JointSystem;
     /** The drivable ute's physics (levels whose ute is 'drivable'), or null. */
     vehicle: UteVehicle | null = null;
     /** Recovery: the last place the ute stood level on solid ground, and how long it has lain tipped. */
@@ -177,6 +203,8 @@ export class LabSim {
     /** Every player's eye entity, by slot. */
     readonly eyes: SimEntity[];
     readonly level: LevelDef;
+    /** The world fighting back (Epic 8): the flood and the aimed gust (src/sim/hazards.ts). */
+    readonly hazards: HazardDirector;
     /** Level progress (rules): the objective, once reached, stays reached until reset. */
     readonly progress = { goalReached: false, goalTick: -1, falls: 0, recoveries: 0, step: 0 };
     private lookAccum = 0;
@@ -188,9 +216,21 @@ export class LabSim {
     private goalTicks = 0;
     /** Not voxelized: carries the walker's pose through the snapshot ring for interpolation. */
     readonly playerEntity: SimEntity;
+    /** The bucket's water (Epic 7): volume, slosh, refills, the flower. */
+    readonly water: BucketWaterState;
+    /** Who is pouring the bucket they hold (ACTION_POUR toggles it). */
+    readonly pouring: boolean[] = Array.from({ length: MAX_PLAYERS }, () => false);
+    /** The bucket sat in the goal without enough water (said once per visit). */
+    private dryNoticed = false;
+    /** Logging (Epic 6): the stand's trees, felled logs, the axe (src/sim/forestry.ts). */
+    readonly forestry: Forestry;
+    /** The level's sawmill, if it has one (src/sim/sawmill.ts). */
+    readonly sawmill: Sawmill | null;
 
     constructor(opts: LabSimOptions = {}) {
         this.level = opts.level ?? riverLabLevel;
+        this.hazards = new HazardDirector(this.level, opts.hazards ?? true);
+        if (opts.hazardSeed !== undefined) this.hazards.seed = opts.hazardSeed >>> 0;
         this.propsMode = this.level.scriptedProps ? (opts.props ?? 'physics') : 'physics';
         const c = createLabEntities();
         this.entities = c.entities;
@@ -211,6 +251,11 @@ export class LabSim {
         this.playerEntity = c.player;
         this.player2Entity = c.player2;
         this.eyes = c.eyes;
+        this.water = new BucketWaterState(this.level);
+        const levelLogs = c.entities.filter((e) => e.name === 'log' || e.name.startsWith('extra-log'));
+        this.forestry = new Forestry(this.level, c.forestry, levelLogs);
+        const saw = this.level.forestry?.sawmill;
+        this.sawmill = saw ? new Sawmill(saw, c.forestry.sawmill, this.forestry) : null;
         const sp = this.level.spawn;
         this.player.x = sp.x;
         this.player.z = sp.z;
@@ -218,9 +263,10 @@ export class LabSim {
         this.player.yaw = sp.yaw;
         for (let i = 1; i < MAX_PLAYERS; i++) {
             const pi = this.players[i];
-            // a row to player 1's right
-            pi.x = sp.x + Math.cos(sp.yaw) * 1.2 * i;
-            pi.z = sp.z - Math.sin(sp.yaw) * 1.2 * i;
+            // rows to player 1's right
+            const o = slotOffset(i);
+            pi.x = sp.x + Math.cos(sp.yaw) * o.right + Math.sin(sp.yaw) * o.back;
+            pi.z = sp.z - Math.sin(sp.yaw) * o.right + Math.cos(sp.yaw) * o.back;
             pi.y = this.level.terrainHeight(pi.x, pi.z);
             pi.yaw = sp.yaw;
         }
@@ -242,12 +288,20 @@ export class LabSim {
         this.lastLookYaw = null;
         this.jumped = false;
         this.events.length = 0;
+        // (tick starts again at 0: a hint given before the reset must not hold the next one back)
+        this.looseHintTick = -Infinity;
         this.lostTicks = this.goalTicks = 0;
+        this.water.reset();
+        // the first snapshot already shows a full bucket
+        this.bucket.anim[BUCKET_LITRES] = this.water.volume;
+        this.pouring.fill(false);
+        this.dryNoticed = false;
         for (const pl of this.players) {
             pl.fallTicks = 0;
             pl.safe.valid = false;
         }
         this.ring.clear();
+        this.hazards.reset();
         this.evaluate();
         this.buildPhysics();
         this.readPhysics();
@@ -275,6 +329,7 @@ export class LabSim {
             this.bucket,
             this.held,
             ...this.extras,
+            ...this.forestry.props,
             ...this.stress,
             ...this.dummy
         ];
@@ -287,6 +342,7 @@ export class LabSim {
         const drivable = ute.mode === 'drivable' && this.physicsProps;
         addLabKinematics(pw, this.beaver.id, drivable ? -1 : this.ute.id, this.beaver.pose, this.ute.pose);
         this.vehicle = drivable ? new UteVehicle(pw, this.ute.id, ute.pose) : null;
+        this.joints = new JointSystem(pw);
         this.seats.fill(-1);
         this.uteSafeSet = false;
         this.uteTipped = 0;
@@ -300,6 +356,8 @@ export class LabSim {
             pw.setEnabled(this.held.id, false);
             for (const e of [this.plank, this.log, this.cube, this.sphere, this.bucket, ...this.extras])
                 if (!pw.bodies.has(e.id)) e.visible = false;
+            this.forestry.build(pw);
+            this.sawmill?.build(pw);
             for (let n = 0; n < this.stress.length; n++) {
                 const d = stressDef(this.level, this.stress[n].id, n);
                 pw.addDynamic(d.id, d.shape, d.spawn, d.opts);
@@ -315,6 +373,10 @@ export class LabSim {
         for (let i = 1; i < MAX_PLAYERS; i++) pw.setCharacterEnabled(this.slotActive[i], i);
         pw.holdReach = BODY.holdReach;
         pw.shoulderDrop = BODY.eyeHeight - BODY.shoulderHeight;
+        pw.holdMin = BODY.holdMin;
+        pw.breakDistance = BODY.breakDistance;
+        pw.breakTime = BODY.breakTime;
+        pw.snapDistance = BODY.snapDistance;
         this.physics = pw;
     }
 
@@ -378,7 +440,22 @@ export class LabSim {
         if (active) {
             const p1 = this.player;
             const pi = this.players[i];
-            this.placePlayer(p1.x + Math.cos(p1.yaw) * 1.2 * i, p1.z - Math.sin(p1.yaw) * 1.2 * i, p1.yaw, i);
+            // their spot in the rows, or the next one nobody is standing on (players who walked off
+            // leave theirs free; two characters placed into each other stick together)
+            let x = 0;
+            let z = 0;
+            for (let k = i; k < i + 4 * MAX_PLAYERS; k++) {
+                const o = slotOffset(k);
+                x = p1.x + Math.cos(p1.yaw) * o.right + Math.sin(p1.yaw) * o.back;
+                z = p1.z - Math.sin(p1.yaw) * o.right + Math.cos(p1.yaw) * o.back;
+                let clear = true;
+                for (let j = 0; j < MAX_PLAYERS && clear; j++) {
+                    if (j === i || !this.isSlotActive(j)) continue;
+                    clear = Math.hypot(this.players[j].x - x, this.players[j].z - z) > 0.9;
+                }
+                if (clear) break;
+            }
+            this.placePlayer(x, z, p1.yaw, i);
             pi.pitch = p1.pitch;
             pi.walkDist = 0;
             pw.setCharacterEnabled(true, i);
@@ -437,6 +514,10 @@ export class LabSim {
             else if (cmd.action === ACTION_RESET_PROPS) {
                 for (const e of this.propEntities) pw.respawn(e.id);
                 if (this.vehicle) pw.respawn(this.vehicle.id);
+                this.water.teleported();
+                this.water.refillSources();
+                this.forestry.resetProps();
+                this.sawmill?.build(pw);
             }
             this.updateStress();
         }
@@ -452,12 +533,17 @@ export class LabSim {
                 if (k === 0) this.driveInput = { ...NO_DRIVE };
             }
         }
+        if (this.physicsProps) this.hazards.step(this);
         // nobody driving: the handbrake is on
-        this.vehicle?.drive(this.driver >= 0 ? this.driveInput : PARKED);
+        // (unless the handbrake prank has let it off: src/sim/hazards.ts)
+        this.vehicle?.drive(this.driver >= 0 ? this.driveInput : this.hazards.handbrakeOff ? NO_DRIVE : PARKED);
         pw.step();
         this.readPhysics();
         this.readVehicle();
+        this.looseBeamHint();
+        this.stepWater();
         this.watchUte();
+        if (this.physicsProps) this.stepWood();
         this.applyRules();
         const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
         this.physicsMs = t1 - t0;
@@ -523,17 +609,30 @@ export class LabSim {
             p.prevCarry = cmd.carry;
         }
         if (cmd.reach) pw.adjustHold(cmd.reach, i);
+        // pour (R): tip the bucket you hold forward, or let it hang again
+        if (cmd.action === ACTION_POUR) this.pouring[i] = pw.setPour(!this.pouring[i], i);
         const eye = { x: p.x, y: p.y + EYE_HEIGHT, z: p.z };
         if (cmd.action === ACTION_DROP) pw.release(i);
+        if (cmd.action === ACTION_NAIL) this.joints.nail(eye, cmd.yaw, cmd.pitch, i, this.tick);
         if (cmd.throw) {
             if (pw.heldIdOf(i) >= 0) ev.thrown = true;
             pw.throwHeld(cmd.yaw, cmd.pitch, i);
         } else if (cmd.grab) {
-            if (pw.heldIdOf(i) >= 0) pw.release(i);
-            else if (!pw.tryGrab(eye, cmd.yaw, cmd.pitch, i) && !this.enterUte(i, eye, cmd)) ev.missed = true;
+            // holding the axe, a grab at a tree or a log is a blow; with empty hands, at a tree, a bite;
+            // a hanging bucket is set down rather than dropped (letGo), again while lowering drops it
+            const held = pw.heldIdOf(i);
+            if (held >= 0) {
+                if (this.forestry.strike(i, eye, p, cmd.yaw, cmd.pitch, held)) ev.missed = true;
+                else pw.letGo(i);
+            } else if (pw.tryGrab(eye, cmd.yaw, cmd.pitch, i)) {
+                // grabbed
+            } else if (this.sawmill?.pressLever(eye, cmd.yaw, cmd.pitch)) ev.grabbed = true;
+            else if (this.forestry.strike(i, eye, p, cmd.yaw, cmd.pitch, -1)) ev.missed = true;
+            else if (!this.enterUte(i, eye, cmd)) ev.missed = true;
         }
         pw.applyGrab(eye, cmd.yaw, cmd.pitch, i);
         const heldAfter = pw.heldIdOf(i);
+        if (heldAfter !== this.bucket.id) this.pouring[i] = false;
         if (heldAfter >= 0 && heldAfter !== heldBefore) ev.grabbed = true;
         if (heldBefore >= 0 && heldAfter < 0 && !ev.thrown) ev.dropped = true;
     }
@@ -563,8 +662,8 @@ export class LabSim {
                 const sp = p.safe.valid
                     ? p.safe
                     : st
-                      ? { x: st.start.x + i * 1.2, z: st.start.z }
-                      : { x: this.level.spawn.x + i * 1.2, z: this.level.spawn.z };
+                      ? { x: st.start.x + slotOffset(i).right, z: st.start.z + slotOffset(i).back }
+                      : { x: this.level.spawn.x + slotOffset(i).right, z: this.level.spawn.z + slotOffset(i).back };
                 this.placePlayer(sp.x, sp.z, p.yaw, i);
                 const who = this.playerCount > 1 ? `Player ${i + 1}: splash!` : 'Splash!';
                 this.events.push({
@@ -580,11 +679,18 @@ export class LabSim {
             this.applySteps(rules);
             return;
         }
-        // essential item: lost in the creek for 1.5 s -> back on its stump
-        this.lostTicks = bk.pose.p.y < rules.lostY && pw.holders(bk.id) === 0 ? this.lostTicks + 1 : 0;
+        // essential item: lost in the creek for 1.5 s -> back on its stump (in a flood, afloat in it)
+        const p0 = bk.pose.p;
+        const lost =
+            p0.y < rules.lostY ||
+            (this.hazards.rise > 0 && p0.y < rules.lostY + this.hazards.rise && !rules.isSafe(p0.x, p0.z));
+        this.lostTicks = lost && pw.holders(bk.id) === 0 ? this.lostTicks + 1 : 0;
         if (this.lostTicks > 90) {
             this.lostTicks = 0;
             this.progress.recoveries++;
+            this.water.bucketLost();
+            this.water.teleported();
+            this.water.refillSources();
             const st = this.stage;
             if (st) {
                 // journeys: the bucket comes back at the last checkpoint reached
@@ -592,14 +698,16 @@ export class LabSim {
                 this.events.push({
                     tick: this.tick,
                     kind: 'recovered',
-                    text: `The bucket fell in. A spare one is waiting at the ${st.name} start.`
+                    text: `The bucket fell in. A spare (empty) one is waiting at the ${st.name} start.`
                 });
             } else {
                 pw.respawn(bk.id);
                 this.events.push({
                     tick: this.tick,
                     kind: 'recovered',
-                    text: 'The bucket floated off. A spare one is back on the stump.'
+                    text: this.water.sources.length
+                        ? 'The bucket floated off. A spare one is back on the stump: fill it at the water butt.'
+                        : 'The bucket floated off. A spare one is back on the stump.'
                 });
             }
         }
@@ -610,14 +718,30 @@ export class LabSim {
             const inside = bk.pose.p.x > g.minX && bk.pose.p.x < g.maxX && bk.pose.p.z > g.minZ && bk.pose.p.z < g.maxZ;
             const resting = Math.hypot(v.x, v.y, v.z) < 0.4 && pw.holders(bk.id) === 0;
             this.goalTicks = inside && resting ? this.goalTicks + 1 : 0;
-            if (this.goalTicks > 30) {
+            if (!inside) this.dryNoticed = false;
+            // Epic 7: a level may ask for water in it, not just the bucket
+            const wet = this.water.volume >= (rules.minLitres ?? 0);
+            if (this.goalTicks > 30 && !wet && !this.dryNoticed) {
+                this.dryNoticed = true;
+                this.events.push({
+                    tick: this.tick,
+                    kind: 'water',
+                    text: 'The bucket made it, but it is empty. Fill it at the water butt and bring it back.'
+                });
+            }
+            if (this.goalTicks > 30 && wet) {
                 this.progress.goalReached = true;
                 this.progress.goalTick = this.tick;
                 const steps = rules.steps;
+                const litres = this.water.volume.toFixed(1);
                 this.events.push({
                     tick: this.tick,
                     kind: 'goal',
-                    text: steps ? 'Bucket delivered!' : 'Bucket delivered across the creek!'
+                    text: steps
+                        ? 'Bucket delivered!'
+                        : rules.minLitres
+                          ? `Bucket delivered across the creek with ${litres} L of water!${waterPraise(this.water.volume)}`
+                          : 'Bucket delivered across the creek!'
                 });
             }
         }
@@ -643,6 +767,10 @@ export class LabSim {
     ): void {
         const k = this.progress.step;
         if (k >= stages.length) return;
+        if (stages[k].flower) {
+            this.applyFlower(stages, k);
+            return;
+        }
         const g = stages[k].goal;
         const inside = p.x > g.minX && p.x < g.maxX && p.z > g.minZ && p.z < g.maxZ;
         const resting = Math.hypot(v.x, v.y, v.z) < 0.4 && holders === 0;
@@ -662,6 +790,46 @@ export class LabSim {
                 ? 'The bucket made it to the flower! The valley is yours.'
                 : `✓ ${stages[k].name} done! Next: ${stages[k + 1].name}`
         });
+    }
+
+    /**
+     * The flower stage (Epic 7): done once enough water has been poured into the flower and the pour
+     * has stopped (so the praise can say how much it got). Fires once.
+     */
+    private applyFlower(stages: LevelStage[], k: number): void {
+        const w = this.water;
+        if (w.poured < WATER.minDelivery || w.pourQuiet < 0) return;
+        if (w.pourQuiet < POUR_DONE_TICKS) return;
+        this.progress.step++;
+        const last = this.progress.step >= stages.length;
+        if (last) {
+            this.progress.goalReached = true;
+            this.progress.goalTick = this.tick;
+        }
+        this.events.push({
+            tick: this.tick,
+            kind: last ? 'goal' : 'step',
+            text: last
+                ? `The flower drank ${w.poured.toFixed(1)} L!${waterPraise(w.poured)} The valley is yours.`
+                : `✓ ${stages[k].name} done! Next: ${stages[k + 1].name}`
+        });
+    }
+
+    /** The bucket's water for one tick (after the physics step): slosh, spill, refill, the flower. */
+    private stepWater(): void {
+        const bk = this.bucket;
+        if (!this.physicsProps) {
+            bk.anim[BUCKET_LITRES] = WATER.capacity;
+            return;
+        }
+        const pb = this.physics.bodies.get(bk.id);
+        if (!pb) return;
+        const st = this.stage;
+        // the flower stage, and after the win too (more water is welcome)
+        const flower = st?.flower ?? null;
+        this.water.goalMet = this.progress.goalReached;
+        for (const text of this.water.step(pb, bk.pose, bk.anim, flower))
+            this.events.push({ tick: this.tick, kind: 'water', text });
     }
 
     /** The current tutorial step's text ("" when the level has none or all are done). */
@@ -731,7 +899,23 @@ export class LabSim {
         this.jumped = false;
     }
 
-    /** Copies dynamic body poses into their entities (physics props mode). */
+    // ------------------------------------------------------------------------------- wood
+
+    /** Logging and the sawmill, after the physics step (src/sim/forestry.ts, sawmill.ts). */
+    private stepWood(): void {
+        const feet: { x: number; z: number }[] = [];
+        for (let i = 0; i < this.players.length; i++)
+            if (this.playerActive(i) && this.seatOf(i) < 0) feet.push(this.players[i]);
+        const props = this.propEntities;
+        this.forestry.step(this.tick, (x, z, r) => {
+            for (const f of feet) if (Math.hypot(f.x - x, f.z - z) < r) return true;
+            for (const e of props) if (e.visible && Math.hypot(e.pose.p.x - x, e.pose.p.z - z) < r) return true;
+            return false;
+        });
+        this.sawmill?.step(feet);
+        for (const text of this.forestry.drain()) this.events.push({ tick: this.tick, kind: 'wood', text });
+    }
+
     // ------------------------------------------------------------------------------- the ute
 
     /** The ute entity's pose and wheel animation from the vehicle; the driver rides in the seat. */
@@ -833,6 +1017,31 @@ export class LabSim {
         quatRotate({ x: -q.x, y: -q.y, z: -q.z, w: q.w }, eye.x - u.p.x, 0, eye.z - u.p.z, _v);
         const want = _v.x < 0 ? 0 : 1;
         return this.takeSeat(i, this.seats[want] < 0 ? want : 1 - want);
+    }
+
+    /** Tick the loose-beam hint was last given (it repeats at most every 30 s). */
+    private looseHintTick = -Infinity;
+
+    /**
+     * Driving onto a beam that is nailed down nowhere (Epic 5): one line saying a bare beam bridge
+     * wants nailing. Loose, the wheels shove a beam aside where it meets the bank's lip.
+     */
+    private looseBeamHint(): void {
+        const v = this.vehicle;
+        if (!v || this.driver < 0 || this.tick - this.looseHintTick < 30 * 60) return;
+        for (const id of v.groundIds) {
+            if (id < 0) continue;
+            const e = this.entities.find((x) => x.id === id);
+            if (!e || !/^beam-\d+$/.test(e.name)) continue;
+            if (this.joints.graph.of(id).some((c) => c.b === GROUND)) continue;
+            this.looseHintTick = this.tick;
+            this.events.push({
+                tick: this.tick,
+                kind: 'ute',
+                text: 'Loose beams shift under the ute: nail each beam down at both ends to drive across.'
+            });
+            return;
+        }
     }
 
     /** Puts a player in the driver's seat (if it is free); also for tests and scripted starts. */
@@ -1038,8 +1247,18 @@ export class LabSim {
         ws.visible = !!spot && !!this.level.wind;
         if (!spot || !this.level.wind) return;
         const w = windAt(t, this.level.wind, _windTmp);
-        const a = Math.atan2(w.z, w.x) + 0.06 * Math.sin(t * 5.3) * w.gustiness;
-        const droop = (1 - Math.min(1, w.speed / 5.5)) * 1.15 + 0.04 * Math.sin(t * 7.1);
+        let a = Math.atan2(w.z, w.x) + 0.06 * Math.sin(t * 5.3) * w.gustiness;
+        let droop = (1 - Math.min(1, w.speed / 5.5)) * 1.15 + 0.04 * Math.sin(t * 7.1);
+        // the aimed gust's tell: the sock swings round to it and stands out, flapping
+        const hz = this.hazards;
+        if (hz.gustPhase !== PHASE.idle) {
+            const k = Math.min(1, hz.gustT / 30);
+            const ga = Math.atan2(hz.gustDirZ, hz.gustDirX);
+            let d = ga - a;
+            d = Math.atan2(Math.sin(d), Math.cos(d));
+            a += d * k + 0.15 * Math.sin(t * 13) * k;
+            droop = droop * (1 - k) + 0.05 * k;
+        }
         ws.pose.p.x = spot.x;
         ws.pose.p.y = this.level.terrainHeight(spot.x, spot.z) + spot.height;
         ws.pose.p.z = spot.z;
@@ -1300,6 +1519,7 @@ export class LabSim {
         shared: boolean;
         driving: boolean;
         seat: number;
+        nail: number;
     } {
         const ids = this.interactionIds(i);
         const name = (id: number) => (id < 0 ? null : (this.entities.find((e) => e.id === id)?.name ?? null));
@@ -1308,8 +1528,16 @@ export class LabSim {
             target: name(ids.target),
             shared: ids.shared,
             driving: ids.driving,
-            seat: ids.seat
+            seat: ids.seat,
+            nail: ids.nail
         };
+    }
+
+    /** What a hammer blow by player i would do now (read-only; a 'none' refusal with a >= 0 means it holds). */
+    nailPreview(i = 0): NailPreview | null {
+        if (!this.playerActive(i) || !this.physicsProps || this.seatOf(i) >= 0) return null;
+        const p = this.players[i];
+        return this.joints.preview({ x: p.x, y: p.y + EYE_HEIGHT, z: p.z }, p.yaw, p.pitch, i);
     }
 
     /**
@@ -1317,8 +1545,17 @@ export class LabSim {
      * prompts. The target is what a grab would do: a grabbable thing, or the ute (get in) when its
      * driver's seat is free.
      */
-    interactionIds(i: number): { held: number; target: number; shared: boolean; driving: boolean; seat: number } {
-        const none = { held: -1, target: -1, shared: false, driving: false, seat: -1 };
+    interactionIds(i: number): {
+        held: number;
+        target: number;
+        shared: boolean;
+        driving: boolean;
+        seat: number;
+        /** The hammer (nailCode) and where its nail would go. */
+        nail: number;
+        nailAt: Vec3 | null;
+    } {
+        const none = { held: -1, target: -1, shared: false, driving: false, seat: -1, nail: 0, nailAt: null };
         if (!this.playerActive(i) || !this.physicsProps) return none;
         const seat = this.seatOf(i);
         if (seat >= 0) return { ...none, driving: seat === 0, seat };
@@ -1327,6 +1564,10 @@ export class LabSim {
         const held = pw.heldIdOf(i);
         const eye = { x: p.x, y: p.y + EYE_HEIGHT, z: p.z };
         let target = held >= 0 ? -1 : pw.probe(eye, p.yaw, p.pitch, i);
+        // what a grab would cut (a stand tree with empty hands; a tree or a log with the axe)
+        if (target < 0) target = this.forestry.aim(eye, p.yaw, p.pitch, i, held);
+        // the sawmill's mode lever (with empty hands)
+        if (target < 0 && held < 0 && this.sawmill?.aimLever(eye, p.yaw, p.pitch)) target = this.sawmill.entity.id;
         if (
             held < 0 &&
             target < 0 &&
@@ -1335,13 +1576,33 @@ export class LabSim {
             pw.probeAny(eye, p.yaw, p.pitch, i) === this.ute.id
         )
             target = this.ute.id;
-        return { held, target, shared: held >= 0 && pw.holders(held) > 1, driving: false, seat: -1 };
+        const pv = this.nailPreview(i);
+        return {
+            held,
+            target,
+            shared: held >= 0 && pw.holders(held) > 1,
+            driving: false,
+            seat: -1,
+            nail: pv ? nailCode(pv.a, pv.refusal) : 0,
+            nailAt: pv && pv.a >= 0 && pv.refusal !== 'not-timber' ? { ...pv.head } : null
+        };
     }
 
     /** True when the voxelized dummy is in the world. */
     get dummyActive(): boolean {
         return this.dummy[0].visible;
     }
+}
+
+/** How long the flower waits after the last water reaches it before it counts the pour (ticks). */
+export const POUR_DONE_TICKS = 45;
+
+/** Positive feedback for arriving with more water (design doc §2.8). */
+function waterPraise(litres: number): string {
+    if (litres >= 8) return ' Hardly a drop spilled.';
+    if (litres >= 4) return ' A good drink.';
+    if (litres >= 1) return ' Every drop counts.';
+    return ' Just enough.';
 }
 
 export function beaverWalkAmount(t: number): number {

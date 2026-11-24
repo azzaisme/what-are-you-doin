@@ -5,6 +5,7 @@
  */
 
 import type { WindSpec } from '../fx/wind.ts';
+import type { HazardSpec } from '../sim/hazards.ts';
 import type { Pose } from '../voxels/math.ts';
 import type { RasterStats, SamplingPolicy } from '../voxels/rasterizer.ts';
 import { box, cylinder, ellipsoid } from '../voxels/volumes.ts';
@@ -13,6 +14,7 @@ import type { ColumnRect, VoxelWorld } from '../voxels/world.ts';
 
 import type { RockSpot, TreeSpot } from './common.ts';
 import type { LevelData } from './data.ts';
+import type { ForestryDef } from './forestry.ts';
 
 export type LevelId = string;
 
@@ -82,6 +84,31 @@ export interface LevelStage {
     start: { x: number; z: number; yaw: number };
     /** Where a lost bucket comes back in this stage. */
     bucket: { x: number; y: number; z: number };
+    /** Epic 7: this stage is done by pouring water here (the flower), not by setting the bucket down. */
+    flower?: FlowerTarget;
+}
+
+/**
+ * A clean water source (Epic 7): an upright bucket whose mouth is inside this upright cylinder is
+ * filled from it, while the source has water. Placed on purpose, never the creek.
+ */
+export interface WaterSource {
+    name: string;
+    x: number;
+    z: number;
+    r: number;
+    /** The cylinder's bottom and height. */
+    y: number;
+    h: number;
+    /** Litres it holds (it runs dry). */
+    litres: number;
+}
+
+/** Where water poured counts as watering the flower: within `r` of (x, z), across the ground. */
+export interface FlowerTarget {
+    x: number;
+    z: number;
+    r: number;
 }
 
 export interface LevelRules {
@@ -99,6 +126,10 @@ export interface LevelRules {
     steps?: TutorialStep[];
     /** Journey stages, done in order (progress.step counts them); the last one's goal is `goal`. */
     stages?: LevelStage[];
+    /** Epic 7: the bucket only counts as delivered to `goal` with at least this much water (litres). */
+    minLitres?: number;
+    /** Epic 7: where the bucket can be refilled. */
+    waterSources?: WaterSource[];
 }
 
 export interface LevelDef {
@@ -108,7 +139,12 @@ export interface LevelDef {
     bounds: Rect;
     /** Area the player can walk in (invisible walls). */
     playArea: Rect;
-    water: { y: number; cx: number; cz: number; halfX: number; halfZ: number };
+    /**
+     * The river's surface at rest and the area it covers. `drawMaxY`: the drawn surface never rises
+     * above this (a level whose water area covers its banks keeps a flood in the channel; see
+     * FloodSpec.channel), so the banks are not drawn under water.
+     */
+    water: { y: number; cx: number; cz: number; halfX: number; halfZ: number; drawMaxY?: number };
     /** Continuous ground height (collision and placement use this, never voxels). */
     terrainHeight(x: number, z: number): number;
     /** Same seed → same layout for voxels and colliders. */
@@ -117,6 +153,10 @@ export interface LevelDef {
     sun: { elevation: number; azimuth: number };
     /** Wind (forces on light bodies, leaves, water ripples); calm when absent. */
     wind?: WindSpec;
+    /** The hazard director's authored events (§2.9, src/sim/hazards.ts); none when absent. */
+    hazards?: HazardSpec;
+    /** Fixed places that make a sound of their own (Epic 8, #80): heard from where they are. */
+    sounds?: { waterfalls?: { x: number; y: number; z: number }[] };
     /** A windsock on a pole (the wind's visible tell, §2.9). */
     windsock?: { x: number; z: number; height: number };
     spawn: { x: number; z: number; yaw: number; pitch: number };
@@ -132,6 +172,8 @@ export interface LevelDef {
     props: PropPlacement[];
     /** Objective and recovery rules; absent for the test lab. */
     rules?: LevelRules;
+    /** Logging and sawing (Epic 6): a stand of trees that can be felled, and a sawmill. */
+    forestry?: ForestryDef;
     /** Whether the Epic 1 scripted-props comparison mode applies. */
     scriptedProps: boolean;
     /** The data this level was made from (data levels and designer levels), sent to the worker. */
@@ -150,8 +192,13 @@ export interface LevelStream {
      * The world's clip is already set to `r`. Returns the number of terrain columns.
      */
     buildTile(world: VoxelWorld, seed: number, r: ColumnRect, tile: { ti: number; tk: number }): number;
-    /** Near-world radius (m): tiles within it of any camera are built. */
+    /** Near-world radius (m): tiles within it of any camera are built (the High preset). */
     radius: number;
+    /**
+     * Near-world radius on the Low preset (m; default `radius`): about half the tiles, triangles
+     * and memory of 36 m at 24 m, measured in the Valley (docs/progress.md, 2026-11-22).
+     */
+    lowRadius?: number;
     /** The far lattice's cell size (cm). */
     farCm: number;
     /** Distance fog (m): starts, and is complete at. */

@@ -7,23 +7,30 @@
  *   a flutter and drifting with the integrated wind, resting on the ground (or floating on water)
  *   until their slot recycles;
  * - dust and chips when a prop lands hard, and splashes when anything (a player too) drops into the
- *   water, detected from the interpolated poses (a sudden stop, or crossing the water surface).
+ *   water, detected from the interpolated poses (a sudden stop, or crossing the water surface);
+ * - the bucket's water (Epic 7): droplets leaving its rim while it spills or pours, and a stream
+ *   from the tap while it fills, from its litres and surface channels. Decorative only: the volume
+ *   is the simulation's, never the droplet count.
  *
  * Engine-free; output is a flat buffer of x, y, z, voxel value per cell for the voxel worker.
  */
 
+import { BUCKET_LITRES, BUCKET_SLOPE_X, BUCKET_SLOPE_Z } from '../assets/props.ts';
+import { sfx } from '../audio/sfx.ts';
 import type { TreeSpot } from '../levels/common.ts';
 import { oakCrown } from '../levels/common.ts';
 import type { LevelDef } from '../levels/level.ts';
 import { ANIM_MAX } from '../sim/snapshots.ts';
 import type { SnapshotRing } from '../sim/snapshots.ts';
+import { WEATHER } from '../sim/weather.ts';
 import { GRID_SIZE } from '../voxels/grid.ts';
-import { pose } from '../voxels/math.ts';
+import { pose, quatRotate } from '../voxels/math.ts';
 import { M, voxel } from '../voxels/palette.ts';
 import { hash3 } from '../voxels/volumes.ts';
 
 import { CALM, windTravel } from './wind.ts';
 import type { WindSpec } from './wind.ts';
+import type { WoodFX } from './wood-fx.ts';
 
 /**
  * Leaf slots. Each falling leaf dirties one dynamic chunk per voxel frame (re-meshed), so the number
@@ -48,6 +55,9 @@ function cellCentre(v: number): number {
     return (Math.floor(v / GRID_SIZE) + 0.5) * GRID_SIZE;
 }
 export const MAX_PARTICLES = 700;
+/** Live bursts at most (oldest go first): bounds the bucket's droplets too. */
+const MAX_BURSTS = 32;
+const _lip = { x: 0, y: 0, z: 0 };
 const LEAF_MATS = [M.Leaf, M.LeafGold, M.LeafGold, M.LeafRed];
 
 const u = (a: number, b: number, c: number) => hash3(a, b, c, 911) / 4294967296;
@@ -59,12 +69,17 @@ interface Crown {
     r: number;
 }
 
+type BurstKind = 'dust' | 'chips' | 'splash' | 'needles' | 'sawdust' | 'gust' | 'pour' | 'fill';
+
 interface Burst {
     t0: number;
     x: number;
     y: number;
     z: number;
-    kind: 'dust' | 'chips' | 'splash';
+    kind: BurstKind;
+    /** Pour and gust: the direction droplets or leaves travel in (horizontal, unit). */
+    dx?: number;
+    dz?: number;
     n: number;
     seed: number;
 }
@@ -95,10 +110,28 @@ export class ParticleFX {
     private readonly p = pose();
     private readonly anim = new Float64Array(ANIM_MAX);
     /** Effects spawned (cumulative, for tests and the debug panel). */
-    readonly spawned = { dust: 0, chips: 0, splash: 0 };
+    readonly spawned = { dust: 0, chips: 0, splash: 0, needles: 0, sawdust: 0, gust: 0, pour: 0, fill: 0 };
+    /** Logging effects (levels with a logging stand or a sawmill): chips, needles, sawdust. */
+    wood: WoodFX | null = null;
+    /** The bucket's entity slot (-1: none) and its litres at the last sample. */
+    bucketSlot = -1;
+    private bucketLitres = -1;
+    /** When the bucket's water last sloshed (s, sample time): once as a spill starts, then now and then. */
+    private waterSoundAt = -1;
+    /** The bucket lost water at the last sample (a spill under way: no new slosh yet). */
+    private spilling = false;
+
+    /** The water surface now (it rises in a flood). */
+    waterY: number;
+    /**
+     * The weather around the viewer (Epic 9, sim/weather.ts): rain or snow, how strong (0..1, only
+     * where the viewer is under it), and the snow's crosswind direction (rad in XZ).
+     */
+    weather = { kind: 0, strength: 0, dir: 0 };
 
     constructor(level: LevelDef, watched: WatchedEntity[]) {
         this.level = level;
+        this.waterY = level.water.y;
         this.wind = level.wind ?? CALM;
         this.watched = watched;
         const trees: TreeSpot[] = level.layout(1).trees.filter((t) => t.kind === 'oak');
@@ -114,11 +147,19 @@ export class ParticleFX {
             // seek or reset: forget motion history and live bursts
             this.prev.clear();
             this.bursts = [];
+            this.wood?.reset();
         }
         const dt = this.lastTime >= 0 ? time - this.lastTime : 0;
         this.lastTime = time;
         this.leaves(time);
-        if (dt > 0 && dt < 0.5) this.detect(time, dt, ring);
+        this.precipitation(time);
+        if (dt > 0 && dt < 0.5) {
+            this.detect(time, dt, ring);
+            this.bucketWater(time, ring);
+        } else this.bucketLitres = -1;
+        this.wood?.update(time, ring, (kind, x, y, z) =>
+            this.spawn(time, x, y, z, kind, kind === 'needles' ? 40 : kind === 'sawdust' ? 6 : 8)
+        );
         this.drawBursts(time);
         return this.count;
     }
@@ -164,14 +205,15 @@ export class ParticleFX {
             let z = z0 + d.z * 0.8 + 0.18 * Math.cos(fallAge * 2.3 + fl);
             let y = y0 - vs * fallAge;
             const g = this.level.terrainHeight(cellCentre(x), cellCentre(z));
-            const inWater = g < water.y && Math.abs(x - water.cx) < water.halfX && Math.abs(z - water.cz) < water.halfZ;
+            const inWater =
+                g < this.waterY && Math.abs(x - water.cx) < water.halfX && Math.abs(z - water.cz) < water.halfZ;
             if (age >= landAge || y <= restY(g)) {
                 if (inWater) {
                     // float on the creek and keep drifting slowly downwind
                     const d2 = windTravel(tSpawn + landAge, t, this.wind, 0.5);
                     x += d2.x * 0.15;
                     z += d2.z * 0.15;
-                    y = water.y + 0.01;
+                    y = this.waterY + 0.01;
                 } else {
                     y = restY(g);
                 }
@@ -186,6 +228,43 @@ export class ParticleFX {
                 if (u(i, k, 10) < 0.5) this.push(x + GRID_SIZE, y, z, v);
                 else this.push(x, y, z + GRID_SIZE, v);
             }
+        }
+    }
+
+    // ------------------------------------------------------------------------------- weather
+
+    /**
+     * Rain and snow round the viewer: a fixed set of slots, each a drop or a flake on its own
+     * schedule falling through a box over the viewer (so the cost stays put; rain ends in a splash
+     * cell on the ground, snow drifts with the crosswind). None for mist and fog: the fog does those.
+     */
+    private precipitation(t: number): void {
+        const w = this.weather;
+        const v = this.viewer;
+        const rain = w.kind === WEATHER.rain;
+        if (!v || w.strength <= 0 || (!rain && w.kind !== WEATHER.snow)) return;
+        const n = Math.round(PRECIP_SLOTS * Math.min(1, w.strength));
+        const fall = rain ? 7 : 1.1;
+        const dx = Math.cos(w.dir);
+        const dz = Math.sin(w.dir);
+        for (let i = 0; i < n; i++) {
+            const period = (PRECIP_TOP / fall) * (1 + 0.3 * u(i, 0, 21));
+            const k = Math.floor((t + u(i, 0, 22) * period) / period);
+            const age = t + u(i, 0, 22) * period - k * period;
+            // where in the box (whole cells, so a flake does not shimmer between them)
+            const x0 = v.x + (u(i, k, 23) - 0.5) * PRECIP_BOX;
+            const z0 = v.z + (u(i, k, 24) - 0.5) * PRECIP_BOX;
+            const drift = rain ? 0 : 1.4 * age;
+            const x = x0 + dx * drift + (rain ? 0 : 0.15 * Math.sin(age * 2.3 + i));
+            const z = z0 + dz * drift + (rain ? 0 : 0.15 * Math.cos(age * 1.9 + i));
+            const g = Math.max(this.level.terrainHeight(cellCentre(x), cellCentre(z)), this.waterY);
+            const y = g + PRECIP_TOP - fall * age;
+            if (y <= restY(g)) {
+                // a raindrop's splash; snow lies a moment
+                this.push(x, restY(g), z, voxel(rain ? M.Splash : M.Snow, i & 3));
+                continue;
+            }
+            this.push(x, y, z, voxel(rain ? M.Splash : M.Snow, i & 3));
         }
     }
 
@@ -212,14 +291,14 @@ export class ParticleFX {
                     this.spawn(t, x, restY(g), z, w.timber ? 'chips' : 'dust', w.timber ? 14 : 10);
                 // dropped into the water
                 const inWaterArea =
-                    Math.abs(x - water.cx) < water.halfX && Math.abs(z - water.cz) < water.halfZ && g < water.y;
+                    Math.abs(x - water.cx) < water.halfX && Math.abs(z - water.cz) < water.halfZ && g < this.waterY;
                 if (
                     inWaterArea &&
-                    prev.y - (w.eyeHeight ? 0 : w.bottom) > water.y &&
-                    y - (w.eyeHeight ? 0 : w.bottom) <= water.y &&
+                    prev.y - (w.eyeHeight ? 0 : w.bottom) > this.waterY &&
+                    y - (w.eyeHeight ? 0 : w.bottom) <= this.waterY &&
                     prev.vy < -0.8
                 ) {
-                    this.spawn(t, x, water.y, z, 'splash', w.eyeHeight ? 26 : 18);
+                    this.spawn(t, x, this.waterY, z, 'splash', w.eyeHeight ? 26 : 18);
                 }
                 this.prev.set(w.slot, { y, vy, vx: 0, vz: 0, visible: true });
             } else {
@@ -228,19 +307,98 @@ export class ParticleFX {
         }
     }
 
-    private spawn(t0: number, x: number, y: number, z: number, kind: Burst['kind'], n: number): void {
+    /** Droplets from the bucket: over the rim when it loses water, from above when it fills. */
+    private bucketWater(t: number, ring: SnapshotRing): void {
+        if (this.bucketSlot < 0) return;
+        if (!ring.sample(this.bucketSlot, t, this.p, this.anim)) {
+            this.bucketLitres = -1;
+            return;
+        }
+        const litres = this.anim[BUCKET_LITRES];
+        const prev = this.bucketLitres;
+        this.bucketLitres = litres;
+        if (prev < 0) return;
+        const d = litres - prev;
+        const q = this.p.q;
+        if (d < -0.004) {
+            // over the rim where the surface stands highest
+            const sx = this.anim[BUCKET_SLOPE_X];
+            const sz = this.anim[BUCKET_SLOPE_Z];
+            const s = Math.hypot(sx, sz);
+            const lx = s > 1e-3 ? (0.15 * sx) / s : 0.15;
+            const lz = s > 1e-3 ? (0.15 * sz) / s : 0;
+            const lip = quatRotate(q, lx, 0.3, lz, _lip);
+            const h = Math.hypot(lip.x, lip.z) || 1;
+            const n = Math.min(8, 2 + Math.round(-d * 20));
+            this.spawn(t, this.p.p.x + lip.x, this.p.p.y + lip.y, this.p.p.z + lip.z, 'pour', n, lip.x / h, lip.z / h);
+            // water leaving: a pour loop at the rim while it runs (Epic 8's `sfx.hold`), a slosh as a
+            // spill starts, and a splash for a gush (a drop, a hard knock)
+            const at = { x: this.p.p.x + lip.x, y: this.p.p.y + lip.y, z: this.p.p.z + lip.z };
+            sfx.hold('bucket-water', 'pour', at, { gain: Math.min(1, 0.3 - d * 4), pitch: 1 });
+            if (!this.spilling || t - this.waterSoundAt > 0.6 || t < this.waterSoundAt) {
+                this.waterSoundAt = t;
+                sfx.play('slosh', at, { gain: Math.min(1, 0.3 - d * 3) });
+            }
+            if (-d > 0.5) sfx.play('splash-big', at, { gain: Math.min(1, -d) });
+            this.spilling = true;
+        } else if (d > 0.004) {
+            const m = quatRotate(q, 0, 0.3, 0, _lip);
+            this.spawn(t, this.p.p.x + m.x, this.p.p.y + m.y + 0.25, this.p.p.z + m.z, 'fill', 5);
+            // filling under the tap: the pour loop, higher (a filling vessel rises in pitch)
+            const at = { x: this.p.p.x + m.x, y: this.p.p.y + m.y, z: this.p.p.z + m.z };
+            sfx.hold('bucket-water', 'pour', at, { gain: 0.5, pitch: 1.1 + 0.03 * litres });
+            this.spilling = false;
+        } else this.spilling = false;
+    }
+
+    /**
+     * The aimed gust's warning (Epic 8): a stream of leaves blowing past (x, z), along (dx, dz), from
+     * upwind of it. Every device starts it from the host's hazard state, so all see it.
+     */
+    gust(t0: number, x: number, y: number, z: number, dx: number, dz: number): void {
+        this.spawn(t0, x, y, z, 'gust', GUST_LEAVES, dx, dz);
+    }
+
+    private spawn(t0: number, x: number, y: number, z: number, kind: BurstKind, n: number, dx = 0, dz = 0): void {
         this.spawned[kind]++;
-        this.bursts.push({ t0, x, y, z, kind, n, seed: ++this.burstSeq });
-        if (this.bursts.length > 24) this.bursts.shift();
+        this.bursts.push({ t0, x, y, z, kind, n, seed: ++this.burstSeq, dx, dz });
+        if (this.bursts.length > MAX_BURSTS) this.bursts.shift();
     }
 
     private drawBursts(t: number): void {
         const live: Burst[] = [];
         for (const b of this.bursts) {
             const age = t - b.t0;
-            const life = b.kind === 'splash' ? 0.7 : b.kind === 'chips' ? 0.8 : 1.1;
+            const life =
+                b.kind === 'splash'
+                    ? 0.7
+                    : b.kind === 'chips'
+                      ? 0.8
+                      : b.kind === 'needles'
+                        ? 1.6
+                        : b.kind === 'sawdust'
+                          ? 0.6
+                          : b.kind === 'pour'
+                            ? 0.6
+                            : b.kind === 'fill'
+                              ? 0.25
+                              : b.kind === 'gust'
+                                ? 2.6
+                                : 1.1;
             if (age < 0 || age > life) continue;
             live.push(b);
+            if (b.kind === 'gust') {
+                this.drawGust(b, age);
+                continue;
+            }
+            if (b.kind === 'needles' || b.kind === 'sawdust') {
+                this.drawWood(b, age);
+                continue;
+            }
+            if (b.kind === 'pour' || b.kind === 'fill') {
+                this.drawWater(b, age);
+                continue;
+            }
             for (let i = 0; i < b.n; i++) {
                 const a = u(b.seed, i, 1) * Math.PI * 2;
                 const sp = b.kind === 'dust' ? 0.5 + 0.6 * u(b.seed, i, 2) : 1.0 + 1.6 * u(b.seed, i, 2);
@@ -259,4 +417,76 @@ export class ParticleFX {
         }
         this.bursts = live;
     }
+
+    /** Bucket droplets: falling off the rim (pour) or down the tap's stream into it (fill). */
+    private drawWater(b: Burst, age: number): void {
+        const ground = this.level.terrainHeight(cellCentre(b.x), cellCentre(b.z));
+        for (let i = 0; i < b.n; i++) {
+            const t = age - u(b.seed, i, 4) * 0.12;
+            if (t < 0) continue;
+            let x = b.x;
+            let y = b.y;
+            let z = b.z;
+            if (b.kind === 'pour') {
+                const sp = 0.3 + 0.5 * u(b.seed, i, 2);
+                const side = (u(b.seed, i, 3) - 0.5) * 0.3;
+                x += ((b.dx ?? 0) * sp - (b.dz ?? 0) * side) * t;
+                z += ((b.dz ?? 0) * sp + (b.dx ?? 0) * side) * t;
+                y -= 0.5 * 9.81 * t * t;
+                if (y < ground) continue;
+            } else {
+                y -= 1.2 * t + 0.5 * 9.81 * t * t;
+                if (y < b.y - 0.28) continue;
+            }
+            this.push(x, y, z, voxel(M.BucketWater, i & 3));
+        }
+    }
+
+    /** Leaves streaming with the gust: from 4 m upwind, through and past the target, fluttering. */
+    private drawGust(b: Burst, age: number): void {
+        const dx = b.dx ?? 1;
+        const dz = b.dz ?? 0;
+        for (let i = 0; i < b.n; i++) {
+            const start = u(b.seed, i, 4) * 0.8; // they come in over the first 0.8 s
+            const a = age - start;
+            if (a < 0) continue;
+            const speed = 4.5 + 3 * u(b.seed, i, 5);
+            const along = -4 + speed * a;
+            const side = (u(b.seed, i, 6) - 0.5) * 3 + 0.25 * Math.sin(a * 9 + i);
+            const x = b.x + dx * along - dz * side;
+            const z = b.z + dz * along + dx * side;
+            const y = b.y - 1.2 + 2.4 * u(b.seed, i, 7) + 0.3 * Math.sin(a * 6 + i * 1.7);
+            const mat = LEAF_MATS[Math.floor(u(b.seed, i, 8) * LEAF_MATS.length)];
+            this.push(x, y, z, voxel(mat, i & 3));
+        }
+    }
+
+    /**
+     * Needles: a cloud from a crown, drifting down slowly and spreading (about the crown's size).
+     * Sawdust: a short low spray out of the blade.
+     */
+    private drawWood(b: Burst, age: number): void {
+        const needles = b.kind === 'needles';
+        for (let i = 0; i < b.n; i++) {
+            const a = u(b.seed, i, 1) * Math.PI * 2;
+            const r0 = needles ? 1.4 * Math.sqrt(u(b.seed, i, 2)) : 0;
+            const sp = needles ? 0.4 + 0.5 * u(b.seed, i, 3) : 0.8 + 1.2 * u(b.seed, i, 3);
+            const x = b.x + Math.cos(a) * (r0 + sp * age);
+            const z = b.z + Math.sin(a) * (r0 + sp * age);
+            const y0 = b.y + (needles ? (u(b.seed, i, 4) - 0.5) * 1.6 : 0);
+            const y = needles ? y0 - (0.7 + 0.5 * u(b.seed, i, 5)) * age : y0 + 1.2 * age - 4.9 * age * age;
+            const g = this.level.terrainHeight(cellCentre(x), cellCentre(z));
+            const yy = Math.max(y, restY(g));
+            const mat = needles ? (i % 3 ? M.Needle : M.NeedleLight) : i % 2 ? M.TimberEnd : M.Dust;
+            this.push(x, yy, z, voxel(mat, i & 3));
+        }
+    }
 }
+
+/** Rain and snow: slots at full strength, the box round the viewer (m) and the height they fall from. */
+const PRECIP_SLOTS = 90;
+const PRECIP_BOX = 14;
+const PRECIP_TOP = 6;
+
+/** Leaves in the gust's warning stream. */
+const GUST_LEAVES = 40;

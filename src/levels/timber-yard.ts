@@ -21,8 +21,11 @@ import type { VoxelWorld } from '../voxels/world.ts';
 
 import { fbm, lerp, oak, patchShade, pine, rasterizeTerrain, rng, rock, smoothstep } from './common.ts';
 import type { RockSpot, TreeSpot } from './common.ts';
+import { drawStand, sawmillPieces } from './forestry.ts';
+import type { ForestryDef } from './forestry.ts';
 import { rasterizePieces } from './level.ts';
 import type { LevelBuildResult, LevelDef, LevelLayout, PropPlacement, StaticPiece } from './level.ts';
+import { waterButt } from './water-butt.ts';
 
 export const YARD_BOUNDS = { minX: -28, maxX: 28, minZ: -42, maxZ: 14 };
 export const CUT_BASE_Y = -2;
@@ -56,6 +59,16 @@ export function yardWeight(x: number, z: number): number {
     return wx * wz;
 }
 
+/** The logging stand east of the yard (YARD_FORESTRY): levelled, so felled logs lie where they fall. */
+const STAND = { minX: 10.6, maxX: 18.6, minZ: 2.4, maxZ: 12.2 };
+
+function standWeight(x: number, z: number): number {
+    const m = 1.6;
+    const wx = smoothstep(STAND.minX - m, STAND.minX, x) * (1 - smoothstep(STAND.maxX, STAND.maxX + m, x));
+    const wz = smoothstep(STAND.minZ - 0.4, STAND.minZ + 0.6, z) * (1 - smoothstep(STAND.maxZ, STAND.maxZ + m, z));
+    return wx * wz;
+}
+
 /** The forest road on the far bank: from the bridge north towards the ridge. */
 export function roadCenterX(z: number): number {
     return BRIDGE_X + 1.4 * Math.sin((z + 4) * 0.13) - 0.04 * (z + 4);
@@ -76,7 +89,7 @@ export function yardHeight(x: number, z: number): number {
     let bank: number;
     if (d > 0) {
         bank = YARD_Y + 0.12 + 0.3 * (fbm(x * 0.15, z * 0.15, 11) - 0.5) + 0.6 * smoothstep(9, 14, z);
-        bank = lerp(bank, YARD_Y - 1e-3, yardWeight(x, z));
+        bank = lerp(bank, YARD_Y - 1e-3, Math.max(yardWeight(x, z), standWeight(x, z)));
     } else {
         bank = FAR_BANK_Y + 0.25 * (fbm(x * 0.14, z * 0.14, 5) - 0.4);
         // gentle rise through the forest, then the ridge and its summit
@@ -130,7 +143,7 @@ export function yardSurfaceMaterial(x: number, z: number, top: number): number {
     if (y < YARD_Y - 0.15 && ad < hw + 0.5) return voxel(M.Mud, shade);
     if (yardWeight(x, z) > 0.55) {
         // gravel yard with sawdust around the saw and the plank stack
-        const saw = Math.hypot(x - 3, z - 9) < 2.4 || Math.hypot(x + 4.6, z - 6) < 1.8;
+        const saw = Math.hypot(x - SAWMILL_SPOT.x, z - SAWMILL_SPOT.z) < 2.8 || Math.hypot(x + 4.6, z - 6) < 1.8;
         if (saw) return voxel(M.Sand, shade & 1);
         return voxel(fbm(x * 0.25, z * 0.25, 17) > 0.62 ? M.Dirt : M.Path, shade);
     }
@@ -175,6 +188,18 @@ function piece(
 }
 
 const boxS = (hx: number, hy: number, hz: number) => ({ type: 'box' as const, hx, hy, hz });
+
+/** Beams sit on the capstones within this far of the face (m); the deck lip starts there. */
+export const BRIDGE_SEAT = 0.6;
+/** The lip runs this far past the bank edge, where the ramp begins (m). */
+const protrudeLip = 0.3;
+/**
+ * The lips' top above the capstones: a 15 cm beam's top, so beams laid on the seats are flush with
+ * the road (a plank deck on them is one 10 cm step up) (m).
+ */
+export const LIP_RISE = 0.15;
+/** Length of the approach ramps (m). */
+export const RAMP_LENGTH = 2.5;
 
 /** Bridge geometry, shared by the pieces, the tests and the level rules. */
 export const BRIDGE = (() => {
@@ -225,17 +250,72 @@ export function yardPieces(): StaticPiece[] {
             { priority: 3 }
         )
     );
-    // capstones, slightly proud
+    // capstones, slightly proud: the beams' seats, up to the deck lip
     P.push(
-        piece('cap-near', boxS(B.halfWidth + 0.05, 0.05, 0.25), BRIDGE_X, nearTop + 0.05, B.nearFace + 0.25, stone(7), {
-            priority: 3
-        })
+        piece(
+            'cap-near',
+            boxS(B.halfWidth + 0.05, 0.05, BRIDGE_SEAT / 2),
+            BRIDGE_X,
+            nearTop + 0.05,
+            B.nearFace + BRIDGE_SEAT / 2,
+            stone(7),
+            {
+                priority: 3
+            }
+        )
     );
     P.push(
-        piece('cap-far', boxS(B.halfWidth + 0.05, 0.05, 0.25), BRIDGE_X, farTop + 0.05, B.farFace - 0.25, stone(9), {
-            priority: 3
-        })
+        piece(
+            'cap-far',
+            boxS(B.halfWidth + 0.05, 0.05, BRIDGE_SEAT / 2),
+            BRIDGE_X,
+            farTop + 0.05,
+            B.farFace - BRIDGE_SEAT / 2,
+            stone(9),
+            {
+                priority: 3
+            }
+        )
     );
+    // Epic 5: a stone lip behind each beam seat, flush with the top of beams laid on it, and a
+    // packed-earth ramp up to it, so the ute can drive onto a built bridge
+    const lipStart = BRIDGE_SEAT; // behind the face: the beams' seat, then the lip
+    const lipEnd = protrudeLip;
+    for (const [side, top, face, edge, dir] of [
+        ['near', nearTop, B.nearFace, B.nearEdge, 1],
+        ['far', farTop, B.farFace, B.farEdge, -1]
+    ] as const) {
+        const deck = top + 0.1 + LIP_RISE;
+        const z0 = face + dir * lipStart;
+        const z1 = edge + dir * lipEnd;
+        P.push(
+            piece(
+                `lip-${side}`,
+                boxS(B.halfWidth, (deck - (top - 0.2)) / 2, Math.abs(z1 - z0) / 2),
+                BRIDGE_X,
+                (deck + top - 0.2) / 2,
+                (z0 + z1) / 2,
+                stone(side === 'near' ? 11 : 13),
+                { priority: 3 }
+            )
+        );
+        const zEnd = z1 + dir * RAMP_LENGTH;
+        const bottom = yardHeight(BRIDGE_X, zEnd);
+        const ang = Math.atan2(deck - bottom, RAMP_LENGTH);
+        const len = Math.hypot(deck - bottom, RAMP_LENGTH);
+        const th = 0.3;
+        P.push(
+            piece(
+                `ramp-${side}`,
+                boxS(B.halfWidth, th / 2, len / 2),
+                BRIDGE_X,
+                (deck + bottom) / 2 - (Math.cos(ang) * th) / 2,
+                (z1 + zEnd) / 2 - (dir * Math.sin(ang) * th) / 2,
+                (x, y, z) => voxel(M.Path, latticeShade(x, y, z, 0.2, 15)),
+                { pitch: dir * ang, priority: 2 }
+            )
+        );
+    }
     // the snapped stringer hanging off the near abutment into the water
     P.push(
         piece('stringer-snapped', boxS(0.09, 0.09, 0.8), BRIDGE_X - 0.8, nearTop - 0.45, B.nearFace - 0.6, darkTimber, {
@@ -271,6 +351,23 @@ export function yardPieces(): StaticPiece[] {
             nearTop + 1.15,
             B.nearFace + 0.4,
             (_x, y) => voxel(Math.abs(y) < 0.06 ? M.HiVisStripe : M.HiVis, 0),
+            { priority: 3 }
+        )
+    );
+
+    // ---- the flood gauge (Epic 8): a banded post in the creek by the crossing; its marks going
+    // under is the rising river's tell (§2.9). Bands every 10 cm, one world-aligned set.
+    const gaugeTop = YARD_Y + 0.45;
+    const gaugeHalf = (gaugeTop - CREEK_BED_Y) / 2;
+    const gaugeY = (gaugeTop + CREEK_BED_Y) / 2;
+    P.push(
+        piece(
+            'flood-gauge',
+            boxS(0.05, gaugeHalf, 0.05),
+            FLOOD_GAUGE.x,
+            gaugeY,
+            FLOOD_GAUGE.z,
+            (_x, y) => voxel(Math.floor((y + gaugeY) / 0.1 + 1e-6) & 1 ? M.HiVis : M.HiVisStripe, 0),
             { priority: 3 }
         )
     );
@@ -325,40 +422,8 @@ export function yardPieces(): StaticPiece[] {
     for (const rx of [sc - 2.4, sc, sc + 2.4])
         P.push(piece('shed-rack-leg', boxS(0.05, 0.33, 0.5), rx, YARD_Y + 0.33, sz1 - 0.7, darkTimber));
 
-    // ---- the sawmill bench (machinery arrives in Epic 6: this one is decoration)
-    const mx = 3;
-    const mz = 9;
-    P.push(piece('saw-bench', boxS(1.7, 0.06, 0.45), mx, YARD_Y + 0.86, mz, solid(M.Steel, 1), { priority: 3 }));
-    for (const [lx, lz] of [
-        [-1.55, -0.38],
-        [1.55, -0.38],
-        [-1.55, 0.38],
-        [1.55, 0.38]
-    ]) {
-        P.push(piece('saw-leg', boxS(0.05, 0.4, 0.05), mx + lx, YARD_Y + 0.4, mz + lz, solid(M.UteTrim, 0)));
-    }
-    P.push(
-        piece(
-            'saw-blade',
-            { type: 'cylinder', axis: 'z', r: 0.42, half: 0.02 },
-            mx + 0.4,
-            YARD_Y + 1.0,
-            mz,
-            (x, y) => voxel(Math.hypot(x, y) > 0.36 ? M.Chrome : M.Steel, 0),
-            { priority: 4 }
-        )
-    );
-    P.push(
-        piece(
-            'saw-motor',
-            boxS(0.28, 0.22, 0.24),
-            mx - 1.1,
-            YARD_Y + 1.14,
-            mz,
-            (_x, y) => voxel(y > 0.12 ? M.HiVis : M.UteTrim, 0),
-            { priority: 3 }
-        )
-    );
+    // ---- the sawmill (Epic 6): its frame, guide and rack; the blade and lamp move (src/levels/forestry.ts)
+    P.push(...sawmillPieces(YARD_FORESTRY.sawmill!));
 
     // ---- the windsock pole (the sock itself is a moving object that follows the wind)
     const wsy = yardHeight(WINDSOCK.x, WINDSOCK.z);
@@ -459,6 +524,8 @@ export function yardPieces(): StaticPiece[] {
             { collide: false, priority: 4 }
         )
     );
+    // the water butt by the stump (Epic 7), last: earlier pieces keep their colliders' order
+    P.push(...yardButt().pieces);
     return P;
 }
 
@@ -467,6 +534,13 @@ export const WINDSOCK = { x: 4.6, z: 1.6, height: 3.2 };
 
 /** Bucket stump in the yard. */
 export const BUCKET_STUMP = { x: 5.6, z: 4.4, top: YARD_Y + 0.44 };
+/** The yard's water tank (Epic 7): its tap fills a bucket set under it (YARD_TAP). */
+export const yardButt = () => waterButt('water butt', YARD_TAP.x, YARD_TAP.z, YARD_Y, YARD_Y, Math.PI / 2, 40);
+/**
+ * Where the yard's tap fills a bucket set on the ground under it: the south-west corner of the yard,
+ * clear of the paths to the bridge, the logging stand and the sawmill (its post stands to the north).
+ */
+export const YARD_TAP = { x: -4.4, z: 10.4 };
 /** Far-bank goal area for the bucket. */
 export const YARD_GOAL = { minX: BRIDGE_X - 3.5, maxX: BRIDGE_X + 3.5, minZ: -9.5, maxZ: -5.2 };
 
@@ -491,12 +565,10 @@ export function yardLayout(seed = 1): LevelLayout {
     for (let n = 0; n < 44; n++) add(-26 + r() * 52, -6 - r() * 15, 0.9 + r() * 0.55);
     // the ridge
     for (let n = 0; n < 22; n++) add(-30 + r() * 60, -22 - r() * 14, 0.85 + r() * 0.6);
-    // a few around the yard's edges
+    // a few around the yard's edges (east of the yard is the logging stand: YARD_FORESTRY)
     for (const [x, z, s] of [
         [-18.5, 6, 1.2],
         [-17.5, 11.5, 1.05],
-        [12, 5, 1.15],
-        [13.5, 10.5, 1.3],
         [-20, 1.8, 1.0],
         [17, 1.8, 1.1],
         [-23, 9, 1.25],
@@ -559,6 +631,7 @@ export function buildTimberYard(world: VoxelWorld, seed = 1): LevelBuildResult {
         else pine(world, t.x, t.z, yardSurfaceY(t.x, t.z), t.scale, t.yaw, stats, trees + seed * 17);
         trees++;
     }
+    trees += drawStand(world, YARD_FORESTRY, stats);
     let rocks = 0;
     for (const k of layout.rocks) {
         rock(world, k.x, k.z, yardSurfaceY(k.x, k.z), k.rx, k.ry, k.rz, k.yaw, stats, rocks + 5);
@@ -599,6 +672,30 @@ const at = (x: number, y: number, z: number, yaw = 0, pitch = 0, roll = 0): Pose
     pose(x, y, z, quatFromYawPitchRoll(yaw, pitch, roll));
 const FLAT = Math.PI / 2; // planks and beams lie on their wide face
 
+/** The sawmill: infeed (east) towards the logging stand, outfeed rack (west) towards the yard. */
+const SAWMILL_SPOT = { x: 4.6, z: 9.6, yaw: 0, y: YARD_Y };
+
+/**
+ * Logging (Epic 6): a stand of six pines east of the yard, 3 m apart (a felled trunk never reaches
+ * a neighbour's) and far enough from the play area's edge that none falls against its wall, and
+ * the sawmill between it and the yard. The axe lies by the infeed.
+ */
+export const YARD_FORESTRY: ForestryDef = {
+    trees: [
+        // leans (rad, towards x/z): their weight pulls the fall their way; tree 0 leans hard north,
+        // more than a cut's push, so it falls north whichever side it is cut from
+        { x: 13.0, z: 4.3, yaw: 0.3, lean: { x: 0, z: -0.11 } },
+        { x: 16.0, z: 4.5, yaw: 1.7 },
+        { x: 13.1, z: 7.3, yaw: 2.9, lean: { x: -0.05, z: 0 } },
+        { x: 16.1, z: 7.5, yaw: 4.1, lean: { x: 0.04, z: 0.03 } },
+        { x: 12.9, z: 10.3, yaw: 5.3, lean: { x: -0.03, z: 0 } },
+        { x: 16.0, z: 10.5, yaw: 0.9, lean: { x: 0.05, z: -0.02 } }
+    ],
+    sawmill: SAWMILL_SPOT,
+    axe: pose(8.4, YARD_Y + 0.06, 8.5, quatFromYawPitchRoll(0.3, 0, Math.PI / 2)),
+    ground: (x, z) => yardSurfaceY(x, z)
+};
+
 /** Where the yard's dynamic props start. */
 export function yardProps(): PropPlacement[] {
     const P: PropPlacement[] = [];
@@ -620,6 +717,46 @@ export function yardProps(): PropPlacement[] {
     return P;
 }
 
+/**
+ * Seven more planks for a bridge deck, stacked between the beams and the plank stack (the yard level only: the Valley
+ * places its own extra planks).
+ */
+export function yardDeckPlanks(): PropPlacement[] {
+    const P: PropPlacement[] = [];
+    for (let n = 0; n < 7; n++)
+        P.push({
+            name: `extra-plank-${5 + n}`,
+            pose: at(-4.6, YARD_Y + 0.055 + n * 0.105, 4.4 + (n % 2) * 0.04, 0, FLAT)
+        });
+    return P;
+}
+
+/** The flood gauge post, upstream of the crossing by the near bank. */
+export const FLOOD_GAUGE = { x: BRIDGE_X - 2.1, z: BRIDGE.nearEdge - 0.45 };
+/** The flood's peak: over the capstones (0.5 / 0.6 m), a hand above the banks. */
+export const FLOOD_PEAK_Y = 0.6;
+
+/**
+ * Where the flood leaves the timber it took: the near bank downstream of the yard, side by side,
+ * in the clear (between the sign and the oak, and past the rock), so each piece can be picked up
+ * by either end.
+ */
+export function floodWashup(): { x: number; y: number; z: number }[] {
+    return [
+        [8, 0.6],
+        [8, 1.0],
+        [14.4, 0.6],
+        [14.4, 1.0]
+    ].map(([x, out]) => {
+        const z = creekCenterZ(x) + creekHalfWidth(x) + out;
+        // dropped onto the highest ground under a 3.2 m beam's whole length (the bank is uneven)
+        let top = -Infinity;
+        for (let dx = -1.7; dx <= 1.7; dx += 0.1)
+            for (const dz of [-0.15, 0, 0.15]) top = Math.max(top, yardHeight(x + dx, z + dz));
+        return { x, y: top + 0.2, z };
+    });
+}
+
 export const timberYardLevel: LevelDef = {
     id: 'yard',
     name: 'Timber Yard',
@@ -633,6 +770,22 @@ export const timberYardLevel: LevelDef = {
     sun: { elevation: 7, azimuth: 105 },
     wind: { dir: Math.PI * 0.3, base: 1.4, gust: 3.6 },
     windsock: WINDSOCK,
+    // the world fights back (Epic 8): finishing the bridge brings the flood; carrying a plank by
+    // the creek brings a gust aimed at it
+    hazards: {
+        seed: 1,
+        flood: {
+            peakY: FLOOD_PEAK_Y,
+            current: { x: 1.3, z: 0 },
+            crossing: { x: BRIDGE_X, halfX: BRIDGE.halfWidth + 0.3, z0: BRIDGE.nearFace, z1: BRIDGE.farFace },
+            washup: floodWashup()
+        },
+        gust: { force: 1050 },
+        // parked on a slope (3.5 degrees or more) and left: the handbrake lets go
+        handbrake: { slope: 0.06 },
+        // a stand tree cut with the ute within its reach leans towards the ute
+        tree: true
+    },
     spawn: { x: 1.2, z: 6.2, yaw: 0.12, pitch: -0.1 },
     orbitHome: { pos: [9, 4.2, 12], focus: [-1, 0.5, 0] },
     startFirstPerson: true,
@@ -640,10 +793,13 @@ export const timberYardLevel: LevelDef = {
         beaver: { mode: 'idle', pose: at(-6.3, YARD_Y, 7.4, 2.4) },
         ute: { mode: 'drivable', pose: at(-10.5, YARD_Y + 0.002, 4.6, Math.PI / 2 + 0.15) }
     },
-    props: yardProps(),
+    props: [...yardProps(), ...yardDeckPlanks()],
+    forestry: YARD_FORESTRY,
     rules: {
-        objective: 'Get the bucket across the creek to the flag',
+        objective: 'Get the bucket of water across the creek to the flag',
         goal: YARD_GOAL,
+        minLitres: 0.25,
+        waterSources: [yardButt().source],
         fallY: -0.2,
         isSafe: (x, z) => Math.abs(z - creekCenterZ(x)) > creekHalfWidth(x) + 0.9,
         lostY: CREEK_WATER_Y + 0.15

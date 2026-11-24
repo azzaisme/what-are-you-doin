@@ -421,6 +421,17 @@ body.ui-hidden .inspector-hint {
     color: #9fe39a;
 }
 
+.hud-water {
+    margin-top: 3px;
+    font-size: 12.5px;
+    color: #9fd2f5;
+    font-variant-numeric: tabular-nums;
+}
+
+.hud-water:empty {
+    display: none;
+}
+
 .toast {
     position: fixed;
     left: 50%;
@@ -450,6 +461,18 @@ body.ui-hidden .inspector-hint {
     background: #1f4a2ae6;
     font-size: 18px;
     font-weight: 600;
+}
+
+/* the world fighting back (Epic 8): a warning, never colour alone (the text says what to do) */
+.toast-hazard {
+    background: #5a1f12eb;
+    border: 2px solid #f26a1b;
+    font-size: 17px;
+    font-weight: 600;
+}
+
+.toast-warn {
+    background: #5a3d12e6;
 }
 
 body.ui-hidden .toast {
@@ -701,8 +724,23 @@ body.touch-play .cell-size {
     background: #2a5a3aa6;
 }
 
+.touch-buttons .touch-nail {
+    grid-column: 2;
+    background: #3a3f48a6;
+}
+
 .touch-buttons .touch-grab {
     background: #6a4a1aa6;
+}
+
+.touch-buttons .touch-pour {
+    grid-column: span 2;
+    justify-self: center;
+    background: #1f5f8aa6;
+}
+
+.touch-buttons .touch-pour[hidden] {
+    display: none;
 }
 
 body.ui-hidden .touch-ui,
@@ -820,6 +858,7 @@ body.ui-hidden .levels-panel {
 }
 
 body.designing .hud-objective,
+body.designing .hud-water,
 body.designing .crosshair {
     display: none;
 }
@@ -1043,6 +1082,7 @@ body.settings-open .crosshair {
 .settings-switch,
 .settings-step,
 .settings-choices,
+.settings-bind,
 .settings-button .settings-control button {
     border: 0;
     border-radius: 0;
@@ -1060,6 +1100,7 @@ body.settings-open .crosshair {
 .settings-tabs button:hover,
 .settings-switch:hover,
 .settings-step:hover,
+.settings-bind:hover,
 .settings-button .settings-control button:hover:not(:disabled) {
     background: #33404c;
 }
@@ -1070,6 +1111,7 @@ body.settings-open .crosshair {
 .settings-switch:active,
 .settings-step:active,
 .settings-choices button:active,
+.settings-bind:active,
 .settings-button .settings-control button:active:not(:disabled) {
     transform: translateY(var(--vx));
     box-shadow: inset 0 var(--vx) 0 #0007;
@@ -1180,6 +1222,36 @@ body.settings-open .crosshair {
     box-shadow:
         inset 0 var(--vx) 0 #d4f7d1,
         inset 0 calc(var(--vx) * -1.5) 0 #5aa257;
+}
+
+.settings-bind {
+    min-width: 96px;
+    max-width: 132px;
+    padding: 0 10px 2px;
+    overflow: hidden;
+    font-weight: 700;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.settings-bind.capturing,
+.settings-bind.capturing:hover {
+    color: #10161c;
+    background: #f2c14e;
+}
+
+/* narrow screens: six sections fit (or scroll) without clipping their names */
+@media (max-width: 480px) {
+    .settings-bind {
+        min-width: 84px;
+    }
+}
+
+.settings-status {
+    min-height: 1.3em;
+    margin-top: 4px;
+    font-size: 0.85em;
+    color: #f2c14e;
 }
 
 .settings-choices {
@@ -1311,6 +1383,7 @@ body.settings-open .crosshair {
 .settings-tabs button:focus-visible,
 .settings-switch:focus-visible,
 .settings-choices button:focus-visible,
+.settings-bind:focus-visible,
 .settings-button .settings-control button:focus-visible {
     box-shadow: inset 0 0 0 var(--vx) #fff;
 }
@@ -1391,12 +1464,169 @@ body.has-pad .settings-foot .foot-pad {
         width: auto;
     }
 
-    /* all four tabs fit */
+    /* six sections: each keeps its whole name; the row scrolls (the current one is kept in view) */
     .settings-tabs button {
-        flex: 1 1 0;
-        min-width: 0;
-        padding: 0 4px 2px;
+        flex: 1 0 auto;
+        padding: 0 8px 2px;
         font-size: 11px;
         letter-spacing: 0.03em;
     }
+}
+
+/* ---- the playtest log viewer (Settings → Game → Playtest log) ---------------------------------- */
+.playtest-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 110;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: #05080bb0;
+    zoom: var(--ui-scale);
+}
+
+.playtest-backdrop[hidden] {
+    display: none;
+}
+
+.playtest {
+    width: min(760px, 100%);
+    gap: 10px;
+    padding: 4px 6px 8px;
+}
+
+.playtest-hint {
+    margin: 0;
+    font-size: 14px;
+    opacity: 0.85;
+}
+
+.playtest-note {
+    display: flex;
+    gap: 8px;
+}
+
+.playtest-note input {
+    flex: 1;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 10px;
+    font: inherit;
+    border-radius: 6px;
+    border: 1px solid #ffffff40;
+    background: #0e1418cc;
+    color: inherit;
+}
+
+.playtest textarea {
+    flex: 1;
+    min-height: 220px;
+    width: 100%;
+    box-sizing: border-box;
+    resize: none;
+    padding: 8px;
+    font:
+        12px/1.4 ui-monospace,
+        Menlo,
+        Consolas,
+        monospace;
+    white-space: pre;
+    border-radius: 6px;
+    border: 1px solid #ffffff30;
+    background: #0a0f12e6;
+    color: #e8e4d8;
+}
+
+.playtest-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.playtest button {
+    min-height: 44px;
+    padding: 0 14px;
+    font: inherit;
+    border-radius: 6px;
+    border: 1px solid #ffffff40;
+    background: #2a3b44;
+    color: inherit;
+    cursor: pointer;
+}
+
+.playtest .settings-close {
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+}
+
+.playtest button:focus-visible,
+.playtest input:focus-visible,
+.playtest textarea:focus-visible {
+    outline: 3px solid #f2c94c;
+    outline-offset: 2px;
+}
+
+/* ---- credits and licences (#104) ----------------------------------------------------------------- */
+
+.credits-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 110;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: #0009;
+    zoom: var(--ui-scale);
+}
+
+.credits-backdrop[hidden] {
+    display: none;
+}
+
+.credits {
+    width: min(560px, 100%);
+    max-height: calc(100dvh / var(--ui-scale) - 32px);
+    overflow-y: auto;
+    padding: 18px 20px;
+    color: #f4f1ea;
+    background: #161c22;
+    border: 4px solid #3a4652;
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+.credits h2 {
+    margin: 0 0 8px;
+    font-size: 20px;
+}
+
+.credits h3 {
+    margin: 14px 0 4px;
+    font-size: 15px;
+    color: #f2c14e;
+}
+
+.credits ul {
+    margin: 0;
+    padding-left: 18px;
+}
+
+.credits a {
+    color: #9fd3ff;
+}
+
+.credits-close {
+    min-height: 44px;
+    margin-top: 12px;
+    padding: 0 18px;
+    font: inherit;
+    font-weight: 700;
+    color: #f4f1ea;
+    background: #26313b;
+    border: 0;
+    cursor: pointer;
 }

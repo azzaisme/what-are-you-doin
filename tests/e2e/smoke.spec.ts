@@ -22,14 +22,47 @@ type Lab = {
     entities(): Record<string, { visible: boolean; x: number; y: number; z: number }>;
     input(c: Record<string, unknown>): void;
     action(id: string): void;
-    player(): { x: number; y: number; z: number; holding: number; grounded: boolean; eyeHeight: number };
+    paused(): boolean;
+    player(): { x: number; y: number; z: number; pitch: number; holding: number; grounded: boolean; eyeHeight: number };
     look(yaw: number, pitch: number): void;
     level: string;
     progress(): { goalReached: boolean; falls: number; recoveries: number; events: string[] };
+    water(): { volume: number; poured: number };
     placeProp(name: string, x: number, y: number, z: number, yaw?: number): boolean;
-    interaction(): { holding: string | null; target: string | null; shared: boolean; driving: boolean; seat: number };
+    interaction(): {
+        holding: string | null;
+        target: string | null;
+        shared: boolean;
+        driving: boolean;
+        seat: number;
+        nail: number;
+    };
+    joints(): {
+        connections: number;
+        nails: number;
+        drawn: number;
+        preview: unknown;
+        outlines: number[][];
+        viewLayers: string[][];
+        slot2: number;
+    };
     teleport(x: number, z: number, yaw?: number): void;
     ute(): { x: number; y: number; z: number; yaw: number; speed: number; driver: number; drivable: boolean };
+    hazards(): {
+        waterY: number;
+        flood: number;
+        gust: number;
+        floods: number;
+        planeY: number;
+        tick: number;
+        tree: number;
+    };
+    placeUte(x: number, z: number, yaw?: number): boolean;
+    audio(): { started: boolean; context: string; played: number; recent: string[]; loops: Record<string, number> };
+    wood(): {
+        trees: { phase: string; cut: number }[];
+        sawmill: { phase: string; stopped: string; mode: string; taken: number; planks: number } | null;
+    };
 };
 
 const IGNORED = [
@@ -181,6 +214,7 @@ test('default voxel size is 5 cm with the slider range 5-10 cm', async ({ page }
 });
 
 test('settings menu: mouse, keyboard and gamepad reach every setting, and it is saved', async ({ page }) => {
+    test.setTimeout(600_000); // two boots of the game page (with Epic 6's stand, ~4.5 min in software GL here)
     // a stand-in gamepad the page reads through navigator.getGamepads
     await page.addInitScript(() => {
         const buttons = Array.from({ length: 17 }, () => ({ pressed: false, touched: false, value: 0 }));
@@ -217,12 +251,14 @@ test('settings menu: mouse, keyboard and gamepad reach every setting, and it is 
     expect(await lab(page, (l) => (l as unknown as { paused(): boolean }).paused())).toBe(true);
     await page.locator('.settings-row button', { hasText: 'Resume' }).click();
     await expect(backdrop).toBeHidden();
-    // keyboard: Esc opens; E to Video; down to the field of view, right to widen it; Esc closes
+    // keyboard: Esc opens; E through the sections to Video; down to the field of view, right to
+    // widen it; Esc closes
     await page.keyboard.press('Escape');
     await expect(backdrop).toBeVisible();
     await expect(page.locator('.settings-row.current')).toContainText('Resume');
-    await page.keyboard.press('KeyE');
-    await page.keyboard.press('KeyE');
+    const tabNow = page.locator('.settings-tabs [aria-selected=true]');
+    for (let n = 0; n < 6 && (await tabNow.textContent()) !== 'Video'; n++) await page.keyboard.press('KeyE');
+    await expect(tabNow).toHaveText('Video');
     const fov = page.locator('.settings-row', { hasText: 'Field of view' });
     while (!(await fov.evaluate((e) => e.classList.contains('current')))) await page.keyboard.press('ArrowDown');
     await page.keyboard.press('ArrowRight');
@@ -237,6 +273,8 @@ test('settings menu: mouse, keyboard and gamepad reach every setting, and it is 
     await expect(backdrop).toBeVisible();
     const selected = page.locator('.settings-tabs [aria-selected=true]');
     await expect(selected).toHaveText('Video');
+    await press(5);
+    await expect(selected).toHaveText('Sound');
     await press(5);
     await expect(selected).toHaveText('Interface');
     await press(5);
@@ -265,7 +303,164 @@ test('settings menu: mouse, keyboard and gamepad reach every setting, and it is 
     expect(problems).toEqual([]);
 });
 
-test('UI boxes never overlap: portrait phone, portrait tablet, desktop and landscape phone', async ({ page }) => {
+test('remappable controls: rebind a key and a pad button in Settings; they work and are saved', async ({ page }) => {
+    test.setTimeout(600_000); // two boots of the game page
+    await page.addInitScript(() => {
+        const buttons = Array.from({ length: 17 }, () => ({ pressed: false, touched: false, value: 0 }));
+        const pad = { index: 0, id: 'test pad', connected: true, mapping: 'standard', axes: [0, 0, 0, 0], buttons };
+        (window as unknown as { __pad: typeof pad }).__pad = pad;
+        navigator.getGamepads = () => [pad as unknown as Gamepad];
+    });
+    const problems = await boot(page, '?level=yard&t=1&quality=low#cell100');
+    await lab(page, (l) => l.action('pause'));
+    const frames = () =>
+        page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+    const setButton = (i: number, v: boolean) =>
+        page.evaluate(
+            ([i, v]) => {
+                (window as unknown as { __pad: { buttons: { pressed: boolean; value: number }[] } }).__pad.buttons[
+                    i
+                ].pressed = v;
+            },
+            [i, v] as [number, boolean]
+        );
+    const press = async (b: number) => {
+        await setButton(b, true);
+        await frames();
+        await setButton(b, false);
+        await frames();
+    };
+    const eyeY = () =>
+        page.evaluate(
+            () =>
+                (
+                    window as unknown as { __riverLab: { entities(): Record<string, { y: number }> } }
+                ).__riverLab.entities().player.y
+        );
+    const backdrop = page.locator('.settings-backdrop');
+    await page.locator('.settings-chip').click();
+    await page.locator('.settings-tabs button', { hasText: 'Keys' }).click();
+    // Jump's first slot: press it, then F
+    const jump = page.locator('.settings-row', { hasText: 'Jump' });
+    await jump.locator('.settings-bind').first().click();
+    await expect(jump.locator('.settings-bind').first()).toHaveText('Press a key…');
+    await page.keyboard.press('KeyF');
+    await expect(jump.locator('.settings-bind').first()).toHaveText('F');
+    // W onto Jump's second slot: taken off Move forward, and the menu says so
+    await jump.locator('.settings-bind').nth(1).click();
+    await page.keyboard.press('KeyW');
+    await expect(jump.locator('.settings-bind').nth(1)).toHaveText('W');
+    await expect(page.locator('.settings-status')).toContainText('W was Move forward');
+    await expect(
+        page.locator('.settings-row', { hasText: 'Move forward' }).locator('.settings-bind').first()
+    ).toHaveText('—');
+    // Esc cancels a capture without closing the menu; Backspace clears a slot
+    await jump.locator('.settings-bind').nth(1).click();
+    await page.keyboard.press('Escape');
+    await expect(backdrop).toBeVisible();
+    await expect(jump.locator('.settings-bind').nth(1)).toHaveText('W');
+    await jump.locator('.settings-bind').nth(1).click();
+    await page.keyboard.press('Backspace');
+    await expect(jump.locator('.settings-bind').nth(1)).toHaveText('—');
+    // the pad's Jump: A on it (pad navigation), then X
+    await page.locator('.settings-tabs button', { hasText: 'Pad' }).click();
+    const padJump = page.locator('.settings-row', { hasText: 'Jump' });
+    await padJump.locator('.settings-bind').first().focus();
+    await press(0);
+    await expect(padJump.locator('.settings-bind').first()).toHaveText('Press a button…');
+    await press(2);
+    await expect(padJump.locator('.settings-bind').first()).toHaveText('X');
+    await expect(page.locator('.settings-status')).toContainText('X was Launch the ragdoll');
+    await page.keyboard.press('Escape');
+    await expect(backdrop).toBeHidden();
+
+    // in the game: F jumps, Space does not any more; the hint says F (keys go to the page, not the
+    // Settings button the menu handed focus back to)
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await expect(page.locator('#hud-help')).toContainText('F jump');
+    const ground = await eyeY();
+    await page.keyboard.press('Space');
+    for (let n = 0; n < 10; n++) await frames();
+    expect(Math.abs((await eyeY()) - ground)).toBeLessThan(0.05);
+    let top = ground;
+    await page.keyboard.down('KeyF');
+    for (let n = 0; n < 20 && top < ground + 0.2; n++) {
+        await frames();
+        top = Math.max(top, await eyeY());
+    }
+    await page.keyboard.up('KeyF');
+    expect(top).toBeGreaterThan(ground + 0.2);
+
+    // saved: a reload keeps them; reset puts the defaults back
+    await page.reload();
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab?: { ready?: boolean } }).__riverLab?.ready === true,
+        null,
+        { timeout: 150_000 }
+    );
+    // the reload seeks and pauses again (?t=): run live, as before it
+    if (await lab(page, (l) => (l as unknown as { paused(): boolean }).paused()))
+        await lab(page, (l) => l.action('pause'));
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('uncivil.bindings') ?? '{}'));
+    expect(saved.keys.jump).toEqual(['KeyF', '']);
+    expect(saved.keys.forward).toEqual(['', 'ArrowUp']);
+    expect(saved.pad.jump).toEqual([2, -1]);
+    await page.locator('.settings-chip').click();
+    await page.locator('.settings-tabs button', { hasText: 'Keys' }).click();
+    await expect(jump.locator('.settings-bind').first()).toHaveText('F');
+    const stored = () => page.evaluate(() => localStorage.getItem('uncivil.bindings'));
+    const mode = () =>
+        page.evaluate(() => (window as unknown as { __riverLab: { state: { mode: string } } }).__riverLab.state.mode);
+
+    // a bound key beats the game's hotkey: V on Jump jumps instead of switching to the orbit view,
+    // and the hint stops offering "V orbit"
+    await jump.locator('.settings-bind').nth(1).click();
+    await page.keyboard.press('KeyV');
+    await expect(jump.locator('.settings-bind').nth(1)).toHaveText('V');
+    await page.keyboard.press('Escape');
+    await expect(backdrop).toBeHidden();
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await expect(page.locator('#hud-help')).not.toContainText('orbit');
+    const ground2 = await eyeY();
+    let top2 = ground2;
+    await page.keyboard.down('KeyV');
+    for (let n = 0; n < 20 && top2 < ground2 + 0.2; n++) {
+        await frames();
+        top2 = Math.max(top2, await eyeY());
+    }
+    await page.keyboard.up('KeyV');
+    expect(top2).toBeGreaterThan(ground2 + 0.2);
+    expect(await mode()).toBe('firstPerson');
+
+    // Reset keys: the keys come back (V orbits again), the pad keeps its change
+    await page.locator('.settings-chip').click();
+    await page.locator('.settings-tabs button', { hasText: 'Keys' }).click();
+    await page.locator('.settings-row button', { hasText: 'Reset keys to defaults' }).click();
+    await expect(jump.locator('.settings-bind').first()).toHaveText('Space');
+    expect(JSON.parse((await stored())!)).toEqual({ pad: { jump: [2, -1], ragdoll: [-1, -1] } });
+    await expect(page.locator('#hud-help')).toContainText('V orbit');
+    // Reset gamepad buttons: the pad's too; nothing left stored
+    await page.locator('.settings-tabs button', { hasText: 'Pad' }).click();
+    await page.locator('.settings-row button', { hasText: 'Reset gamepad buttons to defaults' }).click();
+    await expect(padJump.locator('.settings-bind').first()).toHaveText('A');
+    expect(await stored()).toBeNull();
+    // Reset all settings resets the bindings as well
+    await page.locator('.settings-tabs button', { hasText: 'Keys' }).click();
+    await jump.locator('.settings-bind').first().click();
+    await page.keyboard.press('KeyF');
+    await expect(jump.locator('.settings-bind').first()).toHaveText('F');
+    expect(await stored()).not.toBeNull();
+    await page.locator('.settings-tabs button', { hasText: 'Interface' }).click();
+    await page.locator('.settings-row button', { hasText: 'Reset all settings' }).click();
+    expect(await stored()).toBeNull();
+    await page.locator('.settings-tabs button', { hasText: 'Keys' }).click();
+    await expect(jump.locator('.settings-bind').first()).toHaveText('Space');
+    expect(problems).toEqual([]);
+});
+
+test('UI boxes never overlap: small and large portrait phones, portrait tablet, desktop and landscape phone', async ({
+    page
+}) => {
     const problems = await boot(page, '?level=yard&t=4&debug&quality=low#cell100');
     type Rect = { l: number; t: number; r: number; b: number };
     const rects = () =>
@@ -300,6 +495,7 @@ test('UI boxes never overlap: portrait phone, portrait tablet, desktop and lands
         return r;
     };
     for (const [w, h] of [
+        [360, 740],
         [390, 844],
         [768, 1408],
         [1280, 720],
@@ -320,6 +516,41 @@ test('UI boxes never overlap: portrait phone, portrait tablet, desktop and lands
             await assertLayout(`${w}x${h} panel closed`, w, h);
         }).toPass({ timeout: 20_000 });
     }
+    // the settings menu at 360 px: the Keys section's rows stay inside the dialog, and the six section
+    // tabs scroll with the current one fully in view
+    await page.setViewportSize({ width: 360, height: 740 });
+    await page.locator('.settings-chip').click();
+    await page.locator('.settings-tabs button', { hasText: 'Keys' }).click();
+    await expect(async () => {
+        const fit = await page.evaluate(() => {
+            const d = document.querySelector('.settings')!.getBoundingClientRect();
+            const bar = document.querySelector('.settings-tabs')!.getBoundingClientRect();
+            const sel = document.querySelector('.settings-tabs [aria-selected=true]')!.getBoundingClientRect();
+            const out = [...document.querySelectorAll('.settings-panel *')].filter((e) => {
+                const b = e.getBoundingClientRect();
+                return b.width > 0 && (b.left < d.left - 0.5 || b.right > d.right + 0.5);
+            }).length;
+            return {
+                out,
+                selIn: sel.left >= bar.left - 0.5 && sel.right <= bar.right + 0.5,
+                page: document.documentElement.scrollWidth
+            };
+        });
+        expect(fit.out).toBe(0);
+        expect(fit.selIn).toBe(true);
+        expect(fit.page).toBeLessThanOrEqual(360);
+    }).toPass({ timeout: 20_000 });
+    for (const t of ['Interface', 'Game']) {
+        await page.locator('.settings-tabs button', { hasText: t }).click();
+        const inView = await page.evaluate(() => {
+            const bar = document.querySelector('.settings-tabs')!.getBoundingClientRect();
+            const sel = document.querySelector('.settings-tabs [aria-selected=true]')!.getBoundingClientRect();
+            return sel.left >= bar.left - 0.5 && sel.right <= bar.right + 0.5;
+        });
+        expect(inView, `${t} tab in view`).toBe(true);
+    }
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.settings-backdrop')).toBeHidden();
     // narrow screens get >= 40 px touch targets
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator('.debug-chip').click();
@@ -359,7 +590,12 @@ test('physics sandbox: grab and carry the plank, launch the ragdoll, switch to s
         ([x, z, pitch]) => (window as unknown as { __riverLab: Lab }).__riverLab.setFirstPerson(x, z + 1.6, 0, pitch),
         [plank.x, plank.z, pitch]
     );
-    await page.waitForTimeout(500);
+    // grab once the crosshair is on it (not on the comfort plank the carry toggle just put away)
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().target === 'plank',
+        null,
+        { timeout: 60_000 }
+    );
     await lab(page, (l) => l.input({ grab: true }));
     await page.waitForFunction(
         () => (window as unknown as { __riverLab: Lab }).__riverLab.player().holding === 4,
@@ -421,10 +657,14 @@ test('level 1, the Timber Yard: starts in first person with the objective, and t
     expect(await lab(page, (l) => l.level)).toBe('yard');
     const st = await lab(page, (l) => l.state as unknown as { mode: string });
     expect(st.mode).toBe('firstPerson');
-    await expect(page.locator('#hud-objective')).toContainText('bucket across the creek');
+    await expect(page.locator('#hud-objective')).toContainText('bucket of water across the creek');
+    // the bucket starts full, and the HUD says so (Epic 7)
+    await expect(page.locator('#hud-water')).toContainText('10.0 L');
     const s = await lab(page, (l) => l.stats());
-    // beaver, ute, bucket, six planks, two beams, three logs, the crate, the windsock
-    expect(s.voxel.objects).toBe(16);
+    // beaver, ute, bucket, six planks, two beams, three logs, the crate, the windsock, and logging:
+    // the axe, the sawmill and the six stand markers (their cut band hidden until a tree is bitten), and
+    // Epic 5's seven deck planks by the bridge
+    expect(s.voxel.objects).toBe(31);
     expect(s.voxel.rejected).toBe(0);
     const g = await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid());
     expect(g.misaligned).toBe(0);
@@ -438,6 +678,51 @@ test('level 1, the Timber Yard: starts in first person with the objective, and t
     );
     await expect(page.locator('#hud-objective')).toHaveClass(/done/);
     await expect(page.locator('.toast')).toContainText('delivered');
+    await expect(page.locator('.toast')).toContainText('L of water');
+    expect(problems).toEqual([]);
+});
+
+test('the Timber Yard fights back: the finished bridge brings the flood, with its siren; sound starts on a key', async ({
+    page
+}) => {
+    const problems = await boot(page, '?level=yard&t=0.01&quality=low&seed=1#cell100');
+    // no sound (and no audio context) before the player does something: browser and itch.io rules
+    expect((await lab(page, (l) => l.audio())).context).toBe('locked');
+    await page.keyboard.press('Shift');
+    await page.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.audio().started, null, {
+        timeout: 10_000
+    });
+    // past the quiet start, lay both beams across the gap; the simulation runs on (seeking: software
+    // rendering here runs only a few ticks a second)
+    await lab(page, (l) => l.seek(21));
+    await lab(page, (l) => {
+        l.placeProp('beam-0', -1.105, 0.62, -2, Math.PI / 2);
+        l.placeProp('beam-1', -0.895, 0.62, -2, Math.PI / 2);
+    });
+    // (a finished bridge, 1 s still, then the siren within 3-5 s: the delay varies with the seed)
+    await lab(page, (l) => l.seek(28));
+    expect((await lab(page, (l) => l.hazards())).floods).toBe(1);
+    await expect(page.locator('.toast')).toContainText('siren');
+    // the river's surface rises on screen with the simulation's water
+    await lab(page, (l) => l.seek(40));
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().planeY > -0.2,
+        null,
+        { timeout: 30_000 }
+    );
+    const hz = await lab(page, (l) => l.hazards());
+    expect(Math.abs(hz.planeY - hz.waterY)).toBeLessThan(0.05);
+    const a = await lab(page, (l) => l.audio());
+    expect(a.recent).toContain('siren');
+    expect(a.context).toBe('running');
+    // the playtest log recorded it; a facilitator's note goes in with its time
+    await page.locator('.settings-chip').click();
+    await page.locator('.settings-row button', { hasText: 'Playtest log' }).click();
+    const logText = page.locator('.playtest textarea');
+    await expect(logText).toHaveValue(/Playtest summary[\s\S]*floods: 1[\s\S]*siren/);
+    await page.locator('.playtest input').fill('saw the siren');
+    await page.locator('.playtest form button').click();
+    await expect(logText).toHaveValue(/note +saw the siren/);
     expect(problems).toEqual([]);
 });
 
@@ -456,8 +741,8 @@ test('the Timber Yard ute: get in, drive it with the keyboard, get out', async (
         ([x, z, yaw]) => {
             const l = (window as unknown as { __riverLab: Lab }).__riverLab;
             l.teleport(x, z, yaw);
-            // down at the door from a 1.86 m eye
-            l.look(yaw, -0.7);
+            // down at the door from a beaver's 1.22 m eye
+            l.look(yaw, -0.35);
         },
         [u0.x + sx * 2.2, u0.z + sz * 2.2, Math.atan2(sx, sz)]
     );
@@ -497,6 +782,44 @@ test('the Timber Yard ute: get in, drive it with the keyboard, get out', async (
     const p = await lab(page, (l) => l.player());
     const u1 = await lab(page, (l) => l.ute());
     expect(Math.hypot(p.x - u1.x, p.z - u1.z)).toBeGreaterThan(1);
+    expect(problems).toEqual([]);
+});
+
+test('the Timber Yard hammer: look at a beam, F nails it down and the nail head shows', async ({ page }) => {
+    test.setTimeout(300_000);
+    const problems = await boot(page, '?level=yard&t=0.01&quality=low#cell100');
+    await lab(page, (l) => l.action('pause'));
+    const p0 = await lab(page, (l) => l.player());
+    // a beam on its edge on the ground 0.6 m in front of you (yaw 0 looks along -z), across your
+    // view; look steeply down at the near side of its top, so the nail comes out of its bottom
+    await page.evaluate(
+        ([x, y, z, eye]) => {
+            const l = (window as unknown as { __riverLab: Lab }).__riverLab;
+            l.teleport(x, z, 0);
+            l.placeProp('beam-0', x, y + 0.3, z - 0.6, 0);
+            l.look(0, -Math.atan2(eye - 0.2, 0.55));
+        },
+        [p0.x, p0.y, p0.z, p0.eyeHeight]
+    );
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().nail === 1,
+        null,
+        { timeout: 60_000 }
+    );
+    expect(await lab(page, (l) => l.joints().nails)).toBe(0);
+    await page.keyboard.press('KeyF');
+    await page.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.joints().nails === 1, null, {
+        timeout: 30_000
+    });
+    await page.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.joints().drawn === 1, null, {
+        timeout: 30_000
+    });
+    // the same spot again is refused: still one nail
+    await page.keyboard.press('KeyF');
+    await page.waitForTimeout(500);
+    expect(await lab(page, (l) => l.joints())).toMatchObject({ connections: 1, nails: 1 });
+    expect(await lab(page, (l) => l.interaction().nail)).toBeGreaterThan(1);
+    await page.screenshot({ path: 'test-results/hammer-nail.png' });
     expect(problems).toEqual([]);
 });
 
@@ -571,7 +894,7 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
         Math.abs(rowBrightness(Math.floor(shot.height * 0.3)) - rowBrightness(Math.floor(shot.height * 0.8)))
     ).toBeGreaterThan(1);
     const s = await lab(page, (l) => l.stats());
-    expect(s.voxel.objects).toBe(18); // the yard's 16 plus two voxel beaver bodies
+    expect(s.voxel.objects).toBe(33); // the yard's 31 plus two voxel beaver bodies
     // player 2 walks on their own commands
     const before = await page.evaluate(
         () =>
@@ -600,10 +923,106 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
     await lab(page, (l) => (l as unknown as { setPlayers(n: number): void }).setPlayers(1));
     // player 2's body leaves with the next applied voxel frame (wait on it: slow CI runners lag)
     await page.waitForFunction(
-        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 17,
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 32,
         null,
         { timeout: 60_000 }
     );
+    expect(problems).toEqual([]);
+});
+
+test("split screen: player 2's hammer aim shows player 2's nail outline in player 2's view only", async ({ page }) => {
+    test.setTimeout(300_000);
+    const problems = await boot(page, '?level=yard&t=0.01&quality=low&noui#cell100');
+    await lab(page, (l) => l.action('pause'));
+    await lab(page, (l) => (l as unknown as { setPlayers(n: number): void }).setPlayers(2));
+    const slot2 = await lab(page, (l) => l.joints().slot2);
+    expect(slot2).toBeGreaterThan(0);
+    // player 2 stands over a beam on the ground and looks down at it; player 1 looks at the same
+    // beam from 3 m away (out of hammer reach), so a shared outline would show in both views
+    const p0 = await lab(page, (l) => l.player());
+    await page.evaluate(
+        ([x, y, z, eye]) => {
+            const l = (window as unknown as { __riverLab: Lab }).__riverLab as Lab & {
+                teleport2(x: number, z: number, yaw: number): void;
+                look2(yaw: number, pitch: number): void;
+            };
+            l.look(Math.atan2(-3, 0.6), -Math.atan2(eye - 0.2, Math.hypot(3, 0.6)));
+            l.teleport2(x + 3, z, 0);
+            l.placeProp('beam-0', x + 3, y + 0.3, z - 0.6, 0);
+            l.look2(0, -Math.atan2(eye - 0.2, 0.55));
+        },
+        [p0.x, p0.y, p0.z, p0.eyeHeight]
+    );
+    await page.waitForFunction(
+        (s2) => {
+            const o = (window as unknown as { __riverLab: Lab }).__riverLab.joints().outlines;
+            return o[1]?.length === 1 && o[1][0] === s2;
+        },
+        slot2,
+        { timeout: 60_000 }
+    );
+    // player 1's view (the top camera) draws no outline, player 2's (the bottom camera) draws
+    // player 2's; each camera renders its own outline layer and not the other's
+    const j = await lab(page, (l) => l.joints());
+    expect(j.outlines).toEqual([[], [slot2]]);
+    expect(j.viewLayers).toEqual([['View1'], ['View2']]);
+    // and on screen: the pixels that change with the outline (on, off, on, off, on, with uneven
+    // waits: the same in every shot with it and in every shot without, and different between;
+    // animated things, a creature or the water, differ between shots either way) are all in the
+    // bottom half
+    const show = (on: boolean, frames: number) =>
+        page.evaluate(
+            async ([v, k]) => {
+                (
+                    window as unknown as { __riverLab: { showNailOutlines(on: boolean): void } }
+                ).__riverLab.showNailOutlines(v as boolean);
+                for (let f = 0; f < (k as number); f++) await new Promise((r) => requestAnimationFrame(r));
+            },
+            [on, frames]
+        );
+    const shots: string[] = [];
+    for (const [on, frames] of [
+        [true, 3],
+        [false, 5],
+        [true, 4],
+        [false, 7],
+        [true, 6]
+    ] as const) {
+        await show(on, frames);
+        shots.push((await page.screenshot()).toString('base64'));
+    }
+    const changed = await page.evaluate(async (pngs) => {
+        const data = await Promise.all(
+            pngs.map(async (png) => {
+                const img = new Image();
+                img.src = `data:image/png;base64,${png}`;
+                await img.decode();
+                const c = document.createElement('canvas');
+                c.width = img.width;
+                c.height = img.height;
+                const g = c.getContext('2d')!;
+                g.drawImage(img, 0, 0);
+                return { w: c.width, h: c.height, d: g.getImageData(0, 0, c.width, c.height).data };
+            })
+        );
+        const ons = [data[0], data[2], data[4]];
+        const offs = [data[1], data[3]];
+        const diff = (a: Uint8ClampedArray, b: Uint8ClampedArray, i: number) =>
+            Math.max(Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2]));
+        const { w, h } = data[0];
+        const half = [0, 0];
+        for (let i = 0; i < data[0].d.length; i += 4) {
+            const steady =
+                diff(ons[0].d, ons[1].d, i) < 8 && diff(ons[0].d, ons[2].d, i) < 8 && diff(offs[0].d, offs[1].d, i) < 8;
+            if (steady && diff(ons[0].d, offs[0].d, i) > 25) half[(i / 4 / w) * 2 < h ? 0 : 1]++;
+        }
+        return half;
+    }, shots);
+    console.log(`outline pixels: top ${changed[0]}, bottom ${changed[1]}`);
+    // (a stray pixel or two of noise at most; the outline itself is 16 here, and drawn into the
+    // wrong view it shows there)
+    expect(changed[0]).toBeLessThanOrEqual(3);
+    expect(changed[1]).toBeGreaterThan(10);
     expect(problems).toEqual([]);
 });
 
@@ -702,7 +1121,7 @@ for (const transport of ['local', 'p2p'] as const)
         // the guest renders the host's world: both beaver bodies and every prop, all on the grid
         // (voxel frames lag the snapshots in software GL, so wait for the frame that has both beavers)
         await guest.waitForFunction(
-            () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 18,
+            () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 33,
             null,
             { timeout: 60_000 }
         );
@@ -723,6 +1142,230 @@ for (const transport of ['local', 'p2p'] as const)
         expect(problems).toEqual([]);
         expect(guestProblems).toEqual([]);
     });
+
+// a bad network on purpose (?netsim: 150-250 ms one way, 10 % of updates lost), and a guest who
+// reloads mid-game: the host keeps their player, and the same tab gets it back
+test('online co-op over a bad network: the guest reloads and rejoins as the same player', async ({ page, context }) => {
+    test.setTimeout(600_000);
+    const query = '?level=yard&t=0.01&quality=low&net=local&netsim=150,100,0.1#cell100';
+    const problems = await boot(page, query);
+    const guest = await context.newPage();
+    const guestProblems: string[] = [];
+    guest.on('pageerror', (e) => guestProblems.push(e.message));
+    const ready = (p: Page) =>
+        p.waitForFunction(() => (window as unknown as { __riverLab?: Lab }).__riverLab?.ready === true, null, {
+            timeout: 150_000
+        });
+    await guest.goto(`/${query}`);
+    await ready(guest);
+    type Status = {
+        hosting: string | null;
+        guests: number;
+        dropped: number[];
+        lag: (number | null)[];
+        guest: { slot: number; received: number; lagMs: number | null } | null;
+    };
+    type Net = {
+        net: {
+            host(): Promise<void>;
+            games(): { code: string }[];
+            join(c: string): Promise<void>;
+            status(): Status;
+        };
+    };
+    const status = (p: Page) => p.evaluate(() => (window as unknown as { __riverLab: Net }).__riverLab.net.status());
+    const until = (p: Page, src: string, timeout = 120_000) =>
+        p.waitForFunction(
+            (s) =>
+                new Function('st', `return ${s}`)((window as unknown as { __riverLab: Net }).__riverLab.net.status()),
+            src,
+            { timeout, polling: 250 }
+        );
+
+    await page.evaluate(() => (window as unknown as { __riverLab: Net }).__riverLab.net.host());
+    const code = (await status(page)).hosting!;
+    await guest.waitForFunction(
+        (c) => (window as unknown as { __riverLab: Net }).__riverLab.net.games().some((g) => g.code === c),
+        code,
+        { timeout: 120_000 }
+    );
+    await guest.evaluate((c) => (window as unknown as { __riverLab: Net }).__riverLab.net.join(c), code);
+    await until(guest, '(st.guest?.received ?? 0) > 5');
+    expect((await status(guest)).guest!.slot).toBe(1);
+    // both sides measure the round trip: at least the two one-way delays
+    await until(page, 'st.lag[0] !== null && st.lag[0] !== undefined');
+    expect((await status(page)).lag[0]).toBeGreaterThanOrEqual(250);
+    await until(guest, 'st.guest?.lagMs !== null');
+
+    // player 2 walks well away from where a newcomer would appear (beside the host)
+    const avatar2 = () =>
+        page.evaluate(
+            () =>
+                (
+                    window as unknown as {
+                        __riverLab: { entities(): Record<string, { x: number; z: number }> };
+                    }
+                ).__riverLab.entities()['avatar-1']
+        );
+    const start = await avatar2();
+    await guest.evaluate(() =>
+        (window as unknown as { __riverLab: { look(y: number, p: number): void } }).__riverLab.look(3.14, -0.1)
+    );
+    await guest.keyboard.down('KeyW');
+    let away = 0;
+    for (let i = 0; i < 200 && away <= 1.5; i++) {
+        await guest.waitForTimeout(300);
+        const p = await avatar2();
+        away = Math.hypot(p.x - start.x, p.z - start.z);
+    }
+    await guest.keyboard.up('KeyW');
+    // (a fresh join would appear back on the start spot: 1.5 m off is well clear of 0.5 m)
+    expect(away).toBeGreaterThan(1.5);
+    await page.waitForTimeout(1500); // the last of the walk arrives and the player stops
+    const left = await avatar2();
+
+    // the guest reloads: the host holds player 2 where they stood...
+    await guest.reload();
+    await until(page, 'st.dropped.length === 1', 30_000);
+    expect((await status(page)).dropped).toEqual([1]);
+    expect((await status(page)).guests).toBe(0);
+    // ...and the reloaded page gets that player back, still there (a fresh join would appear beside the host)
+    await ready(guest);
+    await until(guest, '(st.guest?.received ?? 0) > 5');
+    expect((await status(guest)).guest!.slot).toBe(1);
+    await until(page, 'st.guests === 1 && st.dropped.length === 0', 30_000);
+    const back = await avatar2();
+    expect(Math.hypot(back.x - left.x, back.z - left.z)).toBeLessThan(0.5);
+    expect(problems).toEqual([]);
+    expect(guestProblems).toEqual([]);
+});
+
+test('online co-op: the host’s flood reaches the guest — its river rises, the siren toast and sound', async ({
+    page,
+    context
+}) => {
+    test.setTimeout(600_000);
+    const query = '?level=yard&t=0.01&quality=low&net=local&seed=7#cell100';
+    const problems = await boot(page, query);
+    const guest = await context.newPage();
+    const guestProblems: string[] = [];
+    guest.on('console', (m) => {
+        if ((m.type() === 'error' || m.type() === 'warning') && !IGNORED.some((r) => r.test(m.text())))
+            guestProblems.push(`${m.type()}: ${m.text()}`);
+    });
+    guest.on('pageerror', (e) => guestProblems.push(`pageerror: ${e.message}`));
+    await guest.goto(`/${query}`);
+    await guest.waitForFunction(() => (window as unknown as { __riverLab?: Lab }).__riverLab?.ready === true, null, {
+        timeout: 150_000
+    });
+    type Net = {
+        net: {
+            host(): Promise<void>;
+            games(): { code: string }[];
+            join(c: string): Promise<void>;
+            connect(): Promise<void>;
+            status(): { hosting: string | null; guest: { slot: number; received: number } | null };
+        };
+    };
+    const call = (p: Page, src: string, arg?: unknown) =>
+        p.evaluate(
+            ([s2, a]) =>
+                new Function('l', 'a', `return (${s2})(l, a)`)(
+                    (window as unknown as { __riverLab: Net & Lab }).__riverLab,
+                    a
+                ),
+            [src, arg] as const
+        );
+    // the host plays on from the quiet start's end
+    await lab(page, (l) => l.seek(21));
+    await lab(page, (l) => l.action('pause'));
+    await Promise.all([call(page, '(l) => l.net.connect()'), call(guest, '(l) => l.net.connect()')]);
+    await call(page, '(l) => l.net.host()');
+    const code = ((await call(page, '(l) => l.net.status()')) as { hosting: string }).hosting;
+    await guest.waitForFunction(
+        (c) => (window as unknown as { __riverLab: Net }).__riverLab.net.games().some((g) => g.code === c),
+        code,
+        { timeout: 120_000 }
+    );
+    await call(guest, '(l, c) => l.net.join(c)', code);
+    await guest.waitForFunction(
+        () => ((window as unknown as { __riverLab: Net }).__riverLab.net.status().guest?.received ?? 0) > 5,
+        null,
+        { timeout: 120_000 }
+    );
+    // the guest's player presses a key: its sound may start (browser rules)
+    await guest.keyboard.press('Shift');
+    await guest.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.audio().started, null, {
+        timeout: 10_000
+    });
+    const baseY = (await lab(guest, (l) => l.hazards())).planeY;
+    // the host finishes the bridge
+    await lab(page, (l) => {
+        l.placeProp('beam-0', -1.105, 0.62, -2, Math.PI / 2);
+        l.placeProp('beam-1', -0.895, 0.62, -2, Math.PI / 2);
+    });
+    // two game pages in software GL simulate only a couple of ticks a second: the host seeks ahead
+    // (deterministic) past the siren, then plays on, sending its state to the guest
+    const now = (await lab(page, (l) => l.hazards())).tick / 60;
+    await page.evaluate((t) => {
+        const l = (window as unknown as { __riverLab: Lab }).__riverLab;
+        l.seek(t + 7);
+        l.action('pause');
+    }, now);
+    await guest.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().flood >= 1,
+        null,
+        { timeout: 120_000 }
+    );
+    await expect(guest.locator('.toast')).toContainText('siren');
+    // and on into the rising water
+    const later = (await lab(page, (l) => l.hazards())).tick / 60;
+    const seekY = await page.evaluate((t) => {
+        const l = (window as unknown as { __riverLab: Lab }).__riverLab;
+        l.seek(t + 10);
+        l.action('pause');
+        return l.hazards().waterY;
+    }, later);
+    expect(seekY).toBeGreaterThan(baseY + 0.02);
+    // a seek steps the host's sim without sending a state (only its frames send them), so wait for
+    // the guest's river to reach where the seek left the host's (still rising or at the peak), not
+    // just for it to start rising on states from before the seek
+    await guest.waitForFunction(
+        (y) => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().planeY > y - 0.01,
+        seekY,
+        { timeout: 300_000 }
+    );
+    const ga = await lab(guest, (l) => l.audio());
+    expect(ga.recent).toContain('siren');
+    // the guest's water follows the host's: pause the host (it sends a state after each step, so
+    // none after this; `pause` toggles, so only if it is running), let the guest settle on the last
+    // state and render it, then compare tightly
+    await lab(page, (l) => {
+        if (!l.paused()) l.action('pause');
+    });
+    const hh = await lab(page, (l) => l.hazards());
+    const gap = async () => {
+        const g = await lab(guest, (l) => l.hazards());
+        const h = await lab(page, (l) => ({ ...l.hazards(), paused: l.paused() }));
+        return {
+            hostPaused: h.paused,
+            hostTicks: h.tick - hh.tick,
+            water: Math.round(Math.abs(g.waterY - h.waterY) * 1000) / 1000,
+            plane: Math.round(Math.abs(g.planeY - g.waterY) * 1000) / 1000
+        };
+    };
+    // (the numbers are in the failure message if it never settles)
+    const settled = async () => {
+        const g = await gap();
+        return g.hostPaused && g.hostTicks === 0 && g.water <= 0.01 && g.plane <= 0.01 ? 'settled' : JSON.stringify(g);
+    };
+    await expect.poll(settled, { timeout: 120_000, intervals: [1000] }).toBe('settled');
+    const final = await gap();
+    expect(final.water).toBeLessThanOrEqual(0.01);
+    expect(final.plane).toBeLessThanOrEqual(0.01);
+    expect(problems).toEqual([]);
+    expect(guestProblems).toEqual([]);
+});
 
 test("online co-op in the Valley: the guest streams its own world and follows the host's stages", async ({
     page,
@@ -782,6 +1425,9 @@ test("online co-op in the Valley: the guest streams its own world and follows th
         { timeout: 120_000 }
     );
     await expect(guest.locator('#hud-objective')).toContainText('2/7 Shallow Creek', { timeout: 60_000 });
+    // both devices show the host's water (Epic 7: the volume travels in the host state)
+    const hostLitres = (await lab(page, (l) => l.water())).volume.toFixed(1);
+    await expect(guest.locator('#hud-water')).toContainText(`${hostLitres} L`, { timeout: 30_000 });
     expect(await call(guest, '(l) => l.nearTiles()')).toBeGreaterThan(10);
     const gs = await guest.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.stats());
     expect(gs.voxel.rejected).toBe(0);
@@ -814,5 +1460,154 @@ test('the level designer opens on the starter level and places a box with a clic
     );
     expect(pieces).toBe(1);
     await expect(page.locator('.designer')).toContainText('not built yet');
+    expect(problems).toEqual([]);
+});
+
+test('logging in the Timber Yard: chew a pine down, the voxel tree becomes a stump and a log; the sawmill lever sets beams', async ({
+    page
+}) => {
+    test.setTimeout(300_000);
+    const problems = await boot(page, '?level=yard&t=0.01&quality=low#cell100');
+    await lab(page, (l) => l.action('pause'));
+    expect((await lab(page, (l) => l.wood())).trees.length).toBe(6);
+    // stand west of tree 2 (13.1, 7.3), looking at its trunk
+    await lab(page, (l) => {
+        l.teleport(12.1, 7.3, -Math.PI / 2);
+        l.look(-Math.PI / 2, -0.75);
+    });
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().target === 'tree-2',
+        null,
+        { timeout: 60_000 }
+    );
+    await page.screenshot({ path: 'test-results/logging-standing.png' });
+    // a bite at a time: a bite takes 0.3 s of game time and presses in between are swallowed (the
+    // software renderer runs the game slower than real time), so press again until it lands
+    const tree2 = () => lab(page, (l) => l.wood().trees[2]);
+    for (let n = 1; n <= 10 && (await tree2()).phase === 'standing'; n++) {
+        for (let tries = 0; tries < 30; tries++) {
+            await lab(page, (l) => l.input({ grab: true }));
+            await page.waitForTimeout(500);
+            const w = await tree2();
+            if (w.phase === 'down' || w.cut >= n / 10 - 1e-6) break;
+        }
+    }
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.wood().trees[2].phase === 'down',
+        null,
+        { timeout: 60_000 }
+    );
+    // the felled log lies east; the static tree has gone from the voxel world, a stump stays (the
+    // worker side is unit tested: tests/unit/forestry.test.ts; here, look at the screenshot)
+    await page.waitForTimeout(4000);
+    await lab(page, (l) => l.look(-Math.PI / 2 + 0.3, -0.45));
+    await page.waitForTimeout(1500);
+    await page.screenshot({ path: 'test-results/logging-felled.png' });
+    // a grab press that landed after the fall picks the log up (on a slow software renderer the
+    // presses queue up), and full hands never aim at the lever: let go first
+    for (let tries = 0; tries < 20 && (await lab(page, (l) => l.interaction().holding)) !== null; tries++) {
+        await lab(page, (l) => l.input({ grab: true }));
+        await page.waitForTimeout(500);
+    }
+    expect(await lab(page, (l) => l.interaction().holding)).toBeNull();
+    // the sawmill's lever: walk up to the near post and grab it to set the saw to beams
+    await lab(page, (l) => {
+        // the lever is on the near (north) post: stand north of it, facing south (+z)
+        l.teleport(4.8, 7.6, Math.PI);
+        l.look(Math.PI, -0.2);
+    });
+    // look down until the view is on the lever (where depends on the body's eye height). The sim
+    // reads the look when it steps, so wait for it to step at each pitch: on a slow software
+    // renderer a fixed wait can sweep past the lever before the sim ever looks there
+    const sweep: string[] = [];
+    for (let p = -0.2; p > -1.0; p -= 0.04) {
+        const t0 = await page.evaluate((pitch) => {
+            const l = (window as unknown as { __riverLab: Lab }).__riverLab;
+            l.look(Math.PI, pitch);
+            return l.hazards().tick;
+        }, p);
+        await page.waitForFunction(
+            (t) => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().tick >= t + 2,
+            t0,
+            { timeout: 30_000 }
+        );
+        const seen = await lab(page, (l) => {
+            const pl = l.player();
+            const it = l.interaction();
+            return `pitch ${pl.pitch.toFixed(2)} at (${pl.x.toFixed(2)}, ${pl.y.toFixed(2)}, ${pl.z.toFixed(2)}): target ${it.target}, holding ${it.holding}`;
+        });
+        sweep.push(seen);
+        if (seen.includes('target sawmill')) break;
+    }
+    // if the sweep missed, the failure says what the player saw at each pitch
+    expect(sweep.at(-1), sweep.join('\n')).toContain('target sawmill');
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().target === 'sawmill',
+        null,
+        { timeout: 60_000 }
+    );
+    await page.screenshot({ path: 'test-results/logging-sawmill.png' });
+    for (let tries = 0; tries < 20 && (await lab(page, (l) => l.wood().sawmill?.mode)) !== 'beam'; tries++) {
+        await lab(page, (l) => l.input({ grab: true }));
+        await page.waitForTimeout(500);
+    }
+    expect((await lab(page, (l) => l.wood())).sawmill?.mode).toBe('beam');
+    expect(problems).toEqual([]);
+});
+
+test('the falling tree in the Timber Yard: a bite with the ute by the stand, and the pine leans over towards it', async ({
+    page
+}) => {
+    test.setTimeout(300_000);
+    const problems = await boot(page, '?level=yard&t=0.01&quality=low#cell100');
+    // past the quiet start, with the ute parked east of tree 1 (16.0, 4.5)
+    await lab(page, (l) => {
+        l.placeUte(20.5, 4.5, 0);
+        // the software renderer runs slower than real time: step the sim past the quiet start,
+        // then let it run on (seek pauses it)
+        l.seek(21);
+        l.action('pause');
+    });
+    expect(await lab(page, (l) => l.paused())).toBe(false);
+    // chew it from the west, the far side from the ute
+    await lab(page, (l) => {
+        // (forward is (-sin yaw, -cos yaw): facing +x)
+        l.teleport(14.9, 4.5, -Math.PI / 2);
+        l.look(-Math.PI / 2, -0.75);
+    });
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().target === 'tree-1',
+        null,
+        { timeout: 60_000 }
+    );
+    const cells0 = (await lab(page, (l) => l.stats())).dynamicCells;
+    for (let tries = 0; tries < 30 && (await lab(page, (l) => l.hazards().tree)) === 0; tries++) {
+        await lab(page, (l) => l.input({ grab: true }));
+        await page.waitForTimeout(500);
+    }
+    expect(await lab(page, (l) => l.hazards().tree)).toBe(1);
+    await lab(page, (l) => {
+        // south-east of it, outside its crown, looking at it diagonally (forward is
+        // (-sin yaw, -cos yaw)): the lean towards the ute (east) tips it to the left
+        l.teleport(20.0, 1.5, Math.atan2(4, -3));
+        l.look(Math.atan2(4, -3), 0.3);
+    });
+    await page.waitForTimeout(1500);
+    await page.screenshot({ path: 'test-results/falling-tree-crack.png' });
+    // the tell: the static tree is gone and the marker draws it, leaning further over time
+    const t0 = await lab(page, (l) => l.hazards().tick);
+    await page.waitForFunction(
+        (t) => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().tick >= t + 5 * 60,
+        t0,
+        { timeout: 120_000 }
+    );
+    // 5 s into the 7 s tell
+    expect(await lab(page, (l) => l.hazards().tree)).toBe(1);
+    await page.waitForTimeout(1500);
+    await page.screenshot({ path: 'test-results/falling-tree-leaning.png' });
+    const cells1 = (await lab(page, (l) => l.stats())).dynamicCells;
+    // a whole tree's worth of moving cells (at 10 cm: its trunk and four needle tiers)
+    expect(cells1 - cells0).toBeGreaterThan(1000);
+    expect((await lab(page, (l) => l.wood())).trees[1].phase).toBe('standing');
     expect(problems).toEqual([]);
 });

@@ -24,6 +24,10 @@
  * Pure module (no engine).
  */
 
+import { crossingFrame } from '../sim/hazards.ts';
+import type { HazardSpec } from '../sim/hazards.ts';
+import { WEATHER } from '../sim/weather.ts';
+import type { WeatherZone } from '../sim/weather.ts';
 import { GRID_SIZE, cellCenterX, cellCenterZ, cellIndexX, cellIndexZ } from '../voxels/grid.ts';
 import { pose, quatFromYawPitchRoll, quatMul } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
@@ -49,24 +53,44 @@ import {
     smoothstep
 } from './common.ts';
 import type { RockSpot, TerrainSpec, TreeSpot } from './common.ts';
+import { STAND_CROWN_RADIUS, drawStandTree } from './forestry.ts';
+import type { ForestryDef } from './forestry.ts';
 import { pieceVolume } from './level.ts';
-import type { LevelBuildResult, LevelDef, LevelLayout, LevelStage, PropPlacement, Rect, StaticPiece } from './level.ts';
+import type {
+    LevelBuildResult,
+    LevelDef,
+    LevelLayout,
+    LevelStage,
+    PropPlacement,
+    Rect,
+    StaticPiece,
+    WaterSource
+} from './level.ts';
+import { routeSign } from './route-signs.ts';
+import { nearestPath } from './side-paths.ts';
+import type { SidePath } from './side-paths.ts';
 import {
+    BRIDGE,
     BRIDGE_X,
     BUCKET_STUMP,
+    FLOOD_PEAK_Y,
     CREEK_BED_Y,
     CREEK_WATER_Y,
     WINDSOCK,
     YARD_Y,
     creekCenterZ,
     creekHalfWidth,
+    floodWashup,
+    yardButt,
     yardHeight,
+    YARD_FORESTRY,
     yardLayout,
     yardPieces,
     yardProps,
     yardSideMaterial,
     yardSurfaceMaterial
 } from './timber-yard.ts';
+import { waterButt } from './water-butt.ts';
 
 // ------------------------------------------------------------------------------- the route frame
 
@@ -166,8 +190,58 @@ function yardBlend(u: number, t: number): number {
     return (1 - smoothstep(21, 26, Math.abs(t))) * (1 - smoothstep(2.5, 6, u)) * smoothstep(-18, -15.5, u);
 }
 
+/**
+ * Side paths off the road (side-paths.ts): the old logging track loops off the forest road and back
+ * before the culvert (somewhere to go when the road is closed; wide enough for the ute), and a track
+ * climbs from past the culvert to the foot of the fire lookout, stopping short of its legs.
+ */
+export const SIDE_PATHS: SidePath[] = [
+    {
+        name: 'logging-track',
+        points: [
+            [11, roadT(11) + 2.2],
+            [15, 8.5],
+            [21, 12.5],
+            [28, 13],
+            [33, 9.5],
+            [35.5, roadT(35.5) + 2.2]
+        ],
+        halfWidth: 1.6
+    },
+    {
+        name: 'lookout-track',
+        points: [
+            [48, roadT(48) + 2.2],
+            [51, 9],
+            [54, 15],
+            [56, 19.2]
+        ],
+        halfWidth: 1.4
+    }
+];
+
 /** Continuous ground height in the route frame. */
-function heightUT(u: number, t: number): number {
+function heightUT(u: number, t: number, paths = true): number {
+    let y = naturalUT(u, t);
+    // side paths: graded flat across to their centre line's own height
+    const hit = paths ? nearestPath(SIDE_PATHS, u, t, 3.2) : null;
+    const pathW = hit ? 1 - smoothstep(hit.path.halfWidth, hit.path.halfWidth + 1.6, hit.d) : 0;
+    if (hit && pathW > 0) y = lerp(y, naturalUT(hit.u, hit.t), pathW);
+    // the valley sides are terraced into 0.3 m benches (as in the Timber Yard): fewer triangles
+    const terrace = smoothstep(12, 16, Math.abs(t - roadT(u))) * (1 - yardBlend(u, t)) * (1 - pathW);
+    if (terrace > 0) y = lerp(y, Math.floor(y / 0.3) * 0.3 + 1e-3, terrace);
+    // the crossings, cut right across the valley with steep walls
+    for (const c of CHANNELS) {
+        const d = Math.abs(u - c.centre(t));
+        const hw = c.hw(t);
+        if (d < hw) return c.bed + 0.15 * smoothstep(0, hw * 0.8, d);
+        if (d < hw + 0.3) y = lerp(c.bed + 0.15, y, smoothstep(hw, hw + 0.3, d));
+    }
+    return y;
+}
+
+/** Ground height before terraces, side paths and the crossings. */
+function naturalUT(u: number, t: number): number {
     const rt = roadT(u);
     const a = Math.abs(t - rt);
     const f = floorY(u, t);
@@ -189,21 +263,16 @@ function heightUT(u: number, t: number): number {
     // the Timber Yard's own ground at the start
     const yb = yardBlend(u, t);
     if (yb > 0) y = lerp(y, yardHeight(t + BRIDGE_X, creekCenterZ(BRIDGE_X) - u), yb);
-    // the valley sides are terraced into 0.3 m benches (as in the Timber Yard): fewer triangles
-    const terrace = smoothstep(12, 16, a) * (1 - yb);
-    if (terrace > 0) y = lerp(y, Math.floor(y / 0.3) * 0.3 + 1e-3, terrace);
-    // the crossings, cut right across the valley with steep walls
-    for (const c of CHANNELS) {
-        const d = Math.abs(u - c.centre(t));
-        const hw = c.hw(t);
-        if (d < hw) return c.bed + 0.15 * smoothstep(0, hw * 0.8, d);
-        if (d < hw + 0.3) y = lerp(c.bed + 0.15, y, smoothstep(hw, hw + 0.3, d));
-    }
     return y;
 }
 
 export function valleyHeight(x: number, z: number): number {
     return heightUT(routeU(x, z), routeT(x, z));
+}
+
+/** The ground as it would be without the side paths' grading (tests: what the grading changed). */
+export function valleyHeightUngraded(x: number, z: number): number {
+    return heightUT(routeU(x, z), routeT(x, z), false);
 }
 
 const topCell = (x: number, z: number) => Math.floor(valleyHeight(x, z) / GRID_SIZE - 1e-9);
@@ -227,6 +296,9 @@ function surfaceMaterial(x: number, z: number, top: number, grad: number): numbe
         if (grad > 1.5) return voxel(mountain || u > 88 ? M.HillRock : M.Rock, shade & 1);
     }
     if (a < 1.6) return voxel(u > 88 && u < 142 ? M.Concrete : M.Path, shade);
+    const side = nearestPath(SIDE_PATHS, u, t, 1.4);
+    if (side && side.d < side.path.halfWidth - 0.45 + 0.25 * fbm(x * 0.6, z * 0.6, 17))
+        return voxel(fbm(x * 0.4, z * 0.4, 19) > 0.62 ? M.GrassDry : M.Path, shade);
     if (worksWeight(u, a) > 0.5)
         return voxel(fbm(x * 0.2, z * 0.2, 13) > 0.6 ? M.Pebble : M.Concrete, shade & 1 ? 1 : 3);
     if (mountain) return voxel(y > 13.2 && a > 5 ? M.Snow : M.HillGrass, shade);
@@ -313,21 +385,22 @@ function flag(u: number, t: number, colour: number): StaticPiece[] {
     ];
 }
 
-/** A wooden signpost with a coloured board (one per area). */
-function signpost(u: number, t: number, colour: number): StaticPiece[] {
-    const y = groundUT(u, t);
-    return [
-        piece('sign-post', boxS(0.05, 0.8, 0.05), u, y + 0.8, t, darkTimber),
-        piece(
-            'sign-board',
-            boxS(0.6, 0.22, 0.03),
-            u,
-            y + 1.45,
-            t,
-            (x, yy) => voxel(Math.abs(yy) < 0.1 && Math.abs(x) < 0.5 ? colour : M.Timber, 1),
-            { priority: 3, yaw: Math.PI / 2 }
-        )
-    ];
+/**
+ * The route sign at an area's start: the area's number and the way on, on a band of its colour,
+ * beside the road facing players coming up it (route-signs.ts). The board is axis-aligned (the route
+ * runs at 45 degrees), turned to face down the road and across it.
+ */
+function signpost(u: number, t: number, stage: number): StaticPiece[] {
+    const w = routeToWorld(u, t);
+    // the road bends ahead: the arrow bears that way (+t is to the reader's right)
+    const ahead = roadT(u + 14) - roadT(u);
+    const arrow = ahead > 1.5 ? 'right' : ahead < -1.5 ? 'left' : 'up';
+    // left of the road its face looks along +z (down the route and across); right of it, along -x
+    return routeSign({ x: w.x, y: groundUT(u, t), z: w.z }, t < roadT(u) ? 0 : 3, {
+        number: stage + 1,
+        arrow,
+        colour: STAGE_COLOURS[stage]
+    });
 }
 
 /** Checkpoint centres (route frame), one per stage. */
@@ -340,7 +413,7 @@ export const CHECKPOINTS = [
     { u: 174.2, t: roadT(174.2) }, // 6: past the crevasse, on the level bench
     { u: SUMMIT_U, t: 0 } // 7: the flower
 ];
-const STAGE_COLOURS = [M.HiVis, M.TestOrange, M.Grass, M.TestBlue, M.Brick, M.Snow, M.Flower];
+export const STAGE_COLOURS = [M.HiVis, M.TestOrange, M.Grass, M.TestBlue, M.Brick, M.Snow, M.Flower];
 
 function valleyPieces(): StaticPiece[] {
     const P: StaticPiece[] = [];
@@ -397,7 +470,7 @@ function valleyPieces(): StaticPiece[] {
                 darkTimber
             )
         );
-    P.push(...signpost(8, roadT(8) - 2.4, STAGE_COLOURS[2]));
+    P.push(...signpost(8, roadT(8) - 2.4, 2));
     P.push(...flag(CHECKPOINTS[2].u, CHECKPOINTS[2].t - 2.2, STAGE_COLOURS[2]));
 
     // ---- 4: the gorge, its stone pier and a waterfall from the works' outfall
@@ -427,8 +500,7 @@ function valleyPieces(): StaticPiece[] {
     P.push(piece('trestle-snapped', boxS(0.1, 0.1, 1.3), gu + 2.3, rim - 1.0, 0.8, darkTimber, { pitch: 0.9 }));
     P.push(piece('trestle-leg', boxS(0.09, 2.0, 0.09), gu - 1.6, 0.5, -1.5, darkTimber, { roll: 0.35 }));
     // the outfall: a concrete pipe end in the far wall, and the water falling from it
-    const wt = 15;
-    const wu = gorgeU(wt) + GORGE.hw;
+    const { u: wu, t: wt } = waterfallSpot();
     P.push(
         piece('outfall', { type: 'cylinder', axis: 'z', r: 0.7, half: 0.6 }, wu + 0.3, rim - 0.6, wt, concrete, {
             priority: 3
@@ -459,7 +531,7 @@ function valleyPieces(): StaticPiece[] {
         )
     );
     // the timber pile at the gorge
-    P.push(...signpost(70, roadT(70) - 2.6, STAGE_COLOURS[3]));
+    P.push(...signpost(70, roadT(70) - 2.6, 3));
     P.push(...flag(CHECKPOINTS[3].u, CHECKPOINTS[3].t - 2.4, STAGE_COLOURS[3]));
 
     // ---- 5: the old industrial works
@@ -581,7 +653,7 @@ function valleyPieces(): StaticPiece[] {
             collide: false
         })
     );
-    P.push(...signpost(96, -2.6, STAGE_COLOURS[4]));
+    P.push(...signpost(96, -2.6, 4));
     P.push(...flag(CHECKPOINTS[4].u, CHECKPOINTS[4].t - 2.4, STAGE_COLOURS[4]));
 
     // ---- 6: the mountain road and the crevasse
@@ -619,7 +691,7 @@ function valleyPieces(): StaticPiece[] {
             )
         );
     }
-    P.push(...signpost(146, roadT(146) - 2.6, STAGE_COLOURS[5]));
+    P.push(...signpost(146, roadT(146) - 2.6, 5));
     P.push(...flag(CHECKPOINTS[5].u, CHECKPOINTS[5].t - 2.4, STAGE_COLOURS[5]));
 
     // ---- 7: the flower on the summit: the goal of the whole journey
@@ -627,7 +699,7 @@ function valleyPieces(): StaticPiece[] {
     P.push(
         piece(
             'flower-stem',
-            { type: 'cylinder', axis: 'y', r: 0.22, half: 1.6 },
+            { type: 'cylinder', axis: 'y', r: 0.3, half: 1.6 },
             SUMMIT_U,
             fy + 1.5,
             0,
@@ -638,7 +710,7 @@ function valleyPieces(): StaticPiece[] {
     P.push(
         piece(
             'flower-leaf',
-            { type: 'ellipsoid', rx: 0.9, ry: 0.15, rz: 0.4 },
+            { type: 'ellipsoid', rx: 0.9, ry: 0.22, rz: 0.4 },
             SUMMIT_U,
             fy + 1.0,
             0.7,
@@ -690,7 +762,112 @@ function valleyPieces(): StaticPiece[] {
             })
         );
     }
-    P.push(...signpost(192, -2.6, STAGE_COLOURS[6]));
+    P.push(...signpost(192, -2.6, 6));
+    P.push(...landmarkPieces());
+    // ---- water tanks (Epic 7): where the spare buckets of the works and the summit road wait
+    for (const b of valleyButts()) P.push(...b.pieces);
+    return P;
+}
+
+/**
+ * Distant landmarks: a silhouette for each area that reads from far down the valley. Every part is
+ * at least 42 cm thick, so it survives the 40 cm far lattice (tests/unit/landmarks.test.ts). The works have their chimney and crane, the gorge its
+ * waterfall and the summit its flower; these add the forest's fire lookout on the ridge and the
+ * mountain's radio mast.
+ */
+export const LANDMARKS = {
+    lookout: { u: 58, t: 24 },
+    mast: { u: 184, t: -26 }
+};
+
+function landmarkPieces(): StaticPiece[] {
+    const P: StaticPiece[] = [];
+    // the fire lookout: a timber cabin on four braced legs, with a hip roof and a hi-vis band
+    {
+        const { u, t } = LANDMARKS.lookout;
+        const y = groundUT(u, t) - 0.3;
+        const legH = 11;
+        for (const [du, dt] of [
+            [-1.3, -1.3],
+            [-1.3, 1.3],
+            [1.3, -1.3],
+            [1.3, 1.3]
+        ] as const)
+            P.push(
+                piece('lookout-leg', boxS(0.22, legH / 2, 0.22), u + du, y + legH / 2, t + dt, darkTimber, {
+                    roll: -dt * 0.03,
+                    pitch: du * 0.03
+                })
+            );
+        // cross braces on each face
+        for (const [du, dt, yaw] of [
+            [-1.3, 0, 0],
+            [1.3, 0, 0],
+            [0, -1.3, Math.PI / 2],
+            [0, 1.3, Math.PI / 2]
+        ] as const)
+            for (const [tilt, h] of [
+                [-0.9, 0.3],
+                [0.9, 0.3],
+                [-0.9, 0.7],
+                [0.9, 0.7]
+            ] as const)
+                P.push(
+                    piece('lookout-brace', boxS(0.21, 0.21, 1.9), u + du, y + legH * h, t + dt, darkTimber, {
+                        yaw,
+                        pitch: tilt,
+                        collide: false
+                    })
+                );
+        P.push(
+            piece('lookout-cabin', boxS(1.5, 1.0, 1.5), u, y + legH + 1.0, t, grain(M.Timber, 'y', 0.2, 5), {
+                priority: 3
+            })
+        );
+        P.push(
+            piece('lookout-band', boxS(1.55, 0.21, 1.55), u, y + legH + 1.35, t, solid(M.HiVis, 0), { priority: 4 })
+        );
+        for (let n = 0; n < 3; n++)
+            P.push(
+                piece(
+                    'lookout-roof',
+                    boxS(1.8 - n * 0.55, 0.21, 1.8 - n * 0.55),
+                    u,
+                    y + legH + 2.2 + n * 0.4,
+                    t,
+                    solid(M.Galvanised, n & 1 ? 0 : 2),
+                    { priority: 3 }
+                )
+            );
+    }
+    // the radio mast: a lattice tower banded orange and white, on a concrete pad, with a dish
+    {
+        const { u, t } = LANDMARKS.mast;
+        const y = groundUT(u, t);
+        const H = 18;
+        P.push(piece('mast-pad', boxS(1.4, 0.4, 1.4), u, y + 0.1, t, concrete));
+        P.push(
+            piece('mast', boxS(0.4, H / 2, 0.4), u, y + H / 2, t, (_x, yy) =>
+                voxel(Math.floor((yy + H / 2) / 2.25) & 1 ? M.HiVisStripe : M.HiVis, 0)
+            )
+        );
+        P.push(
+            piece(
+                'mast-dish',
+                { type: 'cylinder', axis: 'z', r: 0.8, half: 0.22 },
+                u + 0.6,
+                y + H * 0.7,
+                t,
+                solid(M.Galvanised, 2),
+                {
+                    collide: false,
+                    yaw: 0.6,
+                    priority: 3
+                }
+            )
+        );
+        P.push(piece('mast-hut', boxS(1.2, 1.0, 0.9), u - 2.2, y + 0.9, t + 0.4, concrete, { priority: 3 }));
+    }
     return P;
 }
 
@@ -723,6 +900,8 @@ function clearSpot(u: number, t: number, r: number): boolean {
     if (worksWeight(u, a) > 0.02) return false;
     if (Math.abs(u - WALL.u) < 2.5) return false;
     if (Math.hypot(u - SUMMIT_U, t) < 7) return false;
+    for (const l of Object.values(LANDMARKS)) if (Math.hypot(u - l.u, t - l.t) < 4.5) return false;
+    if (nearestPath(SIDE_PATHS, u, t, 2.4 + r * 0.6)) return false;
     for (const c of CHECKPOINTS) if (Math.hypot(u - c.u, t - c.t) < 4) return false;
     // the timber piles
     for (const [su, st] of STAGING) if (Math.hypot(u - su, t - st) < 4.5) return false;
@@ -811,7 +990,7 @@ function scene(seed: number): Scene {
         const summit = n % 3 === 0;
         const u = summit ? SUMMIT_U - 14 + r() * 26 : 6 + r() * 76;
         const t = summit ? across(14, 2.8) : roadT(u) + across(30, 2.2);
-        if (Math.abs(t - roadT(u)) < 1.9 || channelEdge(u, t) < 0.6) continue;
+        if (Math.abs(t - roadT(u)) < 1.9 || channelEdge(u, t) < 0.6 || nearestPath(SIDE_PATHS, u, t, 1.6)) continue;
         const w = routeToWorld(u, t);
         if (!inBounds(w.x, w.z, 1)) continue;
         flowers.push([w.x, w.z, r() < 0.3 ? 2 : 0]);
@@ -861,6 +1040,12 @@ function buildScenery(
         trees++;
     });
     let rocks = 0;
+    // the Timber Yard's logging stand (felled trees: the voxel worker follows the sim)
+    VALLEY_FORESTRY.trees.forEach((t, n) => {
+        if (!hit(t.x, t.z, STAND_CROWN_RADIUS)) return;
+        drawStandTree(world, t, n, surfaceY(t.x, t.z), stats);
+        trees++;
+    });
     sc.layout.rocks.forEach((k, n) => {
         if (!hit(k.x, k.z, sc.rockR[n])) return;
         rock(world, k.x, k.z, surfaceY(k.x, k.z), k.rx, k.ry, k.rz, k.yaw, stats, n + 5);
@@ -923,6 +1108,27 @@ function atUT(u: number, t: number, lift: number, yaw = 0, pitch = 0, roll = 0):
     return pose(w.x, groundUT(u, t) + lift, w.z, quatFromYawPitchRoll(ROUTE_YAW + yaw, pitch, roll));
 }
 
+/** The Timber Yard's logging stand and sawmill, where the yard is (area 1). */
+const VALLEY_FORESTRY: ForestryDef = (() => {
+    const y = YARD_FORESTRY;
+    const saw = y.sawmill!;
+    const w = yardToWorld(saw.x, saw.z);
+    return {
+        // positions and leans turned with the yard
+        trees: y.trees.map((t) => ({
+            ...yardToWorld(t.x, t.z),
+            yaw: t.yaw + ROUTE_YAW,
+            lean: t.lean && {
+                x: t.lean.x * Math.cos(ROUTE_YAW) + t.lean.z * Math.sin(ROUTE_YAW),
+                z: -t.lean.x * Math.sin(ROUTE_YAW) + t.lean.z * Math.cos(ROUTE_YAW)
+            }
+        })),
+        sawmill: { x: w.x, z: w.z, yaw: saw.yaw + ROUTE_YAW, y: saw.y },
+        axe: y.axe ? fromYard(y.axe) : null,
+        ground: surfaceY
+    };
+})();
+
 /** How many of each prop the Valley uses (sim/lab-entities.ts sizes its pools from these). */
 export const VALLEY_PROPS = { planks: 12, beams: 12, crates: 6 };
 
@@ -963,6 +1169,26 @@ const bucketAt = (u: number, t: number) => {
 };
 
 const stump = yardToWorld(BUCKET_STUMP.x, BUCKET_STUMP.z);
+
+/**
+ * Water butts beyond the yard (Epic 7), each filling a bucket standing on a stage's spare-bucket
+ * spot, its barrel to the side of the road (+t).
+ */
+function valleyButts(): ReturnType<typeof waterButt>[] {
+    const butt = (name: string, u: number, t: number, litres: number) => {
+        const w = routeToWorld(u, t);
+        return waterButt(name, w.x, w.z, groundUT(u, t), groundUT(u, t + 0.62), -Math.PI / 4, litres);
+    };
+    return [butt('works water tank', 96, 1.8, 30), butt('mountain spring butt', 175, roadT(175) + 0.8, 20)];
+}
+
+function valleySources(): WaterSource[] {
+    const y = yardButt().source;
+    const w = yardToWorld(y.x, y.z);
+    return [{ ...y, x: w.x, z: w.z }, ...valleyButts().map((b) => b.source)];
+}
+
+const summit = routeToWorld(SUMMIT_U, 0);
 
 export const VALLEY_STAGES: LevelStage[] = [
     {
@@ -1009,12 +1235,136 @@ export const VALLEY_STAGES: LevelStage[] = [
     },
     {
         name: 'Flower Summit',
-        objective: 'Set the bucket down by the flower',
+        objective: 'Water the flower: hold the bucket inside the ring of stones and pour (R)',
         goal: square(SUMMIT_U, 0, 2.0),
         start: restart(175, roadT(175)),
-        bucket: bucketAt(175, roadT(175) + 0.8)
+        bucket: bucketAt(175, roadT(175) + 0.8),
+        flower: { x: summit.x, z: summit.z, r: 2.2 }
     }
 ];
+
+// ------------------------------------------------------------------------------- hazards and weather
+
+/** In the creek's channel (and a hand's width over its lip), anywhere along it. */
+function inCreek(x: number, z: number): boolean {
+    const u = routeU(x, z);
+    const t = routeT(x, z);
+    return Math.abs(u - creekU(t)) < creekHW(t) + 0.3;
+}
+
+/** Along the route (u) from `u0` to `u1`: a weather area. */
+const alongRoute =
+    (u0: number, u1: number) =>
+    (x: number, z: number): boolean => {
+        const u = routeU(x, z);
+        return u >= u0 && u < u1;
+    };
+/** Downstream (+t: the creek, the culvert and the gorge all run across the route). */
+const DOWNSTREAM = { x: Math.SQRT1_2, z: Math.SQRT1_2 };
+
+/**
+ * The weather along the journey (src/sim/weather.ts, Epic 9 #88), one kind per area, each once a
+ * run, a seeded moment after the first player gets there; the hazard director keeps it one hazard
+ * at a time with the flood. Counterplay (tests/unit/valley-weather.test.ts):
+ * - rain on the forest road: wet timber slips (a grip gives less force, HAZARD.wetGrip): a heavy beam
+ *   carried alone slips out; carry it together. (The river rises a little too: atmosphere, it
+ *   reaches no bridge.)
+ * - mist over the gorge: atmosphere only (not a hazard: no budget, no toast); the view closes in;
+ * - a fog bank on the mountain road: the view closes in to the near world's edge at most (only for
+ *   players in that area); the road's edge posts are close enough to steer by;
+ * - a snow squall at the crevasse: a crosswind on carried planks, more than one grip holds at
+ *   chest height; carry them low or together.
+ */
+export const VALLEY_WEATHER_ZONES: WeatherZone[] = [
+    {
+        name: 'Forest Road',
+        kind: WEATHER.rain,
+        contains: alongRoute(10, 74),
+        tellS: 6,
+        activeS: 45,
+        clearS: 10,
+        delayS: 12,
+        delayJitterS: 10,
+        riverRise: 0.35,
+        current: { x: DOWNSTREAM.x * 0.6, z: DOWNSTREAM.z * 0.6 },
+        fogEnd: 150,
+        tell: '🌧 Rain on the forest road! Wet timber slips: carry heavy pieces together.',
+        clear: 'The rain eases off. Grips are dry again.'
+    },
+    {
+        name: 'Gorge',
+        kind: WEATHER.mist,
+        contains: alongRoute(74, 100),
+        tellS: 5,
+        activeS: 40,
+        clearS: 10,
+        delayS: 6,
+        delayJitterS: 6,
+        fogEnd: 55,
+        // atmosphere, not a hazard: nothing to beat, so it takes no part in the budget and says nothing
+        atmosphere: true,
+        veil: true,
+        tell: '',
+        clear: ''
+    },
+    {
+        name: 'Mountain Approach',
+        kind: WEATHER.fog,
+        contains: alongRoute(138, 166),
+        tellS: 6,
+        activeS: 40,
+        clearS: 12,
+        delayS: 4,
+        delayJitterS: 6,
+        fogEnd: 30,
+        veil: true,
+        tell: '🌫 A fog bank rolls down the mountain. Keep to the road: follow the edge posts.',
+        clear: 'The fog thins and lifts off the road.'
+    },
+    {
+        name: 'Crevasse',
+        kind: WEATHER.snow,
+        contains: alongRoute(166, 196),
+        tellS: 5,
+        activeS: 35,
+        clearS: 8,
+        delayS: 4,
+        delayJitterS: 8,
+        fogEnd: 80,
+        wind: { force: 1000, dir: Math.atan2(DOWNSTREAM.z, DOWNSTREAM.x) },
+        tell: '❄ Snow on the wind! A squall is coming across the road: carry planks low, or together.',
+        clear: 'The squall blows over.'
+    }
+];
+
+/**
+ * The Valley's hazards: the Timber Yard's flood at Shallow Creek (the same crossing, turned with
+ * the yard), and the weather. No aimed gust: the Valley's water covers the whole map, so "near the
+ * water" would be everywhere; the snow's crosswind is the mountain's gust.
+ */
+export const VALLEY_HAZARDS: HazardSpec = (() => {
+    const near = yardToWorld(BRIDGE_X, BRIDGE.nearFace);
+    const far = yardToWorld(BRIDGE_X, BRIDGE.farFace);
+    // the crossing's frame: its z along the yard's z (towards the yard)
+    const yaw = Math.atan2(near.x - far.x, near.z - far.z);
+    const n = crossingFrame({ yaw }, near);
+    const f = crossingFrame({ yaw }, far);
+    const cur = yardToWorld(BRIDGE_X + 1.3, 0);
+    const c0 = yardToWorld(BRIDGE_X, 0);
+    return {
+        seed: 1,
+        flood: {
+            peakY: FLOOD_PEAK_Y,
+            current: { x: cur.x - c0.x, z: cur.z - c0.z },
+            crossing: { x: n.x, halfX: BRIDGE.halfWidth + 0.3, z0: n.z, z1: f.z, yaw },
+            washup: floodWashup().map((w) => ({ ...yardToWorld(w.x, w.z), y: w.y })),
+            // the creek's channel only: the Valley's water area covers the map, and the banks
+            // (the yard at 0.4 m) are lower than the flood's peak
+            channel: inCreek
+        },
+        weather: { zones: VALLEY_WEATHER_ZONES }
+    };
+})();
 
 /** Ground the player may be put back on after a fall. */
 function isSafe(x: number, z: number): boolean {
@@ -1030,18 +1380,35 @@ const yardActors = {
     ute: fromYard(pose(-10.5, YARD_Y + 0.002, 4.6, quatFromYawPitchRoll(Math.PI / 2 + 0.15, 0, 0)))
 };
 
+/** Where the gorge's waterfall comes out of the far wall (route coordinates: along u, across t). */
+function waterfallSpot(): { u: number; t: number } {
+    const t = 15;
+    return { u: gorgeU(t) + GORGE.hw, t };
+}
+
+/** The waterfall's middle, in the world: its roar is heard from here (Epic 8, #80). */
+export function valleyWaterfall(): { x: number; y: number; z: number } {
+    const { u, t } = waterfallSpot();
+    const w = routeToWorld(u - 0.35, t);
+    return { x: w.x, y: (WALL.low - 0.6 + CREEK_WATER_Y) / 2, z: w.z };
+}
+
 export const valleyLevel: LevelDef = {
     id: 'valley',
     name: 'The Valley',
     bounds: VALLEY_BOUNDS,
     playArea: { minX: -109, maxX: 109, minZ: -109, maxZ: 109 },
-    water: { y: CREEK_WATER_Y, cx: 0, cz: 0, halfX: 112, halfZ: 112 },
+    // (the water area is the whole map; floods keep to the creek's channel, and the drawn surface
+    // stops just under the Timber Yard's banks)
+    water: { y: CREEK_WATER_Y, cx: 0, cz: 0, halfX: 112, halfZ: 112, drawMaxY: YARD_Y - 0.02 },
+    sounds: { waterfalls: [valleyWaterfall()] },
     terrainHeight: valleyHeight,
     layout: valleyLayout,
     build: buildValley,
     stream: {
         buildTile: buildValleyTile,
         radius: 36,
+        lowRadius: 24,
         farCm: 40,
         fog: { start: 30, end: 260 }
     },
@@ -1059,13 +1426,16 @@ export const valleyLevel: LevelDef = {
         ute: { mode: 'drivable', pose: yardActors.ute }
     },
     props: valleyProps(),
+    forestry: VALLEY_FORESTRY,
+    hazards: VALLEY_HAZARDS,
     rules: {
-        objective: 'Deliver the bucket to the flower on the summit',
+        objective: 'Bring water to the flower on the summit',
         goal: VALLEY_STAGES[VALLEY_STAGES.length - 1].goal,
         fallY: -0.2,
         isSafe,
         lostY: CREEK_WATER_Y + 0.15,
-        stages: VALLEY_STAGES
+        stages: VALLEY_STAGES,
+        waterSources: valleySources()
     },
     scriptedProps: false
 };

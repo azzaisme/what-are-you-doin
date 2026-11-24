@@ -12,6 +12,8 @@ import {
     ADDRESS_REPEAT,
     AppBase,
     AppOptions,
+    AudioHandler,
+    AudioListenerComponentSystem,
     CameraComponentSystem,
     CameraFrame,
     Color,
@@ -34,6 +36,8 @@ import {
     SHADOW_PCF5_16F,
     SHADOWUPDATE_REALTIME,
     ScriptComponentSystem,
+    SoundComponentSystem,
+    SoundManager,
     StandardMaterial,
     TONEMAP_ACES2,
     Texture,
@@ -96,6 +100,11 @@ export interface LabScene {
     waterEntity: Entity;
     worldLayer: Layer;
     immediateLayer: Layer;
+    /**
+     * Per-view immediate layers: the main camera draws `viewLayers[0]`, player 2's camera
+     * `viewLayers[1]`, so one local player's aim marks never show in the other's view.
+     */
+    viewLayers: [Layer, Layer];
     quality: Quality;
     setSun(elevationDeg: number, azimuthDeg: number): void;
     /**
@@ -124,9 +133,13 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
         RenderComponentSystem,
         CameraComponentSystem,
         LightComponentSystem,
-        ScriptComponentSystem
+        ScriptComponentSystem,
+        // sound (src/audio): the Web Audio context is only created on the first user gesture
+        SoundComponentSystem,
+        AudioListenerComponentSystem
     ];
-    options.resourceHandlers = [TextureHandler];
+    options.resourceHandlers = [TextureHandler, AudioHandler];
+    options.soundManager = new SoundManager();
 
     const app = new AppBase(canvas);
     app.init(options);
@@ -134,7 +147,17 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
     app.setCanvasResolution(RESOLUTION_AUTO);
     const resize = () => app.resizeCanvas();
     window.addEventListener('resize', resize);
-    app.on('destroy', () => window.removeEventListener('resize', resize));
+    // the window's resize event alone can miss a size change: leaving full screen inside an iframe
+    // (itch's embed) may fire it before the new size is laid out, or not at all. A ResizeObserver on
+    // the page fires once the layout has the new size; full screen changes are watched too.
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(resize) : null;
+    observer?.observe(document.documentElement);
+    document.addEventListener('fullscreenchange', resize);
+    app.on('destroy', () => {
+        window.removeEventListener('resize', resize);
+        document.removeEventListener('fullscreenchange', resize);
+        observer?.disconnect();
+    });
     app.start();
 
     const layers = app.scene.layers;
@@ -146,6 +169,11 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
     // excluded from its own reflection / refraction cameras
     const waterLayer = new Layer({ name: 'Water' });
     layers.insert(waterLayer, layers.getTransparentIndex(worldLayer) + 1);
+    // one immediate layer per local view. Inserted before the shared Immediate layer's transparent
+    // part: CameraFrame renders layers up to that one in its scene pass (kept to the camera's half
+    // in split screen); later layers go to a pass over the whole back buffer
+    const viewLayers: [Layer, Layer] = [new Layer({ name: 'View1' }), new Layer({ name: 'View2' })];
+    for (const l of viewLayers) layers.insert(l, layers.getTransparentIndex(immediateLayer));
 
     // ---- sun: soft cascaded shadows sized for 10 cm detail near the camera
     const sun = new Entity('Sun');
@@ -170,7 +198,15 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
         fov: 52,
         nearClip: 0.05,
         farClip: 600,
-        layers: [worldLayer.id, LAYERID_DEPTH, skyboxLayer.id, waterLayer.id, immediateLayer.id, uiLayer.id]
+        layers: [
+            worldLayer.id,
+            LAYERID_DEPTH,
+            skyboxLayer.id,
+            waterLayer.id,
+            immediateLayer.id,
+            viewLayers[0].id,
+            uiLayer.id
+        ]
     });
     app.root.addChild(camera);
 
@@ -269,7 +305,15 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
         fov: 52,
         nearClip: 0.05,
         farClip: 600,
-        layers: [worldLayer.id, LAYERID_DEPTH, skyboxLayer.id, waterLayer.id, immediateLayer.id, uiLayer.id]
+        layers: [
+            worldLayer.id,
+            LAYERID_DEPTH,
+            skyboxLayer.id,
+            waterLayer.id,
+            immediateLayer.id,
+            viewLayers[1].id,
+            uiLayer.id
+        ]
     });
     camera2.enabled = false;
     app.root.addChild(camera2);
@@ -394,6 +438,7 @@ export async function createLabScene(canvas: HTMLCanvasElement, quality: Quality
         waterEntity,
         worldLayer,
         immediateLayer,
+        viewLayers,
         quality,
         sunElevation: level.sun.elevation,
         sunAzimuth: level.sun.azimuth,

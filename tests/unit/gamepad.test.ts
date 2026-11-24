@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { LOOK_SPEED, PAD, PadPlayer, deadzone } from '../../src/input/gamepad.ts';
-import { ACTION_DROP, ACTION_NONE, ACTION_RAGDOLL } from '../../src/sim/commands.ts';
+import { ACTION_DROP, ACTION_NONE, ACTION_POUR, ACTION_RAGDOLL } from '../../src/sim/commands.ts';
 
 /** A minimal Gamepad stand-in with the standard mapping. */
 function pad(axes: number[] = [0, 0, 0, 0], pressed: number[] = [], values: Record<number, number> = {}): Gamepad {
@@ -70,13 +70,24 @@ describe('gamepad input', () => {
         expect(c.reach).toBeGreaterThan(0);
     });
 
-    it('Y toggles the carry plank only for player 1', () => {
+    it('D-pad right toggles the carry plank only for player 1', () => {
         const p1 = new PadPlayer(0);
-        p1.poll(pad(undefined, [PAD.Y]), 0.016, true);
+        p1.poll(pad(undefined, [PAD.RIGHT]), 0.016, true);
         expect(p1.carry).toBe(true);
         const p2 = new PadPlayer(1);
-        p2.poll(pad(undefined, [PAD.Y]), 0.016, false);
+        p2.poll(pad(undefined, [PAD.RIGHT]), 0.016, false);
         expect(p2.carry).toBe(false);
         expect(p2.command().carry).toBe(false);
+    });
+
+    it('Y pours the bucket (one press, one action), for either player', () => {
+        for (const slot of [0, 1]) {
+            const p = new PadPlayer(slot);
+            p.poll(pad(undefined, [PAD.Y]), 0.016, slot === 0);
+            expect(p.command().action).toBe(ACTION_POUR);
+            expect(p.carry).toBe(false);
+            p.poll(pad(undefined, [PAD.Y]), 0.016, slot === 0);
+            expect(p.command().action).toBe(ACTION_NONE);
+        }
     });
 });

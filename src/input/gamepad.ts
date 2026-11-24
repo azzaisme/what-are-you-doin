@@ -6,16 +6,20 @@
  *
  * Joining: the first pad to press A joins as player 1, the next different pad as player 2.
  *
- * Standard mapping used:
+ * Default buttons (standard mapping; every button below can be rebound, see bindings.ts):
  *   left stick  move            right stick  look            L3 or LT (held)  sprint
  *   A           jump            RT           grab / release   RB               throw
- *   B           drop            Y            plank (player 1) X                ragdoll
- *   D-pad up/down  hold further / closer
- *   Start (menu)   settings (any pad, joined or not)
+ *   B           drop            Y            pour the bucket you hold (again: stop)
+ *   X           ragdoll         LB           nail (hammer)
+ *   D-pad up/down  hold further / closer   D-pad right  plank (player 1, River Lab)
+ *   Start (menu)   settings (any pad, joined or not; not rebindable)
  */
 
-import { ACTION_DROP, ACTION_NONE, ACTION_RAGDOLL, PITCH_LIMIT } from '../sim/commands.ts';
+import { ACTION_DROP, ACTION_NAIL, ACTION_NONE, ACTION_POUR, ACTION_RAGDOLL, PITCH_LIMIT } from '../sim/commands.ts';
 import type { PlayerCommand } from '../sim/commands.ts';
+
+import { PAD_ACTIONS, defaultBindings } from './bindings.ts';
+import type { Bindings, PadAction } from './bindings.ts';
 
 export const PAD = {
     A: 0,
@@ -31,7 +35,8 @@ export const PAD = {
     L3: 10,
     R3: 11,
     UP: 12,
-    DOWN: 13
+    DOWN: 13,
+    RIGHT: 15
 } as const;
 
 const DEADZONE = 0.18;
@@ -54,9 +59,12 @@ export class PadPlayer {
     /** Look speed (times LOOK_SPEED) and inverted vertical look, from the settings. */
     lookScale = 1;
     invertY = false;
+    /** Which buttons do what (shared with the settings menu). */
+    bindings: Bindings = defaultBindings();
     padIndex: number;
     private seq = 0;
-    private prev: boolean[] = [];
+    /** Actions held at the last poll (edges are per action: either of its buttons). */
+    private prev = new Set<PadAction>();
     private moveX = 0;
     private moveZ = 0;
     private sprint = false;
@@ -68,13 +76,21 @@ export class PadPlayer {
 
     /** Reads the pad once per frame: look at display rate, edges queued for the next command. */
     poll(pad: Gamepad, dt: number, allowCarry: boolean): void {
-        const b = (i: number) => !!pad.buttons[i]?.pressed;
-        const edge = (i: number) => b(i) && !this.prev[i];
+        // triggers count from part way down (a light rest on them is not a press)
+        const b = (i: number) => {
+            const x = pad.buttons[i];
+            if (!x) return false;
+            // (a digital trigger reports pressed with no value)
+            return i === PAD.LT || i === PAD.RT ? x.value > 0.4 || (x.pressed && !(x.value > 0)) : x.pressed;
+        };
+        const down = new Set<PadAction>();
+        for (const a of PAD_ACTIONS) if (this.bindings.pad[a].some((i) => i >= 0 && b(i))) down.add(a);
+        const edge = (a: PadAction) => down.has(a) && !this.prev.has(a);
         const [lx, ly] = deadzone(pad.axes[0] ?? 0, pad.axes[1] ?? 0);
         const [rx, ry] = deadzone(pad.axes[2] ?? 0, pad.axes[3] ?? 0);
         this.moveX = lx;
         this.moveZ = -ly;
-        this.sprint = b(PAD.L3) || (pad.buttons[PAD.LT]?.value ?? 0) > 0.4;
+        this.sprint = down.has('sprint');
         const step = Math.min(dt, 0.1);
         const ls = this.lookScale;
         this.yaw -= rx * Math.abs(rx) * LOOK_SPEED.yaw * ls * step;
@@ -83,15 +99,17 @@ export class PadPlayer {
             -PITCH_LIMIT,
             Math.min(PITCH_LIMIT, this.pitch - vy * Math.abs(vy) * LOOK_SPEED.pitch * ls * step)
         );
-        if (edge(PAD.A)) this.q.jump = true;
-        if (edge(PAD.RT)) this.q.grab = true;
-        if (edge(PAD.RB)) this.q.throw = true;
-        if (edge(PAD.B)) this.q.action = ACTION_DROP;
-        if (edge(PAD.X)) this.q.action = ACTION_RAGDOLL;
-        if (edge(PAD.UP)) this.q.reach += 0.25;
-        if (edge(PAD.DOWN)) this.q.reach -= 0.25;
-        if (allowCarry && edge(PAD.Y)) this.carry = !this.carry;
-        this.prev = pad.buttons.map((x) => x.pressed);
+        if (edge('jump')) this.q.jump = true;
+        if (edge('grab')) this.q.grab = true;
+        if (edge('throw')) this.q.throw = true;
+        if (edge('drop')) this.q.action = ACTION_DROP;
+        if (edge('nail')) this.q.action = ACTION_NAIL;
+        if (edge('pour')) this.q.action = ACTION_POUR;
+        if (edge('ragdoll')) this.q.action = ACTION_RAGDOLL;
+        if (edge('reachFar')) this.q.reach += 0.25;
+        if (edge('reachNear')) this.q.reach -= 0.25;
+        if (allowCarry && edge('plank')) this.carry = !this.carry;
+        this.prev = down;
     }
 
     /** Stops moving (a menu opened): the stick is ignored until it is next read. */
@@ -132,9 +150,10 @@ export class PadManager {
     readonly players: (PadPlayer | null)[] = [null, null];
     private prevA = new Map<number, boolean>();
     private prevMenu = new Map<number, boolean>();
-    /** Look settings applied to every player's pad. */
+    /** Look settings and button bindings applied to every player's pad. */
     lookScale = 1;
     invertY = false;
+    bindings: Bindings = defaultBindings();
     /**
      * While set (a menu is open), pads move no one and press nothing: buttons are still tracked,
      * so a press that closes the menu does not also act in the game.
@@ -168,6 +187,7 @@ export class PadManager {
             }
             pl.lookScale = this.lookScale;
             pl.invertY = this.invertY;
+            pl.bindings = this.bindings;
             const yaw = pl.yaw;
             const pitch = pl.pitch;
             pl.poll(pad, dt, s === 0);
@@ -192,6 +212,7 @@ export class PadManager {
             const slot = this.players.findIndex((p) => p === null);
             if (slot < 0) continue;
             const pl = new PadPlayer(pad.index);
+            pl.bindings = this.bindings;
             // swallow the joining press, so it does not also jump
             pl.poll(pad, 0, false);
             pl.take();

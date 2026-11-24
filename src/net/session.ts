@@ -7,21 +7,78 @@
  *
  * Input travels as absolute state with edge COUNTERS (jumps, grabs, throws, actions), so a
  * coalesced or dropped presence update never loses or repeats a press.
+ *
+ * Reconnect (#93): each guest carries a rejoin token (kept per browser tab). When a guest drops, the
+ * host keeps their player in the world for REJOIN_GRACE_TICKS, letting go of whatever they held; a
+ * guest who comes back with the same token, under the same or a new peer id, gets that player back.
+ * Only a dropped player can be reclaimed, never one whose guest is still connected. Guests wait
+ * HOST_GRACE_MS for a host that went quiet before they give up on the game.
+ *
+ * Lag (observability): guests echo the newest snapshot tick they applied (`ak`); the host's clock
+ * now minus when it published that snapshot is the round trip (wall time: a host falling behind
+ * real time runs fewer ticks than the clock), which the host shows and sends back to each guest.
  */
 
 import { SIM_HZ } from '../sim/clock.ts';
-import { ACTION_DROP, ACTION_NONE, ACTION_RAGDOLL, neutralCommand } from '../sim/commands.ts';
+import { ACTION_DROP, ACTION_NAIL, ACTION_NONE, ACTION_POUR, ACTION_RAGDOLL, neutralCommand } from '../sim/commands.ts';
 import type { PlayerCommand } from '../sim/commands.ts';
+import { packHazardNet, readHazardNet } from '../sim/hazards.ts';
+import type { HazardNet } from '../sim/hazards.ts';
+import type { JointGraph } from '../sim/joints/graph.ts';
+import { decodeNails, encodeNails, nailMarks } from '../sim/joints/wire.ts';
+import type { NailMark } from '../sim/joints/wire.ts';
+import { MAX_PLAYERS } from '../sim/lab-entities.ts';
 import type { LabSim } from '../sim/lab-sim.ts';
 
 import { SnapshotDecoder, encodeSnapshot, fromBase64Chunks, snapshotTick, toBase64Chunks } from './codec.ts';
 import type { NetChannel, NetPeer, NetTransport } from './transport.ts';
 
-export const NET_PROTOCOL = 1;
+/** Bump whenever host and guest builds stop understanding each other (2: eight player slots). */
+export const NET_PROTOCOL = 2;
 /** The host publishes a snapshot every this many ticks (20 Hz). */
 export const SNAPSHOT_EVERY = 3;
 /** Guests render this many ticks behind the newest snapshot (150 ms) to ride out jitter. */
 export const GUEST_DELAY_TICKS = 9;
+/** A dropped guest's player stays in the world this long for them to come back (60 s). */
+export const REJOIN_GRACE_TICKS = 60 * SIM_HZ;
+/**
+ * A newcomer whose token is still in use by a connected guest waits this long for that guest to
+ * drop (a reloaded page can arrive before the host notices the old one went) before it gets a
+ * place of its own (a duplicated tab carries the same token, and never takes a live player).
+ */
+export const TOKEN_WAIT_TICKS = 10 * SIM_HZ;
+/**
+ * Round trips up to this long are measured (longer reads as unknown). Generous: a guest page busy
+ * building its world (a phone, or software GL) can take seconds to apply and echo a snapshot.
+ */
+export const LAG_WINDOW_MS = 30_000;
+/** A guest waits this long for a host that went quiet before leaving the game. */
+export const HOST_GRACE_MS = 20_000;
+
+/**
+ * The world's entity layout (ids in snapshot order) as a short hash. Snapshots index entities by
+ * position, so a host and guest whose builds list different entities would garble each other even
+ * on the same protocol: the guest compares the host's layout with its own and refuses a mismatch.
+ */
+export function layoutHash(entities: readonly { id: number }[]): string {
+    let h = 0x811c9dc5;
+    for (const e of entities) {
+        h ^= e.id & 0xffff;
+        h = Math.imul(h, 0x01000193) >>> 0;
+        h ^= e.id >>> 16;
+        h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return `${entities.length}-${h.toString(36)}`;
+}
+
+/** A rejoin token: a short random string, unique per browser tab. */
+export function makeToken(): string {
+    let s = '';
+    for (let i = 0; i < 16; i++) s += Math.floor(Math.random() * 36).toString(36);
+    return s;
+}
+
+const readToken = (v: unknown) => (typeof v === 'string' && /^[a-z0-9]{8,32}$/.test(v) ? v : null);
 
 /** A game advertised in the lobby. */
 export interface GameAd {
@@ -55,6 +112,10 @@ export interface HudSlot {
     driving: boolean;
     /** The ute seat this player sits in (0 driver, 1 passenger), or -1. */
     seat: number;
+    /** The hammer: nailCode (0 no timber in view, 1 a nail would hold, 2+ why not). */
+    nail: number;
+    /** Where the nail would go (world), or null. */
+    nailAt: { x: number; y: number; z: number } | null;
 }
 
 export interface NetEvent {
@@ -72,8 +133,11 @@ export function makeCode(): string {
     return s;
 }
 
-export function listGames(lobby: NetChannel): (GameAd & { full: boolean })[] {
-    const out: (GameAd & { full: boolean })[] = [];
+/** A game in the lobby, as listed: full, and whether this build can join it (same protocol). */
+export type ListedGame = GameAd & { full: boolean; compatible: boolean };
+
+export function listGames(lobby: NetChannel): ListedGame[] {
+    const out: ListedGame[] = [];
     for (const p of lobby.peers()) {
         if (p.isMe) continue;
         const g = p.state.game as Partial<GameAd> | undefined;
@@ -86,7 +150,7 @@ export function listGames(lobby: NetChannel): (GameAd & { full: boolean })[] {
             max: num(g.max),
             v: num(g.v)
         };
-        out.push({ ...ad, full: ad.players >= ad.max });
+        out.push({ ...ad, full: ad.players >= ad.max, compatible: ad.v === NET_PROTOCOL });
     }
     return out;
 }
@@ -101,16 +165,41 @@ export class HostSession {
     /** guest peer id -> player slot */
     readonly slots = new Map<string, number>();
     private readonly seen = new Map<string, GuestInput>();
+    /** Players whose guest dropped, kept for a rejoin: slot -> token, when, released yet. */
+    private readonly dropped = new Map<number, { token: string; tick: number; released: boolean }>();
+    /** guest peer id -> rejoin token */
+    private readonly tokens = new Map<string, string>();
+    /** newcomer peer id -> tick it first showed a token a connected guest holds */
+    private readonly waiting = new Map<string, number>();
+    /** guest peer id -> newest snapshot tick that guest applied */
+    private readonly acks = new Map<string, number>();
+    /** snapshot tick -> when it was published (this.now() ms), for the last LAG_WINDOW_MS */
+    private readonly sentAt = new Map<number, number>();
+    private readonly now: () => number;
     private readonly unsub: () => void;
     private readonly levelId: string;
     private lastEventCount = 0;
     private recent: NetEvent[] = [];
     /** Bytes of the last snapshot (for the debug panel). */
     lastSnapshotBytes = 0;
-    onGuestsChanged: (joined: number[], left: number[]) => void = () => undefined;
+    /** The joint graph (and its version) last sent. */
+    private sentGraph: JointGraph | null = null;
+    private sentGraphVersion = -1;
+    /** How long a dropped guest's player is kept (tests shorten it). */
+    rejoinGraceTicks = REJOIN_GRACE_TICKS;
+    /** Slots that got a new guest, slots freed, slots whose guest dropped (held for a rejoin), slots rejoined. */
+    onGuestsChanged: (joined: number[], left: number[], dropped: number[], back: number[]) => void = () => undefined;
 
-    private constructor(sim: LabSim, ch: NetChannel, lobby: NetChannel, code: string, levelId: string) {
+    private constructor(
+        sim: LabSim,
+        ch: NetChannel,
+        lobby: NetChannel,
+        code: string,
+        levelId: string,
+        now: () => number
+    ) {
         this.sim = sim;
+        this.now = now;
         this.ch = ch;
         this.lobby = lobby;
         this.code = code;
@@ -119,10 +208,16 @@ export class HostSession {
         this.advertise();
     }
 
-    static async start(transport: NetTransport, sim: LabSim, levelId: string, code = makeCode()): Promise<HostSession> {
+    static async start(
+        transport: NetTransport,
+        sim: LabSim,
+        levelId: string,
+        code = makeCode(),
+        now: () => number = () => performance.now()
+    ): Promise<HostSession> {
         const ch = await transport.join(`ue-${code}`);
-        ch.setState({ role: 'host', v: NET_PROTOCOL, level: levelId, slots: {} });
-        return new HostSession(sim, ch, transport.lobby, code, levelId);
+        ch.setState({ role: 'host', v: NET_PROTOCOL, layout: layoutHash(sim.entities), level: levelId, slots: {} });
+        return new HostSession(sim, ch, transport.lobby, code, levelId, now);
     }
 
     private advertise(): void {
@@ -131,39 +226,115 @@ export class HostSession {
             level: this.levelId,
             host: this.ch.me,
             players: this.sim.playerCount,
-            max: 4,
+            max: MAX_PLAYERS,
             v: NET_PROTOCOL
         };
         this.lobby.setState({ game: ad });
     }
 
-    /** Assigns free slots to new guests and frees the slots of guests who left. */
+    /**
+     * Assigns slots to new guests (their own player back when they rejoin), holds the players of
+     * guests who dropped, and frees the ones held past the grace period.
+     */
     private reconcile(): void {
         const guests = this.ch.peers().filter((p) => !p.isMe && p.state.role === 'guest' && p.state.v === NET_PROTOCOL);
         const ids = new Set(guests.map((g) => g.id));
         const joined: number[] = [];
         const left: number[] = [];
+        const dropped: number[] = [];
+        const back: number[] = [];
+        for (const g of guests) {
+            const ak = g.state.ak;
+            if (typeof ak === 'number' && Number.isInteger(ak) && ak >= 0) this.acks.set(g.id, ak);
+        }
         for (const [id, slot] of this.slots) {
             if (ids.has(id)) continue;
             this.slots.delete(id);
             this.seen.delete(id);
+            this.acks.delete(id);
+            const token = this.tokens.get(id);
+            this.tokens.delete(id);
+            if (token) {
+                this.dropped.set(slot, { token, tick: this.sim.tick, released: false });
+                dropped.push(slot);
+            } else {
+                this.sim.setSlotActive(slot, false);
+                left.push(slot);
+            }
+        }
+        for (const id of this.waiting.keys()) if (!ids.has(id)) this.waiting.delete(id);
+        const inUse = new Set(this.tokens.values());
+        for (const g of guests) {
+            if (this.slots.has(g.id)) continue;
+            const token = readToken(g.state.rj);
+            if (token && inUse.has(token)) {
+                const since = this.waiting.get(g.id) ?? this.sim.tick;
+                this.waiting.set(g.id, since);
+                if (this.sim.tick - since < TOKEN_WAIT_TICKS) continue;
+            }
+            this.waiting.delete(g.id);
+            let slot = -1;
+            for (const [s, d] of this.dropped) {
+                if (token && d.token === token) slot = s;
+            }
+            if (slot >= 0) {
+                this.dropped.delete(slot);
+                back.push(slot);
+            } else {
+                slot = this.sim.freeSlot();
+                if (slot < 0) continue; // full: they stay watching
+                this.sim.setSlotActive(slot, true);
+                joined.push(slot);
+            }
+            this.slots.set(g.id, slot);
+            // a second holder of a token (a duplicated tab) plays without one: it can't rejoin by it
+            if (token && !inUse.has(token)) this.tokens.set(g.id, token);
+            this.seen.set(g.id, readInput(g.state.in) ?? emptyInput());
+        }
+        this.expire(left);
+        this.changed(joined, left, dropped, back);
+    }
+
+    /** Frees held players whose guest did not come back in time. */
+    private expire(left: number[]): void {
+        for (const [slot, d] of this.dropped) {
+            if (this.sim.tick - d.tick < this.rejoinGraceTicks) continue;
+            this.dropped.delete(slot);
             this.sim.setSlotActive(slot, false);
             left.push(slot);
         }
-        for (const g of guests) {
-            if (this.slots.has(g.id)) continue;
-            const slot = this.sim.freeSlot();
-            if (slot < 0) continue; // full: they stay watching
-            this.slots.set(g.id, slot);
-            this.seen.set(g.id, readInput(g.state.in) ?? emptyInput());
-            this.sim.setSlotActive(slot, true);
-            joined.push(slot);
+    }
+
+    private changed(joined: number[], left: number[], dropped: number[], back: number[]): void {
+        if (!joined.length && !left.length && !dropped.length && !back.length) return;
+        this.ch.setState({ slots: Object.fromEntries(this.slots) });
+        this.advertise();
+        this.onGuestsChanged(joined, left, dropped, back);
+    }
+
+    /**
+     * The host's page went to the background (or came back). A hidden page draws no frames, so the
+     * world waits for it: guests are told why it stopped, rather than seeing it freeze.
+     */
+    setAway(away: boolean): void {
+        this.ch.setState({ away: away || null });
+    }
+
+    /** Slots held for a guest who dropped. */
+    droppedSlots(): number[] {
+        return [...this.dropped.keys()];
+    }
+
+    /** Round trip to the guest playing a slot, ms (null when unknown). */
+    lagMs(slot: number): number | null {
+        for (const [id, s] of this.slots) {
+            if (s !== slot) continue;
+            const ak = this.acks.get(id);
+            // an echo of a snapshot never sent (or sent over LAG_WINDOW_MS ago) is nonsense, or a stalled guest
+            const at = ak === undefined ? undefined : this.sentAt.get(ak);
+            return at === undefined ? null : Math.round(this.now() - at);
         }
-        if (joined.length || left.length) {
-            this.ch.setState({ slots: Object.fromEntries(this.slots) });
-            this.advertise();
-            this.onGuestsChanged(joined, left);
-        }
+        return null;
     }
 
     /** Slots driven by remote guests. */
@@ -173,6 +344,16 @@ export class HostSession {
 
     /** The next command for a remote slot, from that guest's latest input; undefined if not remote. */
     commandFor(slot: number): PlayerCommand | undefined {
+        const d = this.dropped.get(slot);
+        if (d) {
+            if (d.released) return undefined;
+            // a dropped player lets go of what they held (a partner may be carrying it with them) and
+            // gets out of the ute (grab does that; drop would send the ute back to its safe spot)
+            d.released = true;
+            const p = this.sim.players[slot];
+            const seated = this.sim.seatOf(slot) >= 0;
+            return { ...neutralCommand(0, p.yaw, p.pitch), grab: seated, action: seated ? ACTION_NONE : ACTION_DROP };
+        }
         for (const [id, s] of this.slots) {
             if (s !== slot) continue;
             const peer = this.ch.peers().find((p) => p.id === id);
@@ -189,9 +370,13 @@ export class HostSession {
                 jump: input.j > prev.j,
                 grab: input.g > prev.g,
                 throw: input.t > prev.t,
-                // guests may only drop or launch the dummy (no scene resets or drop tests)
+                // guests may only drop, pour, nail or launch the dummy (no scene resets or drop tests)
                 action:
-                    input.an > prev.an && (input.a === ACTION_DROP || input.a === ACTION_RAGDOLL)
+                    input.an > prev.an &&
+                    (input.a === ACTION_DROP ||
+                        input.a === ACTION_RAGDOLL ||
+                        input.a === ACTION_POUR ||
+                        input.a === ACTION_NAIL)
                         ? input.a
                         : ACTION_NONE
             };
@@ -210,20 +395,44 @@ export class HostSession {
             );
         }
         if (sim.events.length < this.lastEventCount) this.lastEventCount = sim.events.length; // reset
+        // held places expire and waiting newcomers time out without any network event
+        if (this.dropped.size || this.waiting.size) this.reconcile();
         if (sim.tick % SNAPSHOT_EVERY !== 0) return;
         const bytes = encodeSnapshot(sim.tick, sim.entities);
         this.lastSnapshotBytes = bytes.length;
-        const huds: [number, number, number, number][] = [];
+        const now = this.now();
+        this.sentAt.set(sim.tick, now);
+        for (const [t, at] of this.sentAt) if (now - at > LAG_WINDOW_MS || t > sim.tick) this.sentAt.delete(t);
+        const huds: number[][] = [];
+        const cm = (v: number) => Math.round(v * 100);
         for (let s = 0; s < sim.players.length; s++) {
             const h = hud(s);
-            huds.push([h.held, h.target, h.shared ? 1 : 0, h.seat + 1]);
+            const row = [h.held, h.target, h.shared ? 1 : 0, h.seat + 1, h.nail];
+            if (h.nailAt) row.push(cm(h.nailAt.x), cm(h.nailAt.y), cm(h.nailAt.z));
+            huds.push(row);
+        }
+        // the nails ride in the same update, only when they changed (presence keeps the last value)
+        const graph = sim.joints.graph;
+        const extra: Record<string, unknown> = {};
+        if (graph !== this.sentGraph || graph.version !== this.sentGraphVersion) {
+            this.sentGraph = graph;
+            this.sentGraphVersion = graph.version;
+            const index = new Map(sim.entities.map((e, i) => [e.id, i]));
+            const marks = nailMarks(graph, (id) => index.get(id) ?? -1);
+            extra.jg = toBase64Chunks(encodeNails(marks));
         }
         this.ch.setState({
+            ...extra,
             s: toBase64Chunks(bytes),
             hud: huds,
             goal: sim.progress.goalReached,
             step: sim.progress.step,
-            ev: this.recent
+            // the bucket's water (Epic 7): litres in it and litres the flower has had
+            wat: [Math.round(sim.water.volume * 100) / 100, Math.round(sim.water.poured * 100) / 100],
+            ev: this.recent,
+            hz: packHazardNet(sim.hazards.net()),
+            seed: sim.hazards.seed,
+            lag: Array.from({ length: sim.players.length }, (_, s) => this.lagMs(s) ?? -1)
         });
     }
 
@@ -234,9 +443,14 @@ export class HostSession {
     stop(): void {
         this.unsub();
         for (const slot of this.slots.values()) this.sim.setSlotActive(slot, false);
+        for (const slot of this.dropped.keys()) this.sim.setSlotActive(slot, false);
         this.slots.clear();
+        this.dropped.clear();
         this.lobby.setState({ game: null });
-        this.ch.leave();
+        // tell guests the game is over (so they leave now, not after waiting for a reconnect), then go
+        this.ch.setState({ end: true });
+        const ch = this.ch;
+        setTimeout(() => ch.leave(), 300);
     }
 }
 
@@ -264,6 +478,13 @@ export function readInput(v: unknown): GuestInput | null {
 
 // ------------------------------------------------------------------------------------- guest
 
+export interface GuestOptions {
+    /** Clock in ms (tests use a fake one). */
+    now?: () => number;
+    /** Rejoin token: the same token gets this guest's player back after a drop. */
+    token?: string;
+}
+
 export class GuestSession {
     readonly code: string;
     readonly hostId: string;
@@ -279,25 +500,46 @@ export class GuestSession {
     /** This guest's player slot (-1 until the host assigns one, e.g. while the game is full). */
     slot = -1;
     hud: HudSlot[] = [];
+    /** The host's nails (display only). */
+    nails: NailMark[] = [];
+    private lastNails = '';
     goal = false;
     /** The host's tutorial step. */
     step = 0;
+    /** The host's bucket water (litres) and what the flower has had. */
+    water = { volume: 0, poured: 0 };
     events: NetEvent[] = [];
-    hostGone = false;
+    /** The host's hazards (water height, flood and gust phases) and the game's hazard seed. */
+    hazard: HazardNet;
+    hazardSeed = 0;
     /** Snapshots applied (for the debug panel). */
     received = 0;
+    /** Round trip to the host as the host measured it, ms (null until known). */
+    lagMs: number | null = null;
+    /** When the host went missing (this.now() time), or null while it is here. */
+    private lostAt: number | null = null;
+    /** The host ended the game. */
+    private ended = false;
+    /** The host runs a build with another entity layout (see layoutHash): the game can't be played. */
+    incompatible = false;
+    /** The host's page is in the background: the world waits for it. */
+    hostAway = false;
+    private readonly layout: string;
     private readonly now: () => number;
 
-    private constructor(sim: LabSim, ch: NetChannel, code: string, hostId: string, now: () => number) {
+    private constructor(sim: LabSim, ch: NetChannel, code: string, hostId: string, opts: GuestOptions) {
         this.sim = sim;
         this.ch = ch;
         this.code = code;
         this.hostId = hostId;
-        this.now = now;
+        this.now = opts.now ?? (() => performance.now());
         this.decoder = new SnapshotDecoder(sim.entities.length);
+        this.hazard = readHazardNet(null, sim.level.water.y);
+        this.layout = layoutHash(sim.entities);
         sim.ring.clear();
         this.unsub = ch.onChange(() => this.receive());
-        ch.setState({ role: 'guest', v: NET_PROTOCOL, in: this.input });
+        const token = opts.token && readToken(opts.token);
+        ch.setState({ role: 'guest', v: NET_PROTOCOL, in: this.input, ...(token ? { rj: token } : {}) });
         this.receive();
     }
 
@@ -305,10 +547,20 @@ export class GuestSession {
         transport: NetTransport,
         sim: LabSim,
         ad: GameAd,
-        now: () => number = () => performance.now()
+        opts: GuestOptions = {}
     ): Promise<GuestSession> {
         const ch = await transport.join(`ue-${ad.code}`);
-        return new GuestSession(sim, ch, ad.code, ad.host, now);
+        return new GuestSession(sim, ch, ad.code, ad.host, opts);
+    }
+
+    /** The host has been missing (after having been here) for a moment: waiting for it to come back. */
+    get reconnecting(): boolean {
+        return this.lostAt !== null;
+    }
+
+    /** The host has been missing for longer than HOST_GRACE_MS: the game is over for this guest. */
+    get hostGone(): boolean {
+        return this.ended || (this.lostAt !== null && this.now() - this.lostAt > HOST_GRACE_MS);
     }
 
     private host(): NetPeer | undefined {
@@ -318,28 +570,60 @@ export class GuestSession {
     private receive(): void {
         const h = this.host();
         if (!h) {
-            // the host may not have answered yet; only a host that was here and left is "gone"
-            if (this.newestTick >= 0) this.hostGone = true;
+            // the host may not have answered yet; only a host that was here and left is missing
+            if (this.newestTick >= 0 && this.lostAt === null) this.lostAt = this.now();
             return;
         }
+        this.lostAt = null;
         const st = h.state;
+        if (st.end === true) this.ended = true;
+        this.hostAway = st.away === true;
+        // another build's world: its snapshots would land on the wrong entities, so apply none
+        if (st.layout !== this.layout) {
+            this.incompatible = true;
+            return;
+        }
         const slots = st.slots && typeof st.slots === 'object' ? (st.slots as Record<string, unknown>) : {};
         const mine = slots[this.ch.me];
         this.slot = typeof mine === 'number' && mine >= 1 && mine < this.sim.players.length ? mine : -1;
         this.goal = st.goal === true;
         this.step = num(st.step);
+        if (Array.isArray(st.wat)) {
+            const w = st.wat as unknown[];
+            this.water = {
+                volume: Math.max(0, Math.min(100, num(w[0]))),
+                poured: Math.max(0, Math.min(1e4, num(w[1])))
+            };
+        }
+        this.hazard = readHazardNet(st.hz, this.sim.level.water.y);
+        this.hazardSeed = num(st.seed) >>> 0;
+        const lag = Array.isArray(st.lag) && this.slot >= 0 ? num((st.lag as unknown[])[this.slot], -1) : -1;
+        this.lagMs = lag >= 0 ? lag : null;
         if (Array.isArray(st.hud)) {
             this.hud = (st.hud as unknown[]).map((x) => {
                 const a = Array.isArray(x) ? x : [];
                 const seat = num(a[3], 0) - 1;
+                const at = a.length >= 8 ? { x: num(a[5]) / 100, y: num(a[6]) / 100, z: num(a[7]) / 100 } : null;
                 return {
                     held: num(a[0], -1),
                     target: num(a[1], -1),
                     shared: a[2] === 1,
                     driving: seat === 0,
-                    seat: seat === 0 || seat === 1 ? seat : -1
+                    seat: seat === 0 || seat === 1 ? seat : -1,
+                    nail: Math.max(0, Math.trunc(num(a[4]))),
+                    nailAt: at
                 };
             });
+        }
+        const jg = Array.isArray(st.jg) ? (st.jg as unknown[]).filter((c): c is string => typeof c === 'string') : null;
+        const jgKey = jg ? jg.join('') : '';
+        if (jg && jgKey !== this.lastNails) {
+            this.lastNails = jgKey;
+            try {
+                this.nails = decodeNails(fromBase64Chunks(jg), this.sim.entities.length) ?? this.nails;
+            } catch {
+                // malformed: keep the last good nails
+            }
         }
         if (Array.isArray(st.ev)) {
             this.events = (st.ev as unknown[])
@@ -361,6 +645,7 @@ export class GuestSession {
         if (!this.decoder.apply(bytes, this.sim.ring)) return;
         this.received++;
         this.newestTick = tick;
+        this.ch.setState({ ak: tick });
         // clock: the host's tick now is about (tick) at this arrival time
         const est = tick - (this.now() / 1000) * SIM_HZ;
         if (this.offset === null || est - this.offset > 6 || this.offset - est > 30) this.offset = est;

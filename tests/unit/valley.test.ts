@@ -201,6 +201,35 @@ describe('the Valley: one map, seven areas', () => {
         expect(s.world.chunkCount).toBeLessThan(chunksMid * 1.5);
     }, 300_000);
 
+    it('the Low preset builds a smaller near world, and shrinking it lets go of the outer tiles', () => {
+        const w = routeToWorld(110, 0);
+        const focus = new Float32Array([w.x, w.z]);
+        const size = STATIC_REGION.x * GRID_SIZE;
+        const s = new VoxelService();
+        s.build(1, 'valley');
+        const states = new Float64Array(s.trackedCount * 18);
+        const settle = (svc: VoxelService, radius: number) => {
+            for (let n = 0; n < 400; n++)
+                svc.frame(n, 0, 'coverage50', false, states, undefined, 0, focus, undefined, 0, radius);
+            return svc.builtTiles;
+        };
+        const far = (tiles: { ti: number; tk: number }[]) =>
+            Math.max(...tiles.map((t) => Math.hypot((t.ti + 0.5) * size - w.x, (t.tk + 0.5) * size - w.z)));
+        const { radius, lowRadius } = valleyLevel.stream!;
+        const high = settle(s, radius).length;
+        // switched to Low: the outer tiles go
+        const shrunk = settle(s, lowRadius!);
+        expect(far(shrunk)).toBeLessThan(lowRadius! * 1.35 + size);
+        // arriving somewhere on Low: about (24 / 36)^2 of the tiles
+        const fresh = new VoxelService();
+        fresh.build(1, 'valley');
+        const low = settle(fresh, lowRadius!);
+        expect(low.length).toBeLessThan(high * 0.6);
+        expect(far(low)).toBeLessThan(lowRadius! + size);
+        // the ground at the camera is built
+        expect(low.some((t) => Math.hypot((t.ti + 0.5) * size - w.x, (t.tk + 0.5) * size - w.z) < size)).toBe(true);
+    }, 300_000);
+
     it('stages: the bucket at each checkpoint in turn completes them, in order, then the journey', () => {
         const s = new LabSim({ level: valleyLevel });
         s.step(cmd(0));
@@ -216,14 +245,36 @@ describe('the Valley: one map, seven areas', () => {
         for (let n = 0; n < 90; n++) s.step(cmd(n));
         expect(s.progress.step).toBe(0);
         let n = 100;
-        for (let k = 0; k < VALLEY_STAGES.length; k++) {
+        const last = VALLEY_STAGES.length - 1;
+        for (let k = 0; k < last; k++) {
             put(VALLEY_STAGES[k].goal);
             for (let i = 0; i < 90; i++) s.step(cmd(n++));
             expect(s.progress.step).toBe(k + 1);
         }
+        // the flower (Epic 7): setting the bucket down by it is not enough, the water has to go in
+        // (a rules check with teleports; tests/unit/water-play.test.ts plays it with commands)
+        put(VALLEY_STAGES[last].goal);
+        for (let i = 0; i < 120; i++) s.step(cmd(n++));
+        expect(s.progress.step).toBe(last);
+        expect(s.progress.goalReached).toBe(false);
+        const f = VALLEY_STAGES[last].flower!;
+        const at = { x: f.x + 1.2 * Math.cos(ROUTE_YAW), z: f.z - 1.2 * Math.sin(ROUTE_YAW) };
+        const before = s.water.volume;
+        // seven half-metre drops onto the checkpoints splashed a little out
+        expect(before).toBeGreaterThan(5);
+        // tipped over inside the ring of stones: it empties into the flower's bed
+        s.physics.place(s.bucket.id, pose(at.x, valleyHeight(at.x, at.z) + 0.5, at.z, quatFromYawPitchRoll(0, 2.2, 0)));
+        for (let i = 0; i < 300; i++) s.step(cmd(n++));
         expect(s.progress.goalReached).toBe(true);
+        expect(s.water.poured).toBeGreaterThan(0.25);
         expect(s.events.filter((e) => e.kind === 'step')).toHaveLength(VALLEY_STAGES.length - 1);
-        expect(s.events.at(-1)!.kind).toBe('goal');
+        expect(s.events.filter((e) => e.kind === 'goal')).toHaveLength(1);
+        expect(s.events.at(-1)!.text).toContain('The flower drank');
+        // the win fires once: more water later is welcome, but no second win
+        s.water.water.reset(5);
+        s.physics.place(s.bucket.id, pose(at.x, valleyHeight(at.x, at.z) + 0.5, at.z, quatFromYawPitchRoll(0, 2.2, 0)));
+        for (let i = 0; i < 300; i++) s.step(cmd(n++));
+        expect(s.events.filter((e) => e.kind === 'goal')).toHaveLength(1);
     }, 120_000);
 
     it('a bucket lost in a crossing comes back at the last checkpoint reached', () => {
@@ -244,6 +295,11 @@ describe('the Valley: one map, seven areas', () => {
         expect(s.progress.recoveries).toBe(1);
         const b = VALLEY_STAGES[2].bucket;
         expect(Math.hypot(s.bucket.pose.p.x - b.x, s.bucket.pose.p.z - b.z)).toBeLessThan(0.5);
+        // its water went with it; the spare is empty (refills are only at the water butts)
+        expect(s.water.volume).toBe(0);
+        const w = s.water;
+        expect(w.spilled + w.lost).toBeCloseTo(10, 6);
+        expect(Math.abs(w.imbalance)).toBeLessThan(1e-9);
     }, 120_000);
 
     it('every prop has a body and is at rest on the ground after two seconds', () => {

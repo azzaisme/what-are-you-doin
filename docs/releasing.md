@@ -58,5 +58,42 @@ Add three repository secrets (Settings → Secrets and variables → Actions):
 The next release builds them in. They end up in the published game (every browser needs them), so
 use a free or capped plan. A guest uses about 12 KB/s, roughly 45 MB an hour.
 
-- The browser tests use software rendering on the GitHub runner, so they take about 10–15 minutes.
-  If one fails, the run uploads its screenshots and traces as `playwright-results`.
+- CI runs the checks, unit tests and build. It does not run the browser tests: on the runner's
+  software rendering they outgrew the job's time limit. Each branch runs the browser
+  tests that cover its change before review; the full browser suite (`npx playwright test --trace off`)
+  runs on the integration branch after each batch of merges and must pass before it merges into
+  `main` (see `AGENTS.md`).
+
+## Embed checks (what itch's iframe needs)
+
+itch.io shows the game in a cross-origin iframe on its own page. `tests/e2e/embed.spec.ts` plays
+the game the same way; it is part of the full browser suite run before every release:
+
+- A stand-in itch page on one host frames the game on another.
+- The iframe grants `autoplay; fullscreen *; gamepad`: the features the game uses. This wasn't
+  checked against the live itch.io page, so an embed without full screen is tested too.
+- Chrome blocks sound until a gesture, as real browsers do. The test's `--autoplay-policy=user-gesture-required` flag is a safeguard for a browser whose default allows autoplay: this Chrome blocks it by default.
+
+| Check                 | What the game does (and the test checks)                                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Sound                 | The browser keeps it suspended until the first click, tap or key inside the game; then it runs                                  |
+| Pointer lock          | Only taken by a click inside the game; that click never grabs the thing under the crosshair. Esc releases it and opens the menu |
+| Resizing              | The canvas and the HUD follow the frame's size                                                                                  |
+| Full screen           | itch's own button, or Settings → Game → Full screen (only offered where allowed); the canvas fills the screen and returns       |
+| Tab hidden            | The sound pauses. A solo game stops at the menu (paused), so you come back to it waiting                                        |
+| Online, host hidden   | Guests are told the host's game is in the background and may stop until they come back; they stay in the game                   |
+| Online, a peer leaves | A guest who leaves is held for a minute (they can come back). A host who leaves is waited for 20 s, then the guest is told      |
+
+- **Hidden tabs.** Headless Chrome never hides a tab. The test hides the page the way the browser
+  announces it: the visibility state changes, and a `visibilitychange` event fires. A host hidden
+  for minutes, peer to peer, keeps its guests: Trystero drops a peer only when the WebRTC
+  connection closes. See `tests/unit/hidden-host.test.ts`.
+- **Plain http.** The test pages are plain `http`. Secure-context features, such as peer-to-peer
+  online play, aren't covered there.
+
+## Credits and licences
+
+The build writes `third-party-licenses.txt` next to `index.html`. It holds the licence notice of
+every bundled package (`scripts/third-party-licenses.ts`), and Settings → Game → Credits & licences
+links to it. Adding a production dependency means adding its credit to `src/ui/credits.ts`:
+`tests/unit/credits.test.ts` fails until it is there with the right licence.

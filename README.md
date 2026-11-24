@@ -77,16 +77,22 @@ Query parameters (handy for comparisons and screenshots):
 | Click, then mouse                          | look (first person; `Esc` releases the pointer and opens Settings)                         |
 | `W A S D`, `Shift`, `Space`                | walk, run, jump (first person; steps up 0.3 m, slides on steep slopes)                     |
 | Left click or `E`                          | grab what the crosshair points at / release it (the prompt says what)                      |
+| Left click or `E` at a banded pine         | chew it (empty hands) or chop it (holding the axe); it falls away from you                 |
+| Left click or `E`, axe in hand, at a log   | buck it into two short logs one beaver can carry; lay logs in the sawmill's guide to saw   |
+| Left click or `E` at the sawmill's lever   | switch the saw between planks (three per log) and a beam (one per log)                     |
 | Right click                                | throw what you hold                                                                        |
 | Mouse wheel                                | hold closer / further                                                                      |
 | `Q`                                        | drop                                                                                       |
+| `F`                                        | nail what you look at to what is behind it (timber to timber, or down to stone or ground)  |
+| `R`                                        | pour the bucket you hold (again: stop)                                                     |
 | `G`                                        | put a plank in your hands (scripted mode: the Epic 1 comfort-test plank)                   |
 | `T`                                        | launch the ragdoll dummy                                                                   |
 | **Play online** (bottom left)              | host a game, or join one, up to 4 players (claude.ai: same artifact link; itch.io: anyone) |
-| **Touch** (phones)                         | left thumb move (edge: run) · right thumb look · Jump / Grab / Throw / Drop buttons        |
+| **Touch** (phones)                         | left thumb move (edge: run) · right thumb look · Jump / Grab / Throw / Drop / Pour buttons |
 | **Gamepad**                                | press **A** to join (first pad: player 1, second pad: player 2 → split screen)             |
 | left / right stick                         | move / look                                                                                |
-| A · LT or L3 · RT · RB · B · X · Y · D-pad | jump · sprint · grab / release · throw · drop · ragdoll · plank · reach                    |
+| A · LT or L3 · RT · RB · B · X · Y · D-pad | jump · sprint · grab / release · throw · drop · ragdoll · pour · reach (right: plank)      |
+| LB                                         | nail                                                                                       |
 | **Levels** (bottom left)                   | tutorial, Timber Yard, River Lab, the level designer and your own level                    |
 | `P` / `N`                                  | pause / step exactly one voxel frame                                                       |
 | `Backspace`                                | reset the scene                                                                            |
@@ -122,8 +128,10 @@ npm run test:e2e     # 9 Playwright browser tests against the production build (
 npm run check        # typecheck + lint + unit tests + build
 ```
 
-Merging into `main` runs all of these in GitHub Actions and releases the build to itch.io
-([`docs/releasing.md`](docs/releasing.md)).
+Pull requests into `main` run everything except the browser tests in GitHub Actions, and merging
+releases the build to itch.io ([`docs/releasing.md`](docs/releasing.md)). The browser tests run locally
+instead (`npm run test:e2e`): the ones covering a change before review, and the full suite before
+every release. CI doesn't run them.
 
 Measurement and evidence scripts:
 
