@@ -6,6 +6,11 @@
  * string and template literals, some joined with `+`. This reads every one there: a template's
  * `${...}` counts as 20 characters (a stage, player or prop name), so a message passes only with
  * room for that.
+ *
+ * An assumption, not checked here: no value put into a message is longer than 20 characters. The
+ * longest today are stage names, put into messages such as "a spare is waiting at the … start": the
+ * longest is "Old Industrial Works", exactly 20. A longer one could make a message that passes here
+ * arrive cut.
  */
 
 import fs from 'node:fs';

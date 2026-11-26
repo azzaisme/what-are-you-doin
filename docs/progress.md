@@ -8,47 +8,54 @@ stopped the goose (Epic 8) and the road closure (#131) being added.
 
 ### What changed
 
-- **Each update lists only what moved lately, and the rest in turn** (network version 3). Before,
-  every visible piece went in every update.
-    - Anything that changed in the last second is in every update, so a lost update can't leave it
-      in the wrong place.
-    - Everything else that's visible is sent again about once a second, so a player who just
-      joined, or missed some updates, has the whole world within a second.
-- **It can't go over the limit.** When a lot moves at once, the pieces that have waited longest go
-  first, nearest to a player among equals. The rest wait one update; none waits longer than two
-  (0.1 s).
+- **Each update lists only what the guests don't have yet** (network version 3). Before, every
+  visible piece went in every update.
+    - Every guest tells the host which update it last got (it always did, for the round-trip
+      time). A piece is in every update until each guest playing has got an update with it where it
+      is now. Then it stops, until it moves.
+    - So nothing depends on which updates arrive: a guest missing updates (on a slow host only one
+      in 20 may get through) or joining late gets each piece in the first update that reaches it.
+- **It can't go over the limit**, counted in UTF-8 bytes (it isn't known whether the room counts
+  characters or bytes, and bytes is the larger count). When a lot moves at once, the pieces that
+  have waited longest go first, nearest to a player among equals. The rest wait one update; none
+  waits longer than two (0.1 s).
+- **A piece shown again waits for its new place.** One that was hidden (picked up, out of range)
+  and moved meanwhile isn't drawn where it last was.
 - **A player on another version is told so.** A guest of this version facing a host of the last one
   now sees "That game runs another version", instead of an empty world.
-- **A slow host's guests get everything.** A slow host sends only the last of several updates per
-  frame. Pieces whose once-a-second turn always fell on an update that wasn't sent never arrived.
-  The browser test over peer to peer found this; the turn now comes every 19 updates (a prime).
 
-### Measured (the Valley, eight players)
+### Measured (the Valley)
 
-|                                                           | Before (version 2)                                                             | Now                                                                                                                          |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| Normal play (walking about)                               | 2050 bytes                                                                     | median 691, at most 803                                                                                                      |
-| Worst case: every piece visible and moving, long messages | 4018 with the long plank; about 4094 with the goose and the road closure added | 4036, with the long plank, a goose stand-in (10 animation channels) and the closure's two pieces: under 4096 by construction |
-| Longest wait for a piece in that worst case               | none (all sent)                                                                | 2 updates (0.1 s)                                                                                                            |
-| Host's time to build an update (141 pieces moving)        | not measured                                                                   | about 0.1 ms on average, under 0.7 ms at the 99th percentile                                                                 |
+|                                                                                                                                         | Before (version 2)                                                           | Now                                                                                                          |
+| --------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Normal play: the host walking, seven guests seated                                                                                      | 2050 bytes                                                                   | median 615, at most 703                                                                                      |
+| Worst case: every piece visible and moving, the longest message (with emoji), 64 nails, every player aiming a nail, seven guests seated | 4018 with the long plank; about 4094 with a goose and the road closure added | 4044 UTF-8 bytes (4018 characters), with stand-ins for the goose and the closure: under 4096 by construction |
+| Longest wait for a piece in that worst case                                                                                             | none (all sent)                                                              | 2 updates (0.1 s)                                                                                            |
+| Host's time to build an update (141 pieces moving)                                                                                      | not measured                                                                 | about 0.1 ms on average                                                                                      |
 
 ### Tests
 
 - `tests/unit/net-headroom.test.ts`:
-    - the worst case and the longest wait;
-    - normal play;
+    - the worst case and the longest wait; the same with messages written entirely in 3-byte
+      characters;
+    - normal play with real guests;
     - the time to build an update;
-    - a piece that stops while updates are lost ends in the right place;
-    - a late joiner gets everything within a second, and nothing before its place is known;
-    - a guest that only gets one update in 2 to 6 still gets everything;
-    - the stalest go first;
-    - version 2 against 3.
-- Each fails without what it guards:
-    - no budget: 4136 bytes;
-    - no stalest-first: one piece waited 99 updates;
-    - a refresh every 20: 30 of 60 pieces never arrived.
+    - a piece that stops while updates are lost is right in the first update after the gap;
+    - an acknowledgement of an older place doesn't count for the new one;
+    - a guest that gets one update in k, for every k from 2 to 40, has every piece in the first
+      that arrives, and within a budget after as many as the budget takes;
+    - nothing is drawn before its place arrives, and a piece shown again waits for its new one;
+    - the stalest go first; version 2 against 3.
+- Each fails without what it guards (checked):
+    - no budget: 5321 bytes in the worst case;
+    - no stalest-first: 41 of the 141 pieces were never sent;
+    - confirming a piece without the guest's acknowledgement: the stopped piece was 0.6 m out;
+    - counting an older acknowledgement;
+    - drawing a piece shown again at its old place;
+    - counting characters, not bytes: 4762 bytes.
 - `tests/unit/event-text.test.ts`: every message the game can show fits the 120 characters an update
-  carries (the longest are the siren at 111 and the handbrake at 114).
+  carries (the longest are the siren at 111 and the handbrake at 114), assuming nothing put into a
+  message is longer than 20 characters (the longest stage name is exactly 20).
 - Browser: every online co-op test (local, peer to peer, the bad network rejoin, the flood reaching
   a guest, the Valley) and the online embed test.
 
