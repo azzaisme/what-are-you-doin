@@ -1,10 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { BEAVER_CARRY, BEAVER_FIRST_PERSON } from '../../src/assets/beaver.ts';
+import { realBucketCarry } from '../../scripts/lattice-scenes.ts';
+import type { CarryScene } from '../../scripts/lattice-scenes.ts';
 import { assetTier } from '../../src/assets/cell-tier.ts';
-import { BUCKET_HANDLE_TOP } from '../../src/assets/props.ts';
+import { combineLaneStats } from '../../src/render/voxel-pipeline.ts';
 import { createLabEntities } from '../../src/sim/lab-entities.ts';
 import type { SimEntity } from '../../src/sim/lab-entities.ts';
+import { initPhysics } from '../../src/sim/physics/world.ts';
 import { ANIM_MAX } from '../../src/sim/snapshots.ts';
 import { CHUNK_BITS, CHUNK_MASK, cellCenterX, cellCenterY, cellCenterZ } from '../../src/voxels/grid.ts';
 import { invertRigidMat34, mat34, pose, poseToMat34 } from '../../src/voxels/math.ts';
@@ -17,6 +19,12 @@ import { MASK_BUDGET, VoxelService } from '../../src/workers/voxel-service.ts';
 // process); the logic is the same at any size, and the browser test checks the real 1 cm lane.
 
 const entities = createLabEntities().entities.filter((e) => e.asset.parts.length > 0);
+/** Player 1 carrying the bucket in first person, from a real grab (looking 0.4 rad down). */
+let carry: CarryScene;
+beforeAll(async () => {
+    await initPhysics();
+    carry = realBucketCarry(-0.4);
+});
 const byName = (n: string) => entities.find((e) => e.name === n)!;
 const beaver = byName('beaver'); // base, priority 3
 const bucket = byName('bucket'); // fine, priority 4
@@ -291,7 +299,7 @@ describe('lattice priority (#107)', () => {
         const run = async (
             draws: string[],
             places: [string, number, number, number][],
-            anims: Record<string, Record<number, number>> = {}
+            extra: Record<string, { q?: { x: number; y: number; z: number; w: number }; anim?: ArrayLike<number> }> = {}
         ) => {
             vi.resetModules();
             replies.length = 0;
@@ -311,8 +319,13 @@ describe('lattice priority (#107)', () => {
                     st[o + 1] = x + f * 0.004;
                     st[o + 2] = y;
                     st[o + 3] = z;
-                    st[o + 7] = 1;
-                    for (const [c, v] of Object.entries(anims[n] ?? {})) st[o + 8 + Number(c)] = v;
+                    const q = extra[n]?.q ?? { x: 0, y: 0, z: 0, w: 1 };
+                    st[o + 4] = q.x;
+                    st[o + 5] = q.y;
+                    st[o + 6] = q.z;
+                    st[o + 7] = q.w;
+                    const anim = extra[n]?.anim ?? [];
+                    for (let c = 0; c < anim.length; c++) st[o + 8 + c] = anim[c];
                 }
                 await scope.onmessage!({
                     data: { type: 'frame', frame: f, time: f / 20, policy: 'coverage50', reference: false, states: st }
@@ -324,20 +337,20 @@ describe('lattice priority (#107)', () => {
             return stats;
         };
         try {
-            // the first-person limbs carrying the bucket, three avatars 0.55 m away (bench-lattice).
-            // Since #139 the arms hang unless carrying: posed carrying, the bucket hangs by its
-            // handle top from the left paw as the sim hangs it (paw at (0.381, 0.373, 0.076) from
-            // the root; the handle top 0.44 m above the bucket's origin).
+            // your limbs carrying the bucket from a real grab (scripts/lattice-scenes.ts, as
+            // hands.test grabs it), three avatars 0.55 m away (bench-lattice)
+            const c = carry;
+            const b = c.body.p;
             const fp = await run(
                 ['fp-body'],
                 [
-                    ['fp-body', 0, 0, 0],
-                    ['bucket', 0.381, 0.373 - (BUCKET_HANDLE_TOP - 0.02), 0.076],
-                    ['avatar-1', 0.55, 0, 0],
-                    ['avatar-2', -0.55, 0, 0],
-                    ['avatar-3', 0, 0, -0.55]
+                    ['fp-body', b.x, b.y, b.z],
+                    ['bucket', c.bucket.p.x, c.bucket.p.y, c.bucket.p.z],
+                    ['avatar-1', b.x + 0.55, b.y, b.z],
+                    ['avatar-2', b.x - 0.55, b.y, b.z],
+                    ['avatar-3', b.x, b.y, b.z + 0.55]
                 ],
-                { 'fp-body': { [BEAVER_CARRY]: 1, [BEAVER_FIRST_PERSON]: 1 } }
+                { 'fp-body': { q: c.body.q, anim: c.anim }, bucket: { q: c.bucket.q } }
             );
             for (const s of fp) {
                 expect(s.maskLimit).toBeGreaterThanOrEqual(MASK_BUDGET);
@@ -621,6 +634,98 @@ describe('lattice priority (#107)', () => {
                 ran.push(s.latticeMasks);
             }
             expect(ran.filter((v, n) => n > 0 && v !== ran[n - 1]).length).toBeLessThanOrEqual(1);
+        } finally {
+            delete (globalThis as { __UE_CELL_CM__?: number }).__UE_CELL_CM__;
+            vi.resetModules();
+        }
+    }, 300_000);
+    it('maskLimit: a lattice that can mask reports its budget, also with no mask this frame; one with none reports 0', () => {
+        // the fine lattice with the ragdoll's head alone: it can mask, nothing is near
+        const fine = lane([head], [{ e: head, x: 0, y: 0.5, z: 0 }]);
+        expect(fine.svc.canMask).toBe(true);
+        expect(fine.stats.latticeMasks).toBe(0);
+        expect(fine.stats.maskLimit).toBe(Math.max(MASK_BUDGET, fine.svc.world.objectCellCount(head.id)));
+        // one lattice for everything (?tiers=off): no masks, no budget
+        const one = new VoxelService();
+        one.build(1, 'yard', undefined, false);
+        const r = one.frame(1, 0, 'coverage50', false, states([{ e: head, x: 0, y: 0.5, z: 0 }]));
+        expect(one.canMask).toBe(false);
+        expect(r.stats.maskLimit).toBe(0);
+        // the pipeline sums the lattices' limits: only the masking one counts
+        const sum = combineLaneStats(r.stats, [r.stats, fine.stats]);
+        expect(sum.maskLimit).toBe(fine.stats.maskLimit);
+    }, 60_000);
+
+    it('one lattice for everything (?tiers=off): your limbs do not win ties, the lower id does (as before #107)', () => {
+        const fp = byName('fp-body');
+        const avatar = byName('avatar-1');
+        expect(avatar.priority).toBe(fp.priority);
+        expect(avatar.id).toBeLessThan(fp.id);
+        // your limbs 0.2 m up, through the avatar's body: many shared cells with different values
+        const places = [
+            { e: fp, x: 0, y: 0.2, z: 0 },
+            { e: avatar, x: 0, y: 0, z: 0 }
+        ];
+        const one = new VoxelService();
+        one.build(1, 'yard', undefined, false);
+        one.frame(1, 0, 'coverage50', false, states(places));
+        const mine = cells(one, fp);
+        const theirs = cells(one, avatar);
+        // shared cells where the two differ: only there does it show who won
+        const differ = [...mine.keys()].filter((k) => theirs.has(k) && theirs.get(k) !== mine.get(k));
+        expect(differ.length).toBeGreaterThan(10);
+        for (const k of differ) expect(one.world.chunks[k >>> 12].dyn![k & 4095]).toBe(theirs.get(k));
+    }, 60_000);
+    it('at 1 cm, your limbs carrying the bucket (a real grab): its mask hides exactly your cells inside it', async () => {
+        expect(carry.held).toBe(true);
+        vi.resetModules();
+        (globalThis as { __UE_CELL_CM__?: number }).__UE_CELL_CM__ = 1;
+        try {
+            const grid = await import('../../src/voxels/grid.ts');
+            expect(grid.GRID_SIZE).toBe(0.01);
+            const { VoxelService: Service } = await import('../../src/workers/voxel-service.ts');
+            const fp = byName('fp-body');
+            const svc = new Service(new Set([fp.id]));
+            svc.build(1, 'yard', undefined, false);
+            const st = new Float64Array(entities.length * STATE_STRIDE);
+            const put = (
+                e: SimEntity,
+                p: { p: { x: number; y: number; z: number }; q: { x: number; y: number; z: number; w: number } },
+                anim?: ArrayLike<number>
+            ) => {
+                const o = entities.indexOf(e) * STATE_STRIDE;
+                st.set([1, p.p.x, p.p.y, p.p.z, p.q.x, p.q.y, p.q.z, p.q.w], o);
+                if (anim) for (let c = 0; c < anim.length; c++) st[o + 8 + c] = anim[c];
+            };
+            put(fp, carry.body, carry.anim);
+            put(bucket, carry.bucket);
+            const s = svc.frame(1, 0, 'coverage50', false, st).stats;
+            expect(s.latticeMasks).toBe(1);
+            expect(s.maskRejected).toBe(0);
+            expect(s.maskCells).toBeGreaterThan(0); // its boxes meet your limbs
+            // your limb cells whose centres lie inside a bucket part, from the bucket's own volumes
+            const poses = bucket.asset.parts.map(() => pose());
+            bucket.asset.evaluate(carry.bucket, new Float64Array(ANIM_MAX), poses);
+            const inv = poses.map((p) => invertRigidMat34(poseToMat34(p, mat34()), mat34()));
+            const w = svc.world;
+            let inside = 0;
+            for (const [key] of w.objectCells(fp.id)) {
+                const c = w.chunks[key >>> 12];
+                const li = key & 4095;
+                const x = grid.cellCenterX(c.cx * 16 + (li & grid.CHUNK_MASK));
+                const z = grid.cellCenterZ(c.cz * 16 + ((li >> grid.CHUNK_BITS) & grid.CHUNK_MASK));
+                const y = grid.cellCenterY(c.cy * 16 + (li >> (2 * grid.CHUNK_BITS)));
+                const hit = bucket.asset.parts.some((part, n) => {
+                    const m = inv[n];
+                    const lx = m[0] * x + m[1] * y + m[2] * z + m[3];
+                    const ly = m[4] * x + m[5] * y + m[6] * z + m[7];
+                    const lz = m[8] * x + m[9] * y + m[10] * z + m[11];
+                    return part.volume.sample(lx, ly, lz) !== 0;
+                });
+                if (hit) inside++;
+            }
+            expect(s.latticeHidden).toBe(inside);
+            return inside;
         } finally {
             delete (globalThis as { __UE_CELL_CM__?: number }).__UE_CELL_CM__;
             vi.resetModules();

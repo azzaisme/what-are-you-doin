@@ -515,40 +515,33 @@ export class VoxelWorld {
     }
 
     /**
-     * Every cell one object holds, as i, j, k and its cell key, four ints a cell, into `out.a`
-     * (grown as needed). Returns the number of cells.
+     * Stages a mask object's cells (registered with `mask`) as exactly `keys[0 .. count)`: the cells
+     * this lattice's own objects hold that the mask wins (VoxelService decides which). Nothing
+     * changes until commitMask; returns how many chunks committing would change cells in (each
+     * is remeshed). Staging again, or staging another mask, discards it.
      */
-    objectCellCoords(id: number, out: { a: Int32Array }): number {
-        const e = this.objects.get(id);
-        if (!e) return 0;
-        if (out.a.length < e.cells.size * 4) out.a = new Int32Array(Math.ceil(e.cells.size * 5));
-        const a = out.a;
-        let n = 0;
-        for (const key of e.cells.keys()) {
-            const c = this.chunks[key >>> 12];
-            const li = key & (CHUNK_VOLUME - 1);
-            a[n] = (c.cx << CHUNK_BITS) | (li & CHUNK_MASK);
-            a[n + 1] = (c.cy << CHUNK_BITS) | (li >> (2 * CHUNK_BITS));
-            a[n + 2] = (c.cz << CHUNK_BITS) | ((li >> CHUNK_BITS) & CHUNK_MASK);
-            a[n + 3] = key;
-            n += 4;
-        }
-        return n / 4;
-    }
-
-    /**
-     * Sets a mask object's cells (registered with `mask`) to exactly `keys[0 .. count)`: the cells
-     * this lattice's own objects hold that the mask wins (VoxelService decides which). Marks
-     * changed cells dirty; returns how many changed.
-     */
-    writeMask(id: number, keys: Int32Array, count: number): number {
+    stageMask(id: number, keys: Int32Array, count: number): number {
         const e = this.objects.get(id);
         if (!e || !e.mask) throw new Error(`Unknown mask object ${id}`);
-        const prev = e.cells;
         const next = e.prev;
         next.clear();
         const v = MASK_VALUE | (e.priority << 16);
         for (let n = 0; n < count; n++) next.set(keys[n], v);
+        const chunks = this.chunkSet;
+        chunks.clear();
+        for (const key of next.keys()) if (!e.cells.has(key)) chunks.add(key >>> 12);
+        for (const key of e.cells.keys()) if (!next.has(key)) chunks.add(key >>> 12);
+        this.staged = e;
+        return chunks.size;
+    }
+
+    /** Applies the staged mask and marks its changed cells dirty; returns how many changed. */
+    commitMask(id: number): number {
+        const e = this.staged;
+        if (!e || e.id !== id) throw new Error(`Mask ${id} is not staged`);
+        this.staged = null;
+        const prev = e.cells;
+        const next = e.prev;
         e.prev = prev;
         e.cells = next;
         e.count = next.size;
@@ -565,6 +558,77 @@ export class VoxelWorld {
                 changed++;
             }
         return changed;
+    }
+
+    /** Sets a mask object's cells at once (stageMask then commitMask); returns how many changed. */
+    writeMask(id: number, keys: Int32Array, count: number): number {
+        this.stageMask(id, keys, count);
+        return this.commitMask(id);
+    }
+
+    private staged: DynamicEntry | null = null;
+    private readonly chunkSet = new Set<number>();
+
+    /**
+     * One object's cells inside a cell box, appended to `out.a` from `start` as i, j, k and the cell
+     * key (four ints a cell; grown as needed). One pass over its cells; those in chunks the box does
+     * not meet are skipped without decoding. Returns the new end.
+     */
+    objectCellsInBox(id: number, box: CellBox, out: { a: Int32Array }, start: number): number {
+        const e = this.objects.get(id);
+        if (!e) return start;
+        let a = out.a;
+        let n = start;
+        const S = CHUNK_SIZE;
+        let lastChunk = -1;
+        let skip = true;
+        let ox = 0;
+        let oy = 0;
+        let oz = 0;
+        for (const key of e.cells.keys()) {
+            const ci = key >>> 12;
+            if (ci !== lastChunk) {
+                lastChunk = ci;
+                const c = this.chunks[ci];
+                ox = c.cx * S;
+                oy = c.cy * S;
+                oz = c.cz * S;
+                skip =
+                    ox > box.i1 ||
+                    ox + S - 1 < box.i0 ||
+                    oy > box.j1 ||
+                    oy + S - 1 < box.j0 ||
+                    oz > box.k1 ||
+                    oz + S - 1 < box.k0;
+            }
+            if (skip) continue;
+            const li = key & (CHUNK_VOLUME - 1);
+            const i = ox + (li & CHUNK_MASK);
+            const j = oy + (li >> (2 * CHUNK_BITS));
+            const k = oz + ((li >> CHUNK_BITS) & CHUNK_MASK);
+            if (i < box.i0 || i > box.i1 || j < box.j0 || j > box.j1 || k < box.k0 || k > box.k1) continue;
+            if (a.length < n + 4) {
+                const g = new Int32Array(Math.max(1024, a.length * 2));
+                g.set(a);
+                a = out.a = g;
+            }
+            a[n] = i;
+            a[n + 1] = j;
+            a[n + 2] = k;
+            a[n + 3] = key;
+            n += 4;
+        }
+        return n;
+    }
+
+    /** How many chunks an object's cells lie in (what clearing it remeshes). */
+    objectChunkCount(id: number): number {
+        const e = this.objects.get(id);
+        if (!e) return 0;
+        const chunks = this.chunkSet;
+        chunks.clear();
+        for (const key of e.cells.keys()) chunks.add(key >>> 12);
+        return chunks.size;
     }
 
     /**

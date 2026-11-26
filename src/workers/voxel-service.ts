@@ -97,12 +97,26 @@ export const MASK_BUDGET = 12_000;
  * so masks cost little (`BENCH_PRESET=low node scripts/bench-lattice.ts`: at most +0.9 ms). Deep
  * overlaps beyond it intersect as before #107.
  */
-export const MASK_BUDGET_LOW = 12_000;
+export const MASK_BUDGET_LOW = 50_000;
 
-/** Mask budgets per quality preset: the least cells, and whether it rises to the lattice's own. */
+/** Voxel frames a mask the budget stopped waits before it is tried again (about a second). */
+export const MASK_BACKOFF = 20;
+/** High: the budget rises to the lattice's own cells times this (one mask can cover them all). */
+export const MASK_OWN_SHARE = 4;
+/** High: never more than this, whatever the lattice holds (an absolute bound on mask work). */
+export const MASK_CAP_HIGH = 150_000;
+/**
+ * Mask work, in units of one cell scanned: a centre sample costs MASK_SAMPLE_WEIGHT,
+ * remeshing one chunk whose cells a mask changes costs MASK_CHUNK_WEIGHT (scripts/bench-lattice.ts
+ * calibrates them).
+ */
+export const MASK_SAMPLE_WEIGHT = 4;
+export const MASK_CHUNK_WEIGHT = 1_000;
+
+/** Mask budgets per quality preset: the least work, whether it rises with the lattice's own cells, the cap. */
 export const MASK_PRESETS = {
-    high: { budget: MASK_BUDGET, own: true },
-    low: { budget: MASK_BUDGET_LOW, own: false }
+    high: { budget: MASK_BUDGET, own: true, cap: MASK_CAP_HIGH },
+    low: { budget: MASK_BUDGET_LOW, own: false, cap: MASK_BUDGET_LOW }
 } as const;
 export type MaskPreset = keyof typeof MASK_PRESETS;
 
@@ -206,13 +220,17 @@ export class VoxelService {
     /** `masks`: false leaves objects on other lattices out (#107 off; benchmarks compare with it). */
     constructor(objects?: Set<number>, masks = true) {
         this.world.addObject(PARTICLE_OBJECT_ID, 0);
-        for (const e of createLabEntities().entities) {
-            if (e.asset.parts.length === 0) continue;
+        const entities = createLabEntities().entities.filter((e) => e.asset.parts.length > 0);
+        // another lattice's object takes its cells from this lattice's lower-priority objects
+        // (only a lattice that draws objects of its own needs to know)
+        const isMask = (id: number) => masks && objects !== undefined && objects.size > 0 && !objects.has(id);
+        this.canMask = entities.some((e) => isMask(e.id));
+        for (const e of entities) {
             const drawn = !objects || objects.has(e.id);
-            // another lattice's object takes its cells from this lattice's lower-priority objects
-            // (only a lattice that draws objects of its own needs to know)
-            const mask = masks && !drawn && objects !== undefined && objects.size > 0;
-            const ownBody = e.name === 'fp-body';
+            const mask = isMask(e.id);
+            // your limbs win ties against other lattices' objects only: on a lattice with no masks
+            // (one lattice for everything, ?tiers=off) the lower id wins, as before #107
+            const ownBody = e.name === 'fp-body' && this.canMask;
             if (drawn || mask) this.world.addObject(e.id, e.priority, mask, ownBody);
             const reach = mask ? maskReach(assetBounds(e.asset)) : 0;
             if (!(reach <= MASK_REACH))
@@ -415,17 +433,20 @@ export class VoxelService {
         };
     }
 
+    /** Does this lattice track objects of other lattices (masks)? */
+    readonly canMask: boolean;
     /** This frame's drawn objects (for the masks), and per tracked object its world bounds. */
     private readonly local: Tracked[] = [];
     private readonly bounds = new Map<number, AABB>();
     /** Mask rasterization telemetry, reset every frame (its rejections are reported). */
     private readonly maskRaster = createRasterStats();
     private readonly maskQueue: { t: Tracked; boxes: (CellBox | null)[] }[] = [];
-    /** Per drawn object this frame (as `local`): its cells as i, j, k, key. */
-    private readonly ownCells: { a: Int32Array; n: number }[] = [];
-    /** A mask's candidate cells (own-cell offset | object index << 24), then the keys it wins. */
-    private maskCand = new Int32Array(4096);
+    /** A mask's candidate cells (i, j, k, key), and the keys it wins. */
+    private readonly maskCandCells = { a: new Int32Array(4096) };
+    private maskCand = new Int32Array(1024);
     private readonly maskTests: CenterTest[] = [];
+    /** The outranked objects (indices into `local`) near the mask being tested. */
+    private readonly maskNear: number[] = [];
     private readonly maskUnion: CellBox = { i0: 0, i1: 0, j0: 0, j1: 0, k0: 0, k1: 0 };
     /** Masks that ran last frame, and this frame (hysteresis, see rasterizeMasks). */
     private maskRan = new Set<number>();
@@ -434,15 +455,51 @@ export class VoxelService {
     maskBudget = MASK_BUDGET;
     /** Raise the budget to this lattice's own cells when more (tests turn it off to force skips). */
     maskOwnBudget = true;
+    /** The most mask work a frame, whatever the lattice holds (MASK_PRESETS). */
+    maskCap: number = MASK_CAP_HIGH;
 
     /** This device's quality preset's mask budget (MASK_PRESETS). */
     setMaskPreset(preset: MaskPreset): void {
         const p = MASK_PRESETS[preset];
         this.maskBudget = p.budget;
         this.maskOwnBudget = p.own;
+        this.maskCap = p.cap;
     }
     /** Last frame's masks: rasterized, skipped over the budget, cells tested, the budget, parts rejected. */
-    readonly maskStats = { masks: 0, skipped: 0, cells: 0, limit: 0, rejected: 0 };
+    readonly maskStats = {
+        masks: 0,
+        skipped: 0,
+        /** The work masks did (MASK_SAMPLE_WEIGHT, MASK_CHUNK_WEIGHT units), clears included. */
+        cells: 0,
+        limit: 0,
+        rejected: 0,
+        /** Its parts, for calibration: cells scanned, samples, chunks whose cells changed. */
+        scanned: 0,
+        samples: 0,
+        chunks: 0,
+        /** The part of `cells` spent clearing masks that dropped out (forced; outside the budget). */
+        clears: 0
+    };
+    /** Per mask that ran last frame: the work it did (its estimate this frame). */
+    private readonly maskWork = new Map<number, number>();
+    /** Per mask the budget stopped: the voxel frame from which it may be tried again. */
+    private readonly maskBackoff = new Map<number, number>();
+    /** Voxel frames this service has run masks in. */
+    private maskFrame = 0;
+
+    /**
+     * Clears a mask's cells. Remeshing what it hid is work too, counted in `cells` and in `clears`
+     * (a frame whose masks drop out pays for them: at most what they held the frame before).
+     */
+    private clearMask(id: number): void {
+        this.maskWork.delete(id);
+        if (this.world.objectCellCount(id) === 0) return;
+        const chunks = this.world.objectChunkCount(id);
+        this.world.clearObject(id);
+        this.maskStats.chunks += chunks;
+        this.maskStats.cells += MASK_CHUNK_WEIGHT * chunks;
+        this.maskStats.clears += MASK_CHUNK_WEIGHT * chunks;
+    }
 
     private boundsOf(t: Tracked): AABB {
         let b = this.bounds.get(t.id);
@@ -473,6 +530,8 @@ export class VoxelService {
     private rasterizeMasks(states: Float64Array, reference: boolean, cull: number): void {
         const st = this.maskStats;
         st.masks = st.skipped = st.cells = st.limit = 0;
+        st.scanned = st.samples = st.chunks = st.clears = 0;
+        this.maskFrame++;
         resetRasterStats(this.maskRaster);
         const queue = this.maskQueue;
         queue.length = 0;
@@ -490,18 +549,15 @@ export class VoxelService {
                 (cull === 0 || this.nearFocus(states[o + 1], states[o + 3], cull));
             const boxes = visible ? this.maskBoxesFor(t, states, o) : null;
             if (boxes) queue.push({ t, boxes });
-            else if (this.world.objectCellCount(t.id) > 0) this.world.clearObject(t.id);
+            else this.clearMask(t.id);
         }
-        // this lattice's own cells, per drawn object: what a mask can take (listed only once a
-        // mask that needs them runs); the frame's budget is reported whether or not any mask runs
+        // this lattice's own cells: what masks can take. The frame's budget is reported whether or
+        // not any mask runs
         let own = 0;
-        for (let n = 0; n < this.local.length; n++) {
-            const buf = this.ownCells[n] ?? (this.ownCells[n] = { a: new Int32Array(1024), n: -1 });
-            buf.n = -1;
-            own += this.world.objectCellCount(this.local[n].id);
-        }
-        const budget = Math.max(this.maskBudget, this.maskOwnBudget ? own : 0);
-        st.limit = budget;
+        for (const l of this.local) own += this.world.objectCellCount(l.id);
+        const budget = Math.min(this.maskCap, Math.max(this.maskBudget, this.maskOwnBudget ? own * MASK_OWN_SHARE : 0));
+        // reported by lattices that can mask only (the pipeline sums them over lattices)
+        st.limit = this.canMask ? budget : 0;
         const ran = this.maskRan;
         if (queue.length === 0) {
             ran.clear();
@@ -537,62 +593,91 @@ export class VoxelService {
                 u.k0 = Math.min(u.k0, Math.max(b.k0, r.minK));
                 u.k1 = Math.max(u.k1, Math.min(b.k1, r.maxK));
             }
-            // its cost, without listing anything: the cells it could test, at most the union box's
-            // and at most its outranked objects' cells
+            // its charge, before any work: the most it could cost. Listing the outranked objects'
+            // cells (once a frame each) and scanning them; a sample per cell in each part's box;
+            // remeshing every chunk its union box touches and every chunk it holds now.
             let held = 0;
-            for (let n = 0; n < this.local.length; n++)
-                if (outranks(t, this.local[n])) held += this.world.objectCellCount(this.local[n].id);
-            const cost =
-                u.i0 > u.i1 || u.j0 > u.j1 || u.k0 > u.k1
-                    ? 0
-                    : Math.min(held, (u.i1 - u.i0 + 1) * (u.j1 - u.j0 + 1) * (u.k1 - u.k0 + 1));
+            const near = this.maskNear;
+            near.length = 0;
+            for (let n = 0; n < this.local.length; n++) {
+                // only the outranked objects whose bounds meet its union box can lose cells to it
+                if (!outranks(t, this.local[n]) || !this.meetsCells(this.bounds.get(this.local[n].id)!, u)) continue;
+                near.push(n);
+                held += this.world.objectCellCount(this.local[n].id);
+            }
+            const empty = u.i0 > u.i1 || u.j0 > u.j1 || u.k0 > u.k1;
+            // its estimate: what it cost last frame when it ran (it moves a little a frame), else
+            // the part of its cost that is certain, scanning those cells. A mask the
+            // budget then stops (below) waits MASK_BACKOFF frames before it is tried again.
+            const backoff = this.maskBackoff.get(t.id);
+            const waiting = backoff !== undefined && this.maskFrame < backoff;
+            const estimate = empty ? 0 : ran.has(t.id) ? (this.maskWork.get(t.id) ?? held) : held;
             // hysteresis: a mask that ran last frame may use the whole budget, and so may the first
-            // served (the highest priority) when the budget covers this lattice's own cells (it
-            // always fits then); any other new one starts only within 80 % of it, so a cost
-            // hovering at the limit does not toggle
+            // served (the highest priority) when the budget rises with this lattice's own cells;
+            // any other new one starts only within 80 % of it, so a cost hovering at the limit
+            // does not toggle
             const limit = (this.maskOwnBudget && st.cells === 0) || ran.has(t.id) ? budget : budget * 0.8;
-            if (cost === 0 || st.cells + cost > limit) {
-                if (cost > 0) st.skipped++;
-                if (this.world.objectCellCount(t.id) > 0) this.world.clearObject(t.id);
+            if (estimate === 0 || waiting || st.cells + estimate > limit) {
+                if (estimate > 0) st.skipped++;
+                this.clearMask(t.id);
                 continue;
             }
-            st.cells += cost;
-            let m = 0;
-            for (let n = 0; n < this.local.length; n++) {
-                if (!outranks(t, this.local[n])) continue;
-                const buf = this.ownCells[n];
-                if (buf.n < 0) buf.n = this.world.objectCellCoords(this.local[n].id, buf);
-                const { a, n: count } = buf;
-                for (let c = 0; c < count * 4; c += 4) {
-                    const i = a[c];
-                    const j = a[c + 1];
-                    const k = a[c + 2];
-                    if (i < u.i0 || i > u.i1 || j < u.j0 || j > u.j1 || k < u.k0 || k > u.k1) continue;
-                    if (this.maskCand.length <= m) {
-                        const g = new Int32Array(this.maskCand.length * 2);
-                        g.set(this.maskCand);
-                        this.maskCand = g;
-                    }
-                    this.maskCand[m++] = c | (n << 24);
+            // the work, counted as it is done; it stops (and the mask is cleared) the moment it
+            // would go over the budget, so a frame's mask work never does
+            const before = st.cells;
+            let over = false;
+            // one pass over each near object's cells, keeping those inside its union box
+            let m4 = 0;
+            for (const n of near) {
+                const cells = this.world.objectCellCount(this.local[n].id);
+                if (st.cells + cells > budget) {
+                    over = true;
+                    break;
                 }
+                m4 = this.world.objectCellsInBox(this.local[n].id, u, this.maskCandCells, m4);
+                st.scanned += cells;
+                st.cells += cells;
             }
+            const cand = this.maskCandCells.a;
+            const m = m4 >> 2;
+            if (this.maskCand.length < m) this.maskCand = new Int32Array(Math.ceil(m * 1.25));
             let won = 0;
-            for (let x = 0; x < m; x++) {
-                const v = this.maskCand[x];
-                const { a } = this.ownCells[v >>> 24];
-                const c = v & 0xffffff;
-                const i = a[c];
-                const j = a[c + 1];
-                const k = a[c + 2];
+            let tested = 0;
+            for (let x = 0; x < m && !over; x++) {
+                if ((x & 255) === 0 && st.cells + MASK_SAMPLE_WEIGHT * (tested + 256 * t.parts.length) > budget) {
+                    over = true;
+                    break;
+                }
+                const c = x * 4;
+                const i = cand[c];
+                const j = cand[c + 1];
+                const k = cand[c + 2];
                 for (let p = 0; p < t.parts.length; p++) {
                     const b = q.boxes[p];
+                    const r = tests[p].range;
                     if (!b || i < b.i0 || i > b.i1 || j < b.j0 || j > b.j1 || k < b.k0 || k > b.k1) continue;
+                    if (i < r.minI || i > r.maxI || j < r.minJ || j > r.maxJ || k < r.minK || k > r.maxK) continue;
+                    tested++;
                     if (!centerInside(tests[p], i, j, k)) continue;
-                    this.maskCand[won++] = a[c + 3];
+                    this.maskCand[won++] = cand[c + 3];
                     break;
                 }
             }
-            this.world.writeMask(t.id, this.maskCand, won);
+            st.samples += tested;
+            st.cells += MASK_SAMPLE_WEIGHT * tested;
+            // remeshing what it changes, counted before anything changes
+            const chunks = over ? 0 : this.world.stageMask(t.id, this.maskCand, won);
+            if (over || st.cells + MASK_CHUNK_WEIGHT * chunks > budget) {
+                st.skipped++;
+                this.clearMask(t.id);
+                this.maskBackoff.set(t.id, this.maskFrame + MASK_BACKOFF);
+                continue;
+            }
+            this.maskBackoff.delete(t.id);
+            this.world.commitMask(t.id);
+            st.chunks += chunks;
+            st.cells += MASK_CHUNK_WEIGHT * chunks;
+            this.maskWork.set(t.id, st.cells - before);
             nextRan.add(t.id);
             st.masks++;
         }
@@ -685,6 +770,18 @@ export class VoxelService {
             };
         });
         return any ? boxes : null;
+    }
+
+    /** Does a world box (m) meet a cell box (one cell of margin either way)? */
+    private meetsCells(b: AABB, u: CellBox): boolean {
+        return (
+            cellIndexX(b.minX) - 1 <= u.i1 &&
+            cellIndexX(b.maxX) + 1 >= u.i0 &&
+            cellIndexY(b.minY) - 1 <= u.j1 &&
+            cellIndexY(b.maxY) + 1 >= u.j0 &&
+            cellIndexZ(b.minZ) - 1 <= u.k1 &&
+            cellIndexZ(b.maxZ) + 1 >= u.k0
+        );
     }
 
     private nearFocus(x: number, z: number, r: number): boolean {

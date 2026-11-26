@@ -47,7 +47,10 @@ interface Lane extends LaneSpec {
     build: BuildInfo | null;
 }
 
-/** Stats summed over lanes (counts), or the slowest lane (times). */
+/**
+ * Stats summed over lanes (counts), or the slowest lane (times). `maskLimit` sums only the lanes
+ * that can mask (a lane with no objects of other lattices reports 0): the masking lanes' budgets.
+ */
 const SUMMED: (keyof FrameStats)[] = [
     'objects',
     'parts',
@@ -71,6 +74,18 @@ const SUMMED: (keyof FrameStats)[] = [
     'chunks'
 ];
 const SLOWEST: (keyof FrameStats)[] = ['rasterMs', 'resolveMs', 'meshMs', 'totalMs'];
+
+/** One frame's stats over every lane: the world lane's, with counts summed and times the slowest. */
+export function combineLaneStats(world: FrameStats, lanes: readonly (FrameStats | null)[]): FrameStats {
+    const out = { ...world };
+    for (const k of SUMMED) out[k] = 0;
+    for (const st of lanes) {
+        if (!st) continue;
+        for (const k of SUMMED) out[k] += st[k];
+        for (const k of SLOWEST) out[k] = Math.max(out[k], st[k]);
+    }
+    return out;
+}
 
 export class VoxelClient {
     policy: SamplingPolicy = 'coverage50';
@@ -268,15 +283,7 @@ export class VoxelClient {
     }
 
     private combine(): FrameStats {
-        const base = this.laneStats[this.lanes.indexOf(this.worldLane)]!;
-        const out = { ...base };
-        for (const k of SUMMED) out[k] = 0;
-        for (const st of this.laneStats) {
-            if (!st) continue;
-            for (const k of SUMMED) out[k] += st[k];
-            for (const k of SLOWEST) out[k] = Math.max(out[k], st[k]);
-        }
-        return out;
+        return combineLaneStats(this.laneStats[this.lanes.indexOf(this.worldLane)]!, this.laneStats);
     }
 
     /**

@@ -19,8 +19,9 @@ interface Scenario {
     cm: number;
     draws: string[];
     places: Place[];
-    /** Animation channels per object name (channel index: value). */
-    anims?: Record<string, Record<number, number>>;
+    /** Your limbs carrying the bucket from a real grab (scripts/lattice-scenes.ts): fp-body and
+     * bucket take that pose (the places give the other objects, relative to your limbs' root). */
+    carry?: boolean;
 }
 
 // the ragdoll standing at the origin, its parts where the sim puts them at rest (DUMMY_PARTS)
@@ -60,16 +61,13 @@ export const SCENARIOS: Scenario[] = [
         name: '1 cm first-person limbs, holding the bucket, three avatars 0.55 m away',
         cm: 1,
         draws: ['fp-body'],
-        // posed carrying (#139: the arms hang otherwise), the bucket hanging by its handle top
-        // (0.44 m above its origin) from the left paw at (0.381, 0.373, 0.076), as the sim hangs it
+        // a real first-person grab, looking 0.4 rad down (as tests/unit/hands.test.ts grabs it)
+        carry: true,
         places: [
-            ['fp-body', 0, 0, 0],
-            ['bucket', 0.381, 0.373 - 0.44, 0.076],
             ['avatar-1', 0.55, 0, 0],
             ['avatar-2', -0.55, 0, 0],
             ['avatar-3', 0, 0, -0.55]
-        ],
-        anims: { 'fp-body': { 2: 1, 5: 1 } } // BEAVER_CARRY, BEAVER_FIRST_PERSON
+        ]
     },
     {
         name: '1 cm ragdoll head, the beaver standing inside it',
@@ -118,6 +116,18 @@ async function run(s: Scenario): Promise<void> {
     const { VoxelService } = await import('../src/workers/voxel-service.ts');
     const { STATE_STRIDE } = await import('../src/workers/protocol.ts');
     const ents = createLabEntities().entities.filter((e) => e.asset.parts.length > 0);
+    type Posed = { p: { x: number; y: number; z: number }; q: { x: number; y: number; z: number; w: number } };
+    const posed: { name: string; pose: Posed; anim?: Float64Array }[] = [];
+    let origin = { x: 0, y: 0, z: 0 };
+    if (s.carry) {
+        const { initPhysics } = await import('../src/sim/physics/world.ts');
+        const { realBucketCarry } = await import('./lattice-scenes.ts');
+        await initPhysics();
+        const c = realBucketCarry(-0.4);
+        if (!c.held) throw new Error('the grab did not hold the bucket');
+        posed.push({ name: 'fp-body', pose: c.body, anim: c.anim }, { name: 'bucket', pose: c.bucket });
+        origin = c.body.p;
+    }
     const byName = (n: string) => {
         const e = ents.find((x) => x.name === n);
         if (!e) throw new Error(`no entity ${n}`);
@@ -136,14 +146,18 @@ async function run(s: Scenario): Promise<void> {
     const FRAMES = 200;
     for (let f = 0; f < FRAMES + 10; f++) {
         const st = new Float64Array(ents.length * STATE_STRIDE);
-        for (const [n, x, y, z] of s.places) {
-            const o = ents.indexOf(byName(n)) * STATE_STRIDE;
-            st[o] = 1;
-            st[o + 1] = x + f * 0.002;
-            st[o + 2] = y;
-            st[o + 3] = z;
-            st[o + 7] = 1;
-            for (const [c, v] of Object.entries(s.anims?.[n] ?? {})) st[o + 8 + Number(c)] = v;
+        const all = [
+            ...posed,
+            ...s.places.map(([name, x, y, z]) => ({
+                name,
+                pose: { p: { x: origin.x + x, y: origin.y + y, z: origin.z + z }, q: { x: 0, y: 0, z: 0, w: 1 } },
+                anim: undefined as Float64Array | undefined
+            }))
+        ];
+        for (const { name, pose: p, anim } of all) {
+            const o = ents.indexOf(byName(name)) * STATE_STRIDE;
+            st.set([1, p.p.x + f * 0.002, p.p.y, p.p.z, p.q.x, p.q.y, p.q.z, p.q.w], o);
+            if (anim) for (let c = 0; c < anim.length; c++) st[o + 8 + c] = anim[c];
         }
         // which goes first alternates too
         for (const k of f % 2 ? [1, 0] : [0, 1]) {
