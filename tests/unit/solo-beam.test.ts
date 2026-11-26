@@ -246,26 +246,6 @@ describe('one beaver replaces a lost stringer (#52)', () => {
         const restDy = Math.abs(seatFar - seatNear);
         const b0 = beam0.pose.p;
         console.log(
-            'trace ends near',
-            near.x.toFixed(2),
-            near.y.toFixed(3),
-            near.z.toFixed(2),
-            'ground',
-            s.physics.groundY(near.x, near.z)?.toFixed(3),
-            '| far',
-            far.x.toFixed(2),
-            far.y.toFixed(3),
-            far.z.toFixed(2),
-            'ground',
-            s.physics.groundY(far.x, far.z)?.toFixed(3),
-            '| player',
-            s.player.x.toFixed(2),
-            s.player.y.toFixed(2),
-            s.player.z.toFixed(2),
-            'held',
-            s.physics.heldIdOf(0)
-        );
-        console.log(
             `solo: the sawn beam seated at x ${laid.x.toFixed(2)} (its line ${x.toFixed(2)}), z ${laid.z.toFixed(2)} (the gap's middle ${BRIDGE.zc.toFixed(2)}), y ${laid.y.toFixed(3)} (resting on both seats: ${restY.toFixed(3)}); ends at x ${near.x.toFixed(2)} and ${far.x.toFixed(2)}; bearing ${nearBearing.toFixed(2)} m on the near seat, ${farBearing.toFixed(2)} m on the far; ends ${(dy * 100).toFixed(1)} cm apart in height (beam-0's ${(dy0 * 100).toFixed(1)} cm, the seats' ${(restDy * 100).toFixed(1)} cm); beam-0 at x ${b0.x.toFixed(2)} y ${b0.y.toFixed(3)} z ${b0.z.toFixed(2)}; falls ${s.progress.falls}`
         );
         // beam-0 is across, on its seats

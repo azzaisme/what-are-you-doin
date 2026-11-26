@@ -80,8 +80,11 @@ All by input, 10 cm cells, from the tests' own lines.
       ground (over a low mound).
     - **Against a staked log:** tension up to 4340 N (the gearing's 3.9 kN, overshooting by up to
       12 % within a tick), 62 ratchet clicks, and the rope held.
-    - **Overloaded:** pulled the other way, harder each second, the rope parted at 9964 N. The log was
-      not whipped back towards the drum (0.00 m/s).
+    - **Overloaded:** pulled the other way, harder each second, the rope parted at 9964 N. No last
+      yank as it parts: on that tick the log's velocity changes by 0.05–0.14 m/s more than the
+      outward pull explains (the ground), against 0.43–0.46 m/s on the tick before (the rope's
+      pull); a one-tick yank added there measures 0.47 and fails the test. After, the log moves
+      back towards the drum at 0.00 m/s.
     - **A rider:** a beaver standing on the hauled log moved 0.00 m while the log wound 2.87 m, and
       dropped to the ground.
 - **Dolly** (`dolly.test.ts`):
@@ -136,7 +139,7 @@ All by input, 10 cm cells, from the tests' own lines.
     - before the road closure (#131) merged in: 4026 → 4046 with the dolly;
     - with it (141 entities, this protocol, v2): 4090;
     - with the winch rope hooked at its widest (`[2,140,-100,-20,-20]`, +26): **4116, over the
-      limit on v2**. On #141's v3 the audit measured 4045 with the rope.
+      limit on v2**. The combined measurement on #141's v3 goes here once #141 is merged in.
     - **So this chunk is blocked on #141:** #141 lands first, then this branch merges it and
       asserts the combined worst case, with the rope hooked, under 4096 UTF-8 bytes. Until then
       the test asserts the worst case without the rope (4090), as v2 can carry it.

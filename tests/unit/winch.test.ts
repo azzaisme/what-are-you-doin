@@ -172,12 +172,23 @@ describe('the hand winch (#52)', () => {
         let pull = 0;
         let peak = 0;
         let snapped = -1;
+        // each tick, the change in the log's velocity along the rope that the outward pull does not
+        // explain: while the rope holds, its own pull back (about T dt / m); on the tick it parts,
+        // nothing (but the ground's friction) if the rope lets go without a last yank
+        const m = body.mass();
+        let before = 0;
+        let atSnap = NaN;
         for (let k = 0; k < 60 * 8 && snapped < 0; k++) {
             pull += 4000 / 60;
+            const v0 = body.linvel().x;
             body.applyImpulse({ x: pull / 60, y: 0, z: 0 }, true);
             g.step();
+            const left = body.linvel().x - v0 - pull / 60 / m;
             peak = Math.max(peak, s.winch!.tension);
-            if (s.events.some((e) => e.text.startsWith('Snap!'))) snapped = k;
+            if (s.events.some((e) => e.text.startsWith('Snap!'))) {
+                snapped = k;
+                atSnap = left;
+            } else before = left;
         }
         expect(snapped).toBeGreaterThanOrEqual(0);
         // after it parts, the log is not whipped back towards the drum
@@ -187,8 +198,13 @@ describe('the hand winch (#52)', () => {
             towards = Math.max(towards, -body.linvel().x);
         }
         console.log(
-            `winch, overloaded: the rope parted at ${(snapped / 60).toFixed(2)} s, peak tension ${peak.toFixed(0)} N (strength ${ROPE.strength} N); the log's speed back towards the drum after, at most ${towards.toFixed(2)} m/s`
+            `winch, overloaded: the rope parted at ${(snapped / 60).toFixed(2)} s, peak tension ${peak.toFixed(0)} N (strength ${ROPE.strength} N); velocity change the outward pull does not explain: ${before.toFixed(2)} m/s on the tick before (the rope's pull), ${atSnap.toFixed(3)} m/s on the tick it parted; the log's speed back towards the drum after, at most ${towards.toFixed(2)} m/s`
         );
+        // (the test sees the rope pulling back before it parts, so a yank would show)
+        expect(before).toBeLessThan(-0.3);
+        // no last yank as it parts: one more tick of its pull would show as much as the tick before
+        // (measured: 0.05-0.14 m/s from the ground; with a one-tick yank added, 0.47)
+        expect(Math.abs(atSnap)).toBeLessThan(0.3);
         expect(peak).toBeGreaterThan(WINCH_PULL);
         expect(peak).toBeLessThan(ROPE.strength * 1.2);
         expect(s.winch!.hooked).toBe(-1);
