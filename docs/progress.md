@@ -107,7 +107,7 @@ The rest:
 - **Known issue, for a follow-up:** a bucket that falls into the crevasse bed stays there, with
   no recovery to the stage start. The base game does the same, but the boulder rule (a bucket
   dropped where the beaver stands on a boulder) makes it more likely to happen.
-- npm test 1144/1144 (5 cm and 10 cm), with `epics-5-10` 085dd00 merged in.
+- npm test 1190/1190 (5 cm and 10 cm), with `epics-5-10` 523bc42 (the release) merged in.
 
 ## Online play: room to grow in the host's updates (2026-11-26, Epic 10, #20)
 
