@@ -49,9 +49,12 @@ stones", "fallen trunk", "boulders"):
 - **Objectives shortened to fit at 160 % text size.** On an 844×390 phone with the debug panel
   open, the longer objectives ran into the settings chip. Now "Bridge the crevasse on the road",
   "Stack crates up the wall: set the bucket on one, lift it from the top" and "Water the flower:
-  hold the bucket in the stone ring and pour (R)". A new browser test plays through all 7 Valley
-  stages and checks each real objective at 160 % on 5 screen shapes, panel open and closed. Before
-  the change it failed at stages 5, 6 and 7 at 844×390.
+  hold the bucket in the stone ring and pour (R)". Shallow Creek's says what to carry where again:
+  "Bridge the creek, bucket to the flag (the stepping stones are feet only)". A new browser test
+  visits all 7 Valley stages and checks each real objective at 160 % on 5 screen shapes, panel open
+  and closed. It moves between stages by teleporting the beaver and setting a full bucket down at
+  each flag, so it checks the layout, not the play. Before the change it failed at stages 5, 6 and
+  7 at 844×390.
 
 **Tests** (`tests/unit/valley-detours.test.ts`, all by input; set-up places players, the bucket and
 a built bridge). Each of these fails to get the bucket over:
@@ -101,6 +104,9 @@ The rest:
   with its waterfall). The ute's red was tried for area 4 first, but it sat next to area 5's brick
   (35 apart in RGB). Tests check the area colours use no test material, are all different, and
   that next-door areas are more than 60 apart (the closest pair now is hi-vis and leaf gold, 65).
+- **Known issue, for a follow-up:** a bucket that falls into the crevasse bed stays there, with
+  no recovery to the stage start. The base game does the same, but the boulder rule (a bucket
+  dropped where the beaver stands on a boulder) makes it more likely to happen.
 - npm test 1144/1144 (5 cm and 10 cm), with `epics-5-10` 085dd00 merged in.
 
 ## Objects on different lattices resolve by priority (2026-11-22, Epic 10, #107)

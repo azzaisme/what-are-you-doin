@@ -1432,7 +1432,7 @@ export const VALLEY_STAGES: LevelStage[] = [
     },
     {
         name: 'Shallow Creek',
-        objective: 'Bridge the creek to the far bank (the stepping stones are feet only)',
+        objective: 'Bridge the creek, bucket to the flag (the stepping stones are feet only)',
         goal: square(CHECKPOINTS[1].u, CHECKPOINTS[1].t, 2.6),
         start: restart(-4.5, 1),
         bucket: bucketAt(-4.5, 1.6),

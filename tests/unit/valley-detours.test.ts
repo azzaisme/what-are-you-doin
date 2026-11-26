@@ -753,6 +753,8 @@ describe('players are told', () => {
 
     it('each detour stage’s objective says its detour is for feet only', () => {
         expect(VALLEY_STAGES[CREEK.stage].objective).toContain('stepping stones are feet only');
+        // and still says what to carry where
+        expect(VALLEY_STAGES[CREEK.stage].objective).toMatch(/bucket.*flag/);
         expect(VALLEY_STAGES[CULVERT.stage].objective).toContain('fallen trunk is feet only');
         expect(VALLEY_STAGES[CRACK.stage].objective).toContain('boulders are feet only');
     });

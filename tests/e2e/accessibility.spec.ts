@@ -408,7 +408,8 @@ test("text size 160 %: every Valley stage's real objective keeps clear of the de
             }).toPass({ timeout: 20_000 });
         }
         if (k === 6) break;
-        // on to the next stage: stand by this stage's flag and set the full bucket down on it
+        // on to the next stage, visited by set-up (not played): teleport the beaver by this stage's
+        // flag and set a full bucket down on it, so the flag counts it
         const f = flags[k];
         await page.evaluate((p) => {
             const l = (window as unknown as { __riverLab: Lab }).__riverLab;
