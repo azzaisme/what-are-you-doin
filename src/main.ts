@@ -62,6 +62,7 @@ import type { Quality } from './render/scene.ts';
 import { VoxelClient } from './render/voxel-pipeline.ts';
 import type { LaneSpec } from './render/voxel-pipeline.ts';
 import { VoxelRenderer } from './render/voxel-renderer.ts';
+import { WinchRope } from './render/winch-rope.ts';
 import { FAST_CATCHUP_STEPS, FixedStepClock, SIM_DT, VOXEL_RATES, VoxelClock } from './sim/clock.ts';
 import type { VoxelRate } from './sim/clock.ts';
 import { ACTION_DROP_TEST, ACTION_RAGDOLL, ACTION_RESET_PROPS, neutralCommand } from './sim/commands.ts';
@@ -74,6 +75,8 @@ import { initPhysics } from './sim/physics/world.ts';
 import { ANIM_MAX } from './sim/snapshots.ts';
 import { WATER } from './sim/water.ts';
 import { weatherCovers, weatherFog } from './sim/weather.ts';
+import { WINCH, decodeWinchRope, encodeWinchRope } from './sim/winch.ts';
+import type { WinchRopeEnd } from './sim/winch.ts';
 import type { CameraControlsApi } from './types/engine-scripts.ts';
 import { CreditsPanel } from './ui/credits.ts';
 import { fullscreenAvailable, isFullscreen, onPageHidden, setFullscreen } from './ui/embed.ts';
@@ -261,6 +264,7 @@ pipeline.applyStatic();
 const staticUploadMs = performance.now() - tUpload;
 const reference = new ReferenceRenderer(app, sim, scene.worldLayer, scene.immediateLayer);
 const nailMarkers = new NailMarkers(app, scene.worldLayer, scene.viewLayers);
+const winchRope = new WinchRope(app, scene.worldLayer);
 const fpInput = new FirstPersonInput(canvas);
 // remappable controls (#98): one table shared by the keyboard, the pads and the settings menu
 const bindings = loadBindings(settingsStorage);
@@ -769,6 +773,7 @@ class LabDirector extends Script {
         pipeline.lockBody(sim.fpBody.id, bodyNow);
         reference.update(renderTime);
         updateNails(renderTime);
+        updateWinchRope(renderTime);
         if (state.colliders) drawColliders();
         if (state.structure) drawStructure();
         // gusts stir the water
@@ -1623,6 +1628,23 @@ function updateNails(time: number): void {
         }
     }
     nailMarkers.update(marks, sim.ring, time, tierCellCm('base', cellCm) / 100, previews);
+}
+
+/** The winch's rope (Epic 5, #52): the host's own, or what it sent a guest. */
+function updateWinchRope(time: number): void {
+    const w = level.winch;
+    let end: WinchRopeEnd | null = null;
+    if (guestSession) end = guestSession.winchRope;
+    else if (sim.winch) {
+        const index = new Map(sim.entities.map((e, i) => [e.id, i]));
+        end = decodeWinchRope(
+            encodeWinchRope(sim.winch.view(), (id) => index.get(id) ?? -1),
+            sim.entities.length,
+            sim.avatars.length
+        );
+    }
+    const drum = w ? { x: w.x, y: w.y + WINCH.drumHeight, z: w.z } : null;
+    winchRope.update(drum, end, sim.ring, time, (k) => (k < sim.avatars.length ? sim.avatars[k].slot : -1));
 }
 
 /** The ute's yaw last render frame, per local view (NaN when that view's player isn't in it). */

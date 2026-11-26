@@ -29,6 +29,8 @@ import { applyStrain, decodeNails, encodeNails, encodeStrain, nailMarks } from '
 import type { NailMark } from '../sim/joints/wire.ts';
 import { MAX_PLAYERS } from '../sim/lab-entities.ts';
 import type { LabSim } from '../sim/lab-sim.ts';
+import { decodeWinchRope, encodeWinchRope } from '../sim/winch.ts';
+import type { WinchRopeEnd } from '../sim/winch.ts';
 import { wireLitres } from '../ui/water-hud.ts';
 
 import { SnapshotDecoder, encodeSnapshot, fromBase64Chunks, snapshotTick, toBase64Chunks } from './codec.ts';
@@ -189,6 +191,8 @@ export class HostSession {
     /** How long a dropped guest's player is kept (tests shorten it). */
     rejoinGraceTicks = REJOIN_GRACE_TICKS;
     private sentStrain = '';
+    /** The winch's rope as last sent (Epic 5, #52). */
+    private sentRope = '';
     /** Slots that got a new guest, slots freed, slots whose guest dropped (held for a rejoin), slots rejoined. */
     onGuestsChanged: (joined: number[], left: number[], dropped: number[], back: number[]) => void = () => undefined;
 
@@ -436,6 +440,16 @@ export class HostSession {
                 extra.jl = strain;
             }
         }
+        // the winch's rope, only when it changes (taken, hooked, wound in)
+        if (sim.winch) {
+            const index = new Map(sim.entities.map((e, i) => [e.id, i]));
+            const rope = encodeWinchRope(sim.winch.view(), (id) => index.get(id) ?? -1);
+            const key = rope.join(',');
+            if (key !== this.sentRope) {
+                this.sentRope = key;
+                extra.wr = rope;
+            }
+        }
         this.ch.setState({
             ...extra,
             s: toBase64Chunks(bytes),
@@ -518,6 +532,8 @@ export class GuestSession {
     /** The host's nails (display only). */
     nails: NailMark[] = [];
     private lastNails = '';
+    /** The host's winch rope (display only; null: on the drum). */
+    winchRope: WinchRopeEnd | null = null;
     goal = false;
     /** The host's tutorial step. */
     step = 0;
@@ -641,6 +657,7 @@ export class GuestSession {
             }
         }
         applyStrain(this.nails, st.jl);
+        if (st.wr !== undefined) this.winchRope = decodeWinchRope(st.wr, this.sim.entities.length, MAX_PLAYERS);
         if (Array.isArray(st.ev)) {
             this.events = (st.ev as unknown[])
                 .map((e) => e as Partial<NetEvent>)

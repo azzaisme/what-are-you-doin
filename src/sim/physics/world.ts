@@ -489,12 +489,22 @@ export class PhysicsWorld {
 
     /**
      * A dynamic body built from several shapes, each with its own density (a vehicle: a heavy
-     * chassis, a light cab) and, if given, its own friction (the log dolly's grippy cradle on
-     * slippery wheels). Not grabbable unless asked; the wind leaves it alone.
+     * chassis, a light cab) and, if given, its own friction. A shape that slides on whatever it
+     * touches (`slides`: the log dolly's casters) keeps its own low friction (Rapier's Min rule);
+     * every other shape grips as before (the two frictions averaged). Not grabbable unless asked;
+     * the wind leaves it alone.
      */
     addDynamicCompound(
         id: number,
-        shapes: { shape: ShapeSpec; x: number; y: number; z: number; density: number; friction?: number }[],
+        shapes: {
+            shape: ShapeSpec;
+            x: number;
+            y: number;
+            z: number;
+            density: number;
+            friction?: number;
+            slides?: boolean;
+        }[],
         spawn: Pose,
         o: {
             friction?: number;
@@ -520,10 +530,10 @@ export class PhysicsWorld {
             d.setTranslation(t.x + s.x, t.y + s.y, t.z + s.z)
                 .setDensity(s.density)
                 .setFriction(s.friction ?? o.friction ?? 0.6)
-                // a shape's own friction is its, whatever it touches (Rapier averages the two by
-                // default: the dolly's 0.03 wheels on gravel came to 0.47, and it would not roll)
+                // a sliding shape's friction is its own, whatever it touches (averaged, the dolly's
+                // 0.03 casters on gravel came to 0.47, and it would not roll under 30 N)
                 .setFrictionCombineRule(
-                    s.friction !== undefined ? RAPIER.CoefficientCombineRule.Min : RAPIER.CoefficientCombineRule.Average
+                    s.slides ? RAPIER.CoefficientCombineRule.Min : RAPIER.CoefficientCombineRule.Average
                 )
                 .setRestitution(0.05)
                 .setCollisionGroups(groups(LAYER.prop, ALL));
@@ -916,6 +926,17 @@ export class PhysicsWorld {
             p
         );
         return true;
+    }
+
+    /**
+     * Read-only: the grabbable body the view ray hits within reach and where (world), or null
+     * (the winch's hook goes in there).
+     */
+    viewHit(eye: Vec3Like, yaw: number, pitch: number, p = 0): { pb: PhysBody; point: Vec3Like } | null {
+        const hit = this.castView(eye, yaw, pitch, p);
+        if (!hit) return null;
+        const d = viewDir(yaw, pitch, _dir);
+        return { pb: hit.pb, point: { x: eye.x + d.x * hit.toi, y: eye.y + d.y * hit.toi, z: eye.z + d.z * hit.toi } };
     }
 
     /** Read-only: id of the grabbable body the view ray hits within reach, or -1 (for UI prompts). */
