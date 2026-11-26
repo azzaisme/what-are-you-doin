@@ -29,6 +29,8 @@ import { EYE_HEIGHT, LabSim, MAX_PLAYERS } from '../../src/sim/lab-sim.ts';
 import { CHARACTER, GRAVITY, initPhysics } from '../../src/sim/physics/world.ts';
 import { pose } from '../../src/voxels/math.ts';
 
+import { hookDolly } from './winch-helpers.ts';
+
 beforeAll(() => initPhysics());
 
 const cmd = (n: number, c: Partial<PlayerCommand> = {}): PlayerCommand => ({ ...neutralCommand(n), ...c });
@@ -438,20 +440,33 @@ describe('host state size', () => {
         sim.fpActive = true;
         const hs = await HostSession.start(hub.transport('host'), sim, 'valley', 'size');
         for (let i = 1; i < MAX_PLAYERS; i++) sim.setSlotActive(i, true);
-        let bytes = 0;
-        for (let k = 0; k < 30; k++) {
-            sim.step(cmd(k));
-            for (const e of sim.entities) e.visible = true; // worst case: everything drawn
-            sim.events.push({ tick: sim.tick, kind: 'info', text: 'x'.repeat(200) });
-            hs.afterStep((s) => ({ ...sim.interactionIds(s), held: 999, target: 999, shared: true, seat: 1 }));
-            const st = hub
-                .channel('room-ue-size', 'probe')
-                .peers()
-                .find((p) => p.id === 'host')!.state;
-            bytes = Math.max(bytes, JSON.stringify(st).length);
-        }
-        console.info(`worst-case host state, Valley, 8 players, all ${sim.entities.length} entities: ${bytes} bytes`);
+        const utf8 = (v: unknown) => new TextEncoder().encode(JSON.stringify(v)).length;
+        const measure = () => {
+            let bytes = 0;
+            for (let k = 0; k < 30; k++) {
+                sim.step(cmd(k));
+                for (const e of sim.entities) e.visible = true; // worst case: everything drawn
+                sim.events.push({ tick: sim.tick, kind: 'info', text: 'x'.repeat(200) });
+                hs.afterStep((s) => ({ ...sim.interactionIds(s), held: 999, target: 999, shared: true, seat: 1 }));
+                const st = hub
+                    .channel('room-ue-size', 'probe')
+                    .peers()
+                    .find((p) => p.id === 'host')!.state;
+                bytes = Math.max(bytes, utf8(st));
+            }
+            return bytes;
+        };
+        // (in UTF-8 bytes, as the room counts them)
+        const bytes = measure();
+        // and with the winch's rope out, hooked into the log dolly (the last entity) at a corner:
+        // a real rope, on the wire in every update (Epic 5, #52)
+        const rope = hookDolly(sim);
+        const withRope = measure();
+        console.info(
+            `worst-case host state, Valley, 8 players, all ${sim.entities.length} entities: ${bytes} UTF-8 bytes; with the winch rope hooked (wr ${JSON.stringify(rope)}): ${withRope}`
+        );
         expect(bytes).toBeLessThan(4096);
+        expect(withRope).toBeLessThan(4096);
     });
 });
 

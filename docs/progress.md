@@ -1,5 +1,165 @@
 # Progress log
 
+## Epic 5, chunk B: the structure overlay, the rope, the winch and the log dolly (2026-11-26, #51 #52)
+
+No puzzle may need exactly two people (#52). Before this, a whole log (113 kg) needed two beavers,
+so a lost or broken stringer, or the Valley's sawn ones, could not be made alone. Now one beaver
+can do it with either solo aid: the hand winch, or the log dolly.
+
+### How to play it
+
+- **The winch** (in the Yard, north of the sawmill's infeed; in the Valley where the Yard is):
+    - Grab at its drum with empty hands to take the rope's hook.
+    - Walk it out (up to 25 m) and grab a piece: the hook goes in where you look.
+    - Back at the drum, grab to crank. Grab again, or walk away, to stop. The ratchet holds what has
+      been wound in. `Q` at the drum, hands empty, lets the rope run back (holding something, `Q`
+      drops that). If the piece it is hooked into leaves the world (the sawmill takes it), the
+      rope comes free and the winch says so.
+    - The hook never goes into the bucket: it crosses only over what is built (#132).
+- **The log dolly** (in the Yard, south of the log pile):
+    - Take a log's end, lift it (the far end stays on the ground) and swing it over the dolly's
+      cradle. Lower it in and let go.
+    - Take the dolly by its stop, behind the log, and walk: it rolls, the stop pushes the log, its
+      far end drags. Pulled the other way, only the cradle's grip holds the log.
+    - Looking up or down neither lifts it nor draws it in.
+- **`F4`** (or the debug panel's _Structure loads_), on the host: a cross on every joint coloured
+  by its strain band, its force as a line, and the contacts the stress meter reads (folded into a
+  joint, or free).
+
+### What was built
+
+- **Structure overlay (#51):** `src/debug/structure-overlay.ts`, drawn by `main.ts`. Off, the
+  stress meter records nothing. On, it records the contacts as it reads them: a loose piece's
+  contacts are scaled to its own momentum, so a log lying across a bridge presses with its weight.
+  Recording changes nothing the simulation does (tested).
+- **Ropes (#52, and for Epic 8's #75):** `src/sim/joints/rope.ts`.
+    - A taut-only spring between two body points, or a body and the ground: T = k·stretch + c·rate.
+    - k = min(EA / L, m·(ring / dt)²): a 12 mm natural-fibre rope, EA 110 kN.
+    - It snaps past 10 kN. A rope tied to a body that leaves the world (gone, or disabled: the
+      sawmill taking a hooked log) is dropped, and a disabled body can't be tied.
+    - API: `tie(a, la, b, lb, length?, owner?)` returns an id. Also `get`, `ropes()`, `size`,
+      `setLength`, `tension`, `span`, `cut`, `events(owner?)` and `ends(rope)`. `GROUND` is the other
+      end for a fixed point.
+    - Events (`snap`, or `loose` when a body left the world) carry their rope's owner.
+      `events(owner)` returns only that owner's and leaves the others queued, so the winch reports
+      only its own ropes and Epic 8's hazard ropes (#75) get theirs.
+    - It runs as the first step hook, and wakes sleeping bodies before it pulls.
+- **The winch:** `src/sim/winch.ts`, with static scenery in `src/levels/winch.ts`.
+    - It winds at 0.25 m/s. Its gearing gives the crank 6 × a beaver's 650 N grip: 3.9 kN, under the
+      rope's 10 kN.
+    - Past that, winding stalls and the ratchet clicks, so cranking alone never snaps the rope.
+    - The rope is drawn on host and guests (`src/render/winch-rope.ts`). It goes on the wire as `wr`,
+      a few numbers, sent only when it changes.
+    - The Yard's winch is at (5.5, 11.8), its axle north–south, so the rope runs east along a clear
+      stretch north of the sign post.
+- **The log dolly:** `src/assets/dolly.ts`, with its body built by `addDolly` in
+  `src/sim/lab-physics.ts`.
+    - **Shape:** a timber cradle 0.6 × 0.64 m on four 6 cm steel ball casters, with side chocks
+      (7 cm to spare either side of a log) and a stop. One rigid part, no animation channels.
+    - **Casters:** they keep their own 0.03 friction, using Rapier's Min combine rule. This is opt-in
+      per shape (`slides`). Every other collider still averages, as before.
+    - **Towing:** the dolly is `towed`, and it is the only body that is. A grip on it holds the hand
+      level at 1 m ahead (`TOW_REACH`). It pulls horizontally only, with no wrist, the same 650 N cap
+      and the same letting go.
+- **Grab law, one case changed (`grabForce`):** a body heavier than one beaver's grip (over 66 kg)
+  used to get a flat 650 N straight up, with no spring.
+    - So a beaver lifting one end of a log (about 555 N) tipped it up and over and lost it.
+    - Now the vertical spring caps the lift at what it takes to hold the grip where it should be, and
+      what the cap leaves over pulls along.
+    - Bodies under 66 kg are unchanged. One beaver still cannot lift the whole log.
+- **A lever:** not needed. A beaver lifts a log's end itself, and swinging the end (the far end
+  pivots, it does not slide) puts it on the dolly. No lever piece was added.
+
+### Measured (actual)
+
+All by input, 10 cm cells, from the tests' own lines.
+
+- **Winch** (`winch.test.ts`):
+    - **Haul:** a 113 kg log hooked 8 m off was wound in 7.13 m in 29.1 s. Peak tension 1700 N. Its
+      fastest speed was 0.69 m/s (the crank winds at 0.25 m/s). It lifted at most 9.8 cm off the
+      ground (over a low mound).
+    - **Against a staked log:** tension up to 4340 N (the gearing's 3.9 kN, overshooting by up to
+      12 % within a tick), 62 ratchet clicks, and the rope held.
+    - **Overloaded:** pulled the other way, harder each second, the rope parted at 9964 N. No last
+      yank as it parts: on that tick the log's velocity changes by 0.05–0.14 m/s more than the
+      outward pull explains (the ground), against 0.43–0.46 m/s on the tick before (the rope's
+      pull); a one-tick yank added there measures 0.47 and fails the test. After, the log moves
+      back towards the drum at 0.00 m/s.
+    - **A rider:** a beaver standing on the hauled log moved 0.00 m while the log wound 2.87 m, and
+      dropped to the ground.
+- **Dolly** (`dolly.test.ts`):
+    - **Loaded by input:** the log's end was lifted at least 46 cm while swung, and lies centred in
+      the cradle.
+    - **Pushed 10 m:** 10.00 m in 9.9 s, the grip held throughout. Pull mean 517 N, peak 650 N. The
+      dolly came at most 2.8 cm off the ground, and the log stayed in the cradle.
+    - **A rider:** a beaver standing on the log moved 0.91 m while it went 2.78 m. Left behind.
+    - **Looked up at:** the dolly rose 0.78 cm.
+    - **Against a staked log:** the pull stops at exactly 650 N and the dolly moves 0.9 cm. Stepping
+      aside, the grip lets go after 2.53 s.
+    - **With the winch:** the rope's mean tension was 1041 N for the bare log and 555 N on the dolly,
+      47 % less.
+- **One beaver replaces a lost stringer** (`solo-beam.test.ts`). The start is placed: beam-0
+  laid across the creek (settled onto both seats), beam-1 gone, a log on the ground by the guide
+  with the dolly, hazards off (as in the sawmill's gate: a bridge brings the flood). Then, all by
+  input:
+    1. the saw is set to beams at its lever;
+    2. the log is loaded onto the dolly and pushed into the guide (1.5 s);
+    3. the sawn 3.2 m beam is shouldered off the rack, carried out onto the near abutment, squared
+       up (it turns with you), lowered to the seats and let go, with no falls.
+    - **Where it lies:** its ends at x −0.85 and −0.88 (its line −0.88), 0.26 m from beam-0. It
+      bears 0.35 m onto the near seat and 0.25 m onto the far. It rests on both: its middle at
+      0.629 m against the 0.625 m of lying on them, its ends 10.9 cm apart in height (the far seat
+      stands 10.0 cm higher).
+    - **Asserted:** both ends on its line, each bearing at least 0.2 m past its seat's face, and
+      both beams resting on both seats (middle within 3 cm, tilt within 3 cm of the seats').
+- **The Valley's stringers:** the Valley's sawmill, beams, dolly and winch are the Yard's own
+  (`yardPieces`, `yardProps`, `YARD_FORESTRY`, moved to where the Yard lies). A sawn beam is the
+  same body. So the Yard test covers them.
+- **Min friction stays opt-in** (`friction-optin.test.ts`):
+    - In every level, every collider averages its friction except the dolly's 4 casters.
+    - Each level's colliders are checked against committed values: a histogram of (friction,
+      rule), and an FNV hash of the whole ordered list, so any change fails.
+    - Those values are `epics-5-10`'s at 085dd00 (measured there), except for the winch's 4
+      colliders and the dolly's 8.
+    - No body but the dolly is towed. The bucket is not.
+- **The grab law's heavy case** (`grab-heavy.test.ts`), against a frozen copy of the old law:
+    - identical for 20,000 random grips of bodies under 66 kg;
+    - over it, the same full lift with the grip below its hold point;
+    - in the case that tipped logs over (the grip a little above its hold point, saturated by
+      the pull along), the old law gave 650 N up and nothing along; now it lifts only what the
+      spring asks, and pulls along with the rest of the cap;
+    - never more than the cap, over 5,000 random heavy grips.
+
+### Costs
+
+- **Snapshot:** the dolly is one entity, 15 bytes; the winch is scenery, 0. A rope on the drum
+  costs nothing on the wire.
+- **The Valley's worst-case host state**, in UTF-8 bytes, of the room's 4096:
+    - **On v2** (before #141), with every entity visible and long events: 4026 → 4046 with the
+      dolly; 4090 once the road closure (#131) was in. A hooked rope adds up to 26 bytes, which
+      made 4116, over the limit. That is why this chunk waited for #141.
+    - **On v3 (#141 merged in), `net-headroom.test.ts`'s worst case:** all 142 entities moving
+      (the dolly among them, and a stand-in for the goose), 64 nails, the longest messages, eight
+      players, none acknowledging.
+        - Without the rope: 4045 bytes, the longest wait 2 snapshots.
+        - With the winch's real rope out, hooked into the dolly (the last entity) at a corner of
+          its stop (`wr` `[2,140,30,53,-32]`, on the wire in every update): **4043 bytes**, every
+          entity still listed, the longest wait 2 snapshots.
+        - Both are asserted. v3 fits the snapshot to what the rest of the state leaves, so the
+          rope costs some of the snapshot's room, not the room's limit.
+- **Bundle:** chunk B adds 13.4 KB to the main chunk (6.242 → 6.255 MB minified) and 2.3 KB to the
+  voxel service. The overlay's module is 827 B minified; with its drawing and recording, about
+  2 KB (estimated).
+
+### Known limits
+
+- The rope is straight (no sag) and passes through things. It pulls only along the line between
+  its ends.
+- The cradle carries the log by friction (about 470 N against the dragging end's 390 N), and the
+  stop catches it if it slips. Pushed from behind it rides 13–14 cm short of the stop.
+- Steering a pushed log is like reversing a trailer. The test steers for the log's middle, or down
+  the guide's line, and loads on level ground (a 10 cm mound east of the mill made the swing miss).
+
 ## Online play: room to grow in the host's updates (2026-11-26, Epic 10, #20)
 
 The host sends its world to the other players about 20 times a second. On claude.ai that update has
