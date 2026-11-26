@@ -174,46 +174,55 @@ describe('level 1: the timber yard', () => {
         // Epic 7: the yard wants water delivered. A full bucket (11.5 kg) is too heavy to throw
         // across, so pour it out and throw the empty one: it lands on the far bank, empty, and the
         // level says so instead of completing. Played through player commands only.
-        const s = yard();
-        let n = 0;
-        let pitch = 0;
-        const step = (c: Partial<PlayerCommand> = {}, k = 1) => {
-            for (let i = 0; i < k; i++) s.step(cmd(n++, { pitch, ...c }));
+        // Thrown across a band of aims, every one gets there (a single aim at 0.3 had landed by the
+        // goal's far edge, 8.9 m out of its 9.5, and once, the player 5 mm further on, bounced out)
+        const play = (aim: number) => {
+            const s = yard();
+            let n = 0;
+            let pitch = 0;
+            const step = (c: Partial<PlayerCommand> = {}, k = 1) => {
+                for (let i = 0; i < k; i++) s.step(cmd(n++, { pitch, ...c }));
+            };
+            step({}, 60);
+            s.fpActive = true;
+            const bucket = byName(s, 'bucket');
+            s.placePlayer(BUCKET_STUMP.x, BUCKET_STUMP.z + 1, 0);
+            step({}, 20);
+            pitch = -Math.atan2(s.player.y + EYE_HEIGHT - bucket.pose.p.y, s.player.z - bucket.pose.p.z);
+            step({}, 3);
+            step({ grab: true });
+            expect(s.physics.heldId).toBe(bucket.id);
+            pitch = 0;
+            for (let i = 0; i < 900 && Math.abs(s.player.x - BRIDGE_X) > 0.1; i++)
+                step({ moveX: s.player.x > BRIDGE_X ? -0.6 : 0.6 });
+            for (let i = 0; i < 900 && s.player.z > BRIDGE.nearFace + 0.25; i++) step({ moveZ: 0.6 });
+            expect(s.progress.falls).toBe(0);
+            // carried steadily, it still holds (nearly) all its water
+            expect(s.water.volume).toBeGreaterThan(9.5);
+            step({}, 30);
+            step({ action: ACTION_POUR });
+            step({}, 240);
+            expect(s.water.volume).toBeLessThan(0.25);
+            step({ action: ACTION_POUR });
+            step({}, 60);
+            for (let i = 0; i < 20; i++) {
+                pitch += (aim - pitch) / 6;
+                step();
+            }
+            step({}, 20);
+            step({ throw: true });
+            step({}, 240);
+            return { s, bucket };
         };
-        step({}, 60);
-        s.fpActive = true;
-        const bucket = byName(s, 'bucket');
-        s.placePlayer(BUCKET_STUMP.x, BUCKET_STUMP.z + 1, 0);
-        step({}, 20);
-        pitch = -Math.atan2(s.player.y + EYE_HEIGHT - bucket.pose.p.y, s.player.z - bucket.pose.p.z);
-        step({}, 3);
-        step({ grab: true });
-        expect(s.physics.heldId).toBe(bucket.id);
-        pitch = 0;
-        for (let i = 0; i < 900 && Math.abs(s.player.x - BRIDGE_X) > 0.1; i++)
-            step({ moveX: s.player.x > BRIDGE_X ? -0.6 : 0.6 });
-        for (let i = 0; i < 900 && s.player.z > BRIDGE.nearFace + 0.25; i++) step({ moveZ: 0.6 });
-        expect(s.progress.falls).toBe(0);
-        // carried steadily, it still holds (nearly) all its water
-        expect(s.water.volume).toBeGreaterThan(9.5);
-        step({}, 30);
-        step({ action: ACTION_POUR });
-        step({}, 240);
-        expect(s.water.volume).toBeLessThan(0.25);
-        step({ action: ACTION_POUR });
-        step({}, 60);
-        for (let i = 0; i < 20; i++) {
-            pitch += (0.3 - pitch) / 6;
-            step();
+        for (const aim of [0.26, 0.28, 0.3]) {
+            const { s, bucket } = play(aim);
+            console.log(`bucket thrown at pitch ${aim}: came to rest at z ${bucket.pose.p.z.toFixed(2)}`);
+            expect(bucket.pose.p.z).toBeLessThan(YARD_GOAL.maxZ);
+            expect(s.progress.goalReached).toBe(false);
+            expect(s.events.filter((e) => e.kind === 'water' && e.text.includes('empty'))).toHaveLength(1);
+            expect(s.player.z).toBeGreaterThan(BRIDGE.nearFace); // the player never crossed
         }
-        step({}, 20);
-        step({ throw: true });
-        step({}, 240);
-        expect(bucket.pose.p.z).toBeLessThan(YARD_GOAL.maxZ);
-        expect(s.progress.goalReached).toBe(false);
-        expect(s.events.filter((e) => e.kind === 'water' && e.text.includes('empty'))).toHaveLength(1);
-        expect(s.player.z).toBeGreaterThan(BRIDGE.nearFace); // the player never crossed
-    }, 60_000);
+    }, 120_000);
 
     it('finishable by building the bridge (placed setup: the player is put beside each piece): shoulder both beams over, walk back for the bucket and carry it across at a normal pace', () => {
         const s = yard();
