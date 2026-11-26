@@ -429,6 +429,8 @@ let localSlot2 = -1;
 
 /** Test hook: fields merged into player 2's next command (no real pad in headless tests). */
 let p2Injected: Partial<PlayerCommand> | null = null;
+/** Test hook: runs after each simulation step the page runs (stop on the tick a condition is met). */
+let stepHook: (() => void) | null = null;
 const clock = new FixedStepClock();
 /**
  * Browser tests only: a Playwright init script sets `window.__uncivilFastClock = true` before the
@@ -659,6 +661,7 @@ class LabDirector extends Script {
                 const c = slotCommands();
                 sim.step(playerOneCommand(), c[1], c.slice(2));
                 hostSession?.afterStep((slot) => sim.interactionIds(slot));
+                stepHook?.();
                 physTimes[physHead] = sim.physicsMs;
                 physHead = (physHead + 1) % physTimes.length;
                 physCount = Math.min(physTimes.length, physCount + 1);
@@ -1542,6 +1545,8 @@ function guestInteraction(): {
 let hostNails: NailMark[] = [];
 let hostNailsKey: unknown = null;
 let hostNailsVersion = -1;
+/** The connection of each host nail mark (its strain). */
+let hostNailConn: number[] = [];
 function updateNails(time: number): void {
     let marks: NailMark[];
     if (guestSession) marks = guestSession.nails;
@@ -1552,7 +1557,10 @@ function updateNails(time: number): void {
             hostNailsVersion = g.version;
             const index = new Map(sim.entities.map((e, i) => [e.id, i]));
             hostNails = nailMarks(g, (id) => index.get(id) ?? -1);
+            hostNailConn = [];
+            for (const c of g.connections()) for (let k = 0; k < c.nails.length; k++) hostNailConn.push(c.id);
         }
+        hostNails.forEach((m, i) => (m.strain = sim.joints.strainLevel(hostNailConn[i])));
         marks = hostNails;
     }
     // every local player's hammer outline, each in its own view (split screen: player 2's below)
@@ -2657,6 +2665,13 @@ window.__riverLab = {
         sim.players[Math.max(1, localSlot2)].yaw = yaw;
         sim.players[Math.max(1, localSlot2)].pitch = pitch;
         p2Injected = { ...p2Injected, yaw, pitch };
+    },
+    /**
+     * Tests: `fn` runs after every simulation step from now on (null clears it), so a test can act on
+     * the very tick a condition is met (the fast clock runs many steps a frame).
+     */
+    afterStep: (fn: (() => void) | null) => {
+        stepHook = fn;
     },
     /** Merges fields into the next player command (grab / throw / move edges for tests). */
     input: (c: Record<string, unknown>) => fpInput.inject(c),

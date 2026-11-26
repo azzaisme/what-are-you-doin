@@ -1592,16 +1592,6 @@ test('logging in the Timber Yard: chew a pine down, the voxel tree becomes a stu
     expect(problems).toEqual([]);
 });
 
-/** Waits until the sim has run `n` more ticks (not wall time: software GL can run a few ticks a second). */
-async function ticks(page: Page, n: number): Promise<void> {
-    const t0 = await lab(page, (l) => l.hazards().tick);
-    await page.waitForFunction(
-        (t) => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().tick >= t,
-        t0 + n,
-        { timeout: 120_000 }
-    );
-}
-
 /** Waits until a prop has moved under 5 mm over 30 sim ticks (it has come to rest; wind may nudge it). */
 async function atRest(page: Page, name: string): Promise<void> {
     for (let k = 0; k < 20; k++) {
@@ -1611,6 +1601,40 @@ async function atRest(page: Page, name: string): Promise<void> {
         if (Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) < 0.005) return;
     }
     throw new Error(`${name} never came to rest`);
+}
+
+/**
+ * Walks by holding a key (a real key press) and lets go of it on the very sim step after which
+ * `until(player, arg)` holds: the page's step hook sends the key-up there, so the next step already
+ * has the key released (the fast clock runs many steps a frame; a per-frame check would overshoot).
+ */
+async function walkUntil<A>(
+    page: Page,
+    key: string,
+    until: (p: { x: number; y: number; z: number }, arg: A) => boolean,
+    arg: A
+): Promise<void> {
+    type Hooked = Lab & { afterStep(fn: (() => void) | null): void };
+    await page.evaluate(
+        ([src, code, a]) => {
+            const w = window as unknown as { __riverLab: Hooked; __walkDone?: number };
+            const l = w.__riverLab;
+            const test = new Function('p', 'a', `return (${src})(p, a)`) as (p: unknown, a: unknown) => boolean;
+            delete w.__walkDone;
+            l.afterStep(() => {
+                if (!test(l.player(), a)) return;
+                window.dispatchEvent(new KeyboardEvent('keyup', { code: code as string }));
+                l.afterStep(null);
+                w.__walkDone = l.hazards().tick;
+            });
+        },
+        [until.toString(), key, arg] as const
+    );
+    await page.keyboard.down(key);
+    await page.waitForFunction(() => (window as unknown as { __walkDone?: number }).__walkDone !== undefined, null, {
+        timeout: 120_000
+    });
+    await page.keyboard.up(key);
 }
 
 test('the tutorial: the 3.8 m long plank, grabbed by its near end and let go a step before the ditch, spans it bank to bank, and you walk over', async ({
@@ -1647,13 +1671,7 @@ test('the tutorial: the 3.8 m long plank, grabbed by its near end and let go a s
         { timeout: 30_000 }
     );
     // walk it toward the ditch (W) and stop a step before the edge: toes about 0.7 m short
-    await page.keyboard.down('KeyW');
-    await page.waitForFunction(
-        (stop) => (window as unknown as { __riverLab: Lab }).__riverLab.player().z <= stop,
-        LIP_NEAR + 0.7 + 0.3,
-        { timeout: 120_000, polling: 'raf' }
-    );
-    await page.keyboard.up('KeyW');
+    await walkUntil(page, 'KeyW', (p, stop) => p.z <= stop, LIP_NEAR + 0.7 + 0.3);
     await ticks(page, 20);
     const toes = (await lab(page, (l) => l.player())).z - 0.3 - LIP_NEAR;
     expect(toes).toBeGreaterThan(0.4);
@@ -1685,13 +1703,7 @@ test('the tutorial: the 3.8 m long plank, grabbed by its near end and let go a s
     await page.keyboard.press('KeyC');
     // walk over it (W): it lies straight ahead
     await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.look(0, 0));
-    await page.keyboard.down('KeyW');
-    await page.waitForFunction(
-        (far) => (window as unknown as { __riverLab: Lab }).__riverLab.player().z < far - 1,
-        LIP_FAR,
-        { timeout: 120_000, polling: 'raf' }
-    );
-    await page.keyboard.up('KeyW');
+    await walkUntil(page, 'KeyW', (p, far) => p.z < far - 1, LIP_FAR);
     expect(await lab(page, (l) => l.progress().falls)).toBe(0);
     expect(problems).toEqual([]);
 });
