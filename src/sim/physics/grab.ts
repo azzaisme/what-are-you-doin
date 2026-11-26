@@ -178,10 +178,13 @@ export function effectiveMassAlong(mass: number, r: Vec3Like, invI: Sym3, n: Vec
     return Number.isFinite(inv) && inv > 0 ? 1 / inv : mass;
 }
 
-/** Throw impulse magnitude for a body of a mass: light things fly fast, heavy things barely move. */
-export function throwImpulse(mass: number): number {
+/**
+ * Throw impulse magnitude for a body of a mass: light things fly fast, heavy things barely move.
+ * `maxImpulse` is a body's own cap (a plank's: BodyOptions.throw), else the general one.
+ */
+export function throwImpulse(mass: number, maxImpulse: number = GRAB.maxThrowImpulse): number {
     if (!(mass > 0)) return 0;
-    return Math.min(mass * GRAB.throwSpeed, GRAB.maxThrowImpulse);
+    return Math.min(mass * GRAB.throwSpeed, maxImpulse);
 }
 
 export function clampHold(d: number): number {
