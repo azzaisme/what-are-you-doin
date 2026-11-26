@@ -29,10 +29,24 @@ function rigid(name: string, parts: AssetPart[], offsets?: Pose[]): VoxelAsset {
 
 /** 2.4 x 0.2 x 0.1 m plank, long axis X, grain along X, lighter end grain. */
 export const PLANK_LENGTH = 2.4;
-export function plankAsset(name = 'plank'): VoxelAsset {
+/** The plank's half extents (m): the asset, its collider and everything that fits planks use these. */
+export const PLANK_HALF = { x: PLANK_LENGTH / 2, y: 0.1, z: 0.05 } as const;
+/**
+ * The tutorial's long plank (entity `long-plank`, placed only by the tutorial): the same section and
+ * wood, LONG_PLANK_LENGTH long, so one plank laid from the bank clears the tutorial's ditch (2.3 m
+ * between the banks' lips) with 0.4 m or more on each bank. Everywhere else planks stay 2.4 m.
+ */
+export const LONG_PLANK_LENGTH = 3.8;
+export const LONG_PLANK_HALF = { x: LONG_PLANK_LENGTH / 2, y: PLANK_HALF.y, z: PLANK_HALF.z } as const;
+/** Half extents of a plank entity by name (the long plank or a standard one). */
+export function plankHalfOf(name: string): { x: number; y: number; z: number } {
+    return name === 'long-plank' ? LONG_PLANK_HALF : PLANK_HALF;
+}
+export function plankAsset(name = 'plank', length = PLANK_LENGTH): VoxelAsset {
+    const hx = length / 2;
     const g = grain(M.Timber, 'x', 0.1, 5);
-    const v = box(1.2, 0.1, 0.05, (x, y, z) =>
-        Math.abs(x) > 1.12 ? voxel(M.TimberEnd, latticeShade(x, y, z, 0.1, 2)) : g(x, y, z)
+    const v = box(hx, PLANK_HALF.y, PLANK_HALF.z, (x, y, z) =>
+        Math.abs(x) > hx - 0.08 ? voxel(M.TimberEnd, latticeShade(x, y, z, 0.1, 2)) : g(x, y, z)
     );
     return rigid(name, [{ name: 'plank', volume: v, priority: 1, refColor: 0xc48d55 }]);
 }

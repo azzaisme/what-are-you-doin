@@ -546,6 +546,7 @@ export function soundBodies(entities: readonly { name: string; slot: number }[])
         if (
             n === 'plank' ||
             n === 'held-plank' ||
+            n === 'long-plank' ||
             n.startsWith('extra-plank') ||
             n.startsWith('crate-') ||
             n === 'cube'

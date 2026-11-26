@@ -214,6 +214,10 @@ export class LabSim {
     readonly events: SimEvent[] = [];
     private lostTicks = 0;
     private goalTicks = 0;
+    /** Ticks the tutorial's long plank has lain in the ditch (applyRules). */
+    private plankDownTicks = 0;
+    /** The tutorial's long plank (only the tutorial places it). */
+    private readonly longPlank: SimEntity;
     /** Not voxelized: carries the walker's pose through the snapshot ring for interpolation. */
     readonly playerEntity: SimEntity;
     /** The bucket's water (Epic 7): volume, slosh, refills, the flower. */
@@ -245,6 +249,7 @@ export class LabSim {
         this.stress = c.stress;
         this.dummy = c.dummy;
         this.extras = c.extras;
+        this.longPlank = c.extras.find((e) => e.name === 'long-plank')!;
         this.windsock = c.windsock;
         this.avatars = c.avatars;
         this.fpBody = c.fpBody;
@@ -290,7 +295,7 @@ export class LabSim {
         this.events.length = 0;
         // (tick starts again at 0: a hint given before the reset must not hold the next one back)
         this.looseHintTick = -Infinity;
-        this.lostTicks = this.goalTicks = 0;
+        this.lostTicks = this.goalTicks = this.plankDownTicks = 0;
         this.water.reset();
         // the first snapshot already shows a full bucket
         this.bucket.anim[BUCKET_LITRES] = this.water.volume;
@@ -670,6 +675,24 @@ export class LabSim {
                     tick: this.tick,
                     kind: 'fell',
                     text: `${who} Fished out and put back on the bank.`
+                });
+            }
+        }
+        // the tutorial's long plank, dropped into the ditch (out of reach from the bank), comes back
+        // to where it started after 1.5 s
+        const lp = this.longPlank;
+        if (pw.bodies.has(lp.id)) {
+            const q = lp.pose.p;
+            const down =
+                !rules.isSafe(q.x, q.z) && q.y < this.level.terrainHeight(q.x, q.z) + 0.3 && pw.holders(lp.id) === 0;
+            this.plankDownTicks = down ? this.plankDownTicks + 1 : 0;
+            if (this.plankDownTicks > 90) {
+                this.plankDownTicks = 0;
+                pw.respawn(lp.id);
+                this.events.push({
+                    tick: this.tick,
+                    kind: 'recovered',
+                    text: 'The plank fell in. It is back where it was: carry it toward the ditch and let go a step before the edge.'
                 });
             }
         }
