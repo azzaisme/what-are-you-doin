@@ -94,7 +94,7 @@ import {
     OLD_CELL_SIZE_STORAGE_KEYS,
     clampCellSizeCm
 } from './voxels/grid.ts';
-import { pose, quatFromYawPitchRoll } from './voxels/math.ts';
+import { pose, quatFromYawPitchRoll, quatRotate, vec3 } from './voxels/math.ts';
 import { SAMPLING_POLICIES } from './voxels/rasterizer.ts';
 import type { SamplingPolicy } from './voxels/rasterizer.ts';
 
@@ -2544,6 +2544,8 @@ window.__riverLab = {
                         2 * (e.pose.q.w * e.pose.q.y + e.pose.q.x * e.pose.q.z),
                         1 - 2 * (e.pose.q.y * e.pose.q.y + e.pose.q.x * e.pose.q.x)
                     ),
+                    /** Its local X axis in the world (a plank's or a beam's long axis). */
+                    axis: quatRotate(e.pose.q, 1, 0, 0, vec3()),
                     visible: e.visible
                 }
             ])

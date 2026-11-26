@@ -19,7 +19,10 @@ type Lab = {
     dynamicHash(): Promise<number>;
     voxelIdle(): boolean;
     setFirstPerson(x: number, z: number, yaw: number, pitch: number): void;
-    entities(): Record<string, { visible: boolean; x: number; y: number; z: number }>;
+    entities(): Record<
+        string,
+        { visible: boolean; x: number; y: number; z: number; axis: { x: number; y: number; z: number } }
+    >;
     input(c: Record<string, unknown>): void;
     action(id: string): void;
     paused(): boolean;
@@ -1628,10 +1631,16 @@ test('the tutorial: the 3.8 m long plank, grabbed by its near end and let go a s
         { timeout: 30_000 }
     );
     await atRest(page, 'long-plank');
-    // it lies flat on both banks, 0.3 m or more past each lip
+    // it lies flat on both banks, 0.3 m or more past each lip: its two ends from its long axis
     const laid = (await lab(page, (l) => l.entities()))['long-plank'];
-    expect(laid.z + HALF - LIP_NEAR).toBeGreaterThan(0.3);
-    expect(LIP_FAR - (laid.z - HALF)).toBeGreaterThan(0.3);
+    const ends = [1, -1].map((k) => ({ y: laid.y + k * HALF * laid.axis.y, z: laid.z + k * HALF * laid.axis.z }));
+    const near = Math.max(...ends.map((e) => e.z));
+    const far = Math.min(...ends.map((e) => e.z));
+    expect(near - LIP_NEAR).toBeGreaterThan(0.3);
+    expect(LIP_FAR - far).toBeGreaterThan(0.3);
+    // level (both ends at the same height) and along the lane, across the ditch
+    expect(Math.abs(laid.axis.y)).toBeLessThan(0.03);
+    expect(Math.abs(laid.axis.z)).toBeGreaterThan(0.99);
     expect(Math.abs(laid.y - pk.y)).toBeLessThan(0.03);
     // a picture of it across the ditch, over your shoulder (C) from where you let go
     await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.look(0, -0.45));

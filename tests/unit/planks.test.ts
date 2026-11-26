@@ -23,7 +23,7 @@ import { MemoryHub } from '../../src/net/transport.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
 import { propBody } from '../../src/sim/lab-physics.ts';
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
-import { initPhysics } from '../../src/sim/physics/world.ts';
+import { LAYER, RELEASE_GUARD_TICKS, groups, initPhysics } from '../../src/sim/physics/world.ts';
 import { pose, quatFromYawPitchRoll, quatMul } from '../../src/voxels/math.ts';
 
 beforeAll(() => initPhysics());
@@ -158,5 +158,43 @@ describe('online: a guest gets the long plank as the host has it', () => {
         expect(Math.abs(out.q.x * q.x + out.q.y * q.y + out.q.z * q.z + out.q.w * q.w)).toBeGreaterThan(0.9999);
         gs.leave();
         hs.stop();
+    });
+});
+
+describe('the long plank comes down clear of its carrier', () => {
+    it('it passes through players for its release guard, and the last of two overlapping guards decides when that ends', () => {
+        const s = new LabSim({ level: tutorialLevel });
+        s.step(neutralCommand(0));
+        s.fpActive = true;
+        const pw = s.physics;
+        const lp = s.entities.find((e) => e.name === 'long-plank')!;
+        const col = pw.bodies.get(lp.id)!.colliders[0];
+        /** Every layer (the physics world's ALL). */
+        const all = 0xffff;
+        const solid = groups(LAYER.prop, all);
+        const clear = groups(LAYER.prop, all & ~LAYER.player);
+        s.placePlayer(lp.pose.p.x, lp.pose.p.z + 2.5, 0);
+        // let go; 10 ticks on, take it and let go again within one tick: two guards, staggered
+        pw.grabById(lp.id, lp.pose.p, 1, 0);
+        pw.release(0);
+        expect(col.collisionGroups()).toBe(clear);
+        let n = 1;
+        for (; n <= 10; n++) s.step(neutralCommand(n));
+        pw.grabById(lp.id, lp.pose.p, 1, 0);
+        pw.release(0);
+        // players pass through it until the second guard ends, 10 ticks after the first
+        for (; n < RELEASE_GUARD_TICKS + 10; n++) {
+            s.step(neutralCommand(n));
+            expect(col.collisionGroups(), `tick ${n}`).toBe(clear);
+        }
+        s.step(neutralCommand(n++));
+        s.step(neutralCommand(n++));
+        expect(col.collisionGroups()).toBe(solid);
+        // and a guard after one has ended still runs its full length
+        pw.grabById(lp.id, lp.pose.p, 1, 0);
+        s.step(neutralCommand(100));
+        pw.release(0);
+        s.step(neutralCommand(101));
+        expect(col.collisionGroups()).toBe(clear);
     });
 });

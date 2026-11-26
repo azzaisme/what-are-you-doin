@@ -1262,9 +1262,15 @@ export class PhysicsWorld {
                 s.releaseClamps++;
             }
             if (--g.ticks <= 0 || this.holders(g.pb.id) > 0) {
-                if (g.noPlayers && this.holders(g.pb.id) === 0)
-                    for (const c of g.pb.colliders) c.setCollisionGroups(groups(LAYER.prop, ALL));
                 this.releasedGuards.splice(i, 1);
+                // players collide with it again once its last release guard is over (it can be let
+                // go again while an earlier guard runs)
+                if (
+                    g.noPlayers &&
+                    this.holders(g.pb.id) === 0 &&
+                    !this.releasedGuards.some((o) => o.pb === g.pb && o.noPlayers)
+                )
+                    for (const c of g.pb.colliders) c.setCollisionGroups(groups(LAYER.prop, ALL));
             }
         }
         s.activeBodies = active;
