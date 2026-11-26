@@ -17,9 +17,13 @@
  *   until someone takes hold of it (any player, a guest too: the grab is the host's); then it is a
  *   light prop to drag or carry off the road.
  * - **Over** (the director is free again) when the barrier is clear of the road, every corner more
- *   than CLOSURE.clearM outside the road's edge, or when every player, and the ute if someone is
- *   driving it, is past it (rejoined the road beyond, by the track). An empty ute, wherever it was
- *   left, does not hold it. No timer: waiting is not a way round.
+ *   than CLOSURE.clearM outside the road's edge, or when everyone holding it is past it (rejoined
+ *   the road beyond, by the track). It is held by the players on foot, and the ute if someone is
+ *   driving it, that are in the closed stretch (past `from`) or beyond. One still behind it (across
+ *   the creek, in the yard), or gone back there, doesn't hold it; nor does an empty ute, wherever it
+ *   was left. With nobody holding it for CLOSURE.goneS (all turned back), it is over too.
+ * - **Waiting is not a way round:** over, the barrier still stands where it was, and the sign
+ *   stays closed; only the director is free.
  * - **The sign never lies:** it shows the closed face exactly while the barrier stands on the road;
  *   it clunks back to "the road goes on" once the barrier is clear, and stays closed if everyone took
  *   the track and left the barrier where it was; dragged back onto the road, it clunks closed again
@@ -63,6 +67,11 @@ export const CLOSURE = {
     clearM: 1,
     /** Nobody within this much of the barrier's footprint when it is set down (m). */
     standOff: 0.6,
+    /**
+     * With nobody in the closed stretch (past `from`) for this long, they have all turned back (or
+     * never came on): it is over (s). Long enough for whoever brought it on to get there.
+     */
+    goneS: 10,
     max: 1
 } as const;
 
@@ -89,6 +98,8 @@ export interface RoadClosureSpec {
      * across the creek) does not keep the closure going; every player does. An empty ute never does.
      */
     from: number;
+    /** Is (x, z) on the side track (optional: for the playtest log's account of how they went round)? */
+    track?: (x: number, z: number) => boolean;
     /** Distance from the road's centre line, across it (m), and the road's half width. */
     across: (x: number, z: number) => number;
     roadHalf: number;
@@ -109,11 +120,13 @@ export interface RoadClosureHost {
     readonly tick: number;
     readonly physics: PhysicsWorld;
     readonly entities: ClosureEntities;
-    /** Who could be coming: players on foot, and the ute (its speed). */
-    readonly walkers: readonly { x: number; z: number }[];
+    /** Who could be coming: players on foot (their slots), and the ute (its speed). */
+    readonly walkers: readonly { x: number; z: number; slot?: number }[];
     /** The ute (where, how fast, and whether someone is driving it), or null without one. */
     readonly ute: { x: number; z: number; speed: number; driven?: boolean } | null;
     say(text: string): void;
+    /** How it ended, for the playtest log (host only, not sent). */
+    outcome?(text: string): void;
 }
 
 export class RoadClosure {
@@ -131,6 +144,11 @@ export class RoadClosure {
     /** The ute's distance along the route last tick (for how fast it is closing on the junction). */
     private uteAlong = NaN;
     private uteClosing = 0;
+    /** This closure: which players (slots) and whether the ute went by the side track. */
+    private readonly byTrack = new Set<number>();
+    private uteByTrack = false;
+    /** The last tick anyone counted was in the closed stretch (or the tell's). */
+    private heldAt = 0;
     private readonly spec: RoadClosureSpec;
 
     constructor(spec: RoadClosureSpec) {
@@ -146,6 +164,9 @@ export class RoadClosure {
         this.placedHidden = false;
         this.uteAlong = NaN;
         this.uteClosing = 0;
+        this.byTrack.clear();
+        this.uteByTrack = false;
+        this.heldAt = 0;
     }
 
     get busy(): boolean {
@@ -205,6 +226,7 @@ export class RoadClosure {
                 this.phase = CLOSURE_PHASE.tell;
                 this.since = h.tick;
                 this.tellDistance = d;
+                this.heldAt = h.tick;
                 this.count++;
                 h.say(CLOSURE_TELL);
             }
@@ -214,8 +236,22 @@ export class RoadClosure {
         const blocking = this.blocking(pw, bid);
         if (this.phase === CLOSURE_PHASE.tell && h.tick - this.since >= S(CLOSURE.swingS))
             this.phase = CLOSURE_PHASE.active;
+        // who goes by the side track (for the account of how it ended)
+        if (this.phase !== CLOSURE_PHASE.idle && sp.track) {
+            const between = (x: number, z: number) => {
+                const a = sp.along(x, z);
+                return a > sp.junction + 1 && a < sp.rejoin - 1 && sp.track!(x, z);
+            };
+            h.walkers.forEach((w, i) => {
+                if (between(w.x, w.z)) this.byTrack.add(w.slot ?? i);
+            });
+            if (h.ute && between(h.ute.x, h.ute.z)) this.uteByTrack = true;
+        }
         // over once the road is open, or everyone has gone round
-        if (this.phase !== CLOSURE_PHASE.idle && (!blocking || this.everyonePast(h))) this.phase = CLOSURE_PHASE.idle;
+        if (this.phase !== CLOSURE_PHASE.idle && (!blocking || this.everyonePast(h))) {
+            this.phase = CLOSURE_PHASE.idle;
+            h.outcome?.(this.account(h, blocking));
+        }
         // the sign: closed exactly while the barrier stands on the road
         const target = blocking ? 1 : 0;
         if (this.swing > 0.5 && target === 0 && this.swing === 1) h.say(CLOSURE_OPEN);
@@ -247,7 +283,8 @@ export class RoadClosure {
         // the ute: by the quickest it could get there from here, closing on it as fast as it is
         const along = this.uteAlong;
         const closing = this.uteClosing;
-        if (h.ute && closing >= CLOSURE.uteMoving && onRoad(h.ute.x, h.ute.z)) {
+        // (an empty ute rolling along brings nobody: only one with a driver counts)
+        if (h.ute && h.ute.driven !== false && closing >= CLOSURE.uteMoving && onRoad(h.ute.x, h.ute.z)) {
             const d = sp.junction - along;
             const t = quickest(d, Math.min(closing, CLOSURE.uteSpeed));
             if (d > 0 && t >= CLOSURE.leadS && t <= CLOSURE.leadS + CLOSURE.uteWindowS) take(d);
@@ -272,14 +309,52 @@ export class RoadClosure {
         return !(h.ute && near(h.ute.x, h.ute.z, 2));
     }
 
-    /** Every player and the ute are on the road beyond the barrier. */
-    private everyonePast(h: RoadClosureHost): boolean {
+    /** How it ended, in a few words: the barrier shifted, or how they went round (or that they turned back). */
+    private account(h: RoadClosureHost, blocking: boolean): string {
+        const parts: string[] = [];
         const sp = this.spec;
         const past = (x: number, z: number) => sp.along(x, z) >= sp.rejoin;
-        const left = (x: number, z: number) => sp.along(x, z) < sp.from;
-        // an empty ute does not hold it, wherever it was left: only one with a driver counts
-        const ute = h.ute && h.ute.driven !== false ? h.ute : null;
-        return h.walkers.every((w) => past(w.x, w.z)) && (!ute || left(ute.x, ute.z) || past(ute.x, ute.z));
+        if (!blocking) parts.push('barrier shifted off the road');
+        else {
+            const slots = h.walkers.filter((w) => past(w.x, w.z)).map((w) => w.slot ?? h.walkers.indexOf(w));
+            const track = slots.filter((s) => this.byTrack.has(s)).length;
+            if (slots.length && track === slots.length) parts.push('took the track on foot');
+            else if (slots.length && track === 0) parts.push('squeezed past on foot');
+            else if (slots.length) parts.push('some took the track, some squeezed past');
+            if (h.ute && past(h.ute.x, h.ute.z))
+                parts.push(this.uteByTrack ? 'drove the ute round the track' : 'got the ute round another way');
+            if (!parts.length) parts.push('turned back');
+        }
+        // an empty ute still on the closed stretch (it doesn't hold it)
+        if (h.ute && h.ute.driven === false && blocking) {
+            const a = sp.along(h.ute.x, h.ute.z);
+            if (a >= sp.from && a < sp.rejoin) parts.push('left the ute on the closed road');
+        }
+        this.byTrack.clear();
+        this.uteByTrack = false;
+        return parts.join('; ');
+    }
+
+    /**
+     * Who holds it: the players on foot, and the ute if someone drives it, that are in the closed
+     * stretch or beyond (past `from`). One still behind it (in the yard, across the creek), or gone
+     * back there, doesn't; nor does an empty ute, wherever it was left.
+     */
+    private holding(h: RoadClosureHost): { x: number; z: number }[] {
+        const sp = this.spec;
+        const ute = h.ute && h.ute.driven !== false ? [h.ute] : [];
+        return [...h.walkers, ...ute].filter((w) => sp.along(w.x, w.z) >= sp.from);
+    }
+
+    /**
+     * Over: everyone who holds it is on the road beyond the barrier; or nobody has held it for
+     * CLOSURE.goneS (they all turned back, or whoever brought it on never came).
+     */
+    private everyonePast(h: RoadClosureHost): boolean {
+        const who = this.holding(h);
+        if (who.length === 0) return h.tick - this.heldAt >= S(CLOSURE.goneS);
+        this.heldAt = h.tick;
+        return who.every((w) => this.spec.along(w.x, w.z) >= this.spec.rejoin);
     }
 
     /** Locks (or frees) the barrier's movement: locked, the ute stops against it. */

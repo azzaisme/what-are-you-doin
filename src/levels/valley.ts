@@ -1228,6 +1228,10 @@ export const VALLEY_ROAD_CLOSURE: RoadClosureSpec = (() => {
         // past the creek (the yard's side is before it)
         from: 2,
         across: (x, z) => routeT(x, z) - roadT(routeU(x, z)),
+        track: (x, z) => {
+            const track = SIDE_PATHS.filter((q) => q.name === 'logging-track');
+            return !!nearestPath(track, routeU(x, z), routeT(x, z), track[0].halfWidth + 0.6);
+        },
         roadHalf: 1.6,
         barrier,
         barrierHalf: BARRIER_HALF,

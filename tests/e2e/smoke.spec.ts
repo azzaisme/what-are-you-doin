@@ -147,6 +147,7 @@ test('boots the River Lab with no console errors and a non-blank frame @realtime
     expect(s.staticCells).toBeGreaterThan(1_000_000);
     expect(s.voxel.objects).toBe(7);
     expect(s.voxel.rejected).toBe(0);
+    expect(s.voxel.maskRejected).toBe(0);
     // feet and wheels may dip a cell into the ground at fine cell sizes; the dynamic cell wins and
     // the static cell reappears afterwards (compositor policy). Physics props rest on the analytic
     // terrain, which lies 0-1 cell below the voxel ground surface, so resting props share at most one
@@ -161,6 +162,36 @@ test('every uploaded vertex lies on the global 10 cm grid and render units never
     const r = await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid());
     expect(r.vertices).toBeGreaterThan(10_000);
     expect(r.misaligned).toBe(0);
+});
+
+test('objects on different lattices resolve by priority: the 1 cm bucket in the 5 cm paw (#107)', async ({ page }) => {
+    // the Epic 1 scripted River Lab: the beaver walks its loop with the bucket hanging from its paw
+    const problems = await boot(page, '?level=lab&props=scripted&t=4&noui');
+    type L = Lab & { latticeHidden(): Promise<Record<string, number>> };
+    for (const t of [2, 4, 6]) {
+        await page.evaluate((t) => (window as unknown as { __riverLab: Lab }).__riverLab.seek(t), t);
+        await idle(page);
+        const hidden = await page.evaluate(() => (window as unknown as { __riverLab: L }).__riverLab.latticeHidden());
+        // the bucket (priority 4) outranks the beaver (3): the paw's 5 cm cells inside the handle give
+        // way, and the bucket keeps every 1 cm cell
+        expect(hidden.beaver, `t=${t}`).toBeGreaterThan(0);
+        expect(hidden.bucket, `t=${t}`).toBeUndefined();
+    }
+    const s = await lab(page, (l) => l.stats());
+    expect(s.voxel.latticeMasks).toBeGreaterThan(0);
+    expect(s.voxel.rejected).toBe(0);
+    expect(s.voxel.maskRejected).toBe(0);
+    const g = await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid());
+    expect(g.misaligned).toBe(0);
+    expect(problems).toEqual([]);
+});
+
+test('one lattice for everything (?tiers=off) needs no lattice priority', async ({ page }) => {
+    const problems = await boot(page, '?level=lab&props=scripted&t=4&noui&tiers=off');
+    type L = Lab & { latticeHidden(): Promise<Record<string, number>> };
+    expect(await page.evaluate(() => (window as unknown as { __riverLab: L }).__riverLab.latticeHidden())).toEqual({});
+    expect((await lab(page, (l) => l.stats())).voxel.latticeMasks).toBe(0);
+    expect(problems).toEqual([]);
 });
 
 test('reconstruction is deterministic for a time and changes as objects move', async ({ page }) => {
@@ -196,6 +227,7 @@ test('debug controls: reference mode, voxel rates, sampling policies and stress 
     const s = await lab(page, (l) => l.stats());
     expect(s.voxel.objects).toBe(32);
     expect(s.voxel.rejected).toBe(0);
+    expect(s.voxel.maskRejected).toBe(0);
     expect(problems).toEqual([]);
 });
 
@@ -599,20 +631,36 @@ test('physics sandbox: grab and carry the plank, launch the ragdoll, switch to s
     await lab(page, (l) => l.action('pause')); // resume: the sandbox runs live from here
     await ticks(page, 180); // props settle
     const plank = (await lab(page, (l) => l.entities())).plank;
-    // stand 1.6 m behind the plank (towards +Z) facing it, and aim the crosshair at it
-    await page.evaluate(
-        ([x, z]) => (window as unknown as { __riverLab: Lab }).__riverLab.setFirstPerson(x, z + 1.6, 0, -0.3),
-        [plank.x, plank.z]
-    );
+    // empty hands first (#110): standing somewhere with carry on hands you the comfort plank, and
+    // turning carry off drops it in front of you, where it can lie across the aim at the test plank
     await lab(page, (l) => l.set('carry', false));
-    await ticks(page, 90);
-    const p = await lab(page, (l) => l.player());
-    expect(p.grounded).toBe(true);
-    const pitch = -Math.atan2(p.y + p.eyeHeight - plank.y, Math.hypot(plank.x - p.x, plank.z - p.z));
-    await page.evaluate(
-        ([x, z, pitch]) => (window as unknown as { __riverLab: Lab }).__riverLab.setFirstPerson(x, z + 1.6, 0, pitch),
-        [plank.x, plank.z, pitch]
-    );
+    // stand 1.6 m from the plank facing it, aim the crosshair at it through the look input, and
+    // grab only once the crosshair is on it. Wherever the comfort plank (or anything else) lies, a
+    // blocked view is tried from the next side (#110)
+    let aimed = false;
+    let yaw = 0;
+    for (let k = 0; k < 8 && !aimed; k++) {
+        yaw = (k * Math.PI) / 4;
+        const x = plank.x + 1.6 * Math.sin(yaw);
+        const z = plank.z + 1.6 * Math.cos(yaw);
+        await page.evaluate(
+            ([x, z, yaw]) => (window as unknown as { __riverLab: Lab }).__riverLab.setFirstPerson(x, z, yaw, -0.3),
+            [x, z, yaw]
+        );
+        await ticks(page, 90);
+        const p = await lab(page, (l) => l.player());
+        if (!p.grounded) continue;
+        const pitch = -Math.atan2(p.y + p.eyeHeight - plank.y, Math.hypot(plank.x - p.x, plank.z - p.z));
+        await page.evaluate(
+            ([yaw, pitch]) => (window as unknown as { __riverLab: Lab }).__riverLab.look(yaw, pitch),
+            [yaw, pitch]
+        );
+        for (let tries = 0; tries < 3 && !aimed; tries++) {
+            await ticks(page, 30);
+            aimed = (await lab(page, (l) => l.interaction())).target === 'plank';
+        }
+    }
+    expect(aimed).toBe(true);
     // grab once the crosshair is on it (not on the comfort plank the carry toggle just put away)
     await page.waitForFunction(
         () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().target === 'plank',
@@ -628,7 +676,7 @@ test('physics sandbox: grab and carry the plank, launch the ragdoll, switch to s
         }
     );
     // look ahead: the hold point follows the view, so the plank is lifted to chest height
-    await lab(page, (l) => l.look(0, 0));
+    await page.evaluate((yaw) => (window as unknown as { __riverLab: Lab }).__riverLab.look(yaw, 0), yaw);
     // lifted off the ground (software GL runs ~1 fps, so wait on sim progress, not wall time)
     await page.waitForFunction(
         (y0) => (window as unknown as { __riverLab: Lab }).__riverLab.entities().plank.y > y0 + 0.3,
@@ -663,6 +711,7 @@ test('physics sandbox: grab and carry the plank, launch the ragdoll, switch to s
     let s = await lab(page, (l) => l.stats());
     expect(s.voxel.objects).toBeGreaterThanOrEqual(14);
     expect(s.voxel.rejected).toBe(0);
+    expect(s.voxel.maskRejected).toBe(0);
 
     await lab(page, (l) => l.set('props', 'scripted'));
     await lab(page, (l) => l.seek(5));
@@ -689,6 +738,7 @@ test('level 1, the Timber Yard: starts in first person with the objective, and t
     // Epic 5's seven deck planks by the bridge
     expect(s.voxel.objects).toBe(31);
     expect(s.voxel.rejected).toBe(0);
+    expect(s.voxel.maskRejected).toBe(0);
     const g = await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid());
     expect(g.misaligned).toBe(0);
     // deliver the bucket by hand (teleport) and let the sim run
@@ -887,6 +937,7 @@ test('the Valley: one streamed map, stages advance in order and the world follow
     );
     const s = await lab(page, (l) => l.stats());
     expect(s.voxel.rejected).toBe(0);
+    expect(s.voxel.maskRejected).toBe(0);
     expect(problems).toEqual([]);
 });
 
@@ -1154,6 +1205,7 @@ for (const transport of ['local', 'p2p'] as const)
         );
         const gs = await guest.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.stats());
         expect(gs.voxel.rejected).toBe(0);
+        expect(gs.voxel.maskRejected).toBe(0);
         expect(
             (await guest.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid())).misaligned
         ).toBe(0);
@@ -1469,6 +1521,7 @@ test("online co-op in the Valley: the guest streams its own world and follows th
     expect(await call(guest, '(l) => l.nearTiles()')).toBeGreaterThan(10);
     const gs = await guest.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.stats());
     expect(gs.voxel.rejected).toBe(0);
+    expect(gs.voxel.maskRejected).toBe(0);
     await call(guest, '(l) => l.net.leave()');
     expect(problems).toEqual([]);
     expect(guestProblems).toEqual([]);
@@ -1480,6 +1533,7 @@ test('a first visit starts the tutorial: step-by-step objective, the Levels menu
     await expect(page.locator('#hud-objective')).toContainText('Step 1/8');
     const s = await lab(page, (l) => l.stats());
     expect(s.voxel.rejected).toBe(0);
+    expect(s.voxel.maskRejected).toBe(0);
     await page.locator('.levels-chip').click();
     await expect(page.locator('.levels-panel')).toContainText('Timber Yard');
     await expect(page.locator('.levels-panel')).toContainText('Tutorial (playing)');

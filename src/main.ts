@@ -244,15 +244,20 @@ if (level.stream)
 const pipeline = new VoxelClient(lanes, sim);
 /** The fog's start for the quality preset (the weather closes the fog in from here and from the level's end). */
 let baseFogStart = scene.app.scene.fog.start;
-/** Streamed levels: how far around the cameras the near world is built follows the quality preset. */
+/**
+ * The quality preset's share of the voxel workers: the mask budget (every level), and on streamed
+ * levels how far around the cameras the near world is built.
+ */
 function applyViewDistance(q: Quality): void {
+    pipeline.maskPreset = q.name;
     if (!level.stream) return;
     const v = viewDistance(level.stream, q.name);
     pipeline.nearRadius = v.radius;
     scene.app.scene.fog.start = baseFogStart = v.fogStart;
 }
 applyViewDistance(initialQuality);
-const build = await pipeline.init(1, level.id, level.data);
+// ?masks=off: objects on different lattices draw through one another, as before #107 (comparisons)
+const build = await pipeline.init(1, level.id, level.data, params.get('masks') !== 'off');
 setLoading('Uploading meshes…');
 await nextFrame();
 const tUpload = performance.now();
@@ -1493,7 +1498,15 @@ function pollEvents(): void {
         playtest.note(performance.now(), e.kind, e.text);
         updateObjective();
     }
+    // how each hazard ended (the host's own account: not sent to guests)
+    const outs = sim.hazards.outcomes;
+    if (outs.length < seenOutcomes) seenOutcomes = 0;
+    while (seenOutcomes < outs.length) {
+        const o = outs[seenOutcomes++];
+        playtest.note(performance.now(), 'outcome', `${o.hazard}: ${o.what}`);
+    }
 }
+let seenOutcomes = 0;
 let promptText = '';
 
 /** Context prompt (design doc §2.3): what a click (or a trigger) would do right now. */
@@ -1733,6 +1746,12 @@ const EMPTY_FRAME_STATS = {
     dirtyCells: 0,
     dynDynOverlaps: 0,
     dynStaticOverlaps: 0,
+    latticeMasks: 0,
+    latticeHidden: 0,
+    maskSkipped: 0,
+    maskCells: 0,
+    maskLimit: 0,
+    maskRejected: 0,
     staticRebuilt: 0,
     dynamicRebuilt: 0,
     rasterMs: 0,
@@ -1832,7 +1851,7 @@ function statsText(): string {
         `  candidates ${v.candidates} samples ${v.samples}`,
         `  occupied ${v.occupied} changed ${v.changedCells}`,
         `  dirty chunks: static ${v.staticRebuilt} dyn ${v.dynamicRebuilt}`,
-        `  overlap dyn/dyn ${v.dynDynOverlaps} dyn/static ${v.dynStaticOverlaps}`,
+        `  overlap dyn/dyn ${v.dynDynOverlaps} dyn/static ${v.dynStaticOverlaps} lattices ${v.latticeHidden}`,
         `  worker ms raster ${f(v.rasterMs)} resolve ${f(v.resolveMs)} mesh ${f(v.meshMs)}`,
         `  worker total ${f(v.totalMs)}   main-thread upload ${f(v.uploadMs)}`,
         `physics  ${s.physics.props}  tick ms avg ${f(s.physics.tickMsAvg)} p95 ${f(s.physics.tickMsP95)} max ${f(s.physics.tickMsMax)}`,
@@ -2595,6 +2614,11 @@ window.__riverLab = {
         };
     },
     dynamicHash: () => pipeline.query<number>('hash'),
+    /** Per object name: cells an object on another lattice takes from it (lattice priority, #107). */
+    latticeHidden: async () => {
+        const by = await pipeline.query<Record<number, number>>('lattice');
+        return Object.fromEntries(sim.entities.filter((e) => by[e.id]).map((e) => [e.name, by[e.id]]));
+    },
     /** Each worker lane's stand trees as its static layer draws them (tests: a leaning tree is not there). */
     standStatic: () => pipeline.query<{ drawn: string; trunk: number }[][]>('stand'),
     /** True when no voxel frame is in flight or waiting to be applied. */

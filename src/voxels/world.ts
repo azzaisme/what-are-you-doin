@@ -15,6 +15,11 @@
  * Composite policy: a dynamic cell overrides a static cell (counted as telemetry). Overlaps between
  * dynamic objects are resolved by object priority, then lower id.
  *
+ * Masks (per-item cell sizes, ADR 0011): an object drawn on another lattice can be registered as a
+ * mask. It is rasterized on this lattice, only where it meets this lattice's own objects, and takes
+ * part in the same priority order; where a mask wins a cell, the cell is left empty here (the other
+ * lattice draws it). So a 1 cm bucket held in a 5 cm paw shows the bucket, not the paw through it.
+ *
  * Storage is sparse: chunks are allocated only when written. A level-sized dense array is never
  * allocated (§5.5).
  */
@@ -77,6 +82,9 @@ export interface PartInstance {
 interface DynamicEntry {
     id: number;
     priority: number;
+    /** Drawn on another lattice: wins cells by priority but leaves them empty here. */
+    mask: boolean;
+    ownBody: boolean;
     cells: Map<number, number>;
     prev: Map<number, number>;
     /** Occupied cells after the last rasterization. */
@@ -88,6 +96,8 @@ export interface CompositeStats {
     changedCells: number;
     dynDynOverlaps: number;
     dynStaticOverlaps: number;
+    /** Cells an object on another lattice now takes from one of this lattice's objects. */
+    latticeHidden: number;
 }
 
 /**
@@ -111,6 +121,15 @@ export interface ColumnRect {
     k0: number;
     k1: number;
 }
+
+/** A box of cells (inclusive): where a mask object is sampled. */
+export interface CellBox extends ColumnRect {
+    j0: number;
+    j1: number;
+}
+
+/** The value a mask holds in its own occupancy (never drawn: a winning mask leaves the cell empty). */
+const MASK_VALUE = 0xffff;
 
 const tileKey = (ti: number, tk: number) => (ti + 32768) * 65536 + (tk + 32768);
 
@@ -168,10 +187,13 @@ export class VoxelWorld {
         dirtyCells: 0,
         changedCells: 0,
         dynDynOverlaps: 0,
-        dynStaticOverlaps: 0
+        dynStaticOverlaps: 0,
+        latticeHidden: 0
     };
     /** Running totals of overlap cells currently present. */
     dynStaticOverlapCells = 0;
+    /** Cells (keys) where a mask currently hides one of this lattice's objects. */
+    private readonly latticeHiddenCells = new Set<number>();
 
     // ------------------------------------------------------------------------------- chunks
 
@@ -397,13 +419,14 @@ export class VoxelWorld {
 
     // ------------------------------------------------------------------------------- dynamic objects
 
-    addObject(id: number, priority = 0): void {
+    /** `ownBody`: your own first-person limbs, first among equal priorities (see VoxelService). */
+    addObject(id: number, priority = 0, mask = false, ownBody = false): void {
         if (this.objects.has(id)) throw new Error(`Dynamic object ${id} already registered`);
         if (!Number.isInteger(id) || id < 0) throw new Error(`Invalid object id ${id}`);
-        const e: DynamicEntry = { id, priority, cells: new Map(), prev: new Map(), count: 0 };
+        const e: DynamicEntry = { id, priority, mask, ownBody, cells: new Map(), prev: new Map(), count: 0 };
         this.objects.set(id, e);
         this.order.push(e);
-        this.order.sort((a, b) => b.priority - a.priority || a.id - b.id);
+        this.order.sort((a, b) => b.priority - a.priority || Number(b.ownBody) - Number(a.ownBody) || a.id - b.id);
     }
 
     hasObject(id: number): boolean {
@@ -492,6 +515,123 @@ export class VoxelWorld {
     }
 
     /**
+     * Stages a mask object's cells (registered with `mask`) as exactly `keys[0 .. count)`: the cells
+     * this lattice's own objects hold that the mask wins (VoxelService decides which). Nothing
+     * changes until commitMask; returns how many chunks committing would change cells in (each
+     * is remeshed). Staging again, or staging another mask, discards it.
+     */
+    stageMask(id: number, keys: Int32Array, count: number): number {
+        const e = this.objects.get(id);
+        if (!e || !e.mask) throw new Error(`Unknown mask object ${id}`);
+        const next = e.prev;
+        next.clear();
+        const v = MASK_VALUE | (e.priority << 16);
+        for (let n = 0; n < count; n++) next.set(keys[n], v);
+        const chunks = this.chunkSet;
+        chunks.clear();
+        for (const key of next.keys()) if (!e.cells.has(key)) chunks.add(key >>> 12);
+        for (const key of e.cells.keys()) if (!next.has(key)) chunks.add(key >>> 12);
+        this.staged = e;
+        return chunks.size;
+    }
+
+    /** Applies the staged mask and marks its changed cells dirty; returns how many changed. */
+    commitMask(id: number): number {
+        const e = this.staged;
+        if (!e || e.id !== id) throw new Error(`Mask ${id} is not staged`);
+        this.staged = null;
+        const prev = e.cells;
+        const next = e.prev;
+        e.prev = prev;
+        e.cells = next;
+        e.count = next.size;
+        let changed = 0;
+        const dirty = this.dirtyCells;
+        for (const key of next.keys())
+            if (!prev.has(key)) {
+                dirty.add(key);
+                changed++;
+            }
+        for (const key of prev.keys())
+            if (!next.has(key)) {
+                dirty.add(key);
+                changed++;
+            }
+        return changed;
+    }
+
+    /** Sets a mask object's cells at once (stageMask then commitMask); returns how many changed. */
+    writeMask(id: number, keys: Int32Array, count: number): number {
+        this.stageMask(id, keys, count);
+        return this.commitMask(id);
+    }
+
+    private staged: DynamicEntry | null = null;
+    private readonly chunkSet = new Set<number>();
+
+    /**
+     * One object's cells inside a cell box, appended to `out.a` from `start` as i, j, k and the cell
+     * key (four ints a cell; grown as needed). One pass over its cells; those in chunks the box does
+     * not meet are skipped without decoding. Returns the new end.
+     */
+    objectCellsInBox(id: number, box: CellBox, out: { a: Int32Array }, start: number): number {
+        const e = this.objects.get(id);
+        if (!e) return start;
+        let a = out.a;
+        let n = start;
+        const S = CHUNK_SIZE;
+        let lastChunk = -1;
+        let skip = true;
+        let ox = 0;
+        let oy = 0;
+        let oz = 0;
+        for (const key of e.cells.keys()) {
+            const ci = key >>> 12;
+            if (ci !== lastChunk) {
+                lastChunk = ci;
+                const c = this.chunks[ci];
+                ox = c.cx * S;
+                oy = c.cy * S;
+                oz = c.cz * S;
+                skip =
+                    ox > box.i1 ||
+                    ox + S - 1 < box.i0 ||
+                    oy > box.j1 ||
+                    oy + S - 1 < box.j0 ||
+                    oz > box.k1 ||
+                    oz + S - 1 < box.k0;
+            }
+            if (skip) continue;
+            const li = key & (CHUNK_VOLUME - 1);
+            const i = ox + (li & CHUNK_MASK);
+            const j = oy + (li >> (2 * CHUNK_BITS));
+            const k = oz + ((li >> CHUNK_BITS) & CHUNK_MASK);
+            if (i < box.i0 || i > box.i1 || j < box.j0 || j > box.j1 || k < box.k0 || k > box.k1) continue;
+            if (a.length < n + 4) {
+                const g = new Int32Array(Math.max(1024, a.length * 2));
+                g.set(a);
+                a = out.a = g;
+            }
+            a[n] = i;
+            a[n + 1] = j;
+            a[n + 2] = k;
+            a[n + 3] = key;
+            n += 4;
+        }
+        return n;
+    }
+
+    /** How many chunks an object's cells lie in (what clearing it remeshes). */
+    objectChunkCount(id: number): number {
+        const e = this.objects.get(id);
+        if (!e) return 0;
+        const chunks = this.chunkSet;
+        chunks.clear();
+        for (const key of e.cells.keys()) chunks.add(key >>> 12);
+        return chunks.size;
+    }
+
+    /**
      * Writes an object made of single cells (particles: leaves, chips, splashes). `points` holds
      * x, y, z (metres) and a voxel value per point; each point fills the one cell containing it, on
      * the global grid like everything else. Marks changed cells dirty; returns how many changed.
@@ -557,20 +697,29 @@ export class VoxelWorld {
         st.changedCells = 0;
         st.dynDynOverlaps = 0;
         st.dynStaticOverlaps = 0;
-        const order = this.order;
+        // only objects holding cells can contribute (the same order, without the empty ones)
+        const order = this.order.filter((e) => e.cells.size > 0);
         const n = order.length;
         for (const key of this.dirtyCells) {
             const c = this.chunks[key >>> 12];
             const li = key & (CHUNK_VOLUME - 1);
             let winner = 0;
             let cover = 0;
+            let masked = false;
             for (let o = 0; o < n; o++) {
-                const v = order[o].cells.get(key);
-                if (v !== undefined) {
-                    if (cover === 0) winner = v & 0xffff;
-                    cover++;
+                const e = order[o];
+                const v = e.cells.get(key);
+                if (v === undefined) continue;
+                if (e.mask) {
+                    // another lattice's object: it takes the cell from everything after it
+                    if (cover === 0) masked = true;
+                    continue;
                 }
+                if (cover === 0) winner = masked ? 0 : v & 0xffff;
+                cover++;
             }
+            if (masked && cover > 0) this.latticeHiddenCells.add(key);
+            else this.latticeHiddenCells.delete(key);
             if (cover > 1) st.dynDynOverlaps++;
             if (!c.dyn) {
                 if (winner === 0) continue;
@@ -593,6 +742,7 @@ export class VoxelWorld {
             this.markDynDirtyAround(c, li);
         }
         st.dynStaticOverlaps = this.dynStaticOverlapCells;
+        st.latticeHidden = this.latticeHiddenCells.size;
         this.dirtyCells.clear();
         return st;
     }
@@ -619,6 +769,17 @@ export class VoxelWorld {
                 }
             }
         }
+    }
+
+    /** Per object id: the cells a mask (another lattice's object) currently takes from it. */
+    latticeHiddenByObject(): Map<number, number> {
+        const out = new Map<number, number>();
+        for (const key of this.latticeHiddenCells)
+            for (const e of this.order) {
+                if (e.mask || !e.cells.has(key)) continue;
+                out.set(e.id, (out.get(e.id) ?? 0) + 1);
+            }
+        return out;
     }
 
     /** Total static cells (for stats). */
