@@ -87,6 +87,13 @@ export interface LevelStage {
     bucket: { x: number; y: number; z: number };
     /** Epic 7: this stage is done by pouring water here (the flower), not by setting the bucket down. */
     flower?: FlowerTarget;
+    /**
+     * The bucket only counts at `goal` with at least this much water (litres). A thrown bucket lands
+     * with its water gone, so a crossing has to be built and the bucket carried over.
+     */
+    minLitres?: number;
+    /** A bucket lost in this stage comes back at `bucket` holding this much water (default empty). */
+    spareLitres?: number;
 }
 
 /**
@@ -103,6 +110,12 @@ export interface WaterSource {
     h: number;
     /** Litres it holds (it runs dry). */
     litres: number;
+    /**
+     * Journeys: it gives water only from this stage on (`progress.step`), and the stage before it
+     * must be done first: the Valley's sources past a crossing stay shut until it is crossed, so a
+     * dry bucket thrown over can't be refilled before its flag (Epic 9).
+     */
+    opensAt?: number;
 }
 
 /** Where water poured counts as watering the flower: within `r` of (x, z), across the ground. */

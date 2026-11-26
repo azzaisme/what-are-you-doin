@@ -1455,6 +1455,21 @@ export class PhysicsWorld {
         return this.world.debugRender(undefined, (c) => c.handle !== th).vertices;
     }
 
+    /**
+     * Height of what a player could stand on under (x, z), cast down from `fromY` at most `range`:
+     * the ground, props, the ute (not players, nor anything held), or null if nothing is there.
+     */
+    supportY(x: number, z: number, fromY: number, range: number): number | null {
+        const hit = this.world.castRay(
+            new RAPIER.Ray({ x, y: fromY, z }, { x: 0, y: -1, z: 0 }),
+            range,
+            true,
+            RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+            groups(ALL, LAYER.static | LAYER.prop | LAYER.kinematic)
+        );
+        return hit ? fromY - hit.timeOfImpact : null;
+    }
+
     /** Raycast against static geometry only (used for placing things on the ground). */
     groundY(x: number, z: number, fromY = 50): number | null {
         const hit = this.world.castRay(

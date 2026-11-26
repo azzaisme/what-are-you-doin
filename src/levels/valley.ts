@@ -1183,11 +1183,14 @@ const stump = yardToWorld(BUCKET_STUMP.x, BUCKET_STUMP.z);
  * spot, its barrel to the side of the road (+t).
  */
 function valleyButts(): ReturnType<typeof waterButt>[] {
-    const butt = (name: string, u: number, t: number, litres: number) => {
+    const butt = (name: string, u: number, t: number, litres: number, opensAt: number) => {
         const w = routeToWorld(u, t);
-        return waterButt(name, w.x, w.z, groundUT(u, t), groundUT(u, t + 0.62), -Math.PI / 4, litres);
+        const b = waterButt(name, w.x, w.z, groundUT(u, t), groundUT(u, t + 0.62), -Math.PI / 4, litres);
+        return { ...b, source: { ...b.source, opensAt } };
     };
-    return [butt('works water tank', 96, 1.8, 30), butt('mountain spring butt', 175, roadT(175) + 0.8, 20)];
+    // each past a crossing a beaver can jump: shut until the stage it serves (the Works, the summit),
+    // so a dry bucket thrown over can't be refilled before the crossing's flag
+    return [butt('works water tank', 96, 1.8, 30, 4), butt('mountain spring butt', 175, roadT(175) + 0.8, 20, 6)];
 }
 
 function valleySources(): WaterSource[] {
@@ -1197,6 +1200,15 @@ function valleySources(): WaterSource[] {
 }
 
 const summit = routeToWorld(SUMMIT_U, 0);
+
+/**
+ * Each flag past the yard wants at least this much water in the bucket (litres): a thrown bucket
+ * lands with its water gone (0.02 L at most, measured), one carried over a crossing keeps nearly all
+ * of its 10 L, so the crossings have to be built.
+ */
+export const FLAG_LITRES = 1;
+/** A bucket lost at a stage with no water nearby comes back with this much in it (litres). */
+export const SPARE_LITRES = 3;
 
 export const VALLEY_STAGES: LevelStage[] = [
     {
@@ -1211,35 +1223,44 @@ export const VALLEY_STAGES: LevelStage[] = [
         objective: 'Bridge the creek and get the bucket to the flag on the far bank',
         goal: square(CHECKPOINTS[1].u, CHECKPOINTS[1].t, 2.6),
         start: restart(-4.5, 1),
-        bucket: bucketAt(-4.5, 1.6)
+        bucket: bucketAt(-4.5, 1.6),
+        minLitres: FLAG_LITRES
     },
     {
         name: 'Forest Road',
         objective: 'Carry the long beams from the log dump over the washed-out culvert',
         goal: square(CHECKPOINTS[2].u, CHECKPOINTS[2].t, 2.6),
         start: restart(8, roadT(8)),
-        bucket: bucketAt(8, roadT(8) + 0.8)
+        bucket: bucketAt(8, roadT(8) + 0.8),
+        minLitres: FLAG_LITRES,
+        spareLitres: SPARE_LITRES
     },
     {
         name: 'Gorge',
         objective: 'Span the gorge to the old pier and on to the far side',
         goal: square(CHECKPOINTS[3].u, CHECKPOINTS[3].t, 2.6),
         start: restart(50, roadT(50)),
-        bucket: bucketAt(50, roadT(50) + 0.8)
+        bucket: bucketAt(50, roadT(50) + 0.8),
+        minLitres: FLAG_LITRES,
+        spareLitres: SPARE_LITRES
     },
     {
         name: 'Old Industrial Works',
-        objective: 'Stack the crates and get the bucket up onto the works’ upper yard',
+        objective: 'Stack crates to climb the wall: set the bucket on one and lift it up from the top',
         goal: square(CHECKPOINTS[4].u, CHECKPOINTS[4].t, 3),
         start: restart(96, 1),
-        bucket: bucketAt(96, 1.8)
+        bucket: bucketAt(96, 1.8),
+        minLitres: FLAG_LITRES
     },
     {
         name: 'Mountain Approach',
         objective: 'Bridge the crevasse on the mountain road',
         goal: square(CHECKPOINTS[5].u, CHECKPOINTS[5].t, 2.6),
         start: restart(128, -2),
-        bucket: bucketAt(128, -1.2)
+        bucket: bucketAt(128, -1.2),
+        minLitres: FLAG_LITRES,
+        // (the works tank is below the retaining wall)
+        spareLitres: SPARE_LITRES
     },
     {
         name: 'Flower Summit',
