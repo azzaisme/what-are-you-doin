@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import type { VoxelAsset } from '../../src/assets/asset.ts';
-import { BEAVER_ARM_RAISE, BEAVER_FIRST_PERSON, beaverAsset, beaverFirstPersonAsset } from '../../src/assets/beaver.ts';
+import {
+    BEAVER_ARM_LENGTH,
+    BEAVER_ARM_RAISE,
+    BEAVER_FIRST_PERSON,
+    beaverAsset,
+    beaverFirstPersonAsset
+} from '../../src/assets/beaver.ts';
 import { assetTier } from '../../src/assets/cell-tier.ts';
 import { PERSON_ARM_LENGTH, PERSON_EYE_HEIGHT, personAsset, personFirstPersonAsset } from '../../src/assets/person.ts';
 import { bodyLockOffset } from '../../src/render/voxel-pipeline.ts';
@@ -26,7 +32,7 @@ const BODIES: Body[] = [
         asset: beaverAsset,
         fp: beaverFirstPersonAsset,
         eye: 1.22,
-        tip: 0.18,
+        tip: BEAVER_ARM_LENGTH / 2,
         head: ['head', 'muzzle', 'earL', 'earR', 'hatDome', 'hatBrim'],
         holding: 1.95,
         shown: ['body', 'vest', 'armL', 'armR', 'legL', 'footR']
@@ -79,17 +85,21 @@ describe.each(BODIES)('your own body in first person ($name)', (b) => {
         for (const n of b.shown) expect(b.asset.partHidden!(fp, index(n)), n).toBe(false);
     });
 
-    it('shows both hands at the bottom of the view, and higher while holding', () => {
+    it('keeps relaxed hands low and raises them into view while holding', () => {
         // the default look is 7 degrees down with a 52 degree vertical field of view: the bottom
         // edge is 33 degrees below the horizon; the side edges (16:9) about 40 degrees out
         for (const arm of ['armL', 'armR'] as const) {
             const ready = handInView(0, true, arm);
-            expect(ready.below).toBeLessThan(32);
-            expect(ready.below).toBeGreaterThan(20);
-            expect(ready.side).toBeLessThan(30);
-            // not in your face: the hand is about as far away as a held phone, or further
-            expect(ready.near).toBeGreaterThan(0.35);
+            if (b.name === 'beaver') {
+                expect(ready.below).toBeGreaterThan(60);
+            } else {
+                expect(ready.below).toBeLessThan(32);
+                expect(ready.below).toBeGreaterThan(20);
+                expect(ready.side).toBeLessThan(30);
+                expect(ready.near).toBeGreaterThan(0.35);
+            }
             const holding = handInView(b.holding, true, arm);
+            expect(holding.below).toBeLessThan(32);
             expect(holding.below).toBeLessThan(ready.below - 8);
             // other players' view of you: arms hang at your sides unless you hold something
             expect(handInView(0, false, arm).below).toBeGreaterThan(60);
