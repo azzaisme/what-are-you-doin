@@ -46,6 +46,19 @@ function cantilever(nails: number, spread = 0.1) {
     return { pw, pb, js, c: [...js.graph.connections()][0] };
 }
 
+/** v rotated by q (world). */
+function rotateBy(q: { x: number; y: number; z: number; w: number }, x: number, y: number, z: number) {
+    const ix = q.w * x + q.y * z - q.z * y;
+    const iy = q.w * y + q.z * x - q.x * z;
+    const iz = q.w * z + q.x * y - q.y * x;
+    const iw = -q.x * x - q.y * y - q.z * z;
+    return [
+        ix * q.w + iw * -q.x + iy * -q.z - iz * -q.y,
+        iy * q.w + iw * -q.y + iz * -q.x - ix * -q.z,
+        iz * q.w + iw * -q.z + ix * -q.y - iy * -q.x
+    ];
+}
+
 /**
  * Statics of the cantilever: it tips on the block's edge (x = 0), and the nails at the anchor,
  * `a` behind the edge, hold its back end down. About the anchor M = W (x_com - x_a) + P (x_tip -
@@ -469,6 +482,125 @@ describe('the yard bridge (Epic 5 gate)', () => {
         expect(a.clamps).toBe(0);
         const b = run();
         expect(b).toEqual(a);
+    }, 60_000);
+});
+
+describe('knock-on failures and debris (#50)', () => {
+    /**
+     * A 3.2 m beam hung face to face on a stone pier by two spikes 2.4 m apart (A at x = -1.2, B at
+     * +1.2: two joints), a load of `P` hanging from it `fromA` m along from A. With `worn`, A starts
+     * worn out by earlier strain (fatigue 1: 40 % of its strength left). Returns, per step, A's and
+     * B's utilization (-1 once gone) and the events.
+     */
+    function hung(P: number, fromA: number, seconds: number, worn: boolean) {
+        const pw = new PhysicsWorld();
+        pw.addTerrain(() => -5, -20, 20, -20, 20, 20);
+        pw.createCharacter(0, -5, 10, 0);
+        pw.addStatic(RAPIER.ColliderDesc.cuboid(2, 1.5, 0.5).setTranslation(0, 1.5, -0.5));
+        const pb = pw.addDynamic(1, { type: 'box', hx: 1.6, hy: 0.1, hz: 0.075 }, pose(0, 2, 0.076), {
+            density: 380,
+            nailable: true
+        });
+        pb.body.setGravityScale(0, true);
+        pw.step();
+        const js = new JointSystem(pw);
+        js.nail({ x: -1.2, y: 2, z: 1.2 }, 0, 0, 0, 0);
+        js.nail({ x: 1.2, y: 2, z: 1.2 }, 0, 0, 0, 0);
+        pb.body.setGravityScale(1, true);
+        expect(js.graph.size).toBe(2);
+        const [A, B] = [...js.graph.connections()].sort((a, b) => a.anchorB.x - b.anchorB.x);
+        if (worn) A.fatigue = 1;
+        const uA: number[] = [];
+        const uB: number[] = [];
+        const events: { kind: string; id: number; tick: number }[] = [];
+        for (let i = 0; i < 60 * seconds; i++) {
+            // the load hangs from a point on the beam (it goes where the beam goes)
+            const q = pb.body.rotation();
+            const t = pb.body.translation();
+            const w = rotateBy(q, -1.2 + fromA, 0, 0);
+            pb.body.applyImpulseAtPoint(
+                { x: 0, y: -P / 60, z: 0 },
+                { x: t.x + w[0], y: t.y + w[1], z: t.z + w[2] },
+                true
+            );
+            pw.step();
+            for (const e of js.update(i)) events.push({ kind: e.kind, id: e.conn.id, tick: i });
+            uA.push(js.graph.get(A.id) ? (js.health.states.get(A.id)?.util ?? 0) : -1);
+            uB.push(js.graph.get(B.id) ? (js.health.states.get(B.id)?.util ?? 0) : -1);
+        }
+        return { pw, pb, A, B, uA, uB, events };
+    }
+
+    it('one joint failing sheds its load onto another, which then breaks because of it (and holds when the first does not fail)', () => {
+        // 2 kN hanging 0.6 m from A: B works under half its strength (no fatigue, no creak); A,
+        // worn out, is past what it has left
+        const P = 2000;
+        const run = hung(P, 0.6, 8, true);
+        const breakOf = (id: number) => run.events.find((e) => e.kind === 'break' && e.id === id)?.tick ?? -1;
+        const aBroke = breakOf(run.A.id);
+        const bBroke = breakOf(run.B.id);
+        // B over the half second before A went, and its peak after (until it went too)
+        const bBefore = Math.max(...run.uB.slice(Math.max(0, aBroke - 30), aBroke));
+        const bAfter = Math.max(...run.uB.slice(aBroke, bBroke < 0 ? undefined : bBroke).filter((u) => u >= 0));
+        const bCreak = run.events.find((e) => e.kind !== 'break' && e.id === run.B.id)?.tick ?? -1;
+        // the control: the same, but A is not worn, so it holds
+        const ctl = hung(P, 0.6, 8, false);
+        const ctlB = Math.max(...ctl.uB.slice(60));
+        const ctlA = Math.max(...ctl.uA.slice(60));
+        const ctlBreaks = ctl.events.filter((e) => e.kind === 'break').length;
+        const ctlBWarned = ctl.events.filter((e) => e.id === ctl.B.id).length;
+        console.log(
+            `knock-on: worn A breaks at ${(aBroke / 60).toFixed(2)} s; B worked at ${bBefore.toFixed(2)} before, ${bAfter.toFixed(2)} after, creaked at ${(bCreak / 60).toFixed(2)} s and broke at ${(bBroke / 60).toFixed(2)} s. A not worn: A works at ${ctlA.toFixed(2)} and holds, B at most ${ctlB.toFixed(2)}; ${ctlBreaks} breaks, ${ctlBWarned} warnings from B in 8 s`
+        );
+        expect(aBroke).toBeGreaterThan(0);
+        expect(bBroke).toBeGreaterThan(aBroke);
+        // B was well within its strength until A went; then it was past it, and creaked only after
+        expect(bBefore).toBeLessThan(0.5);
+        expect(bAfter).toBeGreaterThan(1);
+        expect(bCreak).toBeGreaterThanOrEqual(aBroke);
+        // with A intact, the same B under the same load holds, without a sound
+        expect(ctlA).toBeLessThan(1);
+        expect(ctlB).toBeLessThan(0.5);
+        expect(ctlBreaks).toBe(0);
+        expect(ctlBWarned).toBe(0);
+    }, 60_000);
+
+    it('debris settles: after the underbuilt bridge gives way, the broken beams and the ute come to rest, with no clamped or runaway speeds', () => {
+        const { s, beams } = shortBridge(4);
+        const pieces = [...beams, s.ute].map((e) => s.physics.bodies.get(e.id)!.body);
+        const clamps0 = s.physics.stats.linClamps + s.physics.stats.angClamps;
+        // from the first break on: the fastest any piece goes, and when each is last moving
+        // (asleep, or under 5 cm/s and 0.2 rad/s)
+        let broke = -1;
+        let fastest = 0;
+        const lastMoving = pieces.map(() => 0);
+        const watch = () => {
+            if (broke < 0 && s.joints.graph.size < 2) broke = s.tick;
+            if (broke < 0) return;
+            pieces.forEach((b, i) => {
+                const v = b.linvel();
+                const w = b.angvel();
+                const speed = Math.hypot(v.x, v.y, v.z);
+                fastest = Math.max(fastest, speed);
+                if (!b.isSleeping() && (speed > 0.05 || Math.hypot(w.x, w.y, w.z) > 0.2))
+                    lastMoving[i] = s.tick - broke;
+            });
+        };
+        driveOver(s, watch);
+        for (let k = 0; k < 60 * 10; k++) {
+            s.step(neutralCommand(s.tick + 1));
+            watch();
+        }
+        expect(broke).toBeGreaterThan(0);
+        const clamps = s.physics.stats.linClamps + s.physics.stats.angClamps - clamps0;
+        const settled = Math.max(...lastMoving) / 60;
+        console.log(
+            `debris: the first joint broke at ${(broke / 60).toFixed(1)} s; ${s.joints.graph.size} joints left; the beams and the ute last moving ${lastMoving.map((t) => (t / 60).toFixed(2)).join(', ')} s after it, the fastest ${fastest.toFixed(2)} m/s; ${clamps} speed clamps`
+        );
+        expect(clamps).toBe(0);
+        // nothing faster than falling from the bridge into the creek (about 1.2 m: 4.9 m/s)
+        expect(fastest).toBeLessThan(6);
+        expect(settled).toBeLessThan(6);
     }, 60_000);
 });
 

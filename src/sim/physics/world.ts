@@ -326,7 +326,7 @@ export class PhysicsWorld {
      * Bodies under characters' feet this tick: the controller's vertical push on them (N s), the
      * weight standing on them (kg) and where.
      */
-    private readonly stoodOn = new Map<number, { pushed: number; m: number; x: number; z: number }>();
+    private readonly stoodOn = new Map<number, { m: number; x: number; z: number }>();
     private terrainHandle = -1;
     /** How many rigs hold each body (two beavers can carry one log; forces add, each bounded). */
     private readonly holdCount = new Map<number, number>();
@@ -677,14 +677,14 @@ export class PhysicsWorld {
             // never collide with (or climb onto) what you are holding: no grab/body feedback loop
             heldHandle < 0 ? undefined : (c: RAPIER.Collider) => c.parent()?.handle !== heldHandle
         );
-        // what the controller's move pushed into each body under the feet (it pushes every one)
-        // the controller's push down on what is under the feet is replaced by the weight (below):
-        // taken back here, its turn too (pushing at its own contact points, it rocked the deck
-        // and walked a loose plank along it); its push sideways stays only for a loose piece it
-        // walked into from the side, a shove. Stepping onto a loose beam's end (its contact facing
-        // up, n.y 0.83 to 0.92) walked the 36 kg beam 10 cm along at a stroll; standing still,
-        // pressing down on a neighbour's edge, it shoved it sideways
-        // what the controller walked into from the side (a shove), not stepped onto
+        // The controller pushes every body under the feet as it moves. That push is taken back
+        // here, down and turning (pushing at its own contact points, it rocked the deck and walked
+        // a loose plank along it); the weight replaces it (weighStanding). Its push sideways stays
+        // only for a loose piece the controller walked into from the side: a shove. Stepping onto
+        // a loose beam's end (its contact facing up, n.y 0.83 to 0.92) had walked the 36 kg beam
+        // 10 cm along at a stroll, and standing still, pressing down on a neighbour's edge, had
+        // shoved it sideways.
+        // The pieces walked into from the side (contact normal under SHOVE_MAX_UP), this move:
         const shoved = new Set<PhysBody>();
         if (Math.hypot(wishX, wishZ) > 0.05)
             for (let i = 0; i < k.numComputedCollisions(); i++) {
@@ -693,7 +693,6 @@ export class PhysicsWorld {
                 if (pb && c && c.normal1.y <= SHOVE_MAX_UP) shoved.add(pb);
             }
         for (const u of under) {
-            if (!this.stoodOn.has(u.pb.id)) this.stoodOn.set(u.pb.id, { pushed: 0, m: 0, x: 0, z: 0 });
             const v = u.pb.body.linvel();
             // (the controller's push just woke it: nothing to wake here)
             u.pb.body.setLinvel(shoved.has(u.pb) && !u.pb.nailed ? { x: v.x, y: u.v.y, z: v.z } : u.v, false);
@@ -737,7 +736,7 @@ export class PhysicsWorld {
         const pb = this.byCollider.get(hit.collider.handle);
         if (!pb || pb.kind !== 'dynamic' || !pb.enabled || this.holders(pb.id) > 0) return -1;
         let st = this.stoodOn.get(pb.id);
-        if (!st) this.stoodOn.set(pb.id, (st = { pushed: 0, m: 0, x: 0, z: 0 }));
+        if (!st) this.stoodOn.set(pb.id, (st = { m: 0, x: 0, z: 0 }));
         const m = CHARACTER.mass + (r.held ? r.held.body.mass() / Math.max(1, this.holders(r.held.id)) : 0);
         st.x = (st.x * st.m + t.x * m) / (st.m + m);
         st.z = (st.z * st.m + t.z * m) / (st.m + m);
@@ -796,10 +795,9 @@ export class PhysicsWorld {
             const pb = this.bodies.get(id);
             if (!pb) continue;
             const b = pb.body;
-            const pushed = st.pushed;
             const t = b.worldCom();
             const at = st.m > 0 ? { x: st.x, y: t.y, z: st.z } : t;
-            const j = -st.m * GRAVITY * SIM_DT - pushed;
+            const j = -st.m * GRAVITY * SIM_DT;
             // (no need to wake it: Rapier keeps a body a character stands on awake, so this never
             // lands on a sleeping one, where it would wait in its velocity and drop all at once
             // when it woke; joints-sleep.test.ts stands a beaver still on a beam for 8 s)

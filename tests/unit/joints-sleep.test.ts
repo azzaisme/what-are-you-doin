@@ -326,3 +326,50 @@ describe('joint springs (#49)', () => {
         expect(NAIL.bedding).toBeGreaterThan(1e5);
     }, 60_000);
 });
+
+describe("nailed pieces' extra solver iterations (#49, NAIL.solverIterations)", () => {
+    /** The yard bridge, nailed at both ends, with an 8-plank deck nailed across it mid-span. */
+    function deck8() {
+        const { s, beams } = yardBridge([1, -1], 2);
+        const planks = Array.from({ length: 8 }, (_, k) => s.entities.find((e) => e.name === `extra-plank-${k + 2}`)!);
+        const top = Math.max(...beams.map((b) => b.pose.p.y)) + 0.075;
+        const zs = planks.map((_, k) => BRIDGE.zc + (k - 3.5) * 0.22);
+        planks.forEach((p, k) =>
+            s.physics.place(p.id, pose(BRIDGE_X, top + 0.06, zs[k], quatFromYawPitchRoll(0, Math.PI / 2, 0)))
+        );
+        for (let k = 0; k < 40; k++) s.step(neutralCommand(s.tick + 1));
+        for (const z of zs) for (const x of LINES) hammerAt(s.joints, { x, y: top + 0.1, z }, s.tick);
+        expect(s.joints.graph.size).toBe(4 + 2 * planks.length);
+        return { s, ids: [...beams, ...planks].map((e) => e.id), top };
+    }
+
+    it('an idle 8-plank deck goes to sleep, and so does one under a 113 kg crate, which stays put', () => {
+        // idle: asleep (every piece) within 3 s of the last nail. (With the world's 4 iterations
+        // only, it quivered at up to 1.3 rad/s and never slept)
+        const idle = deck8();
+        const sleptIdle = untilAsleep(idle.s, idle.ids, 60 * 3);
+        // a 113 kg crate set down on the deck's middle: the deck sleeps within 6 s, and the crate
+        // moves under 2 cm in 10 s. (Without them, the quiver walked the crate 8 cm along)
+        const loaded = deck8();
+        const crate = loaded.s.entities.find((e) => e.name === 'cube')!;
+        const cb = loaded.s.physics.bodies.get(crate.id)!.body;
+        cb.setAdditionalMass(113 - cb.mass(), true);
+        loaded.s.physics.place(crate.id, pose(BRIDGE_X, loaded.top + 0.6, BRIDGE.zc, quatFromYawPitchRoll(0, 0, 0)));
+        for (let k = 0; k < 60; k++) loaded.s.step(neutralCommand(loaded.s.tick + 1));
+        const p0 = { ...cb.translation() };
+        let sleptLoaded = -1;
+        for (let k = 0; k < 600; k++) {
+            if (sleptLoaded < 0 && asleep(loaded.s, loaded.ids)) sleptLoaded = k;
+            loaded.s.step(neutralCommand(loaded.s.tick + 1));
+        }
+        const p1 = cb.translation();
+        const crept = Math.hypot(p1.x - p0.x, p1.z - p0.z);
+        console.log(
+            `extra iterations: an idle 8-plank deck asleep after ${(sleptIdle / 60).toFixed(2)} s; under a ${cb.mass().toFixed(0)} kg crate, asleep after ${(sleptLoaded / 60).toFixed(2)} s, the crate moved ${(crept * 100).toFixed(2)} cm in 10 s`
+        );
+        expect(sleptIdle).toBeGreaterThanOrEqual(0);
+        expect(sleptLoaded).toBeGreaterThanOrEqual(0);
+        expect(sleptLoaded).toBeLessThan(60 * 6);
+        expect(crept).toBeLessThan(0.02);
+    }, 120_000);
+});

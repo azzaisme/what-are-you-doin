@@ -711,7 +711,11 @@ export class StressMeter {
         return rotate(b.rotation(), c.axis.x, c.axis.y, c.axis.z);
     }
 
-    private anchorWorld(c: Connection): [number, number, number] {
+    /**
+     * Where a connection's joint anchor is now, in the world (read-only; tests read the arm of a
+     * load about the nails from it).
+     */
+    anchorWorld(c: Connection): [number, number, number] {
         const a = this.pw.bodies.get(c.a)?.body;
         if (!a) return [c.anchorB.x, c.anchorB.y, c.anchorB.z];
         const t = a.translation();

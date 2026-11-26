@@ -394,11 +394,26 @@ function buildAndCross(pullPlankNails = false) {
     waitForSafe(60);
     // ---- 3. out on the deck: nail both beams' far ends into the far capstone
     walkTo(BRIDGE_X, deck[deck.length - 2] + 0.5);
-    for (let b = 0; b < 2; b++)
-        for (const dx of [-0.05, 0.05]) {
-            const at = onBeam(beams[b], farNailZ);
-            nail({ ...at, x: at.x + dx }, `beam ${b} far end`, deck[deck.length - 2]);
+    // two nails across each far end. Where the hammer is refused (a beam lying a little off its
+    // seat's flat: under one edge the stone is 5.6 cm down, past the nail's 5 cm), move the spot,
+    // as a player would, until both are in
+    const farNails: number[] = [];
+    for (let b = 0; b < 2; b++) {
+        let got = 0;
+        for (const [dx, dz] of [
+            [-0.05, 0],
+            [0.05, 0],
+            [0, 0],
+            [-0.05, -0.06],
+            [0.05, -0.06],
+            [0, -0.06]
+        ]) {
+            if (got === 2) break;
+            const at = onBeam(beams[b], farNailZ + dz);
+            if (nail({ ...at, x: at.x + dx }, `beam ${b} far end`, deck[deck.length - 2])) got++;
         }
+        farNails.push(got);
+    }
     walkTo(BRIDGE_X, deck[deck.length - 2] + 1.2);
     layPlank(deck[deck.length - 1]);
     // ---- the finished bridge, built by input, stands a minute with nobody on it (off it, by the
@@ -509,7 +524,24 @@ function buildAndCross(pullPlankNails = false) {
         const b = s.entities.find((e) => e.id === l.id)!.pose.p;
         return Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
     });
-    return { s, log, deck, placed, target, minY, beams, phases, landed, shift, atStart, u0, floods, idle, seat };
+    return {
+        s,
+        log,
+        deck,
+        placed,
+        target,
+        minY,
+        beams,
+        phases,
+        landed,
+        shift,
+        atStart,
+        u0,
+        floods,
+        idle,
+        seat,
+        farNails
+    };
 }
 
 /** A nailed deck barely moves under the ute; the same planks only laid are shoved about (m). */
@@ -564,9 +596,15 @@ describe('the yard crossing, built by a player and driven over (Epic 5 gate)', (
             expect(ends.length).toBe(2);
             expect(ends.filter((c) => c.anchorB.z > BRIDGE.nearFace - 0.1).length).toBe(1);
             expect(ends.filter((c) => c.anchorB.z < BRIDGE.farFace + 0.1).length).toBe(1);
+            // every nail the builder set out to drive went in: four across the near end, two
+            // across the far end
+            expect(ends.find((c) => c.anchorB.z > BRIDGE.nearFace - 0.1)!.nails.length).toBe(4);
+            expect(ends.find((c) => c.anchorB.z < BRIDGE.farFace + 0.1)!.nails.length).toBe(2);
         }
+        expect(r.farNails).toEqual([2, 2]);
         // every deck plank nailed to both beams
         expect(deckJoints).toBe(2 * r.deck.length);
+        expect(g.nailCount).toBe(2 * 4 + 2 * 2 + 2 * r.deck.length);
         for (const l of r.landed)
             for (const beam of r.beams) expect(g.find(l.id, beam.id), `plank ${l.id} to ${beam.name}`).toBeDefined();
         // driven from where it was parked, turned round in the yard, onto the bridge's line
