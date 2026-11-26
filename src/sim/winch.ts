@@ -57,6 +57,9 @@ export const WINCH = {
     clickTicks: 20
 } as const;
 
+/** The winch's ropes' owner tag (RopeSystem.tie): its events are the winch's, no one else's. */
+export const WINCH_ROPE = 'winch';
+
 /** The most the winch pulls the rope with (N). */
 export const WINCH_PULL = WINCH.gearing * GRAB.maxForce;
 
@@ -156,7 +159,7 @@ export class Winch {
             const local = inverseRotate(q, hit.point.x - t.x, hit.point.y - t.y, hit.point.z - t.z);
             const d = this.drum;
             const span = Math.hypot(hit.point.x - d.x, hit.point.y - d.y, hit.point.z - d.z);
-            const id = this.ropes.tie(hit.pb.id, local, GROUND, d, span + WINCH.slack);
+            const id = this.ropes.tie(hit.pb.id, local, GROUND, d, span + WINCH.slack, WINCH_ROPE);
             if (id < 0) return true;
             this.ropeId = id;
             this.carrier = -1;
@@ -180,14 +183,18 @@ export class Winch {
         return true;
     }
 
-    /** A drop (Q) by player `i` at the winch: lifts the pawl, the hook comes back to the drum. */
-    drop(i: number, eye: Vec3, yaw: number, pitch: number, out: WinchEvent[]): boolean {
+    /**
+     * A drop (Q) by player `i`: carrying the hook, it goes back to the drum; at the winch with empty
+     * hands (`held` < 0), it lifts the pawl and the rope runs back. Holding something, Q drops that,
+     * wherever you look (returns false: the rest of the drop goes on).
+     */
+    drop(i: number, eye: Vec3, yaw: number, pitch: number, held: number, out: WinchEvent[]): boolean {
         if (this.carrier === i) {
             this.carrier = -1;
             out.push({ kind: 'drop', player: i });
             return true;
         }
-        if (!this.looksAt(eye, yaw, pitch) || this.ropeId < 0) return false;
+        if (held >= 0 || !this.looksAt(eye, yaw, pitch) || this.ropeId < 0) return false;
         this.ropes.cut(this.ropeId);
         this.ropeId = -1;
         this.cranker = -1;

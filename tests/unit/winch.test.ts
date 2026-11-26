@@ -6,6 +6,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import { LOG_RADIUS } from '../../src/assets/props.ts';
 import { YARD_WINCH, timberYardLevel, yardSurfaceY } from '../../src/levels/timber-yard.ts';
+import { ACTION_DROP } from '../../src/sim/commands.ts';
 import { GROUND } from '../../src/sim/joints/graph.ts';
 import { ROPE } from '../../src/sim/joints/rope.ts';
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
@@ -193,7 +194,8 @@ describe('the hand winch (#52)', () => {
         expect(s.winch!.hooked).toBe(-1);
         expect(s.winch!.cranking).toBe(-1);
         expect(s.ropes.size).toBe(0);
-        expect(towards).toBeLessThan(0.3);
+        // (no recoil: a rope's stored stretch let go at once would send it back at metres a second)
+        expect(towards).toBeLessThan(0.05);
     }, 120_000);
 
     it('the rope goes to guests as a few numbers, only what it is hooked to; malformed is nothing', () => {
@@ -243,4 +245,50 @@ describe('the hand winch (#52)', () => {
         expect(s.winch!.carrying).toBe(0);
         expect(s.ropes.size).toBe(0);
     }, 60_000);
+
+    it('a hooked log taken out of the world (the sawmill takes it) frees the rope: the winch lets go', () => {
+        const { s, g, log, body } = yardWithLog(6);
+        hookAndCrank(s, g, body, log.id);
+        g.step({}, 120);
+        expect(s.winch!.tension).toBeGreaterThan(0);
+        const n0 = s.events.length;
+        // what the sawmill does to a log it takes: out of the world
+        s.physics.setEnabled(log.id, false);
+        g.step({}, 5);
+        expect(s.ropes.size).toBe(0);
+        expect(s.winch!.hooked).toBe(-1);
+        expect(s.winch!.cranking).toBe(-1);
+        expect(s.winch!.tension).toBe(0);
+        const said = s.events.slice(n0).map((e) => e.text);
+        expect(said).toContain('The winch rope comes free: what it held is gone.');
+        expect(said.some((t) => t.startsWith('Snap!'))).toBe(false);
+        // and its hook can be taken again
+        g.lookAt(DRUM.x, DRUM.y, DRUM.z);
+        g.step({ grab: true });
+        expect(s.winch!.carrying).toBe(0);
+    }, 120_000);
+
+    it('Q at the drum lets the rope run back only with empty hands; holding something, Q drops that', () => {
+        const { s, g, log, body } = yardWithLog(6);
+        hookAndCrank(s, g, body, log.id);
+        g.step({ grab: true }); // stop cranking
+        expect(s.winch!.cranking).toBe(-1);
+        // pick up the plank lying by the winch (placed), still facing the drum
+        const plank = s.plank;
+        s.physics.place(plank.id, pose(DRUM.x + 0.5, YARD_WINCH.y + 0.06, DRUM.z + 0.5, quatFromYawPitchRoll(0, 0, 0)));
+        g.step({}, 30);
+        g.lookAt(DRUM.x + 0.5, YARD_WINCH.y + 0.06, DRUM.z + 0.5);
+        g.step({ grab: true });
+        expect(s.physics.heldIdOf(0)).toBe(plank.id);
+        g.lookAt(DRUM.x, DRUM.y, DRUM.z);
+        g.step({ action: ACTION_DROP });
+        // the plank is dropped, the rope still hooked
+        expect(s.physics.heldIdOf(0)).toBe(-1);
+        expect(s.winch!.hooked).toBe(log.id);
+        // empty-handed, at the drum: now it runs back
+        g.lookAt(DRUM.x, DRUM.y, DRUM.z);
+        g.step({ action: ACTION_DROP });
+        expect(s.winch!.hooked).toBe(-1);
+        expect(s.ropes.size).toBe(0);
+    }, 120_000);
 });

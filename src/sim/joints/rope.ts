@@ -51,11 +51,16 @@ export interface Rope {
     tension: number;
     /** Its stretch last step (m; 0 slack), for the rate it is stretching at. */
     stretch: number;
+    /** Who tied it (the winch, a hazard...), so each can tell its own ropes' events from others'. */
+    owner: string;
 }
 
 export interface RopeEvent {
-    kind: 'snap';
+    /** 'snap': it parted past its strength; 'loose': a body it was tied to left the world. */
+    kind: 'snap' | 'loose';
     id: number;
+    /** Its owner (see Rope.owner). */
+    owner: string;
     /** Where it parted (the middle of the line, world). */
     x: number;
     y: number;
@@ -77,12 +82,13 @@ export class RopeSystem {
     /**
      * Ties a rope from body `a` (at `la`, its local frame) to body `b` (at `lb`, local), or to a
      * fixed point `lb` (world) when b is GROUND. Its length defaults to the distance now (just
-     * taut). Returns its id, or -1 if a body is missing.
+     * taut). `owner` tags it and its events. Returns its id, or -1 if a body is missing or out of
+     * the world.
      */
-    tie(a: number, la: Vec3, b: number, lb: Vec3, length?: number): number {
-        if (!this.pw.bodies.get(a) || (b !== GROUND && !this.pw.bodies.get(b))) return -1;
+    tie(a: number, la: Vec3, b: number, lb: Vec3, length?: number, owner = ''): number {
+        if (!this.inWorld(a) || (b !== GROUND && !this.inWorld(b))) return -1;
         const id = this.nextId++;
-        const r: Rope = { id, a, la: { ...la }, b, lb: { ...lb }, length: 0, tension: 0, stretch: 0 };
+        const r: Rope = { id, a, la: { ...la }, b, lb: { ...lb }, length: 0, tension: 0, stretch: 0, owner };
         const [p, q] = this.ends(r);
         r.length = Math.max(ROPE.minLength, length ?? Math.hypot(q.x - p.x, q.y - p.y, q.z - p.z));
         this.list.set(id, r);
@@ -125,9 +131,17 @@ export class RopeSystem {
         return this.list.delete(id);
     }
 
-    /** Ropes that snapped since the last call. */
-    events(): RopeEvent[] {
-        return this.snapped.splice(0);
+    /**
+     * Ropes that snapped or came loose since the last call, of one owner (the others' stay queued
+     * for theirs), or of every owner.
+     */
+    events(owner?: string): RopeEvent[] {
+        if (owner === undefined) return this.snapped.splice(0);
+        const mine = this.snapped.filter((e) => e.owner === owner);
+        const rest = this.snapped.filter((e) => e.owner !== owner);
+        this.snapped.length = 0;
+        this.snapped.push(...rest);
+        return mine;
     }
 
     /** Its two ends in the world now: [a's tie point, b's]. */
@@ -135,10 +149,23 @@ export class RopeSystem {
         return [this.world(r.a, r.la), r.b === GROUND ? { ...r.lb } : this.world(r.b, r.lb)];
     }
 
-    /** Drops ropes whose bodies are gone (a piece removed or respawned elsewhere is still tied). */
+    /** Whether a body is in the world (there, and not taken out of it: by the sawmill, a respawn...). */
+    private inWorld(id: number): boolean {
+        const b = this.pw.bodies.get(id);
+        return !!b && b.enabled;
+    }
+
+    /**
+     * Drops ropes tied to a body that has left the world (gone, or disabled: the sawmill taking a
+     * hooked log, a piece put away), with a 'loose' event where it was tied.
+     */
     private prune(): void {
-        for (const r of this.list.values())
-            if (!this.pw.bodies.get(r.a) || (r.b !== GROUND && !this.pw.bodies.get(r.b))) this.list.delete(r.id);
+        for (const r of [...this.list.values()]) {
+            if (this.inWorld(r.a) && (r.b === GROUND || this.inWorld(r.b))) continue;
+            this.list.delete(r.id);
+            const p = r.b === GROUND ? r.lb : { x: 0, y: 0, z: 0 };
+            this.snapped.push({ kind: 'loose', id: r.id, owner: r.owner, x: p.x, y: p.y, z: p.z });
+        }
     }
 
     /** Before each physics step: every taut rope pulls its ends together; a rope past its strength snaps. */
@@ -184,6 +211,7 @@ export class RopeSystem {
                 this.snapped.push({
                     kind: 'snap',
                     id: r.id,
+                    owner: r.owner,
                     x: (p.x + q.x) / 2,
                     y: (p.y + q.y) / 2,
                     z: (p.z + q.z) / 2

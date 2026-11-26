@@ -94,7 +94,7 @@ import type { AnimEvents, AnimOutput } from './player-anim.ts';
 import { Sawmill } from './sawmill.ts';
 import { ANIM_MAX, SnapshotRing, writeEntity } from './snapshots.ts';
 import { WATER } from './water.ts';
-import { Winch } from './winch.ts';
+import { WINCH_ROPE, Winch } from './winch.ts';
 import type { WinchEvent, WinchEventKind } from './winch.ts';
 
 export type { PlayerCommand, SimEntity };
@@ -664,9 +664,13 @@ export class LabSim {
             const text = TEXT[e.kind];
             if (text) this.events.push({ tick: this.tick, kind: 'winch', text });
         }
-        const snapped = this.ropes.events().length;
-        for (let k = 0; k < snapped; k++)
-            this.events.push({ tick: this.tick, kind: 'break', text: 'Snap! The rope parted' });
+        // the winch's own ropes only (other owners' events are theirs: Epic 8's hazard ropes, #75)
+        for (const e of this.ropes.events(WINCH_ROPE))
+            this.events.push(
+                e.kind === 'snap'
+                    ? { tick: this.tick, kind: 'break', text: 'Snap! The winch rope parted' }
+                    : { tick: this.tick, kind: 'winch', text: 'The winch rope comes free: what it held is gone.' }
+            );
     }
 
     private lastCreakTick = -1e9;
@@ -772,7 +776,10 @@ export class LabSim {
         // pour (R): tip the bucket you hold forward, or let it hang again
         if (cmd.action === ACTION_POUR) this.pouring[i] = pw.setPour(!this.pouring[i], i);
         const eye = { x: p.x, y: p.y + EYE_HEIGHT, z: p.z };
-        if (cmd.action === ACTION_DROP && !this.winch?.drop(i, eye, cmd.yaw, cmd.pitch, this.winchEvents))
+        if (
+            cmd.action === ACTION_DROP &&
+            !this.winch?.drop(i, eye, cmd.yaw, cmd.pitch, pw.heldIdOf(i), this.winchEvents)
+        )
             pw.release(i);
         if (cmd.action === ACTION_NAIL) this.joints.nail(eye, cmd.yaw, cmd.pitch, i, this.tick);
         if (cmd.throw) {

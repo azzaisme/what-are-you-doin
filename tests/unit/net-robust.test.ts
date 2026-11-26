@@ -438,20 +438,37 @@ describe('host state size', () => {
         sim.fpActive = true;
         const hs = await HostSession.start(hub.transport('host'), sim, 'valley', 'size');
         for (let i = 1; i < MAX_PLAYERS; i++) sim.setSlotActive(i, true);
-        let bytes = 0;
-        for (let k = 0; k < 30; k++) {
-            sim.step(cmd(k));
-            for (const e of sim.entities) e.visible = true; // worst case: everything drawn
-            sim.events.push({ tick: sim.tick, kind: 'info', text: 'x'.repeat(200) });
-            hs.afterStep((s) => ({ ...sim.interactionIds(s), held: 999, target: 999, shared: true, seat: 1 }));
-            const st = hub
-                .channel('room-ue-size', 'probe')
-                .peers()
-                .find((p) => p.id === 'host')!.state;
-            bytes = Math.max(bytes, JSON.stringify(st).length);
-        }
-        console.info(`worst-case host state, Valley, 8 players, all ${sim.entities.length} entities: ${bytes} bytes`);
+        // the winch's rope hooked, at its widest on the wire: into the last entity, at the far
+        // corner of a 2 m log (Epic 5, #52; its view stubbed: this measures the wire, not play)
+        const last = sim.entities[sim.entities.length - 1];
+        const wound = sim.winch!.view.bind(sim.winch!);
+        let hooked = false;
+        sim.winch!.view = () =>
+            hooked ? { from: sim.winch!.drum, body: last.id, local: { x: -1, y: -0.2, z: -0.2 }, player: -1 } : wound();
+        const utf8 = (v: unknown) => new TextEncoder().encode(JSON.stringify(v)).length;
+        const measure = () => {
+            let bytes = 0;
+            for (let k = 0; k < 30; k++) {
+                sim.step(cmd(k));
+                for (const e of sim.entities) e.visible = true; // worst case: everything drawn
+                sim.events.push({ tick: sim.tick, kind: 'info', text: 'x'.repeat(200) });
+                hs.afterStep((s) => ({ ...sim.interactionIds(s), held: 999, target: 999, shared: true, seat: 1 }));
+                const st = hub
+                    .channel('room-ue-size', 'probe')
+                    .peers()
+                    .find((p) => p.id === 'host')!.state;
+                bytes = Math.max(bytes, utf8(st));
+            }
+            return bytes;
+        };
+        const bytes = measure();
+        hooked = true;
+        const withRope = measure();
+        console.info(
+            `worst-case host state, Valley, 8 players, all ${sim.entities.length} entities: ${bytes} UTF-8 bytes; with the winch rope hooked at its widest: ${withRope} (+${withRope - bytes})`
+        );
         expect(bytes).toBeLessThan(4096);
+        expect(withRope).toBeLessThan(4096);
     });
 });
 

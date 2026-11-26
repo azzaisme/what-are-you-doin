@@ -12,12 +12,15 @@ can do it with either solo aid: the hand winch, or the log dolly.
     - Grab at its drum with empty hands to take the rope's hook.
     - Walk it out (up to 25 m) and grab a piece: the hook goes in where you look.
     - Back at the drum, grab to crank. Grab again, or walk away, to stop. The ratchet holds what has
-      been wound in. `Q` at the drum lets the rope run back.
+      been wound in. `Q` at the drum, hands empty, lets the rope run back (holding something, `Q`
+      drops that). If the piece it is hooked into leaves the world (the sawmill takes it), the
+      rope comes free and the winch says so.
     - The hook never goes into the bucket: it crosses only over what is built (#132).
 - **The log dolly** (in the Yard, south of the log pile):
     - Take a log's end, lift it (the far end stays on the ground) and swing it over the dolly's
       cradle. Lower it in and let go.
-    - Take the dolly by its stop, behind the log, and walk: it rolls, the log's far end drags.
+    - Take the dolly by its stop, behind the log, and walk: it rolls, the stop pushes the log, its
+      far end drags. Pulled the other way, only the cradle's grip holds the log.
     - Looking up or down neither lifts it nor draws it in.
 - **`F4`** (or the debug panel's _Structure loads_), on the host: a cross on every joint coloured
   by its strain band, its force as a line, and the contacts the stress meter reads (folded into a
@@ -32,10 +35,14 @@ can do it with either solo aid: the hand winch, or the log dolly.
 - **Ropes (#52, and for Epic 8's #75):** `src/sim/joints/rope.ts`.
     - A taut-only spring between two body points, or a body and the ground: T = k·stretch + c·rate.
     - k = min(EA / L, m·(ring / dt)²): a 12 mm natural-fibre rope, EA 110 kN.
-    - It snaps past 10 kN, with the event `Snap! The rope parted`.
-    - API: `tie(a, la, b, lb, length?)` returns an id. Also `get`, `ropes()`, `size`, `setLength`,
-      `tension`, `span`, `cut`, `events()` and `ends(rope)`. `GROUND` is the other end for a fixed
-      point.
+    - It snaps past 10 kN. A rope tied to a body that leaves the world (gone, or disabled: the
+      sawmill taking a hooked log) is dropped, and a disabled body can't be tied.
+    - API: `tie(a, la, b, lb, length?, owner?)` returns an id. Also `get`, `ropes()`, `size`,
+      `setLength`, `tension`, `span`, `cut`, `events(owner?)` and `ends(rope)`. `GROUND` is the other
+      end for a fixed point.
+    - Events (`snap`, or `loose` when a body left the world) carry their rope's owner.
+      `events(owner)` returns only that owner's and leaves the others queued, so the winch reports
+      only its own ropes and Epic 8's hazard ropes (#75) get theirs.
     - It runs as the first step hook, and wakes sleeping bodies before it pulls.
 - **The winch:** `src/sim/winch.ts`, with static scenery in `src/levels/winch.ts`.
     - It winds at 0.25 m/s. Its gearing gives the crank 6 × a beaver's 650 N grip: 3.9 kN, under the
@@ -89,24 +96,48 @@ All by input, 10 cm cells, from the tests' own lines.
     - **With the winch:** the rope's mean tension was 1041 N for the bare log and 555 N on the dolly,
       47 % less.
 - **One beaver replaces a lost stringer** (`solo-beam.test.ts`). The start is placed: beam-0
-  across, beam-1 gone, a log on the ground by the guide with the dolly. Then, all by input:
+  laid across the creek (settled onto both seats), beam-1 gone, a log on the ground by the guide
+  with the dolly, hazards off (as in the sawmill's gate: a bridge brings the flood). Then, all by
+  input:
     1. the saw is set to beams at its lever;
     2. the log is loaded onto the dolly and pushed into the guide (1.5 s);
-    3. the sawn 3.2 m beam is shouldered off the rack and seated across the creek on its line
-       (x −0.88), beside beam-0, with no falls.
+    3. the sawn 3.2 m beam is shouldered off the rack, carried out onto the near abutment, squared
+       up (it turns with you), lowered to the seats and let go, with no falls.
+    - **Where it lies:** its ends at x −0.85 and −0.88 (its line −0.88), 0.26 m from beam-0. It
+      bears 0.35 m onto the near seat and 0.25 m onto the far. It rests on both: its middle at
+      0.629 m against the 0.625 m of lying on them, its ends 10.9 cm apart in height (the far seat
+      stands 10.0 cm higher).
+    - **Asserted:** both ends on its line, each bearing at least 0.2 m past its seat's face, and
+      both beams resting on both seats (middle within 3 cm, tilt within 3 cm of the seats').
 - **The Valley's stringers:** the Valley's sawmill, beams, dolly and winch are the Yard's own
   (`yardPieces`, `yardProps`, `YARD_FORESTRY`, moved to where the Yard lies). A sawn beam is the
   same body. So the Yard test covers them.
 - **Min friction stays opt-in** (`friction-optin.test.ts`):
     - In every level, every collider averages its friction except the dolly's 4 casters.
-    - The friction census matches `epics-5-10`'s, except for the winch's 4 colliders and the dolly's 8.
+    - Each level's colliders are checked against committed values: a histogram of (friction,
+      rule), and an FNV hash of the whole ordered list, so any change fails.
+    - Those values are `epics-5-10`'s at 085dd00 (measured there), except for the winch's 4
+      colliders and the dolly's 8.
     - No body but the dolly is towed. The bucket is not.
+- **The grab law's heavy case** (`grab-heavy.test.ts`), against a frozen copy of the old law:
+    - identical for 20,000 random grips of bodies under 66 kg;
+    - over it, the same full lift with the grip below its hold point;
+    - in the case that tipped logs over (the grip a little above its hold point, saturated by
+      the pull along), the old law gave 650 N up and nothing along; now it lifts only what the
+      spring asks, and pulls along with the rest of the cap;
+    - never more than the cap, over 5,000 random heavy grips.
 
 ### Costs
 
-- **Snapshot:** the dolly is one entity, 15 bytes; the winch is scenery, 0. The Valley's worst-case
-  host state, with 8 players, all 139 entities visible and long events, went from 4026 to 4046
-  bytes (of 4096). A hooked rope adds up to about 18 more.
+- **Snapshot:** the dolly is one entity, 15 bytes; the winch is scenery, 0. A rope on the drum
+  costs nothing on the wire.
+- **The Valley's worst-case host state** (8 players, every entity visible, long events), in UTF-8
+  bytes, of the room's 4096:
+    - before the road closure (#131) merged in: 4026 → 4046 with the dolly;
+    - with it (141 entities, this protocol, v2): 4090;
+    - with the winch rope hooked at its widest (`[2,140,-100,-20,-20]`, +26): **4116, over the
+      limit on v2**. On #141's v3 the audit measured 4045 with the rope.
+    - Open: which lands first decides where this is fixed (see the PR).
 - **Bundle:** chunk B adds 13.4 KB to the main chunk (6.242 → 6.255 MB minified) and 2.3 KB to the
   voxel service. The overlay's module is 827 B minified; with its drawing and recording, about
   2 KB (estimated).

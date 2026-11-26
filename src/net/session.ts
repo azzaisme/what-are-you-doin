@@ -447,7 +447,8 @@ export class HostSession {
             const key = rope.join(',');
             if (key !== this.sentRope) {
                 this.sentRope = key;
-                extra.wr = rope;
+                // (wound on the drum: the field goes, rather than costing every update an empty list)
+                extra.wr = rope.length ? rope : null;
             }
         }
         this.ch.setState({
@@ -657,7 +658,8 @@ export class GuestSession {
             }
         }
         applyStrain(this.nails, st.jl);
-        if (st.wr !== undefined) this.winchRope = decodeWinchRope(st.wr, this.sim.entities.length, MAX_PLAYERS);
+        // (presence holds the host's whole state: no rope field is no rope out)
+        this.winchRope = st.wr === undefined ? null : decodeWinchRope(st.wr, this.sim.entities.length, MAX_PLAYERS);
         if (Array.isArray(st.ev)) {
             this.events = (st.ev as unknown[])
                 .map((e) => e as Partial<NetEvent>)

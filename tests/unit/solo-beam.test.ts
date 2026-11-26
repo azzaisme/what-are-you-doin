@@ -26,7 +26,7 @@ import { LabSim } from '../../src/sim/lab-sim.ts';
 import { GRAB } from '../../src/sim/physics/grab.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
 import { SAW } from '../../src/sim/sawmill.ts';
-import { pose, quatFromYawPitchRoll, quatRotate } from '../../src/voxels/math.ts';
+import { pose, quatFromYawPitchRoll, quatMul, quatRotate } from '../../src/voxels/math.ts';
 
 import { Player } from './play.ts';
 
@@ -40,12 +40,19 @@ const FACE_WEST = Math.PI / 2;
 
 describe('one beaver replaces a lost stringer (#52)', () => {
     it('sets the saw to beams, dollies a whole log into the guide, and seats the sawn beam on the bridge, all by input', () => {
-        const s = new LabSim({ level: timberYardLevel });
+        // (the hazards off, as in the sawmill's gate: a bridge laid across brings the flood, which
+        // this test is not about)
+        const s = new LabSim({ level: timberYardLevel, hazards: false });
         s.fpActive = true;
         const beam0 = s.entities.find((e) => e.name === 'beam-0')!;
         const beam1 = s.entities.find((e) => e.name === 'beam-1')!;
         // beam-0 already across the creek (west stringer); beam-1 lost
-        s.physics.place(beam0.id, pose(BRIDGE_X - 0.12, YARD_Y + 0.12, BRIDGE.zc, quatFromYawPitchRoll(0, 0, 0)));
+        // (its long axis, local x, turned to run across the creek along z; laid flat, as the bridge
+        // tests lay their beams)
+        const flatAlongZ = quatMul(quatFromYawPitchRoll(Math.PI / 2, 0, 0), quatFromYawPitchRoll(0, Math.PI / 2, 0));
+        // (the far seat stands 10 cm higher than the near one: set it down a little above both and
+        // let it settle onto them)
+        s.physics.place(beam0.id, pose(BRIDGE_X - 0.12, YARD_Y + 0.24, BRIDGE.zc, flatAlongZ));
         s.physics.setEnabled(beam1.id, false);
         beam1.visible = false;
         // the log on the ground at the guide's mouth: its far end at P, just inside the rails, on the
@@ -171,25 +178,110 @@ describe('one beaver replaces a lost stringer (#52)', () => {
         turn(0, 120); // facing south: the beam swings round and points out ahead
         const x = BRIDGE_X + 0.12;
         const bx = () => beam.pose.p.x;
-        for (let k = 0; k < 900 && Math.abs(bx() - x) > 0.04; k++) g.step({ moveX: bx() > x ? -0.3 : 0.3 });
-        for (let k = 0; k < 1500 && s.player.z > BRIDGE.nearEdge + 0.4; k++)
-            g.step({ moveZ: 0.5, moveX: Math.max(-0.2, Math.min(0.2, (x - bx()) * 2)) });
+        // carried in a little east of its line, clear of beam-0's end, then stepped across onto it
+        const xIn = x + 0.15;
+        for (let k = 0; k < 900 && Math.abs(bx() - xIn) > 0.04; k++) g.step({ moveX: bx() > xIn ? -0.3 : 0.3 });
+        // out onto the near abutment (it reaches 0.86 m past the bank's edge, to the seat's face)
+        // until the beam's middle is past the gap's by as much as lowering it will draw it back in
+        const STAND = BRIDGE.nearFace + 0.35;
+        const LEAD = -0.4;
+        const bz = () => beam.pose.p.z;
+        for (let k = 0; k < 1500 && bz() > BRIDGE.zc + LEAD && s.player.z > STAND; k++)
+            g.step({
+                moveZ: bz() > BRIDGE.zc + 0.5 ? 0.5 : 0.2,
+                moveX: Math.max(-0.2, Math.min(0.2, (xIn - bx()) * 2))
+            });
         g.step({}, 30);
         for (let k = 0; k < 60 && Math.abs(bx() - x) > 0.03; k++)
             g.step({ moveX: Math.max(-0.2, Math.min(0.2, (x - bx()) * 2)) });
-        tilt(-0.7);
+        // square it up (it turns with you): its two ends on its line, not skewed towards beam-0
+        const skew = () => {
+            quatRotate(beam.pose.q, BEAM_HALF.x, 0, 0, v);
+            // (+x end minus the -x end, per metre of z between them)
+            return v.z !== 0 ? v.x / v.z : 0;
+        };
+        for (let k = 0; k < 60 && Math.abs(skew()) > 0.01; k++) {
+            g.yaw -= 0.05 * skew();
+            g.step({ moveX: Math.max(-0.1, Math.min(0.1, (x - bx()) * 2)) }, 3);
+        }
+        // lower it (looking down) until it is just over the seats, keeping it on its line
+        for (let k = 0; k < 60 && beam.pose.p.y > YARD_Y + 0.12 + 0.04 && g.pitch > -1.5; k++) {
+            g.pitch -= 0.03;
+            // (looking down draws it in: step after it, as far as the bank's edge)
+            const fwd = s.player.z > STAND ? Math.max(0, Math.min(0.3, (bz() - BRIDGE.zc) * 2)) : 0;
+            g.yaw -= 0.05 * skew();
+            g.step({ moveZ: fwd, moveX: Math.max(-0.1, Math.min(0.1, (x - bx()) * 2)) }, 5);
+        }
         g.step({}, 30);
         g.step({ grab: true });
-        g.step({}, 120);
+        g.step({}, 10);
         expect(s.physics.heldIdOf(0)).toBe(-1);
+        // and back off the abutment (it was standing where the beam's end comes down)
+        g.pitch = 0;
+        g.step({ moveZ: -0.6 }, 60);
+        g.step({}, 120);
         const laid = beam.pose.p;
+        // its two ends (local x, ±BEAM_HALF.x), and how far each bears past its seat's face
+        const endOf = (sx: number) => {
+            quatRotate(beam.pose.q, sx * BEAM_HALF.x, 0, 0, v);
+            return { x: laid.x + v.x, y: laid.y + v.y, z: laid.z + v.z };
+        };
+        const [e1, e2] = [endOf(1), endOf(-1)];
+        const [near, far] = e1.z > e2.z ? [e1, e2] : [e2, e1];
+        const nearBearing = near.z - BRIDGE.nearFace;
+        const farBearing = BRIDGE.farFace - far.z;
+        const dy = Math.abs(near.y - far.y);
+        // beam-0's own ends, for comparison (the two seats need not stand at one height)
+        const end0 = (sx: number) => {
+            quatRotate(beam0.pose.q, sx * BEAM_HALF.x, 0, 0, v);
+            return beam0.pose.p.y + v.y;
+        };
+        const dy0 = Math.abs(end0(1) - end0(-1));
+        // the seats' tops, under the sawn beam's line
+        const seatNear = s.physics.groundY(x, BRIDGE.nearFace + 0.2) ?? NaN;
+        const seatFar = s.physics.groundY(x, BRIDGE.farFace - 0.2) ?? NaN;
+        // a beam lying on both seats: its middle over their mean height (plus its half thickness),
+        // its ends as far apart in height as the seats' tops
+        const restY = (seatNear + seatFar) / 2 + BEAM_HALF.z;
+        const restDy = Math.abs(seatFar - seatNear);
+        const b0 = beam0.pose.p;
         console.log(
-            `solo: the sawn beam seated at x ${laid.x.toFixed(2)} (its line ${x.toFixed(2)}), z ${laid.z.toFixed(2)} (the gap's middle ${BRIDGE.zc.toFixed(2)}), y ${laid.y.toFixed(2)} (the seats ${(YARD_Y + 0.12).toFixed(2)}); beside beam-0 at x ${beam0.pose.p.x.toFixed(2)}; falls ${s.progress.falls}`
+            'trace ends near',
+            near.x.toFixed(2),
+            near.y.toFixed(3),
+            near.z.toFixed(2),
+            'ground',
+            s.physics.groundY(near.x, near.z)?.toFixed(3),
+            '| far',
+            far.x.toFixed(2),
+            far.y.toFixed(3),
+            far.z.toFixed(2),
+            'ground',
+            s.physics.groundY(far.x, far.z)?.toFixed(3),
+            '| player',
+            s.player.x.toFixed(2),
+            s.player.y.toFixed(2),
+            s.player.z.toFixed(2),
+            'held',
+            s.physics.heldIdOf(0)
         );
-        // across the gap, on the seats, beside the other stringer, as the gate lays the yard's beams
-        expect(Math.abs(laid.z - BRIDGE.zc)).toBeLessThan(0.3);
-        expect(Math.abs(laid.y - (YARD_Y + 0.12))).toBeLessThan(0.25);
-        expect(Math.abs(laid.x - x)).toBeLessThan(0.15);
+        console.log(
+            `solo: the sawn beam seated at x ${laid.x.toFixed(2)} (its line ${x.toFixed(2)}), z ${laid.z.toFixed(2)} (the gap's middle ${BRIDGE.zc.toFixed(2)}), y ${laid.y.toFixed(3)} (resting on both seats: ${restY.toFixed(3)}); ends at x ${near.x.toFixed(2)} and ${far.x.toFixed(2)}; bearing ${nearBearing.toFixed(2)} m on the near seat, ${farBearing.toFixed(2)} m on the far; ends ${(dy * 100).toFixed(1)} cm apart in height (beam-0's ${(dy0 * 100).toFixed(1)} cm, the seats' ${(restDy * 100).toFixed(1)} cm); beam-0 at x ${b0.x.toFixed(2)} y ${b0.y.toFixed(3)} z ${b0.z.toFixed(2)}; falls ${s.progress.falls}`
+        );
+        // beam-0 is across, on its seats
+        expect(Math.abs(b0.z - BRIDGE.zc)).toBeLessThan(0.1);
+        expect(Math.abs(b0.y - restY)).toBeLessThan(0.03);
+        expect(Math.abs(dy0 - restDy)).toBeLessThan(0.03);
+        // the sawn beam across beside it: on its line, both ends bearing well onto their seats, lying
+        // on them (not on its end, not on beam-0)
+        expect(Math.abs(laid.x - x)).toBeLessThan(0.08);
+        expect(Math.abs(near.x - x)).toBeLessThan(0.08);
+        expect(Math.abs(far.x - x)).toBeLessThan(0.08);
+        expect(laid.x - b0.x).toBeGreaterThan(0.2);
+        expect(nearBearing).toBeGreaterThan(0.2);
+        expect(farBearing).toBeGreaterThan(0.2);
+        expect(Math.abs(laid.y - restY)).toBeLessThan(0.03);
+        expect(Math.abs(dy - restDy)).toBeLessThan(0.03);
         expect(s.progress.falls).toBe(0);
     }, 240_000);
 });

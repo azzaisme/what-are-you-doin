@@ -69,41 +69,41 @@ Query parameters (handy for comparisons and screenshots):
 
 ## Controls
 
-| Input                                      | Action                                                                                      |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| Drag / right-drag / wheel                  | orbit / pan / zoom (orbit view)                                                             |
-| `V`                                        | toggle orbit / first-person view                                                            |
-| **Settings** (bottom left), `Esc`, Start   | settings menu (pauses solo play): controls, video, voxel size, text size, levels            |
-| Click, then mouse                          | look (first person; `Esc` releases the pointer and opens Settings)                          |
-| `W A S D`, `Shift`, `Space`                | walk, run, jump (first person; steps up 0.3 m, slides on steep slopes)                      |
-| Left click or `E`                          | grab what the crosshair points at / release it (the prompt says what)                       |
-| Left click or `E` at a banded pine         | chew it (empty hands) or chop it (holding the axe); it falls away from you                  |
-| Left click or `E`, axe in hand, at a log   | buck it into two short logs one beaver can carry; lay logs in the sawmill's guide to saw    |
-| Left click or `E` at the sawmill's lever   | switch the saw between planks (three per log) and a beam (one per log)                      |
-| Left click or `E` at the winch's drum      | take its rope's hook; holding it, at a piece: hook it; at the drum again: crank (or stop)   |
-| `Q` at the winch                           | let its rope run back to the drum (holding the hook: drop it)                               |
-| Left click or `E` at the log dolly         | take it to push or pull along the ground (put a log's end in its cradle: lift and swing it) |
-| Right click                                | throw what you hold (a plank flies flat, along your view)                                   |
-| Mouse wheel                                | hold closer / further                                                                       |
-| `Q`                                        | drop                                                                                        |
-| `F`                                        | nail what you look at to what is behind it (timber to timber, or down to stone or ground)   |
-| `R`                                        | pour the bucket you hold (again: stop)                                                      |
-| `G`                                        | put a plank in your hands (scripted mode: the Epic 1 comfort-test plank)                    |
-| `T`                                        | launch the ragdoll dummy                                                                    |
-| **Play online** (bottom left)              | host a game, or join one, up to 4 players (claude.ai: same artifact link; itch.io: anyone)  |
-| **Touch** (phones)                         | left thumb move (edge: run) · right thumb look · Jump / Grab / Throw / Drop / Pour buttons  |
-| **Gamepad**                                | press **A** to join (first pad: player 1, second pad: player 2 → split screen)              |
-| left / right stick                         | move / look                                                                                 |
-| A · LT or L3 · RT · RB · B · X · Y · D-pad | jump · sprint · grab / release · throw · drop · ragdoll · pour · reach (right: plank)       |
-| LB                                         | nail                                                                                        |
-| **Levels** (bottom left)                   | tutorial, Timber Yard, River Lab, the level designer and your own level                     |
-| `P` / `N`                                  | pause / step exactly one voxel frame                                                        |
-| `Backspace`                                | reset the scene                                                                             |
-| `H`                                        | hide all UI (for screenshots)                                                               |
-| `C`                                        | first person: watch your beaver from over its shoulder                                      |
-| `L`                                        | pixel look on / off (prototype)                                                             |
-| `F3` or the corner chip                    | debug panel                                                                                 |
-| `F4`                                       | debug: what the joints carry and the contacts the stress meter reads (host only)            |
+| Input                                      | Action                                                                                                                                             |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Drag / right-drag / wheel                  | orbit / pan / zoom (orbit view)                                                                                                                    |
+| `V`                                        | toggle orbit / first-person view                                                                                                                   |
+| **Settings** (bottom left), `Esc`, Start   | settings menu (pauses solo play): controls, video, voxel size, text size, levels                                                                   |
+| Click, then mouse                          | look (first person; `Esc` releases the pointer and opens Settings)                                                                                 |
+| `W A S D`, `Shift`, `Space`                | walk, run, jump (first person; steps up 0.3 m, slides on steep slopes)                                                                             |
+| Left click or `E`                          | grab what the crosshair points at / release it (the prompt says what)                                                                              |
+| Left click or `E` at a banded pine         | chew it (empty hands) or chop it (holding the axe); it falls away from you                                                                         |
+| Left click or `E`, axe in hand, at a log   | buck it into two short logs one beaver can carry; lay logs in the sawmill's guide to saw                                                           |
+| Left click or `E` at the sawmill's lever   | switch the saw between planks (three per log) and a beam (one per log)                                                                             |
+| Left click or `E` at the winch's drum      | take its rope's hook; holding it, at a piece: hook it; at the drum again: crank (or stop)                                                          |
+| `Q` at the winch, hands empty              | let its rope run back to the drum (holding the hook: drop it)                                                                                      |
+| Left click or `E` at the log dolly         | take it to push along the ground: its stop pushes the log (pulled, only the cradle's grip holds it); put a log's end in by lifting and swinging it |
+| Right click                                | throw what you hold (a plank flies flat, along your view)                                                                                          |
+| Mouse wheel                                | hold closer / further                                                                                                                              |
+| `Q`                                        | drop                                                                                                                                               |
+| `F`                                        | nail what you look at to what is behind it (timber to timber, or down to stone or ground)                                                          |
+| `R`                                        | pour the bucket you hold (again: stop)                                                                                                             |
+| `G`                                        | put a plank in your hands (scripted mode: the Epic 1 comfort-test plank)                                                                           |
+| `T`                                        | launch the ragdoll dummy                                                                                                                           |
+| **Play online** (bottom left)              | host a game, or join one, up to 4 players (claude.ai: same artifact link; itch.io: anyone)                                                         |
+| **Touch** (phones)                         | left thumb move (edge: run) · right thumb look · Jump / Grab / Throw / Drop / Pour buttons                                                         |
+| **Gamepad**                                | press **A** to join (first pad: player 1, second pad: player 2 → split screen)                                                                     |
+| left / right stick                         | move / look                                                                                                                                        |
+| A · LT or L3 · RT · RB · B · X · Y · D-pad | jump · sprint · grab / release · throw · drop · ragdoll · pour · reach (right: plank)                                                              |
+| LB                                         | nail                                                                                                                                               |
+| **Levels** (bottom left)                   | tutorial, Timber Yard, River Lab, the level designer and your own level                                                                            |
+| `P` / `N`                                  | pause / step exactly one voxel frame                                                                                                               |
+| `Backspace`                                | reset the scene                                                                                                                                    |
+| `H`                                        | hide all UI (for screenshots)                                                                                                                      |
+| `C`                                        | first person: watch your beaver from over its shoulder                                                                                             |
+| `L`                                        | pixel look on / off (prototype)                                                                                                                    |
+| `F3` or the corner chip                    | debug panel                                                                                                                                        |
+| `F4`                                       | debug: what the joints carry and the contacts the stress meter reads (host only)                                                                   |
 
 The settings menu works with every input: mouse and touch (tap), keyboard (arrow keys, `Q` / `E`
 for sections, `Enter`, `Esc`) and gamepad (D-pad or stick, **A**, **B**, **LB** / **RB**). It has

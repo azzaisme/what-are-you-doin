@@ -84,6 +84,44 @@ describe('ropes (#52, #75)', () => {
         expect(box.body.translation().y).toBeLessThan(2);
     });
 
+    it('a rope on a body that leaves the world (the sawmill takes it) is dropped, with a loose event', () => {
+        const { pw, box, ropes, id } = hang(50);
+        for (let i = 0; i < 30; i++) pw.step();
+        expect(ropes.tension(id)).toBeGreaterThan(0);
+        // out of the world, as the sawmill takes a log (its body disabled, not removed)
+        pw.setEnabled(1, false);
+        pw.step();
+        expect(ropes.get(id)).toBeUndefined();
+        expect(ropes.events()).toEqual([expect.objectContaining({ kind: 'loose', id })]);
+        // and nothing more is pulled on it
+        for (let i = 0; i < 30; i++) pw.step();
+        expect(ropes.size).toBe(0);
+        // a body out of the world cannot be tied
+        expect(ropes.tie(1, O, GROUND, { x: 0, y: 6, z: 0 })).toBe(-1);
+        void box;
+    });
+
+    it('each rope’s events are its owner’s: one owner reading its own leaves the others’ queued', () => {
+        const pw = world();
+        const mk = (n: number, x: number) =>
+            pw.addDynamic(n, { type: 'box', hx: 0.2, hy: 0.2, hz: 0.2 }, pose(x, 3, 0), { density: 1200 / 0.064 });
+        mk(1, -3);
+        mk(2, 3);
+        const ropes = new RopeSystem(pw);
+        // two 1.2 t blocks: both ropes snap
+        const w = ropes.tie(1, { x: 0, y: 0.2, z: 0 }, GROUND, { x: -3, y: 5.2, z: 0 }, undefined, 'winch');
+        const h = ropes.tie(2, { x: 0, y: 0.2, z: 0 }, GROUND, { x: 3, y: 5.2, z: 0 }, undefined, 'hazard');
+        expect(ropes.get(w)!.owner).toBe('winch');
+        for (let i = 0; i < 60; i++) pw.step();
+        expect(ropes.size).toBe(0);
+        const winch = ropes.events('winch');
+        expect(winch).toEqual([expect.objectContaining({ kind: 'snap', id: w, owner: 'winch' })]);
+        // the hazard's is still there for the hazard, and only once
+        expect(ropes.events('winch')).toEqual([]);
+        expect(ropes.events('hazard')).toEqual([expect.objectContaining({ kind: 'snap', id: h, owner: 'hazard' })]);
+        expect(ropes.events()).toEqual([]);
+    });
+
     it('wound in, it draws two loose blocks together, equal and opposite (no launch)', () => {
         const pw = world();
         pw.world.gravity = { x: 0, y: 0, z: 0 };
