@@ -57,11 +57,16 @@ counts: one flying up the boulders, clipping the first and flying on, touched th
 of a second and landed on the far rim with no respawn (tested).
 
 These work alongside the rules that keep the bucket off the bare crossings (#132): no jumping
-holding it or grabbing it in mid-air, hand-overs only standing close with ground between (a plank laid
-from the bank onto the stones is ground: handed to a beaver on it, it passes, tested), and the taps
-past a crossing shut until its stage. So
-the crevasse detour can't be used to fetch a thrown bucket and refill it at the spring butt either:
-the butt is shut until the Mountain Approach is done.
+holding it or grabbing it in mid-air, taking it only with ground between you and it (and, hand to
+hand, standing within 1.9 m), and the taps past a crossing shut until its stage.
+
+- In each grab the rules run in this order: mid-air, then the detour pieces, then the ground to the
+  bucket, then hand to hand. A pass that more than one would refuse says the specific thing ("too
+  awkward for the stepping stones").
+- A plank laid from the bank onto the stones is building for both: handed to a beaver standing on
+  it, the bucket passes (tested), and a beaver on a plank over the stones picks it up off the plank.
+- The crevasse detour can't be used to fetch a thrown bucket and refill it at the spring butt: the
+  butt is shut until the Mountain Approach is done.
 
 The rest:
 
@@ -72,7 +77,10 @@ The rest:
 - **Timber, measured:** a plank (2.4 m) and a beam (3.2 m) can each be carried over all three
   detours by one beaver. So a crossing can be built from either side. Only the bucket is held back.
 - Valley planks stay 2.4 m, and the bucket's throw is unchanged.
-- npm test 884/884 (5 cm and 10 cm).
+- **Area colours:** areas 2 and 4 (their flags and route signs) used the test materials
+  (`M.TestOrange`, `M.TestBlue`): now leaf gold and the ute's red paint. A test checks the area
+  colours use no test material and are all different.
+- npm test 1056/1056 (5 cm and 10 cm).
 
 ## Valley flags want water in the bucket: the empty-bucket throw is closed (2026-11-23, Epic 9)
 

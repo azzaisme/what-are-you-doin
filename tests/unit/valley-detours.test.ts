@@ -613,7 +613,18 @@ describe('building over the detours is building', () => {
         s.physics.place(s.bucket.id, pose(b.x, pp.y + 0.1, b.z));
         pl.step({}, 30);
         expect(s.bucketOnDetour(), 'the bucket on the plank is not on the stones').toBeNull();
-        expect(pl.grabBucket()).toBe(true);
+        // aimed straight at it (the full bucket settles on the plank a little while a slow look
+        // turns to it), and a click
+        const bk = s.bucket.pose.p;
+        const ft = pl.p;
+        pl.yaw = Math.atan2(-(bk.x - ft.x), -(bk.z - ft.z));
+        pl.pitch = Math.atan2(bk.y + 0.15 - (ft.y + EYE_HEIGHT), Math.hypot(bk.x - ft.x, bk.z - ft.z));
+        pl.step();
+        expect(s.interaction(0).target).toBe('bucket');
+        pl.step({ grab: true });
+        expect(holds(s, 0), 'picked up on the plank').toBe(true);
+        expect(texts(s, 'hint')).toEqual([]);
+        expect(texts(s, 'hint')).toEqual([]);
         pl.step({}, 60);
         expect(holds(s, 0)).toBe(true);
     }, 60_000);
