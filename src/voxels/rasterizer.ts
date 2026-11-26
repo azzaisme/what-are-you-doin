@@ -29,8 +29,9 @@ import {
     createCellRange,
     rangeCellCount
 } from './grid.ts';
+import type { CellRange } from './grid.ts';
 import { aabb, invertRigidMat34, mat34, poseIsFinite, poseToMat34, transformAabb } from './math.ts';
-import type { Pose } from './math.ts';
+import type { Mat34, Pose } from './math.ts';
 import { VALUE_PRECEDENCE } from './palette.ts';
 import type { Volume } from './volumes.ts';
 
@@ -97,7 +98,7 @@ export function rasterizeVolume(
     priority: number,
     sink: CellSink,
     stats: RasterStats,
-    clip: { i0: number; i1: number; k0: number; k1: number } | null = null
+    clip: { i0: number; i1: number; k0: number; k1: number; j0?: number; j1?: number } | null = null
 ): boolean {
     stats.parts++;
     if (!poseIsFinite(worldPose)) {
@@ -107,6 +108,9 @@ export function rasterizeVolume(
     poseToMat34(worldPose, _m);
     invertRigidMat34(_m, _inv);
     transformAabb(volume.bounds, _m, _wb);
+    // the same runaway guards for every part, clipped or not (a box clip, j0 / j1 given, is another
+    // lattice's object sampled only where it meets this lattice's own objects)
+    const box = clip !== null && clip.j0 !== undefined && clip.j1 !== undefined;
     if (
         _wb.maxX - _wb.minX > MAX_PART_EXTENT ||
         _wb.maxY - _wb.minY > MAX_PART_EXTENT ||
@@ -123,7 +127,11 @@ export function rasterizeVolume(
         _range.maxI = Math.min(_range.maxI, clip.i1);
         _range.minK = Math.max(_range.minK, clip.k0);
         _range.maxK = Math.min(_range.maxK, clip.k1);
-        if (_range.minI > _range.maxI || _range.minK > _range.maxK) return true;
+        if (box) {
+            _range.minJ = Math.max(_range.minJ, clip.j0!);
+            _range.maxJ = Math.min(_range.maxJ, clip.j1!);
+        }
+        if (_range.minI > _range.maxI || _range.minK > _range.maxK || _range.minJ > _range.maxJ) return true;
     }
 
     const inv = _inv;
@@ -353,6 +361,67 @@ export function rasterizeVolume(
     stats.samples += samples;
     stats.occupied += occupied;
     return true;
+}
+
+/** One posed volume, ready to test single cells' centres (prepareCenterTest). */
+export interface CenterTest {
+    volume: Volume | null;
+    /** World to local. */
+    readonly inv: Mat34;
+    /** The cells rasterizeVolume would consider (its candidate range). */
+    readonly range: CellRange;
+}
+
+export function createCenterTest(): CenterTest {
+    return { volume: null, inv: mat34(), range: createCellRange() };
+}
+
+/**
+ * Prepares one volume at a world pose for testing single cells ('center' sampling), with
+ * rasterizeVolume's own guards: an invalid pose or runaway bounds is rejected and counted (false).
+ * centerInside(t, i, j, k) is then true exactly where rasterizeVolume(…, 'center', …) would
+ * write the cell: the same candidate range, transform and sample.
+ */
+export function prepareCenterTest(volume: Volume, worldPose: Pose, stats: RasterStats, out: CenterTest): boolean {
+    stats.parts++;
+    out.volume = null;
+    if (!poseIsFinite(worldPose)) {
+        stats.rejected++;
+        return false;
+    }
+    poseToMat34(worldPose, _m);
+    invertRigidMat34(_m, out.inv);
+    transformAabb(volume.bounds, _m, _wb);
+    const r = out.range;
+    if (
+        _wb.maxX - _wb.minX > MAX_PART_EXTENT ||
+        _wb.maxY - _wb.minY > MAX_PART_EXTENT ||
+        _wb.maxZ - _wb.minZ > MAX_PART_EXTENT ||
+        !candidateCells(_wb.minX, _wb.minY, _wb.minZ, _wb.maxX, _wb.maxY, _wb.maxZ, r) ||
+        rangeCellCount(r) > MAX_PART_CANDIDATES
+    ) {
+        stats.rejected++;
+        return false;
+    }
+    out.volume = volume;
+    return true;
+}
+
+/** Does cell (i, j, k) have its centre inside the prepared volume (see prepareCenterTest)? */
+export function centerInside(t: CenterTest, i: number, j: number, k: number): boolean {
+    const r = t.range;
+    const v = t.volume;
+    if (!v || i < r.minI || i > r.maxI || j < r.minJ || j > r.maxJ || k < r.minK || k > r.maxK) return false;
+    const m = t.inv;
+    const wx = cellCenterX(i);
+    const wy = cellCenterY(j);
+    const wz = cellCenterZ(k);
+    const lx = m[0] * wx + m[1] * wy + m[2] * wz + m[3];
+    const ly = m[4] * wx + m[5] * wy + m[6] * wz + m[7];
+    const lz = m[8] * wx + m[9] * wy + m[10] * wz + m[11];
+    const b = v.bounds;
+    if (lx < b.minX || lx > b.maxX || ly < b.minY || ly > b.maxY || lz < b.minZ || lz > b.maxZ) return false;
+    return v.sample(lx, ly, lz) > 0;
 }
 
 function clampInside(v: number, h: number): number {

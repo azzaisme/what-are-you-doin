@@ -67,6 +67,7 @@ import {
 } from './commands.ts';
 import type { PlayerCommand } from './commands.ts';
 import { Forestry } from './forestry.ts';
+import type { ClosureEntities } from './hazard-road.ts';
 import { HazardDirector, PHASE } from './hazards.ts';
 import type { JointEvent } from './joints/breaking.ts';
 import { GROUND, nailCode } from './joints/graph.ts';
@@ -281,6 +282,8 @@ export class LabSim {
     readonly forestry: Forestry;
     /** The level's sawmill, if it has one (src/sim/sawmill.ts). */
     readonly sawmill: Sawmill | null;
+    /** The road closure's barrier and sign (#77: the hazard places and shows them). */
+    readonly closure: ClosureEntities & { barrier: SimEntity; sign: SimEntity };
 
     constructor(opts: LabSimOptions = {}) {
         this.level = opts.level ?? riverLabLevel;
@@ -314,6 +317,10 @@ export class LabSim {
         this.forestry = new Forestry(this.level, c.forestry, levelLogs);
         const saw = this.level.forestry?.sawmill;
         this.sawmill = saw ? new Sawmill(saw, c.forestry.sawmill, this.forestry) : null;
+        this.closure = {
+            barrier: c.entities.find((e) => e.name === 'barrier')!,
+            sign: c.entities.find((e) => e.name === 'closure-sign')!
+        };
         const sp = this.level.spawn;
         this.player.x = sp.x;
         this.player.z = sp.z;
@@ -392,6 +399,7 @@ export class LabSim {
             this.held,
             ...this.extras,
             ...this.forestry.props,
+            this.closure.barrier,
             ...this.stress,
             ...this.dummy,
             this.dolly
@@ -423,6 +431,12 @@ export class LabSim {
                 if (e && body) pw.addDynamic(e.id, body.shape, placement.pose, body.opts);
             }
             pw.setEnabled(this.held.id, false);
+            // the road closure's barrier waits out of the world, at the pose it will stand at (#77)
+            const barrier = this.closure.barrier;
+            if (pw.bodies.has(barrier.id)) {
+                pw.readPose(barrier.id, barrier.pose);
+                pw.setEnabled(barrier.id, false);
+            }
             for (const e of [this.plank, this.log, this.cube, this.sphere, this.bucket, ...this.extras, this.dolly])
                 if (!pw.bodies.has(e.id)) e.visible = false;
             this.forestry.build(pw);

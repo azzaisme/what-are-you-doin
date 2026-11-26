@@ -120,6 +120,265 @@ All by input, 10 cm cells, from the tests' own lines.
 - Steering a pushed log is like reversing a trailer. The test steers for the log's middle, or down
   the guide's line, and loads on level ground (a 10 cm mound east of the mill made the swing miss).
 
+## Objects on different lattices resolve by priority (2026-11-22, Epic 10, #107)
+
+Objects drawn on different lattices (1 cm fine, the 5–10 cm base, the coarse 10–20 cm) used to draw
+through one another: the bucket's handle disappeared inside the beaver's 5 cm paw. Now they resolve
+by priority across lattices, as they always did within one (ADR 0011, amended).
+
+- **How:** each lattice's worker tests, at its own cell size, every object of another lattice that
+  outranks one of its own objects nearby. It tests only the cells those objects hold, at their
+  centres, inside one box per part: where that part's bounds meet the bounds of the parts it
+  outranks. Where it wins, the cell is left empty there and the winner's own lattice draws it.
+- **Priority** is the objects' own: priority, then lower id. The bucket (4) wins over the beaver (3)
+  and planks (1); the beaver over the ute (2) and the ragdoll (2). Your own first-person limbs win
+  ties against other lattices' objects, so another player's beaver never cuts holes in them. With
+  one lattice for everything (`?tiers=off`) there are no masks and the lower id wins ties, as before
+  #107.
+- **Mask work** is counted in units: one per cell of this lattice's that a mask scans (only the
+  outranked objects whose bounds meet its box, chunks outside the box skipped), 4 per centre
+  sample, 1,000 per chunk whose cells it changes (the resolve; meshing gets cheaper, hidden cells
+  have no faces). On the calibration machine (Xeon, 2.1 GHz) a unit took 0.036–0.054 µs across the
+  scenes measured; samples are most of it (about 0.2 µs each, the beaver's custom parts).
+- **Budget, by quality preset:**
+    - High: `max(MASK_BUDGET 50,000, 4 × the lattice's own cells)`, capped at `MASK_CAP_HIGH`
+      150,000 units (about 8 ms of worker time on that machine).
+    - Low: a fixed 50,000 units (`MASK_BUDGET_LOW`, about 2.7 ms), never raised. 1 cm lattices
+      exist at both presets, phones included.
+    - Highest priority first. A mask is estimated by what it did last frame if it ran, else by the
+      scan it certainly needs. One that would overrun what is left is skipped that frame (its
+      object intersects as before) and counted (`maskSkipped`). Hysteresis: one that ran last
+      frame, and at High the first served, may use it all, any other new one 80 %.
+    - The budget is enforced on the work as it is done: a mask whose scan, samples or changed
+      chunks would go over it is abandoned, cleared, and waits 20 voxel frames before it is tried
+      again. So a frame's mask work never exceeds the budget; clearing masks that drop out is
+      counted apart.
+    - Mask parts posed out of bounds are counted (`maskRejected`).
+- **The trade-off** (2026-11-26): a whole beaver deep in the 1 cm ragdoll costs more than the cap
+  (on the real fine lane about 11 ms touching its head, 23 ms with the head inside it), so at High,
+  as at Low, such deep whole-beaver overlaps on the fine lane intersect as before #107. Frame cost
+  matters more, and only the debug stress scene and pile-ups make them. The cases #107 is about,
+  the 1 cm bucket in a 5 cm paw and the like, cost a few thousand units and are kept.
+- **Audits:** the first version sampled every cell of the boxes within a fixed 12,000, so the
+  beaver over the 1 cm ragdoll head toggled at the threshold (re-audit, 2026-11-23). The second
+  had no absolute cap and charged cells that did not track the time (audit of 6843c88,
+  2026-11-26). The cost model, the cap and the enforced budget above answer both.
+- **The static world** is not part of this: it stays on the base lattice, where moving objects
+  already win over it.
+- **Known gap (your own held object):** your first-person limbs are moved as one piece every render
+  frame (`lockBody`), and the holes a mask cuts in them move with them. The held bucket, on the
+  fine lattice, stays at its voxel-frame pose. Between voxel frames the cut and the bucket separate
+  by how far the camera moved since that frame, so a sliver can open at the handle. That is new
+  with #107 (before it the handle simply drew inside the paw). In a real carry (a physics grab)
+  your paws hold the bucket's outside and the mask hides no cells, so it does not show there. Not
+  fixed here: the fix is to lock the held object together with the limbs.
+- **Debug panel:** "lattices N" after the overlap counts: cells another lattice's object takes now.
+  `__riverLab.latticeHidden()` gives them per object. `?masks=off` turns it off, for comparisons.
+
+### Measured
+
+`node scripts/bench-lattice.ts` (High) and `BENCH_PRESET=low node scripts/bench-lattice.ts` (Low):
+one lattice's worker, the other objects placed as listed in the script, everything moving 2 mm a
+frame. The 1 cm scenes draw the real fine lane (main.ts: the bucket, the stress objects and the
+ragdoll's head and limbs; your limbs have their own lane). Masks off (as before) and on run side by
+side, framed alternately; median over 200 frames, on the container's CPU (Xeon, 2.1 GHz), idle.
+"Work" is the mask work a frame, in units (its peak over the run in brackets).
+
+| Lattice: its object; the others                                              | Masks off (ms) | High: on (ms) | Masks (skipped) |         Work (peak) / limit | Hidden |  Low: on (ms) | Masks (skipped) |
+| ---------------------------------------------------------------------------- | -------------: | ------------: | --------------: | --------------------------: | -----: | ------------: | --------------: |
+| 1 cm: the bucket, alone                                                      |          10.66 | 10.83 (+0.18) |           0 (0) |              0 (0) / 50,000 |      0 | 11.64 (-0.03) |           0 (0) |
+| 1 cm: the bucket, the beaver and the held plank touching it                  |          11.59 | 11.46 (-0.12) |           1 (0) |    16,026 (20,090) / 50,000 |    510 | 12.74 (-0.16) |           1 (0) |
+| 5 cm beaver, the 1 cm bucket in it                                           |           3.27 |  3.49 (+0.21) |           1 (0) |     7,421 (10,944) / 50,000 |    162 |  3.87 (+0.31) |           1 (0) |
+| 1 cm your limbs carrying the bucket, three avatars 0.55 m away (a real grab) |          13.49 | 13.70 (+0.21) |           1 (0) |   29,866 (29,875) / 116,188 |      0 | 14.41 (+0.00) |           1 (0) |
+| 1 cm: the ragdoll standing, the beaver touching its head from above          |          31.98 | 31.96 (-0.02) |           0 (1) |   7,497 (149,940) / 150,000 |      0 | 32.79 (-0.17) |           0 (1) |
+| 1 cm: the ragdoll standing, the beaver deep inside it                        |          29.45 | 29.77 (+0.32) |           0 (1) |   7,497 (149,940) / 150,000 |      0 | 31.26 (-0.18) |           0 (1) |
+| 1 cm: the ragdoll standing, three avatars 0.5 m away                         |          29.31 | 33.16 (+3.86) |           3 (0) | 100,375 (112,820) / 150,000 |  9,825 | 33.55 (+0.86) |           1 (2) |
+| 1 cm: the ragdoll, the beaver and four avatars in it                         |          31.35 | 32.51 (+1.16) |           0 (5) |  37,485 (149,944) / 150,000 |      0 | 30.98 (+0.59) |           0 (5) |
+| 1 cm: pile-up, the beaver and eight avatars deep in the ragdoll              |          30.93 | 32.04 (+1.11) |           0 (9) |  67,474 (149,944) / 150,000 |      0 | 31.37 (-0.14) |           0 (9) |
+| 1 cm: the ragdoll at rest, its 5 cm body at the joints                       |          31.99 | 31.65 (-0.34) |           0 (0) |             0 (0) / 150,000 |      0 | 30.48 (-0.89) |           0 (0) |
+
+- **The worst scene measured** is three players 0.5 m from the ragdoll (3 masks at High, 9,825
+  cells hidden, peak work 112,820 of 150,000). Its cost, as measured ranges: High +3.52 and +3.86 ms
+  in two idle runs here, +3.02 to +3.81 ms in the re-audit's runs at load 6–7; Low +0.86 and
+  +1.12 ms idle, +1.14 to +2.17 ms under that load. The guarantee is the budget itself: at most
+  150,000 units at High and 50,000 (about 2.7 ms on this machine) at Low, a frame. The deep overlaps
+  skip (tried, stopped by the budget, then waiting 20 frames: at most +1.2 ms here). Peak work stayed
+  under the limit in every scene (at most 149,944 of 150,000 at High, 49,940 of 50,000 at Low).
+  With forced clears, `maskCells` can exceed the limit for a frame (175,940 against 150,000 in the
+  re-audit's 5-player jump): clearing masks that drop out is counted but is outside the budget.
+- **Off the main thread:** this is voxel-worker time. In the browser (scripted River Lab, High,
+  8 masks hiding 45,271 cells, SwiftShader at 640 × 360, measured before the cap), the main thread's
+  mesh upload per voxel frame went from 2.6 to 2.8 ms (median; p95 4.2 to 5.0 ms), and the slowest
+  worker's frame from 49 to 67 ms.
+- **Local co-op, split screen** (the same scene with `setPlayers(2)`, 90 frames, one run each, with
+  the cap): High, 3 masks hiding 23 cells, the slowest worker 40.7 ms against 42.9 off, the upload
+  2.6 ms against 2.8, the frame 1,129 against 1,150 ms; Low, 2 masks, 43.3 ms against 44.0. No
+  page errors.
+- The ragdoll at rest: its 5 cm body does not touch its 1 cm head or limbs, so it costs nothing.
+
+Pixels (`node scripts/verify-pixels.mjs`, scenes in `scripts/verify-pixels-107.json`; frozen
+frames, 480 × 270, SwiftShader, High, waiting until the camera has held still for 5 frames before
+it captures). Measured on this head against its epics-5-10 base (8f7d418); two captures of each
+build match exactly in all ten scenes.
+
+- **Unchanged, 0 of 129,600 pixels differ in each:**
+    - the River Lab at t = 4 from three views (no masks);
+    - the Timber Yard from two views (no masks);
+    - the Valley from two views (no masks);
+    - first person beside the yard's bucket, from two spots (no masks: since #139 your empty-handed
+      arms hang, and no longer touch the bucket there).
+- **The scripted River Lab, the bucket in the paw** (t = 4; orbit camera at (5.2, 0.9, -3.5)
+  looking at (4.6, 0.55, -4.15); latticeMasks 3, latticeHidden 24): 754 pixels differ.
+    - 464 differ by more than one level, all inside a 29 × 25 pixel box at the paw and handle:
+      the intended change.
+    - The other 290 each differ by one level out of 255. The bloom samples the whole screen, so it
+      picks up the changed paw.
+    - Before the cap the same frame had 8 masks hiding 45,272 cells (deep overlaps in the scripted
+      props' pile at the origin). Its image is identical to this one (0 pixels): those hidden cells
+      were all behind the winners' surfaces.
+
+### Tests
+
+- Unit (`tests/unit/lattice-priority.test.ts`, at 5 and 10 cm):
+    - the winner hides exactly the beaver cells whose centres lie inside a bucket part, computed
+      from the bucket's own volumes, and nothing else;
+    - a lower-priority object on another lattice changes nothing (same hash);
+    - the coarse and fine lattices give way to the base one by priority;
+    - cells come back when the winner leaves, and match a fresh build;
+    - your own limbs win ties against other lattices' objects, and with one lattice for everything
+      the lower id wins, as before #107;
+    - the budget is served highest priority first, and nothing is hidden when nothing fits;
+    - `maskLimit` is reported by lattices that can mask, also with no mask that frame, and is 0 on
+      one that cannot (so the pipeline's sum is the masking lattices' budgets);
+    - a mask part posed out of bounds is counted that frame only;
+    - `masks` off, and one lattice for everything, have no masks.
+- Unit, at 1 cm:
+    - your limbs carrying the bucket from a real physics grab (as `hands.test` grabs it): the mask
+      hides exactly your cells inside the bucket (none: the paws hold its outside);
+    - the beaver swept down into the ragdoll on the real fine lane: a frame's mask work never
+      exceeds its limit, abandoned attempts included;
+    - a mask the budget stops is cleared and waits 20 frames before it is tried again;
+    - a pile-up of the ragdoll, the beaver, eight players and the stress objects stays under the cap;
+    - Low: a fixed budget, the bucket against the beaver still masks, deep overlaps skip;
+    - hysteresis between masks does not toggle at the limit.
+- Browser:
+    - in the scripted River Lab the beaver's paw gives cells to the bucket at three times, and the
+      bucket keeps all its own;
+    - with `?tiers=off` nothing is masked;
+    - `maskRejected` is 0 wherever `rejected` is checked.
+
+### Found on the way
+
+- With `?props=scripted` the River Lab leaves the spare planks, beams, logs, crates and the ragdoll
+  piled at the origin, in the river, where they show above the water. To be fixed with #110.
+
+## Epic 8: the road closure sign swap (2026-11-23, #77)
+
+The Valley's forest road can now be closed on you. Come up from Shallow Creek and the sign at the
+old logging track's mouth clunks over to "ROAD CLOSED / DETOUR →", with a barrier across the road
+beyond it. Drive round by the track, or shift the barrier; on foot you can also squeeze past.
+
+- **Where:** the forest road between the logging track's two ends (Epic 9's side path, from u = 11
+  to 35.5). The sign stands at the track's mouth (u = 9). The barrier, 5.6 m of striped board on
+  trestles, stands across the road and its verges at u = 22, 1.2 m past each edge.
+- **The old fence line:** the barrier stands in a post-and-rail fence across the valley floor.
+    - The posts are evenly spaced, 1.1 m apart. The rail, at 1.5 m, is above a beaver's head, so a
+      beaver fits between two posts and the ute doesn't.
+    - There's a gap where the logging track crosses, and the log dump is part of the line.
+    - Where something else already stops the ute (a pine, the dump, the terraces), there is no
+      post. Each of the 15 posts holds the ute somewhere. A test takes each one out in turn and
+      drives the ute at the line where it stood (the same scan as below): every time, it gets
+      through.
+- **What the fence holds, and what it doesn't:** it holds the valley floor. Driven at the line by
+  input every 0.2 m, straight and at an angle (330 drives, out to 24.6 m from the road on both
+  sides), the ute never gets past it; the only way through is the logging track.
+- **The valley sides are not a wall.** Driven up them from the floor (27 tries: 5 places, 3
+  angles, each side), the ute climbs as far as 26.1 m out, which took 24.5 s.
+    - Then driven along the side, up the route, for 20 s more, it never got past the line in any
+      try.
+    - So it is at best a long way round. The logging track takes 11.2 s from its mouth to the road
+      beyond. The test checks that any way round by the side takes longer than that.
+- **When:** a player on foot is in the tell's window: 2.5 s from the junction at a run
+  (4.2 m/s), 1.5 m deep, on the creek crossing. Anyone on foot in the window counts, standing or
+  facing either way. Or the ute, coming up the road, gets close enough that,
+  flat out from the speed it's going, it could reach the junction in 3 s.
+    - That reckoning assumes 5 m/s² of acceleration, more than the ute makes. Measured by input,
+      its peak along the road is 3.6–3.7 m/s², and the test asserts it stays under 4. The #131
+      audit measured 4.6 m/s² coming off the creek's bridge another way, which 5 still covers.
+    - One already closer when it could not start gets no closure at all rather than a late one.
+    - Once a run, through the shared budget: not in the first 20 s, one hazard at a time, and not
+      during the weather or the quiet spell after it (each tested: the test fails if either
+      check is removed).
+    - Tested on the full Valley too: crossing the creek on a finished bridge brings the flood
+      first and no closure; after the flood and its quiet spell the next one in the window gets
+      it; while it runs, the forest road's rain waits.
+- **Lead time, measured by input:** at a run 3.03 s before the junction, at a walk 5.65 s.
+    - **The ute, on the real layout:** driven flat out from the yard's side over the creek, on two
+      beams nailed under its wheels, then up the road past the checkpoint flag. From 12 m before
+      the creek, the tell came 4.18 s before the junction; from 16 m before, 4.08 s. The fastest it
+      went on that stretch is 7.6 and 7.8 m/s.
+    - **Extra test, not the real layout and not by input:** the same closure, moved up the forest
+      road beyond the culvert, with the ute set going at its top speed of 10 m/s (the test sets
+      that speed), then driven on by input: 3.10 s at 9.1 m/s.
+- **The tell:** a clunk (a latch click, then a metal thunk) and a toast: "Road closed ahead: drive
+  round by the old logging track, or shift the barrier. On foot, you can squeeze past."
+    - The sign's board (2.4 × 1.2 m) swings half round over 1.2 s. Its closed face says "ROAD
+      CLOSED" and "DETOUR" in black 5 cm letters on cream, with a big hi-vis orange arrow towards the track
+      in a striped border.
+    - The arrow points right: going up the road, the track leaves to the right (the approved
+      design said ←).
+    - Every pixel falls on whole voxel cells. At the 10 cm quality setting the letters can't be
+      drawn (they'd be noise), so the board shows its stripes and the arrow.
+    - The open face is the area's route sign ("2", straight on), in orange.
+- **The barrier is pinned:** its movement is locked until someone takes hold of it. Tested: the ute
+  driven into it at full throttle for 3 s stops; the barrier moves under 0.1 m, nothing goes over
+  15 m/s, nothing breaks. Any player's grab frees it (a guest's too: tested through real sessions),
+  and it is then a 45 kg prop.
+- **Ways round, each tested by input:**
+    - walk the logging track and rejoin the road beyond;
+    - drive the ute round the track;
+    - drag the barrier off the road: one player, by its end, straight back down the road first,
+      since it stands in the fence line, then out to the side;
+    - two players carry it off together;
+    - on foot, squeeze round either end or between two fence posts, then on up the road.
+- **No timer:** the closure ends when the barrier is clear of the road (every corner more than 1 m
+  past the edge), or when every player, and the ute if someone is driving it, is past it.
+    - **An empty ute doesn't hold it**, wherever it was left. Before this was fixed (found in the
+      #131 audit), a ute parked on the closed stretch kept the closure going for the rest of the
+      run, and with it every other hazard and the weather.
+    - **Tested by input:** park the ute on the closed road at u 15 and get out, then walk round by
+      the track. The closure ends, and the next weather comes after its quiet spell. Put the old
+      rule back and the test fails.
+- **The sign never lies:** it shows "closed" exactly while the barrier stands on the road.
+    - Cleared, it clunks back to "the road goes on" (once).
+    - Dragged back onto the road, it clunks closed again, with a toast ("The barrier is back across
+      the road"). Tested.
+    - If everyone took the track and left the barrier, it stays closed.
+    - A run's reset puts the barrier away and the sign back. (There is no checkpoint reset in the
+      game: a lost bucket comes back at the stage's start, and the closure stays as it is.)
+- **Online, tested:** the guest gets the toast (and so the clunk), the sign's swing on its channel,
+  and the barrier where the host has it.
+- **Network budget:** the Valley's worst-case host state (8 players, every entity visible, long
+  events) is now 4041 of the room's 4096 bytes. That leaves little room for more entities.
+- **In the browser:** a test brings the closure on in the Valley and photographs the sign and the
+  barrier (`test-results/road-closure-*.png`).
+- **Code:**
+    - `src/sim/hazard-road.ts`: the closure;
+    - `src/assets/road-closure.ts`: the barrier and the sign;
+    - `valley.ts`: the Valley's spec, the barrier's place and the fence;
+    - the barrier in the prop list and its body;
+    - the clunk in `synth.ts`;
+    - a few lines in the director: the closure's step, and the weather's quiet spell starting when
+      it ends.
+    - No new HazardNet fields.
+- **Also in this PR (the #127 audit's follow-ups):** the falling-tree browser test steps the sim by
+  ticks instead of waiting in real time, and now checks the lean and that the static tree is gone
+  in every worker lane.
+- **Tests:** `tests/unit/road-closure.test.ts` has 20 tests. All but two use the Valley with
+  only the closure among its hazards, so the flood the test's bridge brings doesn't get in first.
+  New since the #131 audit: the empty ute left on the closed road, and every fence post counting.
+  Unit tests: 896 pass at both voxel sizes, with `epics-5-10` 8f7d418 merged in.
+
 ## Valley flags want water in the bucket: the empty-bucket throw is closed (2026-11-23, Epic 9)
 
 An existing cheat: the Valley could be finished without building a single bridge.

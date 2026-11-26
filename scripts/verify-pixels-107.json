@@ -1,0 +1,19 @@
+[
+    {
+        "name": "lab",
+        "q": "?level=lab&t=4&noui",
+        "cams": [null, [2.5, 1.6, 7.5, 1.6, 0.3, 4.8], [-4, 3, -2, -8.4, 0.5, -7.4]]
+    },
+    { "name": "yard", "q": "?level=yard&t=0.01&noui&view=orbit", "cams": [null, [0, 4, 6, 0, 0.5, 0]] },
+    { "name": "valley", "q": "?level=valley&t=0.01&noui&view=orbit", "cams": [null, [-50, 25, 50, -20, 8, 20]] },
+    {
+        "name": "fp-near-bucket",
+        "q": "?level=yard&t=0.01&noui",
+        "fp": true,
+        "cams": [
+            [5.6, 4.85, 0, -0.5],
+            [5.6, 5.0, 0.3, -0.4]
+        ]
+    },
+    { "name": "paw", "q": "?level=lab&props=scripted&t=4&noui", "cams": [[5.2, 0.9, -3.5, 4.6, 0.55, -4.15]] }
+]

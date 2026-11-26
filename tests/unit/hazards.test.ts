@@ -1287,7 +1287,7 @@ describe('hazard director: online, through real host and guest sessions', () => 
         run(1, { ...look, grab: true });
         run(S(3), look);
         expect(host.hazards.tree.phase).toBe(1);
-        // the guest's copy of the tree's marker: swaying, towards the ute (east)
+        // the guest's copy of the tree's marker: leaning, towards the ute (east)
         while (host.tick % 3 !== 0) run(1, look);
         const marker = host.forestry.ents.markers[1];
         const anim = new Float64Array(ANIM_MAX);

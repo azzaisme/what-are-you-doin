@@ -20,7 +20,7 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
         (globalThis as { __UE_CELL_CM__?: number }).__UE_CELL_CM__ = msg.cellCm;
         try {
             const { VoxelService } = await import('./voxel-service.ts');
-            service = new VoxelService(msg.objects ? new Set(msg.objects) : undefined);
+            service = new VoxelService(msg.objects ? new Set(msg.objects) : undefined, msg.masks ?? true);
             const { build, units } = service.build(msg.seed, msg.level, msg.data, msg.world ?? true, msg.far ?? false);
             post({ type: 'ready', build, units }, transferables(units));
             ready = true;
@@ -49,11 +49,19 @@ function handle(msg: ToWorker): void {
                 msg.focus,
                 msg.nearTiles,
                 msg.nearTileSize,
-                msg.nearRadius
+                msg.nearRadius,
+                msg.maskPreset
             );
             post({ type: 'frame', units, stats, tiles }, transferables(units));
         } else if (msg.type === 'query') {
-            const result = msg.what === 'hash' ? service.world.dynamicHash() : service.verifyGrid();
+            const result =
+                msg.what === 'hash'
+                    ? service.world.dynamicHash()
+                    : msg.what === 'lattice'
+                      ? Object.fromEntries(service.world.latticeHiddenByObject())
+                      : msg.what === 'stand'
+                        ? service.standState()
+                        : service.verifyGrid();
             post({ type: 'query', id: msg.id, result });
         }
     } catch (err) {
