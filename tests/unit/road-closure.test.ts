@@ -21,7 +21,15 @@ import { GuestSession, HostSession, listGames } from '../../src/net/session.ts';
 import { MemoryHub } from '../../src/net/transport.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
-import { CLOSURE, CLOSURE_OPEN, CLOSURE_SHUT, CLOSURE_TELL, SIGN_SWING, quickest } from '../../src/sim/hazard-road.ts';
+import {
+    CLOSURE,
+    CLOSURE_OPEN,
+    CLOSURE_SHUT,
+    CLOSURE_TELL,
+    RoadClosure,
+    SIGN_SWING,
+    quickest
+} from '../../src/sim/hazard-road.ts';
 import { HAZARD } from '../../src/sim/hazards.ts';
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
@@ -105,14 +113,13 @@ function inputs(s: LabSim, slot = 0) {
     };
     const me = () => s.players[slot];
     /** Walks (or runs) to (x, z), facing the way it goes; calls `each` every tick. */
-    /** (`pitch`: where it looks as it goes; dragging something heavy, down at the ground.) */
-    const walkTo = (x: number, z: number, sprint = false, each?: () => void, near = 0.3, pitch = 0) => {
+    const walkTo = (x: number, z: number, sprint = false, each?: () => void, near = 0.3) => {
         for (let i = 0; i < 60 * 60; i++) {
             const dx = x - me().x;
             const dz = z - me().z;
             if (Math.hypot(dx, dz) < near) return;
             v.yaw = Math.atan2(-dx, -dz);
-            v.pitch = pitch;
+            v.pitch = 0;
             step({ moveZ: 1, sprint });
             each?.();
         }
@@ -391,6 +398,8 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
             // as the trigger reckons it): the trigger assumes more than it ever makes
             const alongs: number[] = [];
             let hardest = 0;
+            // once told, it holds until the ute is past (the driver alone brought it on)
+            let heldAfterTell = true;
             // flat out: over the beams on the crossing's line, then up the road (round the
             // checkpoint flag in the middle of it at u = 7.2), to the junction
             for (let k = 0; k < S(30) && junction < 0; k++) {
@@ -413,6 +422,7 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
                     tell = s.tick;
                     tellSpeed = v;
                 }
+                if (tell > 0 && !s.hazards.road!.busy) heldAfterTell = false;
                 if (routeU(s.ute.pose.p.x, s.ute.pose.p.z) >= CLOSURE_AT.junction) junction = s.tick;
             }
             expect(tell, `from u ${back}`).toBeGreaterThan(0);
@@ -426,6 +436,10 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
             expect(CLOSURE.uteAccel).toBeGreaterThan(4.6);
             expect(lead, `from u ${back}: lead ${lead.toFixed(2)} s`).toBeGreaterThanOrEqual(2.5);
             expect(s.hazards.road!.count).toBe(1);
+            // the closure the driver brought on holds while they drive at it, and says so once:
+            // the ute still behind the closed stretch at the tell doesn't end it there and then
+            expect(heldAfterTell, `from u ${back}: still on after the tell`).toBe(true);
+            expect(texts(s).filter((t) => t === CLOSURE_TELL || t === CLOSURE_SHUT)).toEqual([CLOSURE_TELL]);
         }
         // the trigger's own bound: from a standstill the ute could not get there faster than this
         expect(quickest(25, 0)).toBeGreaterThan(CLOSURE.leadS);
@@ -885,6 +899,79 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         for (let i = 0; i < S(HAZARD.safeS + 5) && !w.hazardBusy; i++) p.step();
         expect(w.hazardBusy).toBe(true);
         expect(texts(s)).toContain('test shower');
+    }, 300_000);
+
+    it('turned back: a player who brought it on and goes back across the creek stops holding it; with nobody in the closed stretch for 10 s it is over', () => {
+        const s = closed();
+        const p = inputs(s);
+        expect(routeU(s.player.x, s.player.z)).toBeGreaterThanOrEqual(R.from);
+        // back over the creek's beams into the yard, and wait there
+        for (const u of [0, -2, -6]) {
+            const w = at(u, 0);
+            p.walkTo(w.x, w.z);
+        }
+        expect(routeU(s.player.x, s.player.z)).toBeLessThan(R.from);
+        const back = s.tick;
+        while (s.hazards.road!.busy && s.tick - back < S(CLOSURE.goneS + 5)) p.step();
+        const took = (s.tick - back) / 60;
+        // it was still on when they got there; it ended CLOSURE.goneS after they left the stretch
+        expect(s.hazards.road!.busy).toBe(false);
+        expect(took).toBeGreaterThan(CLOSURE.goneS - 3);
+        expect(took).toBeLessThanOrEqual(CLOSURE.goneS);
+        // the barrier stays across the road, and the sign says so
+        expect(s.hazards.road!.blocking(s.physics, s.closure.barrier.id)).toBe(true);
+        expect(s.closure.sign.anim[SIGN_SWING]).toBe(1);
+        expect(s.hazards.outcomes.map((o) => `${o.hazard}: ${o.what}`)).toEqual(['road closure: turned back']);
+    }, 300_000);
+
+    it('a player who stays behind (across the creek) does not hold it: the other walks the track, and it is over', () => {
+        const s = closed();
+        // player 2 joins in the yard and stays there
+        s.setSlotActive(1, true);
+        const p = inputs(s);
+        p.step({}, 30);
+        const behind = s.players[1];
+        expect(routeU(behind.x, behind.z)).toBeLessThan(R.from);
+        const track = SIDE_PATHS.find((q) => q.name === 'logging-track')!;
+        for (const [u, t] of track.points) {
+            const w = at(u, t);
+            p.walkTo(w.x, w.z, false, undefined, 0.6);
+        }
+        expect(s.hazards.road!.busy).toBe(true);
+        const beyond = roadAt(CLOSURE_AT.rejoin + 1.5);
+        p.walkTo(beyond.x, beyond.z);
+        p.step({}, 5);
+        expect(routeU(s.players[1].x, s.players[1].z)).toBeLessThan(R.from);
+        expect(s.hazards.road!.busy).toBe(false);
+        expect(s.hazards.outcomes.map((o) => o.what)).toEqual(['took the track on foot']);
+    }, 300_000);
+
+    it('an empty ute rolling at the junction brings nobody: no tell (and the same roll with a driver brings it)', () => {
+        // An empty ute only moves when something shoves it, or when the handbrake prank lets it
+        // roll, so this one plays the closure's own step: the same roll along the road at 8 m/s,
+        // empty and driven, from u = -20 to the junction
+        const roll = (driven: boolean) => {
+            const s = valley();
+            const road = new RoadClosure(R);
+            const said: string[] = [];
+            for (let k = 0, u = -20; u < CLOSURE_AT.junction; k++, u += 8 / 60) {
+                const w = roadAt(u);
+                road.step(
+                    {
+                        tick: s.tick + k,
+                        physics: s.physics,
+                        entities: s.closure,
+                        walkers: [],
+                        ute: { x: w.x, z: w.z, speed: 8, driven },
+                        say: (t) => said.push(t)
+                    },
+                    true
+                );
+            }
+            return said;
+        };
+        expect(roll(true)).toEqual([CLOSURE_TELL]);
+        expect(roll(false)).toEqual([]);
     }, 300_000);
 
     it('the budget: not while the weather is on, nor in the quiet spell after it; then it comes', () => {
