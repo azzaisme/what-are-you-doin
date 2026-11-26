@@ -607,6 +607,8 @@ const EVENT_SOUNDS: Record<SimEvent['kind'], (text: string) => EventSound[]> = {
     water: () => soft('slosh', 0.6, 1),
     // the pine falls, a log is bucked, fresh logs arrive: a wooden knock
     wood: () => soft('knock', 0.6, 0.9),
+    // the hand winch (Epic 5, #52): its rope snapping, or its hook, crank and pawl (a metal clank)
+    winch: (text) => (text.startsWith('Snap!') ? soft('snap', 1, 0.9) : soft('clank', 0.5, 1)),
     creak: () => NONE,
     break: () => NONE,
     fell: () => NONE
