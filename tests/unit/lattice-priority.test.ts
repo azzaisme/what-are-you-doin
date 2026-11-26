@@ -474,7 +474,9 @@ describe('lattice priority (#107)', () => {
             }
             // the guard was exercised: attempts were stopped part-way
             expect(abandoned).toBeGreaterThan(0);
-            expect(ranMasks).toBeGreaterThanOrEqual(0);
+            // and the trade-off (MASK_CAP_HIGH): a whole beaver over the ragdoll on the real fine
+            // lane costs more than the cap, so no such mask completes; it intersects as before #107
+            expect(ranMasks).toBe(0);
         } finally {
             fineDone();
         }
@@ -724,7 +726,10 @@ describe('lattice priority (#107)', () => {
             expect(s.latticeMasks).toBe(1);
             expect(s.maskRejected).toBe(0);
             expect(s.maskCells).toBeGreaterThan(0); // its boxes meet your limbs
-            // your limb cells whose centres lie inside a bucket part, from the bucket's own volumes
+            // your limb cells whose centres lie inside a bucket part, from the bucket's own volumes.
+            // In a real carry there are none (the paws hold the bucket's outside), so this checks one
+            // direction only: the mask hides nothing it should not. A mask that hid nothing at all
+            // would pass here too; the 5 / 10 cm exact-winner test (more than 10 cells) covers that.
             const poses = bucket.asset.parts.map(() => pose());
             bucket.asset.evaluate(carry.bucket, new Float64Array(ANIM_MAX), poses);
             const inv = poses.map((p) => invertRigidMat34(poseToMat34(p, mat34()), mat34()));

@@ -77,10 +77,15 @@ side, framed alternately; median over 200 frames, on the container's CPU (Xeon, 
 | 1 cm: pile-up, the beaver and eight avatars deep in the ragdoll              |          30.93 | 32.04 (+1.11) |           0 (9) |  67,474 (149,944) / 150,000 |      0 | 31.37 (-0.14) |           0 (9) |
 | 1 cm: the ragdoll at rest, its 5 cm body at the joints                       |          31.99 | 31.65 (-0.34) |           0 (0) |             0 (0) / 150,000 |      0 | 30.48 (-0.89) |           0 (0) |
 
-- **Worst case measured:** High +3.86 ms (three players 0.5 m from the ragdoll: 3 masks, 9,825
-  cells hidden, peak work 112,820 of 150,000); Low +0.86 ms. The deep overlaps skip (tried, stopped
-  by the budget, then waiting 20 frames: at most +1.2 ms). Peak work stayed under the limit in
-  every scene (at most 149,944 of 150,000 at High, 49,940 of 50,000 at Low).
+- **The worst scene measured** is three players 0.5 m from the ragdoll (3 masks at High, 9,825
+  cells hidden, peak work 112,820 of 150,000). Its cost, as measured ranges: High +3.52 and +3.86 ms
+  in two idle runs here, +3.02 to +3.81 ms in the re-audit's runs at load 6–7; Low +0.86 and
+  +1.12 ms idle, +1.14 to +2.17 ms under that load. The guarantee is the budget itself: at most
+  150,000 units at High and 50,000 (about 2.7 ms on this machine) at Low, a frame. The deep overlaps
+  skip (tried, stopped by the budget, then waiting 20 frames: at most +1.2 ms here). Peak work stayed
+  under the limit in every scene (at most 149,944 of 150,000 at High, 49,940 of 50,000 at Low).
+  With forced clears, `maskCells` can exceed the limit for a frame (175,940 against 150,000 in the
+  re-audit's 5-player jump): clearing masks that drop out is counted but is outside the budget.
 - **Off the main thread:** this is voxel-worker time. In the browser (scripted River Lab, High,
   8 masks hiding 45,271 cells, SwiftShader at 640 × 360, measured before the cap), the main thread's
   mesh upload per voxel frame went from 2.6 to 2.8 ms (median; p95 4.2 to 5.0 ms), and the slowest
