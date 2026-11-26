@@ -112,15 +112,15 @@ function inputs(s: LabSim, slot = 0) {
         }
     };
     const me = () => s.players[slot];
-    /** Walks (or runs) to (x, z), facing the way it goes; calls `each` every tick. */
-    const walkTo = (x: number, z: number, sprint = false, each?: () => void, near = 0.3) => {
-        for (let i = 0; i < 60 * 60; i++) {
+    /** Walks (or runs) to (x, z), facing the way it goes, the stick pushed `stick` of the way; calls `each` every tick. */
+    const walkTo = (x: number, z: number, sprint = false, each?: () => void, near = 0.3, stick = 1) => {
+        for (let i = 0; i < 60 * 120; i++) {
             const dx = x - me().x;
             const dz = z - me().z;
             if (Math.hypot(dx, dz) < near) return;
             v.yaw = Math.atan2(-dx, -dz);
             v.pitch = 0;
-            step({ moveZ: 1, sprint });
+            step({ moveZ: stick, sprint });
             each?.();
         }
         throw new Error(`could not walk to ${x.toFixed(1)}, ${z.toFixed(1)}`);
@@ -931,15 +931,20 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         expect(s.hazards.outcomes.map((o) => `${o.hazard}: ${o.what}`)).toEqual(['road closure: never came']);
     }, 300_000);
 
-    it('stopped in the closure: a player standing just inside the closed stretch holds it CLOSURE.stopS from the tell, then it is over', () => {
+    it('stopped in the closure: a player standing just inside the closed stretch holds it CLOSURE.stopS from their last step along the road, then it is over', () => {
         const s = closed();
         const tell = s.events.find((e) => e.text === CLOSURE_TELL)!.tick;
         const p = inputs(s);
+        // they stopped here (closed() walks them in and stops)
+        const stopped = s.tick;
         expect(routeU(s.player.x, s.player.z)).toBeGreaterThanOrEqual(R.from);
         expect(routeU(s.player.x, s.player.z)).toBeLessThan(R.from + 1.5);
-        while (s.hazards.road!.busy && s.tick - tell < S(CLOSURE.stopS + 5)) p.step();
+        while (s.hazards.road!.busy && s.tick - tell < S(CLOSURE.stopS + 10)) p.step();
         expect(s.hazards.road!.busy).toBe(false);
-        expect((s.tick - tell) / 60).toBeCloseTo(CLOSURE.stopS, 1);
+        // CLOSURE.stopS after their last 0.5 m along: no sooner than that after the tell, and no
+        // later than that after they stood still
+        expect(s.tick - tell).toBeGreaterThanOrEqual(S(CLOSURE.stopS));
+        expect(s.tick - stopped).toBeLessThanOrEqual(S(CLOSURE.stopS));
         // still standing there, the barrier still across the road, the sign still closed
         expect(routeU(s.player.x, s.player.z)).toBeGreaterThanOrEqual(R.from);
         expect(s.hazards.road!.blocking(s.physics, s.closure.barrier.id)).toBe(true);
@@ -949,12 +954,34 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         ]);
     }, 300_000);
 
+    it('a slow walk round the track (the stick at 0.3) takes over CLOSURE.stopS and still ends as "took the track on foot", not cut off', () => {
+        const s = closed();
+        const tell = s.events.find((e) => e.text === CLOSURE_TELL)!.tick;
+        const p = inputs(s);
+        const track = SIDE_PATHS.find((q) => q.name === 'logging-track')!;
+        for (const [u, t] of track.points) {
+            const w = at(u, t);
+            p.walkTo(w.x, w.z, false, undefined, 0.6, 0.3);
+        }
+        const beyond = roadAt(CLOSURE_AT.rejoin + 1.5);
+        p.walkTo(beyond.x, beyond.z, false, undefined, 0.3, 0.3);
+        p.step({}, 5);
+        expect(s.hazards.road!.busy).toBe(false);
+        const o = s.hazards.outcomes[0];
+        // it took longer than the cap from the tell: the cap runs from the last progress, not the tell
+        expect((o.tick - tell) / 60).toBeGreaterThan(CLOSURE.stopS);
+        expect(s.hazards.outcomes.map((x) => x.what)).toEqual(['took the track on foot']);
+    }, 300_000);
+
     it('stopped in the closure waits while someone has hold of the barrier: held past CLOSURE.stopS it stays on; let go, it ends', () => {
         const s = closed();
         const tell = s.events.find((e) => e.text === CLOSURE_TELL)!.tick;
         const p = takeHold(s, 0, -2.5);
         expect(s.physics.holders(s.closure.barrier.id)).toBe(1);
-        while (s.tick - tell < S(CLOSURE.stopS + 3)) p.step();
+        // (standing still, holding it, from here: past CLOSURE.stopS since the tell and since they stopped)
+        const held = s.tick;
+        while (s.tick - held < S(CLOSURE.stopS + 3)) p.step();
+        expect(s.tick - tell).toBeGreaterThan(S(CLOSURE.stopS));
         expect(s.physics.holders(s.closure.barrier.id)).toBe(1);
         expect(s.hazards.road!.busy).toBe(true);
         // let go (grab again): over at once, stopped in it
