@@ -668,7 +668,8 @@ export class LabSim {
         for (const e of this.ropes.events(WINCH_ROPE))
             this.events.push(
                 e.kind === 'snap'
-                    ? { tick: this.tick, kind: 'break', text: 'Snap! The winch rope parted' }
+                    ? // (its own kind: 'break' is a nail's, voiced where the nail is)
+                      { tick: this.tick, kind: 'winch', text: 'Snap! The winch rope parted' }
                     : { tick: this.tick, kind: 'winch', text: 'The winch rope comes free: what it held is gone.' }
             );
     }
@@ -1050,7 +1051,7 @@ export class LabSim {
                 this.events.push({
                     tick: this.tick,
                     kind: 'water',
-                    text: `The bucket made it, but it needs at least ${need} L of water in it. Carry it over the crossing, don't throw it.`
+                    text: `The bucket made it, but it needs at least ${need} L of water. Carry it over the crossing, don't throw it.`
                 });
             }
             return;

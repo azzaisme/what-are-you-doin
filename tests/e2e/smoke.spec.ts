@@ -632,20 +632,36 @@ test('physics sandbox: grab and carry the plank, launch the ragdoll, switch to s
     await lab(page, (l) => l.action('pause')); // resume: the sandbox runs live from here
     await ticks(page, 180); // props settle
     const plank = (await lab(page, (l) => l.entities())).plank;
-    // stand 1.6 m behind the plank (towards +Z) facing it, and aim the crosshair at it
-    await page.evaluate(
-        ([x, z]) => (window as unknown as { __riverLab: Lab }).__riverLab.setFirstPerson(x, z + 1.6, 0, -0.3),
-        [plank.x, plank.z]
-    );
+    // empty hands first (#110): standing somewhere with carry on hands you the comfort plank, and
+    // turning carry off drops it in front of you, where it can lie across the aim at the test plank
     await lab(page, (l) => l.set('carry', false));
-    await ticks(page, 90);
-    const p = await lab(page, (l) => l.player());
-    expect(p.grounded).toBe(true);
-    const pitch = -Math.atan2(p.y + p.eyeHeight - plank.y, Math.hypot(plank.x - p.x, plank.z - p.z));
-    await page.evaluate(
-        ([x, z, pitch]) => (window as unknown as { __riverLab: Lab }).__riverLab.setFirstPerson(x, z + 1.6, 0, pitch),
-        [plank.x, plank.z, pitch]
-    );
+    // stand 1.6 m from the plank facing it, aim the crosshair at it through the look input, and
+    // grab only once the crosshair is on it. Wherever the comfort plank (or anything else) lies, a
+    // blocked view is tried from the next side (#110)
+    let aimed = false;
+    let yaw = 0;
+    for (let k = 0; k < 8 && !aimed; k++) {
+        yaw = (k * Math.PI) / 4;
+        const x = plank.x + 1.6 * Math.sin(yaw);
+        const z = plank.z + 1.6 * Math.cos(yaw);
+        await page.evaluate(
+            ([x, z, yaw]) => (window as unknown as { __riverLab: Lab }).__riverLab.setFirstPerson(x, z, yaw, -0.3),
+            [x, z, yaw]
+        );
+        await ticks(page, 90);
+        const p = await lab(page, (l) => l.player());
+        if (!p.grounded) continue;
+        const pitch = -Math.atan2(p.y + p.eyeHeight - plank.y, Math.hypot(plank.x - p.x, plank.z - p.z));
+        await page.evaluate(
+            ([yaw, pitch]) => (window as unknown as { __riverLab: Lab }).__riverLab.look(yaw, pitch),
+            [yaw, pitch]
+        );
+        for (let tries = 0; tries < 3 && !aimed; tries++) {
+            await ticks(page, 30);
+            aimed = (await lab(page, (l) => l.interaction())).target === 'plank';
+        }
+    }
+    expect(aimed).toBe(true);
     // grab once the crosshair is on it (not on the comfort plank the carry toggle just put away)
     await page.waitForFunction(
         () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().target === 'plank',
@@ -661,7 +677,7 @@ test('physics sandbox: grab and carry the plank, launch the ragdoll, switch to s
         }
     );
     // look ahead: the hold point follows the view, so the plank is lifted to chest height
-    await lab(page, (l) => l.look(0, 0));
+    await page.evaluate((yaw) => (window as unknown as { __riverLab: Lab }).__riverLab.look(yaw, 0), yaw);
     // lifted off the ground (software GL runs ~1 fps, so wait on sim progress, not wall time)
     await page.waitForFunction(
         (y0) => (window as unknown as { __riverLab: Lab }).__riverLab.entities().plank.y > y0 + 0.3,
