@@ -33,6 +33,7 @@ import { aabb, mat34, pose, poseIsFinite, poseToMat34, transformAabb } from '../
 import type { AABB, Pose } from '../voxels/math.ts';
 import { MeshOutput, meshRegionBlocked } from '../voxels/mesher.ts';
 import type { MeshMode } from '../voxels/mesher.ts';
+import { voxelMaterial } from '../voxels/palette.ts';
 import {
     centerInside,
     createCenterTest,
@@ -873,6 +874,20 @@ export class VoxelService {
             if (performance.now() - t0 > budgetMs || ++n >= maxTiles) break;
         }
         if (want.length > 0) this.world.finalizeStatic();
+    }
+
+    /**
+     * Each stand tree as the static layer draws it, and the static voxel's material at its trunk
+     * (0.7 m up: bark while it stands there, empty while it leans or lies felled). Tests read it.
+     */
+    standState(): { drawn: string; trunk: number }[] {
+        const w = this.wood;
+        if (!w) return [];
+        return w.def.trees.map((t, k) => {
+            const g = w.def.ground(t.x, t.z);
+            const v = this.world.staticAt(cellIndexX(t.x), Math.floor((g + 0.7) / GRID_SIZE), cellIndexZ(t.z));
+            return { drawn: w.drawn[k], trunk: v === 0 ? 0 : voxelMaterial(v) };
+        });
     }
 
     /**

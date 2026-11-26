@@ -37,15 +37,104 @@ export const NAIL = {
     maxPerJoint: 4,
     /** Nails in the whole world (bounded network state). */
     maxTotal: 64,
-    /** Strength of one nail (N): shear capacity before a calibrated break (#49). */
+    /**
+     * Shear capacity of one nail (N), and its withdrawal capacity (N), for a calibrated break
+     * (#49): an 8 mm x 300 mm spike in C24 softwood (rho_k 350 kg/m3), characteristic values of
+     * EN 1995-1-1. Shear 8.2.2 (8.6 f): f_h,k = 0.082 rho_k d^-0.3 = 15.4 MPa, M_y,Rk = 0.3 f_u
+     * d^2.6 = 40.1 N m (f_u 600 MPa), 1.15 sqrt(2 M_y f_h d) = 3.6 kN, plus the rope effect (up to
+     * 15 %): 4.2 kN. Withdrawal 8.3.2: f_ax,k = 20e-6 rho_k^2 = 2.45 MPa x d x 100 mm penetration
+     * = 2.0 kN. The game breaks at the characteristic value itself (no partial factor: a design
+     * would allow kmod / gamma_M = 0.9 / 1.3 = 0.69 of it).
+     */
     strength: 4000,
-    /** Angular stiffness of one nail at stiffness 1 (N m/rad), and the damping time of its spring (s). */
-    angularStiffness: 200000,
+    withdrawal: 2000,
+    /**
+     * Slip modulus of one nail (N/m): how far it gives under load, from EN 1995-1-1 7.1,
+     * K_ser = rho_m^1.5 d^0.8 / 30 per shear plane (rho_m 420 kg/m3 softwood, d 8 mm): 1.5 kN/mm.
+     */
+    slipModulus: 1.5e6,
+    /**
+     * A nail's own lever against a turn (m): how deep below the face it bears in bending. With the
+     * slip modulus it gives a nail's turn stiffness (K_ser x lever^2) and, with its shear, its
+     * moment capacity (strength x lever); see angularStiffness and breaking.ts.
+     */
+    lever: 0.04,
+    /**
+     * Turn stiffness of the faces a joint presses together (N m/rad): timber bedding on its seat,
+     * E_90,mean x I / t, C24 (EN 338: E_90,mean 370 MPa) on a 20 x 15 cm face (I = b h^3 / 12 =
+     * 5.6e-5 m^4) crushing through 10 cm: 2.1e5. The nails are softer in a turn (K_ser x lever^2 =
+     * 2.4e3 for one), but it is the pressed faces that hold a seated piece square; with only the
+     * nails' spring Rapier let a cantilevered beam rock on its pin (up to 12 rad/s).
+     */
+    bedding: 2.1e5,
+    /** How far from a nail the faces it holds together count as its own (m; stress.ts). */
+    faceReach: 0.6,
+    /**
+     * The damping time of the turn about the nails (s): two faces turning flat on each other rub
+     * (with the nails' spring alone, a beam spiked at one end yawed on, damping ratio 0.05).
+     */
+    twistDamping: 0.05,
+    /** The damping time of the joint springs (s). */
     angularDamping: 0.005,
     /** Relative stiffness of a joint: timber to timber flexes more than a spike into stone. */
     stiffness: 0.8,
-    anchorStiffness: 1
+    anchorStiffness: 1,
+    /**
+     * Extra solver iterations a nailed piece gets (Rapier's per-body count, on top of the world's
+     * 4). The timber springs are stiff for a 24 kg plank's roll at a 60 Hz step, and with the
+     * world's iterations the solve left a residue that kept an 8-plank deck quivering (up to 1.3
+     * rad/s) and awake forever, at about 1.2 ms a step; under a 113 kg crate it walked the crate
+     * 5.4 cm in 10 s. With 24 more the same deck sleeps within 3 s, idle or under the crate. The
+     * cost is paid only while the deck is awake.
+     */
+    solverIterations: 24
 } as const;
+
+/**
+ * Angular stiffness of a connection's joint (N m/rad). Timber to timber: about every axis. An
+ * anchor (a spike into stone or ground) is a pin in bending, and stiff only about the nails' own
+ * axis (two nails side by side resist a turn about it as a couple: a beam spiked down at one end
+ * does not swing round in the current).
+ */
+/** sum(lever^2 + r^2) over a connection's nails, r from the group's centre (m^2). */
+function nailArm2(c: { nails: Vec3[] }): number {
+    const n = c.nails.length;
+    if (!n) return NAIL.lever * NAIL.lever;
+    let cx = 0;
+    let cy = 0;
+    let cz = 0;
+    for (const p of c.nails) {
+        cx += p.x / n;
+        cy += p.y / n;
+        cz += p.z / n;
+    }
+    let sum = 0;
+    for (const p of c.nails) sum += NAIL.lever * NAIL.lever + (p.x - cx) ** 2 + (p.y - cy) ** 2 + (p.z - cz) ** 2;
+    return sum;
+}
+
+/**
+ * Turn stiffness of a connection about its nails' own axis (N m/rad): only the nails hold that
+ * turn (two pieces turning flat on each other slide over the faces), as a couple: K_ser x sum(lever^2
+ * + r^2) (EN 1995-1-1 7.1 slip modulus per nail, r from the group's centre), times the joint's
+ * stiffness.
+ */
+export function twistStiffness(c: { stiffness: number; nails: Vec3[] }): number {
+    return c.stiffness * NAIL.slipModulus * nailArm2(c);
+}
+
+/**
+ * Turn stiffness across the nails (tipping one piece on the other, N m/rad): the faces pressed
+ * together bed against it (NAIL.bedding), or the nails' couple where that is stiffer.
+ */
+export function angularStiffness(c: { stiffness: number; nails: Vec3[] }): number {
+    return c.stiffness * Math.max(NAIL.bedding, NAIL.slipModulus * nailArm2(c));
+}
+
+/** Linear stiffness of a connection's joint (N/m): its nails' slip modulus. */
+export function linearStiffness(c: { nails: unknown[] }): number {
+    return Math.max(1, c.nails.length) * NAIL.slipModulus;
+}
 
 export interface Connection {
     id: number;
@@ -60,6 +149,17 @@ export interface Connection {
     rel: { x: number; y: number; z: number; w: number };
     /** Nail heads, in a's local frame (the visual markers and the nail count). */
     nails: Vec3[];
+    /**
+     * Into b, in b's local frame (world for an anchor; unit): against the face of b the first nail
+     * entered. Pressing a against b along it is bearing (the pieces carry it, not the nails); see
+     * stress.ts.
+     */
+    axis?: Vec3;
+    /**
+     * The collider the nails bite into (an anchor's stone; runtime only): with a's own shape, the
+     * extent of the faces a moment across the nails tips the pieces onto (stress.ts).
+     */
+    behind?: number;
     stiffness: number;
     /** Load the connection takes before it breaks (N); grows with nails. */
     strength: number;
@@ -182,6 +282,8 @@ export class JointGraph {
             anchorB: { ...c.anchorB },
             rel: { ...c.rel },
             nails: c.nails.map((n) => ({ ...n })),
+            axis: c.axis ? { ...c.axis } : undefined,
+            behind: c.behind,
             strength: c.strength ?? NAIL.strength * Math.max(1, c.nails.length),
             fatigue: 0
         };

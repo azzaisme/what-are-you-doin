@@ -12,7 +12,7 @@ import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs';
 import { BEAVER_ARM_REACH, BEAVER_LEAN, BEAVER_WALK_AMOUNT, BEAVER_WALK_PHASE } from './assets/beaver.ts';
 import { CELL_TIERS, assetTier, tierCellCm } from './assets/cell-tier.ts';
 import type { CellTier } from './assets/cell-tier.ts';
-import { SAW_MODE, TREE_CUT } from './assets/forestry.ts';
+import { SAW_MODE, TREE_CUT, TREE_SWAY, TREE_TILT_X, TREE_TILT_Z } from './assets/forestry.ts';
 import { BUCKET_CAPACITY } from './assets/props.ts';
 import { GameAudio, soundBodies } from './audio/game-audio.ts';
 import { DebugPanel } from './debug/panel.ts';
@@ -590,8 +590,11 @@ let renderTime = 0;
 let prevGustPhase = 0;
 /** How far the camera is under the weather's area (eased, so its fog fades in and out at the edge). */
 let weatherUnder = 0;
-/** The fog's sky (created with the first weather): the sky turns the fog colour as it closes in. */
-let fogDome: FogDome | null = null;
+/**
+ * The fog's sky, one dome per local view (each centred on its own camera, drawn in that view's
+ * layer only: split screen), created on the first frame of a level with weather.
+ */
+let fogDomes: [FogDome, FogDome] | null = null;
 const playerPose = pose();
 const playerAnim = new Float64Array(ANIM_MAX);
 const bodyPose = pose();
@@ -801,8 +804,14 @@ class LabDirector extends Script {
             );
             scene.app.scene.fog.start = f.start;
             scene.app.scene.fog.end = f.end;
-            fogDome ??= new FogDome(scene.app, scene.worldLayer);
-            fogDome.update(c, f.end);
+            fogDomes ??= [
+                new FogDome(scene.app, scene.viewLayers[0], 'FogDome1'),
+                new FogDome(scene.app, scene.viewLayers[1], 'FogDome2')
+            ];
+            fogDomes[0].update(c, f.end);
+            // player 2's view (split screen) has its own, round its own camera
+            if (scene.split) fogDomes[1].update(scene.camera2.getPosition(), f.end);
+            else fogDomes[1].update(c, Infinity);
             const zone = wz >= 0 ? wSpec.zones[wz] : undefined;
             fx.weather.kind = zone?.kind ?? 0;
             fx.weather.strength = k;
@@ -1550,6 +1559,8 @@ function guestInteraction(): {
 let hostNails: NailMark[] = [];
 let hostNailsKey: unknown = null;
 let hostNailsVersion = -1;
+/** The connection of each host nail mark (its strain). */
+let hostNailConn: number[] = [];
 function updateNails(time: number): void {
     let marks: NailMark[];
     if (guestSession) marks = guestSession.nails;
@@ -1560,7 +1571,10 @@ function updateNails(time: number): void {
             hostNailsVersion = g.version;
             const index = new Map(sim.entities.map((e, i) => [e.id, i]));
             hostNails = nailMarks(g, (id) => index.get(id) ?? -1);
+            hostNailConn = [];
+            for (const c of g.connections()) for (let k = 0; k < c.nails.length; k++) hostNailConn.push(c.id);
         }
+        hostNails.forEach((m, i) => (m.strain = sim.joints.strainLevel(hostNailConn[i])));
         marks = hostNails;
     }
     // every local player's hammer outline, each in its own view (split screen: player 2's below)
@@ -2597,6 +2611,8 @@ window.__riverLab = {
         const by = await pipeline.query<Record<number, number>>('lattice');
         return Object.fromEntries(sim.entities.filter((e) => by[e.id]).map((e) => [e.name, by[e.id]]));
     },
+    /** Each worker lane's stand trees as its static layer draws them (tests: a leaning tree is not there). */
+    standStatic: () => pipeline.query<{ drawn: string; trunk: number }[][]>('stand'),
     /** True when no voxel frame is in flight or waiting to be applied. */
     voxelIdle: () => !pipeline.inFlight && !state.forceVoxel,
     entities: () =>
@@ -2688,7 +2704,8 @@ window.__riverLab = {
     input: (c: Record<string, unknown>) => fpInput.inject(c),
     player: () => ({ ...sim.player, holding: sim.physics.heldId, eyeHeight: EYE_HEIGHT }),
     /** Puts player 1 somewhere (tests and screenshots of big levels). */
-    teleport: (x: number, z: number, yaw?: number) => sim.placePlayer(x, z, yaw ?? sim.player.yaw, 0),
+    teleport: (x: number, z: number, yaw?: number, slot = 0) =>
+        sim.placePlayer(x, z, yaw ?? sim.players[slot].yaw, slot),
     /** Puts the ute down at (x, z), facing yaw, on the ground there (tests: a ute by the logging stand). */
     placeUte: (x: number, z: number, yaw = 0) => {
         if (!sim.vehicle) return false;
@@ -2740,6 +2757,8 @@ window.__riverLab = {
         floods: sim.hazards.floodCount,
         gusts: sim.hazards.gustCount,
         tree: sim.hazards.tree.phase,
+        closure: sim.hazards.road?.phase ?? -1,
+        closureSign: sim.closure.sign.anim[0],
         /** The tick the falling tree's phase began (its tell's start while it leans). */
         treeSince: sim.hazards.tree.since,
         planeY: scene.waterEntity.getPosition().y
@@ -2754,7 +2773,11 @@ window.__riverLab = {
     },
     /** Logging: each stand tree's phase and cut, and the sawmill's state and totals. */
     wood: () => ({
-        trees: Array.from({ length: sim.forestry.treeCount }, (_, n) => sim.forestry.treeState(n)),
+        trees: Array.from({ length: sim.forestry.treeCount }, (_, n) => {
+            const a = sim.forestry.ents.markers[n].anim;
+            // the falling-tree hazard's lean on its marker (what every device draws)
+            return { ...sim.forestry.treeState(n), lean: a[TREE_SWAY], tiltX: a[TREE_TILT_X], tiltZ: a[TREE_TILT_Z] };
+        }),
         sawmill: sim.sawmill
             ? { phase: sim.sawmill.phase, stopped: sim.sawmill.stopped, mode: sim.sawmill.mode, ...sim.sawmill.stats }
             : null

@@ -59,7 +59,9 @@ function handle(msg: ToWorker): void {
                     ? service.world.dynamicHash()
                     : msg.what === 'lattice'
                       ? Object.fromEntries(service.world.latticeHiddenByObject())
-                      : service.verifyGrid();
+                      : msg.what === 'stand'
+                        ? service.standState()
+                        : service.verifyGrid();
             post({ type: 'query', id: msg.id, result });
         }
     } catch (err) {

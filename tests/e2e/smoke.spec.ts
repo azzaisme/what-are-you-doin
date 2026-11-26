@@ -64,8 +64,9 @@ type Lab = {
     };
     placeUte(x: number, z: number, yaw?: number): boolean;
     audio(): { started: boolean; context: string; played: number; recent: string[]; loops: Record<string, number> };
+    standStatic(): Promise<{ drawn: string; trunk: number }[][]>;
     wood(): {
-        trees: { phase: string; cut: number }[];
+        trees: { phase: string; cut: number; lean: number; tiltX: number; tiltZ: number }[];
         sawmill: { phase: string; stopped: string; mode: string; taken: number; planks: number } | null;
     };
 };
@@ -1807,6 +1808,7 @@ test('the falling tree in the Timber Yard: a bite with the ute by the stand, and
     await page.screenshot({ path: 'test-results/falling-tree-crack.png' });
     // the tell: the static tree is gone and the marker draws it, leaning further over time. Step the
     // simulation (deterministic) to 5 s into the 7 s tell and hold it there to look at it
+    const lean0 = (await lab(page, (l) => l.wood())).trees[1];
     await page.evaluate(
         (t) => (window as unknown as { __riverLab: Lab }).__riverLab.seek(t),
         (crack.treeSince + 5 * 60) / 60
@@ -1814,9 +1816,82 @@ test('the falling tree in the Timber Yard: a bite with the ute by the stand, and
     expect(await lab(page, (l) => l.hazards().tree)).toBe(1);
     await idle(page);
     await page.screenshot({ path: 'test-results/falling-tree-leaning.png' });
+    const lean1 = (await lab(page, (l) => l.wood())).trees[1];
+    // the lean, in the browser: most of the way into it, and tilted towards the ute (east, +x)
+    // well past the tree's own lean (none for tree 1)
+    expect(lean1.phase).toBe('standing');
+    expect(lean1.lean).toBeGreaterThan(0.6);
+    expect(lean1.lean).toBeGreaterThan(lean0.lean);
+    expect(lean1.tiltX).toBeGreaterThan(0.1);
+    expect(Math.abs(lean1.tiltZ)).toBeLessThan(0.02);
+    // the static tree is gone from every worker lane (its marker draws it), its trunk cell empty
+    // (lanes that draw no stand, such as a far lattice, list none)
+    const lanes = (
+        await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.standStatic())
+    ).filter((l) => l.length > 0);
+    expect(lanes.length).toBeGreaterThan(0);
+    for (const stand of lanes) {
+        expect(stand[1]).toEqual({ drawn: 'none', trunk: 0 });
+        // a neighbour still stands in the static layer
+        expect(stand[3].drawn).toBe('standing');
+        expect(stand[3].trunk).not.toBe(0);
+    }
     const cells1 = (await lab(page, (l) => l.stats())).dynamicCells;
     // a whole tree's worth of moving cells (at 10 cm: its trunk and four needle tiers)
     expect(cells1 - cells0).toBeGreaterThan(1000);
-    expect((await lab(page, (l) => l.wood())).trees[1].phase).toBe('standing');
+    expect(problems).toEqual([]);
+});
+
+test('the road closure in the Valley: the sign swings to closed, a barrier stands across the forest road', async ({
+    page
+}) => {
+    test.setTimeout(300_000);
+    const problems = await boot(page, '?level=valley&t=0.01&quality=low#cell100');
+    // past the quiet start (seek steps the sim by ticks, then let it run on)
+    await lab(page, (l) => {
+        l.seek(21);
+        l.action('pause');
+    });
+    // step onto the creek crossing, in the tell's window (route u = 0: world -64, 62)
+    await lab(page, (l) => l.teleport(-64, 62, 0));
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().closure >= 1,
+        null,
+        { timeout: 120_000 }
+    );
+    // let the sign swing over (1.2 s of sim), then look at it from the road short of the junction
+    // (straight on, 4 m short of it, route u = 5: world -58.4, 60.6), and at the barrier from 6 m short
+    // of it (u = 16: world -51.4, 52.0); forward is (-sin yaw, -cos yaw)
+    await lab(page, (l) => {
+        l.seek(l.hazards().tick / 60 + 1.5);
+        // run on (seek pauses): the camera follows the snapshots
+        l.action('pause');
+    });
+    for (const [x, z, yaw, file] of [
+        [-58.35, 60.58, Math.atan2(-1, 1), 'road-closure-sign'],
+        [-51.37, 52.0, -0.872, 'road-closure-barrier']
+    ] as const) {
+        await page.evaluate(
+            ([px, pz, py]) => {
+                const l = (window as unknown as { __riverLab: Lab }).__riverLab;
+                l.teleport(px, pz, py);
+                l.look(py, -0.08);
+            },
+            [x, z, yaw] as const
+        );
+        const t0 = await lab(page, (l) => l.hazards().tick);
+        await page.waitForFunction(
+            (t) => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().tick > t + 6,
+            t0,
+            { timeout: 120_000 }
+        );
+        // (the streamed world keeps building while the sim runs: give it a moment)
+        await page.waitForTimeout(4000);
+        await page.screenshot({ path: `test-results/${file}.png` });
+    }
+    expect(await lab(page, (l) => l.hazards().closureSign)).toBeCloseTo(1, 2);
+    const e = await lab(page, (l) => l.entities());
+    expect(e['barrier'].visible).toBe(true);
+    expect(e['closure-sign'].visible).toBe(true);
     expect(problems).toEqual([]);
 });

@@ -132,7 +132,7 @@ export type ToWorker =
           /** This device's quality preset, for the mask budget (MASK_PRESETS; default high). */
           maskPreset?: 'high' | 'low';
       }
-    | { type: 'query'; id: number; what: 'hash' | 'verify' | 'lattice' };
+    | { type: 'query'; id: number; what: 'hash' | 'verify' | 'lattice' | 'stand' };
 
 export type FromWorker =
     | { type: 'ready'; build: BuildInfo; units: UnitMesh[] }

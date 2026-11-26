@@ -288,9 +288,10 @@ export class VoxelClient {
 
     /**
      * `hash`: dynamic content of every lane combined; `verify`: grid checks summed over lanes;
-     * `lattice`: per object id, the cells an object on another lattice takes from it (summed).
+     * `lattice`: per object id, the cells an object on another lattice takes from it (summed);
+     * `stand`: each lane's stand trees as its static layer draws them (an array per lane).
      */
-    async query<T>(what: 'hash' | 'verify' | 'lattice'): Promise<T> {
+    async query<T>(what: 'hash' | 'verify' | 'lattice' | 'stand'): Promise<T> {
         const results = await Promise.all(this.lanes.map((l) => this.queryLane(l, what)));
         if (what === 'lattice') {
             const out: Record<number, number> = {};
@@ -298,6 +299,7 @@ export class VoxelClient {
                 for (const [id, n] of Object.entries(r)) out[Number(id)] = (out[Number(id)] ?? 0) + n;
             return out as T;
         }
+        if (what === 'stand') return results as T;
         if (what === 'hash') return results.reduce((h: number, r) => (Math.imul(h, 31) + (r as number)) >>> 0, 17) as T;
         const v = { vertices: 0, misaligned: 0 };
         for (const r of results as { vertices: number; misaligned: number }[]) {
@@ -307,7 +309,7 @@ export class VoxelClient {
         return v as T;
     }
 
-    private queryLane(lane: Lane, what: 'hash' | 'verify' | 'lattice'): Promise<unknown> {
+    private queryLane(lane: Lane, what: 'hash' | 'verify' | 'lattice' | 'stand'): Promise<unknown> {
         const id = ++this.queryId;
         return new Promise((resolve) => {
             this.queries.set(id, resolve);

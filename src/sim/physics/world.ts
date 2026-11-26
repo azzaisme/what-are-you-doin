@@ -113,6 +113,8 @@ export interface PhysBody {
     enabled: boolean;
     /** Average projected area (m^2) the wind acts on (surface area / 4 for convex shapes). */
     windArea: number;
+    /** Nailed into a structure (Epic 5 joints set it): a character's controller does not shove it. */
+    nailed?: boolean;
     /** Body-local grab anchor override (see BodyOptions.grabPoint). */
     grabPoint?: { x: number; y: number; z: number };
     /** See BodyOptions.wristTorque. */
@@ -190,9 +192,20 @@ export const CHARACTER = {
     maxClimb: (50 * Math.PI) / 180,
     minSlide: (55 * Math.PI) / 180,
     /** Mass used to push dynamic props (bounded pushing, no infinite-mass shoves). */
-    pushMass: 60
+    pushMass: 60,
+    /** A beaver's own weight on what it stands on (kg; the same 60 as it pushes with). */
+    mass: 60
 } as const;
 
+/** What a character's feet rest on: a ball at the bottom of its capsule, a little wider. */
+const FOOT = new RAPIER.Ball(CHARACTER.radius + 0.02);
+/**
+ * A controller contact whose normal points up more than this is a step onto a piece, not a shove
+ * against its side (normal1.y: 0 a wall, 1 a floor; 0.7 is 45 degrees).
+ */
+const SHOVE_MAX_UP = 0.7;
+/** All of a character, a little wider: what it brushes against. */
+const BODY = new RAPIER.Capsule(CHARACTER.half + 0.05, CHARACTER.radius + 0.05);
 const _v = { x: 0, y: 0, z: 0 };
 const _dir = { x: 0, y: 0, z: 0 };
 const _target = { x: 0, y: 0, z: 0 };
@@ -214,6 +227,8 @@ export interface HeldInfo {
 /** One player's physical presence: capsule, controller and what they hold. */
 export class Rig {
     held: PhysBody | null = null;
+    /** The dynamic body stood on last tick (-1: none). */
+    standing = -1;
     heldLocal = { x: 0, y: 0, z: 0 };
     holdDist = 1.5;
     /** The hold distance was set with the wheel: it no longer eases in to the comfortable carry. */
@@ -307,6 +322,8 @@ export class PhysicsWorld {
      */
     readonly gripScale: number[] = [];
     snapDistance: number = GRAB.snapDistance;
+    /** Called just before and just after each Rapier step (the joint load meter). */
+    readonly stepHooks: { before(): void; after(): void }[] = [];
     readonly world: RAPIER.World;
     readonly bodies = new Map<number, PhysBody>();
     private readonly byCollider = new Map<number, PhysBody>();
@@ -329,6 +346,11 @@ export class PhysicsWorld {
     };
     /** One rig per player: capsule, character controller, grab state. Player 0 is the default. */
     readonly rigs: Rig[] = [];
+    /**
+     * Bodies under characters' feet this tick: the controller's vertical push on them (N s), the
+     * weight standing on them (kg) and where.
+     */
+    private readonly stoodOn = new Map<number, { m: number; x: number; z: number }>();
     private terrainHandle = -1;
     /** How many rigs hold each body (two beavers can carry one log; forces add, each bounded). */
     private readonly holdCount = new Map<number, number>();
@@ -672,6 +694,7 @@ export class PhysicsWorld {
         s.vy -= GRAVITY * dt;
         if (s.grounded && s.vy < -1) s.vy = -1; // keep pressing into the ground, never accumulate
         const heldHandle = r.held ? r.held.body.handle : -1;
+        const under = this.underFoot(r);
         k.computeColliderMovement(
             r.collider,
             { x: s.vx * dt, y: s.vy * dt, z: s.vz * dt },
@@ -680,6 +703,27 @@ export class PhysicsWorld {
             // never collide with (or climb onto) what you are holding: no grab/body feedback loop
             heldHandle < 0 ? undefined : (c: RAPIER.Collider) => c.parent()?.handle !== heldHandle
         );
+        // The controller pushes every body under the feet as it moves. That push is taken back
+        // here, down and turning (pushing at its own contact points, it rocked the deck and walked
+        // a loose plank along it); the weight replaces it (weighStanding). Its push sideways stays
+        // only for a loose piece the controller walked into from the side: a shove. Stepping onto
+        // a loose beam's end (its contact facing up, n.y 0.83 to 0.92) had walked the 36 kg beam
+        // 10 cm along at a stroll, and standing still, pressing down on a neighbour's edge, had
+        // shoved it sideways.
+        // The pieces walked into from the side (contact normal under SHOVE_MAX_UP), this move:
+        const shoved = new Set<PhysBody>();
+        if (Math.hypot(wishX, wishZ) > 0.05)
+            for (let i = 0; i < k.numComputedCollisions(); i++) {
+                const c = k.computedCollision(i);
+                const pb = c?.collider ? this.byCollider.get(c.collider.handle) : undefined;
+                if (pb && c && c.normal1.y <= SHOVE_MAX_UP) shoved.add(pb);
+            }
+        for (const u of under) {
+            const v = u.pb.body.linvel();
+            // (the controller's push just woke it: nothing to wake here)
+            u.pb.body.setLinvel(shoved.has(u.pb) && !u.pb.nailed ? { x: v.x, y: u.v.y, z: v.z } : u.v, false);
+            u.pb.body.setAngvel(u.w, false);
+        }
         const m = k.computedMovement();
         const t = body.translation();
         const nx = t.x + m.x;
@@ -693,9 +737,99 @@ export class PhysicsWorld {
         if (Math.abs(m.x) < Math.abs(s.vx * dt) * 0.5) s.vx = m.x / dt;
         if (Math.abs(m.z) < Math.abs(s.vz * dt) * 0.5) s.vz = m.z / dt;
         s.grounded = grounded;
+        r.standing = grounded ? this.standOn(r) : -1;
         s.x = nx;
         s.y = ny;
         s.z = nz;
+    }
+
+    /**
+     * Which dynamic body (a deck plank, a beam) a grounded character stands on, and its weight
+     * there: its own and its share of what it holds (see weighStanding). Returns the body's id, or -1.
+     */
+    private standOn(r: Rig): number {
+        // what is straight under its centre carries it (half off a plank onto stone, the stone does)
+        const t = r.body.translation();
+        const hit = this.world.castRay(
+            new RAPIER.Ray({ x: t.x, y: t.y + 0.05, z: t.z }, { x: 0, y: -1, z: 0 }),
+            0.3,
+            true,
+            RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+            groups(ALL, ALL & ~LAYER.player),
+            r.collider
+        );
+        if (!hit) return -1;
+        const pb = this.byCollider.get(hit.collider.handle);
+        if (!pb || pb.kind !== 'dynamic' || !pb.enabled || this.holders(pb.id) > 0) return -1;
+        let st = this.stoodOn.get(pb.id);
+        if (!st) this.stoodOn.set(pb.id, (st = { m: 0, x: 0, z: 0 }));
+        const m = CHARACTER.mass + (r.held ? r.held.body.mass() / Math.max(1, this.holders(r.held.id)) : 0);
+        st.x = (st.x * st.m + t.x * m) / (st.m + m);
+        st.z = (st.z * st.m + t.z * m) / (st.m + m);
+        st.m += m;
+        return pb.id;
+    }
+
+    /**
+     * The dynamic bodies under a character's feet (not held by anyone), with their vertical
+     * velocity, before it moves.
+     */
+    private underFoot(r: Rig): { pb: PhysBody; v: Vec3Like; w: Vec3Like }[] {
+        const t = r.body.translation();
+        const out: { pb: PhysBody; v: Vec3Like; w: Vec3Like }[] = [];
+        // and anything nailed the capsule brushes: a nailed deck does not give to a shove, and the
+        // controller's push on it (a capsule pressed against a nailed plank's edge read 1.5 kN on
+        // its nails) is taken back whole
+        for (const [shape, y, nailedOnly] of [
+            [FOOT, t.y, false],
+            [BODY, t.y + CHARACTER.half + CHARACTER.radius, true]
+        ] as const)
+            this.world.intersectionsWithShape(
+                { x: t.x, y, z: t.z },
+                { x: 0, y: 0, z: 0, w: 1 },
+                shape,
+                (col) => {
+                    const pb = this.byCollider.get(col.handle);
+                    if (
+                        pb &&
+                        pb.kind === 'dynamic' &&
+                        pb.enabled &&
+                        (!nailedOnly || pb.nailed) &&
+                        this.holders(pb.id) === 0 &&
+                        !out.some((u) => u.pb === pb)
+                    )
+                        out.push({ pb, v: { ...pb.body.linvel() }, w: { ...pb.body.angvel() } });
+                    return true;
+                },
+                RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+                groups(ALL, LAYER.prop),
+                r.collider
+            );
+        return out;
+    }
+
+    /**
+     * Puts the weight of the beavers standing on dynamic bodies on them, before the step. A
+     * kinematic character presses on what is under it only by the controller's push as it moves
+     * into it: in fits, on every plank under its 0.6 m wide feet (three on the yard deck), adding up
+     * to about 0.8 of its weight there; and what it carries weighs nothing at all. So the moves'
+     * push on each body under the feet this tick is replaced by exactly the weight standing on it
+     * (none on a neighbour it only brushed), at where they stand.
+     */
+    private weighStanding(): void {
+        for (const [id, st] of this.stoodOn) {
+            const pb = this.bodies.get(id);
+            if (!pb) continue;
+            const b = pb.body;
+            const t = b.worldCom();
+            const at = st.m > 0 ? { x: st.x, y: t.y, z: st.z } : t;
+            const j = -st.m * GRAVITY * SIM_DT;
+            // (no need to wake it: Rapier keeps a body a character stands on awake, so this never
+            // lands on a sleeping one, where it would wait in its velocity and drop all at once
+            // when it woke; joints-sleep.test.ts stands a beaver still on a beam for 8 s)
+            if (j !== 0) b.applyImpulseAtPoint({ x: 0, y: j, z: 0 }, at, false);
+        }
+        this.stoodOn.clear();
     }
 
     // ------------------------------------------------------------------------------- grab
@@ -1212,7 +1346,10 @@ export class PhysicsWorld {
 
     step(): void {
         const t0 = now();
+        this.weighStanding();
+        for (const h of this.stepHooks) h.before();
         this.world.step();
+        for (const h of this.stepHooks) h.after();
         const t1 = now();
         // bound velocities and recover lost bodies
         let active = 0;
@@ -1283,6 +1420,21 @@ export class PhysicsWorld {
     debugLines(): Float32Array {
         const th = this.terrainHandle;
         return this.world.debugRender(undefined, (c) => c.handle !== th).vertices;
+    }
+
+    /**
+     * Height of what a player could stand on under (x, z), cast down from `fromY` at most `range`:
+     * the ground, props, the ute (not players, nor anything held), or null if nothing is there.
+     */
+    supportY(x: number, z: number, fromY: number, range: number): number | null {
+        const hit = this.world.castRay(
+            new RAPIER.Ray({ x, y: fromY, z }, { x: 0, y: -1, z: 0 }),
+            range,
+            true,
+            RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+            groups(ALL, LAYER.static | LAYER.prop | LAYER.kinematic)
+        );
+        return hit ? fromY - hit.timeOfImpact : null;
     }
 
     /** Raycast against static geometry only (used for placing things on the ground). */
