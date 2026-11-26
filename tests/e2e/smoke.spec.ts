@@ -1911,3 +1911,189 @@ test('the road closure in the Valley: the sign swings to closed, a barrier stand
     expect(e['closure-sign'].visible).toBe(true);
     expect(problems).toEqual([]);
 });
+
+// ---------------------------------------------------------------------------- Voxels: Off (#24)
+
+type VoxLab = Lab & {
+    voxels(): {
+        on: boolean;
+        smoothLoaded: boolean;
+        smooth: { meshes: number; objectParts: number };
+        voxelRoots: number;
+        particles: number;
+        particleMaterials: Record<string, number>;
+    };
+    setVoxels(on: boolean): Promise<void>;
+    smoothParts(name: string): number;
+    smoothStand(n: number): { tree: boolean; stump: boolean };
+};
+const vox = <T>(page: Page, fn: (l: VoxLab) => T) => lab(page, fn as unknown as (l: Lab) => T);
+
+test('Voxels: Off switches the yard to plain smooth meshes live, and back', async ({ page }) => {
+    test.setTimeout(300_000);
+    const problems = await boot(page, '?level=yard&t=4&view=orbit&noui');
+    const on0 = await vox(page, (l) => l.voxels());
+    expect(on0.on).toBe(true);
+    expect(on0.voxelRoots).toBeGreaterThan(0);
+    await page.screenshot({ path: 'test-results/voxels-on-yard.png' });
+    await page.evaluate(() => (window as unknown as { __riverLab: VoxLab }).__riverLab.setVoxels(false));
+    await page.waitForTimeout(1500);
+    const off = await vox(page, (l) => l.voxels());
+    // the voxel lattices are gone, smooth ground, scenery and objects are drawn instead
+    expect(off.on).toBe(false);
+    expect(off.voxelRoots).toBe(0);
+    expect(off.smoothLoaded).toBe(true);
+    expect(off.smooth.meshes).toBeGreaterThan(20);
+    expect(off.smooth.objectParts).toBeGreaterThan(20);
+    expect((await lab(page, (l) => l.stats())).drawCalls as number).toBeGreaterThan(0);
+    await page.screenshot({ path: 'test-results/voxels-off-yard.png' });
+    // and back: the lattices again, no smooth meshes drawn
+    await page.evaluate(() => (window as unknown as { __riverLab: VoxLab }).__riverLab.setVoxels(true));
+    await idle(page);
+    const on1 = await vox(page, (l) => l.voxels());
+    expect(on1.on).toBe(true);
+    expect(on1.voxelRoots).toBe(on0.voxelRoots);
+    expect(on1.smooth.meshes).toBe(0);
+    const g = await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid());
+    expect(g.misaligned).toBe(0);
+    expect(problems).toEqual([]);
+});
+
+for (const level of ['lab', 'valley'] as const)
+    test(`Voxels: Off in the ${level === 'lab' ? 'River Lab' : 'Valley'}: smooth meshes, no console errors`, async ({
+        page
+    }) => {
+        test.setTimeout(300_000);
+        const problems = await boot(page, `?level=${level}&t=0.01&quality=low&voxels=off#cell100`);
+        await page.waitForFunction(
+            () => (window as unknown as { __riverLab: VoxLab }).__riverLab.voxels().smoothLoaded,
+            null,
+            { timeout: 180_000 }
+        );
+        await lab(page, (l) => l.action('pause'));
+        await page.waitForTimeout(3000);
+        const v = await vox(page, (l) => l.voxels());
+        expect(v.on).toBe(false);
+        expect(v.voxelRoots).toBe(0);
+        expect(v.smooth.meshes).toBeGreaterThan(20);
+        expect(problems).toEqual([]);
+    });
+
+test('Voxels: Off: the falling tree leans as a smooth tree and still sheds its needles', async ({ page }) => {
+    test.setTimeout(300_000);
+    const problems = await boot(page, '?level=yard&t=0.01&quality=low&voxels=off#cell100');
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: VoxLab }).__riverLab.voxels().smoothLoaded,
+        null,
+        {
+            timeout: 180_000
+        }
+    );
+    expect(await vox(page, (l) => l.smoothStand(1))).toEqual({ tree: true, stump: false });
+    // as the voxel test: the ute east of tree 1, a bite from the west
+    await lab(page, (l) => {
+        l.placeUte(20.5, 4.5, 0);
+        l.seek(21);
+        l.action('pause');
+    });
+    await lab(page, (l) => {
+        l.teleport(14.9, 4.5, -Math.PI / 2);
+        l.look(-Math.PI / 2, -0.75);
+    });
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().target === 'tree-1',
+        null,
+        { timeout: 60_000 }
+    );
+    for (let tries = 0; tries < 30 && (await lab(page, (l) => l.hazards().tree)) === 0; tries++) {
+        await lab(page, (l) => l.input({ grab: true }));
+        await page.waitForTimeout(500);
+    }
+    expect(await lab(page, (l) => l.hazards().tree)).toBe(1);
+    await lab(page, (l) => {
+        l.teleport(20.0, 1.5, Math.atan2(4, -3));
+        l.look(Math.atan2(4, -3), 0.3);
+    });
+    // the tell, read from the same channels: the static tree is hidden, the marker draws it leaning,
+    // and its needles fall as particles
+    let needles = 0;
+    for (let i = 0; i < 40 && needles === 0; i++) {
+        await page.waitForTimeout(250);
+        const m = await vox(page, (l) => l.voxels().particleMaterials);
+        needles = (m['pine-needle'] ?? 0) + (m['pine-needle-light'] ?? 0);
+    }
+    expect(needles).toBeGreaterThan(0);
+    expect(await vox(page, (l) => l.smoothStand(1))).toEqual({ tree: false, stump: false });
+    expect(await vox(page, (l) => l.smoothParts('tree-1'))).toBeGreaterThan(3);
+    await page.screenshot({ path: 'test-results/voxels-off-falling-tree.png' });
+    expect(problems).toEqual([]);
+});
+
+for (const [hostVoxels, guestVoxels] of [
+    ['on', 'off'],
+    ['off', 'on']
+] as const)
+    test(`Voxels: a host with voxels ${hostVoxels} and a guest with them ${guestVoxels} play together`, async ({
+        page,
+        context
+    }) => {
+        test.setTimeout(600_000);
+        const query = (v: string) => `?level=yard&t=0.01&quality=low&net=local&voxels=${v}#cell100`;
+        const problems = await boot(page, query(hostVoxels));
+        const guest = await context.newPage();
+        const guestProblems: string[] = [];
+        guest.on('pageerror', (e) => guestProblems.push(e.message));
+        guest.on('console', (m) => {
+            if (m.type() === 'error' && !IGNORED.some((r) => r.test(m.text()))) guestProblems.push(m.text());
+        });
+        await guest.goto(`/${query(guestVoxels)}`);
+        await guest.waitForFunction(
+            () => (window as unknown as { __riverLab?: Lab }).__riverLab?.ready === true,
+            null,
+            {
+                timeout: 150_000
+            }
+        );
+        type Net = {
+            net: {
+                host(): Promise<void>;
+                games(): { code: string }[];
+                join(c: string): Promise<void>;
+                connect(): Promise<void>;
+                status(): { hosting: string | null; guests: number; guest: { slot: number; received: number } | null };
+            };
+        };
+        const net = (p: Page, src: string, arg?: unknown) =>
+            p.evaluate(
+                ([s, a]) =>
+                    new Function('l', 'a', `return (${s})(l, a)`)(
+                        (window as unknown as { __riverLab: Net }).__riverLab,
+                        a
+                    ),
+                [src, arg] as const
+            );
+        await lab(page, (l) => l.action('pause'));
+        await Promise.all([net(page, '(l) => l.net.connect()'), net(guest, '(l) => l.net.connect()')]);
+        await net(page, '(l) => l.net.host()');
+        const code = ((await net(page, '(l) => l.net.status()')) as { hosting: string }).hosting;
+        await guest.waitForFunction(
+            (c) => (window as unknown as { __riverLab: Net }).__riverLab.net.games().some((g) => g.code === c),
+            code,
+            { timeout: 120_000 }
+        );
+        await net(guest, '(l, c) => l.net.join(c)', code);
+        await guest.waitForFunction(
+            () => ((window as unknown as { __riverLab: Net }).__riverLab.net.status().guest?.received ?? 0) > 5,
+            null,
+            { timeout: 120_000 }
+        );
+        expect(((await net(page, '(l) => l.net.status()')) as { guests: number }).guests).toBe(1);
+        // each draws its own way
+        const hv = await vox(page, (l) => l.voxels());
+        const gv = await vox(guest, (l) => l.voxels());
+        expect(hv.on).toBe(hostVoxels === 'on');
+        expect(gv.on).toBe(guestVoxels === 'on');
+        await guest.waitForTimeout(3000);
+        expect(problems).toEqual([]);
+        expect(guestProblems).toEqual([]);
+    });

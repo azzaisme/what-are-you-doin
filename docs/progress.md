@@ -1,5 +1,25 @@
 # Progress log
 
+## Voxels: Off, plain smooth meshes (2026-11-26, Epic 10, #24)
+
+A setting, **Settings > Video > Voxels** (on by default, saved; `?voxels=off` for one visit), switches live between the voxel lanes and plain smooth meshes. It is a render choice only: the simulation, physics and co-op are the same, and a host and a guest can each have it on or off.
+
+- **Geometry** (`src/smooth/`): the same source the voxelizer works from. Analytic volumes (box, ellipsoid, cylinder, cone) are tessellated; custom volumes (the hollow bucket, the vest) are polygonized from their own `sample()` with marching tetrahedra; the ground is a heightfield of the level's height. Colours and surface classes come from each volume's material field, so the three voxel materials draw it.
+- **Recording** (`src/smooth/recorder.ts`): what a level builds (ground, volumes, single cells such as reeds and flowers, stand trees) is captured as it is built, and a worker (`src/workers/smooth-worker.ts`) builds it once into 16 m chunk units, one unit per stand tree and stump, and shared part meshes.
+- **Renderer** (`src/render/smooth-renderer.ts`): static units are uploaded once; stand trees and stumps show by each tree's state, read from the same marker channels the voxel lane reads; objects are one entity a part, posed every frame from the snapshot ring; in first person your beaver gives way to your limbs. Particles stay (some are gameplay tells, such as a tree about to fall).
+
+**Measured** (`voxbench.mjs`, a local script: settled scene, 30 frames, SwiftShader 640 × 360, High, Xeon at 2.1 GHz with 4 cores, load about 1.3, at 12ef171 plus this change, one run each):
+
+| Level       | Draw calls on → off | Frame median (ms) on → off |  Triangles on → off | Voxel worker (ms) on → off | Smooth build (ms) | Heap (MB) on → off |
+| ----------- | ------------------: | -------------------------: | ------------------: | -------------------------: | ----------------: | -----------------: |
+| River Lab   |         3,153 → 822 |                1,308 → 394 | 1,509,930 → 141,840 |                   39.4 → 0 |             1,690 |          170 → 167 |
+| Timber Yard |       3,668 → 1,113 |                1,454 → 410 | 2,068,466 → 182,540 |                   35.1 → 0 |             2,408 |          206 → 210 |
+| Valley      |       4,074 → 2,279 |                2,243 → 699 | 4,432,614 → 785,356 |                   29.6 → 0 |             4,419 |          418 → 253 |
+
+Frame times are software rendering, so they show the ratio, not phone frame rates.
+
+**Tests:** `tests/unit/voxels-off.test.ts` (the setting and its URL override; primitives closed and wound outward; the bucket polygonized watertight and still hollow; colours from the volume, split by surface class; the recorder; a level's units) and six browser tests in `tests/e2e/smoke.spec.ts` (the yard switched off live and back; the River Lab and the Valley off with no console errors; the falling tree leans as a smooth tree and sheds its needles; co-op with the host on and the guest off, and the reverse).
+
 ## Objects on different lattices resolve by priority (2026-11-22, Epic 10, #107)
 
 Objects drawn on different lattices (1 cm fine, the 5–10 cm base, the coarse 10–20 cm) used to draw

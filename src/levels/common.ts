@@ -127,11 +127,23 @@ export interface TerrainSpec {
 }
 
 /**
+ * A world that records the ground as its spec instead of columns ("Voxels: Off" builds a smooth
+ * heightfield from it: src/smooth/recorder.ts).
+ */
+export interface TerrainRecorder {
+    recordTerrain(t: TerrainSpec): number;
+}
+function isTerrainRecorder(world: unknown): world is TerrainRecorder {
+    return typeof (world as Partial<TerrainRecorder>).recordTerrain === 'function';
+}
+
+/**
  * Writes ground columns: the top cell gets the surface material, the shell below it is filled down
  * to one below the lowest neighbour (or the cut base on the border), and everything deeper is
  * implicit bedrock. Returns the number of columns.
  */
 export function rasterizeTerrain(world: VoxelWorld, t: TerrainSpec): number {
+    if (isTerrainRecorder(world)) return world.recordTerrain(t);
     const i0 = cellIndexX(t.minX);
     const i1 = cellIndexX(t.maxX) - 1;
     const k0 = cellIndexZ(t.minZ);
@@ -187,6 +199,7 @@ export function rasterizeTerrainTile(
     r: { i0: number; i1: number; k0: number; k1: number },
     tile: { ti: number; tk: number }
 ): number {
+    if (isTerrainRecorder(world)) return world.recordTerrain(t);
     const L0 = cellIndexX(t.minX);
     const L1 = cellIndexX(t.maxX) - 1;
     const M0 = cellIndexZ(t.minZ);

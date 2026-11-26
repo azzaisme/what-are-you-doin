@@ -265,14 +265,28 @@ const treeSeed = (n: number) => 9100 + n * 13;
 
 /** Draws a standing stand tree into the static layer. */
 export function drawStandTree(world: VoxelWorld, t: StandTree, n: number, ground: number, stats: RasterStats): void {
+    // a recording world ("Voxels: Off") keeps each stand tree apart, to show it by its state
+    const group = (world as { group?: (name: string | null) => void }).group;
+    group?.call(world, `stand-${n}`);
     for (const v of treeVolumes(treeSeed(n)))
         world.rasterizeStatic(v.volume, standPose(t, ground, v.y), 'coverage50', v.priority, stats);
+    group?.call(world, null);
 }
 
 /** Draws a stump into the static layer. */
 export function drawStump(world: VoxelWorld, t: StandTree, ground: number, stats: RasterStats): void {
     const half = (STUMP_HEIGHT + 0.05) / 2;
     world.rasterizeStatic(stumpVolume(), pose(t.x, ground + half - 0.05, t.z), 'coverage50', 2, stats);
+}
+
+/** Draws every stand tree's stump, each as its own group `stump-<n>` (a recording world only). */
+export function drawStumps(world: VoxelWorld, def: ForestryDef, stats: RasterStats): void {
+    const group = (world as { group?: (name: string | null) => void }).group;
+    def.trees.forEach((t, n) => {
+        group?.call(world, `stump-${n}`);
+        drawStump(world, t, def.ground(t.x, t.z), stats);
+        group?.call(world, null);
+    });
 }
 
 /**

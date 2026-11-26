@@ -58,6 +58,7 @@ import { NailMarkers } from './render/nail-markers.ts';
 import { ReferenceRenderer } from './render/reference.ts';
 import { QUALITY, createLabScene } from './render/scene.ts';
 import type { Quality } from './render/scene.ts';
+import { SmoothRenderer } from './render/smooth-renderer.ts';
 import { VoxelClient } from './render/voxel-pipeline.ts';
 import type { LaneSpec } from './render/voxel-pipeline.ts';
 import { VoxelRenderer } from './render/voxel-renderer.ts';
@@ -106,6 +107,7 @@ import {
 import { pose, quatFromYawPitchRoll, quatRotate, vec3 } from './voxels/math.ts';
 import { SAMPLING_POLICIES } from './voxels/rasterizer.ts';
 import type { SamplingPolicy } from './voxels/rasterizer.ts';
+import type { FromSmoothWorker, ToSmoothWorker } from './workers/smooth-worker.ts';
 
 import './style.css';
 
@@ -264,6 +266,48 @@ const tUpload = performance.now();
 pipeline.applyStatic();
 const staticUploadMs = performance.now() - tUpload;
 const reference = new ReferenceRenderer(app, sim, scene.worldLayer, scene.immediateLayer);
+// "Voxels: Off" (#24): plain smooth meshes instead of the voxel lattices, a render choice only. Built
+// once, in a worker, the first time it is chosen; with it, no voxel frames are sent at all.
+const smooth = new SmoothRenderer(app, scene.worldLayer, lanes.find((l) => l.world && !l.far)!.renderer.materials, sim);
+let smoothBuild: Promise<void> | null = null;
+let smoothBuildMs = 0;
+function buildSmoothWorld(): Promise<void> {
+    const t0 = performance.now();
+    const worker = new Worker(new URL('./workers/smooth-worker.ts', import.meta.url), {
+        type: 'module',
+        name: 'smooth'
+    });
+    return new Promise((resolve, reject) => {
+        worker.onmessage = (e: MessageEvent<FromSmoothWorker>) => {
+            worker.terminate();
+            if (e.data.type === 'error') {
+                console.error('smooth worker:', e.data.message);
+                reject(new Error(e.data.message));
+                return;
+            }
+            smooth.load(e.data.build);
+            smoothBuildMs = performance.now() - t0;
+            resolve();
+        };
+        worker.postMessage({
+            type: 'build',
+            cellCm,
+            level: level.id,
+            data: level.data,
+            seed: 1
+        } satisfies ToSmoothWorker);
+    });
+}
+let voxelsOn = true;
+function applyVoxels(on: boolean): void {
+    if (on === voxelsOn && (on || smoothBuild)) return;
+    voxelsOn = on;
+    pipeline.paused = !on;
+    for (const r of pipeline.renderers) r.setVisible(on);
+    smooth.setEnabled(!on);
+    if (on) state.forceVoxel = true;
+    else smoothBuild ??= buildSmoothWorld();
+}
 const nailMarkers = new NailMarkers(app, scene.worldLayer, scene.viewLayers);
 const fpInput = new FirstPersonInput(canvas);
 // remappable controls (#98): one table shared by the keyboard, the pads and the settings menu
@@ -751,6 +795,13 @@ class LabDirector extends Script {
             voxelClock.frame = frame;
             state.forceVoxel = false;
             pipeline.request(frame, voxelClock.timeOf(frame));
+        }
+        if (!voxelsOn) {
+            smooth.update(renderTime, pipeline.firstPersonSlot, sim.fpBody.id);
+            if (state.particles && pipeline.particles) {
+                const fxNow = pipeline.particles(renderTime);
+                smooth.updateParticles(fxNow.buffer, fxNow.count);
+            } else smooth.updateParticles(EMPTY_PARTICLES, 0);
         }
         // apply a finished voxel frame (all its meshes at once) before this frame renders
         pipeline.poll();
@@ -1725,6 +1776,7 @@ const gpuName = (() => {
     return ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : String(gl.getParameter(gl.RENDERER));
 })();
 
+const EMPTY_PARTICLES = new Float32Array(0);
 const EMPTY_FRAME_STATS = {
     frame: -1,
     time: 0,
@@ -2165,6 +2217,7 @@ function applyInputSettings(): void {
 }
 
 function applyUiSettings(): void {
+    applyVoxels(settings.voxels);
     audio.setVolumes({
         master: settings.volumeMaster,
         effects: settings.volumeEffects,
@@ -2503,7 +2556,8 @@ const menu = new SettingsMenu(
                     label: 'Camera bob & kick',
                     hint: 'Off for less motion: the camera holds steady and menus stop animating'
                 },
-                { kind: 'toggle', key: 'particles', label: 'Leaves & particles' }
+                { kind: 'toggle', key: 'particles', label: 'Leaves & particles' },
+                { kind: 'toggle', key: 'voxels', label: 'Voxels', hint: 'Off: plain smooth meshes' }
             ]
         },
         {
@@ -2615,6 +2669,26 @@ window.__riverLab = {
     standStatic: () => pipeline.query<{ drawn: string; trunk: number }[][]>('stand'),
     /** True when no voxel frame is in flight or waiting to be applied. */
     voxelIdle: () => !pipeline.inFlight && !state.forceVoxel,
+    /** "Voxels: Off" (#24): the state, and what each renderer draws now. */
+    voxels: () => ({
+        on: voxelsOn,
+        smoothLoaded: smooth.loaded,
+        smoothBuildMs,
+        smoothStaticTriangles: smooth.staticTriangles,
+        smooth: smooth.enabled ? smooth.totals() : { meshes: 0, objectParts: 0 },
+        voxelRoots: pipeline.renderers.filter((r) => r.visible).length,
+        particles: smooth.lastParticles,
+        particleMaterials: Object.fromEntries(smooth.particleMaterials)
+    }),
+    /** Voxels Off: an object's smooth parts shown now, and a stand tree's units. */
+    smoothParts: (name: string) => smooth.visibleParts(name),
+    smoothStand: (n: number) => smooth.standState(n),
+    setVoxels(on: boolean) {
+        setSetting('voxels', on);
+        applyVoxels(on);
+        if (menuReady) menu.sync();
+        return smoothBuild ?? Promise.resolve();
+    },
     entities: () =>
         Object.fromEntries(
             sim.entities.map((e) => [

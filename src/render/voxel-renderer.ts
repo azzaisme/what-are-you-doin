@@ -221,6 +221,15 @@ export class VoxelRenderer {
             u.entity.enabled = show ? show(u.minX, u.maxX, u.minZ, u.maxZ) : true;
     }
 
+    /** Shows or hides everything this lattice draws ("Voxels: Off" hides every lattice). */
+    setVisible(v: boolean): void {
+        this.root.enabled = v;
+    }
+
+    get visible(): boolean {
+        return this.root.enabled;
+    }
+
     setDynamicVisible(v: boolean): void {
         this.dynamicVisible = v;
         for (const u of this.dynUnits.values()) u.entity.enabled = v;

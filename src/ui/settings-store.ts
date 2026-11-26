@@ -1,6 +1,6 @@
 /**
  * Player settings: what the settings menu changes, saved in local storage per browser. URL
- * parameters (?quality=, ?look=, ?bob=, ?view=, ?sound=off) still win for that visit, so test and share links
+ * parameters (?quality=, ?look=, ?bob=, ?view=, ?sound=off, ?voxels=off) still win for that visit, so test and share links
  * keep working, but they are not saved.
  *
  * The voxel size is a setting too, but it keeps its own storage key and URL hash (see
@@ -24,6 +24,8 @@ export interface Settings {
     cameraBob: boolean;
     /** Falling leaves and voxel particles. */
     particles: boolean;
+    /** Draw the world in voxels; off: plain smooth meshes (a render choice only, #24). */
+    voxels: boolean;
     /** First person: watch yourself from over the shoulder. */
     overShoulder: boolean;
     /** Size of the menus and HUD text (times the default). */
@@ -47,6 +49,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
     look: 'default',
     cameraBob: true,
     particles: true,
+    voxels: true,
     overShoulder: false,
     uiScale: 1,
     controlHints: true,
@@ -185,6 +188,8 @@ export function urlOverrides(params: URLSearchParams): Partial<Settings> {
     if (look === 'pixel' || look === 'default') o.look = look;
     if (params.get('bob') === 'off') o.cameraBob = false;
     if (params.get('sound') === 'off') o.volumeMaster = 0;
+    const vox = params.get('voxels');
+    if (vox === 'off' || vox === 'on') o.voxels = vox === 'on';
     const view = params.get('view');
     if (view === 'chase' || view === 'side') o.overShoulder = true;
     return o;
