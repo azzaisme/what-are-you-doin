@@ -488,6 +488,16 @@ describe('weather along the Valley (#88): each comes with its counterplay', () =
             if (r.dropAt < 0) held.push(lift);
         }
         expect(held.length, `held at ${held.join(', ')}`).toBeLessThanOrEqual(1);
+        // the control: in the dry, the same carry alone holds at the low heights too (so in the
+        // rain it is the wet grip that loses them, not the height)
+        for (const lift of [-0.8, -1.2]) {
+            const s = valley();
+            s.fpActive = true;
+            s.step(cmd(0));
+            const r = carryUpTheRoad(s, [0], hostSend(s), lift);
+            expect(s.hazards.weather!.busy).toBe(false);
+            expect(r.dropAt, `dry, at ${lift}`).toBe(-1);
+        }
     }, 900_000);
 
     it('counterplay: carried together, two beavers hold it all the way in the rain', () => {
@@ -830,6 +840,34 @@ describe('weather and the one-hazard-at-a-time budget', () => {
         expect(s.hazards.startWeatherNow(s, snow)).toBe(false);
         expect(s.hazards.weather!.zone).toBe(fog);
     }, 180_000);
+
+    it('the debug hook never starts weather over the gorge mist (atmosphere: no hazard is running, but weather is)', () => {
+        const s = valley();
+        s.fpActive = true;
+        const gorge = routeToWorld(80, roadT(80));
+        s.placePlayer(gorge.x, gorge.z, ROUTE_YAW);
+        const mist = zoneOf(WEATHER.mist);
+        // the mist comes on its own (it waits for no budget), before the grace period is over
+        runUntil(
+            s,
+            () => s.hazards.weather!.busy,
+            S(HAZARD.graceS),
+            () => ({ yaw: ROUTE_YAW })
+        );
+        expect(s.hazards.weather!.zone).toBe(mist);
+        // past the grace period, with no hazard running and the mist still on
+        runUntil(
+            s,
+            () => s.tick >= S(HAZARD.graceS) + 10,
+            S(HAZARD.graceS) + 20,
+            () => ({ yaw: ROUTE_YAW })
+        );
+        expect(s.hazards.weather!.zone).toBe(mist);
+        expect(s.hazards.weather!.hazardBusy).toBe(false);
+        expect(s.hazards.busy).toBe(false);
+        expect(s.hazards.startWeatherNow(s, zoneOf(WEATHER.fog))).toBe(false);
+        expect(s.hazards.weather!.zone).toBe(mist);
+    }, 120_000);
 
     it('and with the aimed gust (a Timber Yard with weather over it): neither starts while the other runs', () => {
         const over: LevelDef = {

@@ -573,6 +573,8 @@ export function eventSounds(kind: string, text: string): { name: SfxName; gain: 
     if (kind === 'recovered') return [{ name: 'ding', gain: 0.45, pitch: 0.75 }];
     if (kind === 'hazard' && (text === CLOSURE_TELL || text === CLOSURE_OPEN || text === CLOSURE_SHUT))
         return [{ name: 'clunk', gain: 1, pitch: text === CLOSURE_TELL ? 1 : 1.1 }];
+    // a rule about the bucket (too heavy to jump with it): a dull knock
+    if (kind === 'hint') return [{ name: 'thud', gain: 0.5, pitch: 0.8 }];
     if (kind === 'hazard' && text === TREE_TELL)
         return [
             { name: 'snap', gain: 1, pitch: 0.8 },
