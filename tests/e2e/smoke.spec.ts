@@ -686,8 +686,8 @@ test('level 1, the Timber Yard: starts in first person with the objective, and t
     const s = await lab(page, (l) => l.stats());
     // beaver, ute, bucket, six planks, two beams, three logs, the crate, the windsock, and logging:
     // the axe, the sawmill and the six stand markers (their cut band hidden until a tree is bitten), and
-    // Epic 5's seven deck planks by the bridge
-    expect(s.voxel.objects).toBe(31);
+    // Epic 5's seven deck planks by the bridge and its log dolly
+    expect(s.voxel.objects).toBe(32);
     expect(s.voxel.rejected).toBe(0);
     const g = await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid());
     expect(g.misaligned).toBe(0);
@@ -933,7 +933,7 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
         Math.abs(rowBrightness(Math.floor(shot.height * 0.3)) - rowBrightness(Math.floor(shot.height * 0.8)))
     ).toBeGreaterThan(1);
     const s = await lab(page, (l) => l.stats());
-    expect(s.voxel.objects).toBe(33); // the yard's 31 plus two voxel beaver bodies
+    expect(s.voxel.objects).toBe(34); // the yard's 32 plus two voxel beaver bodies
     // player 2 walks on their own commands
     const before = await page.evaluate(
         () =>
@@ -962,7 +962,7 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
     await lab(page, (l) => (l as unknown as { setPlayers(n: number): void }).setPlayers(1));
     // player 2's body leaves with the next applied voxel frame (wait on it: slow CI runners lag)
     await page.waitForFunction(
-        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 32,
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 33,
         null,
         { timeout: 60_000 }
     );
@@ -1162,7 +1162,7 @@ for (const transport of ['local', 'p2p'] as const)
         // the guest renders the host's world: both beaver bodies and every prop, all on the grid
         // (voxel frames lag the snapshots in software GL, so wait for the frame that has both beavers)
         await guest.waitForFunction(
-            () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 33,
+            () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 34,
             null,
             { timeout: 60_000 }
         );
