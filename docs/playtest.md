@@ -53,6 +53,8 @@ Then start a timer and stay quiet.
       they run to get in, or wedge something against a wheel?
     - **The falling tree** (if they cut a stand tree with the ute close by): do they hear the
       crack, see the tree lean and read the warning? Do they move the ute, go round to cut from its side, or carry on?
+    - **The road closure** (the Valley, coming up the forest road): do they hear the clunk and read
+      the sign? Do they take the old logging track, shift the barrier, or squeeze past it on foot (and what about the ute)?
     - **Every fall into the creek:** what were they trying to do?
     - **Stuck:** a minute or more with no progress. Note what they are trying.
 
@@ -116,6 +118,16 @@ slice may be too short.
   the ute is still in reach, it falls towards it. Moving the ute out of reach, or cutting from the
   ute's side, makes it fall away, on every tree in the stand. At most two, 60 s apart. A tree cut a
   little and left alone sets nothing off until someone cuts it again.
+- **The road closure** (the Valley only): crossing Shallow Creek up the forest road (on foot, or
+  the ute coming at it), a clunk and a toast, and the sign at the old logging track's mouth swings
+  over to "ROAD CLOSED / DETOUR" and an arrow down the track. A striped barrier stands across the
+  road 11 m further on, in an old post-and-rail fence across the valley floor; the ute stops
+  against it (it is fixed until someone takes hold of it). Ways round: the logging track (on foot
+  or in the ute), drag the barrier off the road (one beaver, or two together), or on foot squeeze
+  between the fence posts. The valley sides beyond the fence's ends are not a wall: note if anyone
+  tries to drive the ute up and round that way, and how long it takes them. It is over when the
+  barrier is off the road or everyone has gone round; the sign only says the road is open when it
+  is. Once a run.
 - There is only one hazard at a time, and 15 s of quiet after each one.
 
 ## Recording the results

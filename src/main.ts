@@ -12,7 +12,7 @@ import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs';
 import { BEAVER_ARM_REACH, BEAVER_LEAN, BEAVER_WALK_AMOUNT, BEAVER_WALK_PHASE } from './assets/beaver.ts';
 import { CELL_TIERS, assetTier, tierCellCm } from './assets/cell-tier.ts';
 import type { CellTier } from './assets/cell-tier.ts';
-import { SAW_MODE, TREE_CUT } from './assets/forestry.ts';
+import { SAW_MODE, TREE_CUT, TREE_SWAY, TREE_TILT_X, TREE_TILT_Z } from './assets/forestry.ts';
 import { BUCKET_CAPACITY } from './assets/props.ts';
 import { GameAudio, soundBodies } from './audio/game-audio.ts';
 import { DebugPanel } from './debug/panel.ts';
@@ -2595,6 +2595,8 @@ window.__riverLab = {
         };
     },
     dynamicHash: () => pipeline.query<number>('hash'),
+    /** Each worker lane's stand trees as its static layer draws them (tests: a leaning tree is not there). */
+    standStatic: () => pipeline.query<{ drawn: string; trunk: number }[][]>('stand'),
     /** True when no voxel frame is in flight or waiting to be applied. */
     voxelIdle: () => !pipeline.inFlight && !state.forceVoxel,
     entities: () =>
@@ -2739,6 +2741,8 @@ window.__riverLab = {
         floods: sim.hazards.floodCount,
         gusts: sim.hazards.gustCount,
         tree: sim.hazards.tree.phase,
+        closure: sim.hazards.road?.phase ?? -1,
+        closureSign: sim.closure.sign.anim[0],
         /** The tick the falling tree's phase began (its tell's start while it leans). */
         treeSince: sim.hazards.tree.since,
         planeY: scene.waterEntity.getPosition().y
@@ -2753,7 +2757,11 @@ window.__riverLab = {
     },
     /** Logging: each stand tree's phase and cut, and the sawmill's state and totals. */
     wood: () => ({
-        trees: Array.from({ length: sim.forestry.treeCount }, (_, n) => sim.forestry.treeState(n)),
+        trees: Array.from({ length: sim.forestry.treeCount }, (_, n) => {
+            const a = sim.forestry.ents.markers[n].anim;
+            // the falling-tree hazard's lean on its marker (what every device draws)
+            return { ...sim.forestry.treeState(n), lean: a[TREE_SWAY], tiltX: a[TREE_TILT_X], tiltZ: a[TREE_TILT_Z] };
+        }),
         sawmill: sim.sawmill
             ? { phase: sim.sawmill.phase, stopped: sim.sawmill.stopped, mode: sim.sawmill.mode, ...sim.sawmill.stats }
             : null

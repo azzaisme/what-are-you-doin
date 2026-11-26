@@ -366,6 +366,28 @@ function snap(sr: number, seed: number): Float32Array {
     return fadeEnds(normalize(out), sr);
 }
 
+/** A sign's latch letting go and the board swinging home (the road closure, #77): click, then clunk. */
+function clunk(sr: number, seed: number): Float32Array {
+    const n = len(0.8, sr);
+    const out = new Float32Array(n);
+    // the latch: a short bright click
+    const click = highpass(noise(n, seed), 2500, sr);
+    for (let i = 0; i < n; i++) out[i] += click[i] * 0.5 * env(i, sr, 0.0003, 0.006);
+    // 0.18 s later the board hits its stop: a low metal knock and a thump through the post
+    const at = Math.round(0.18 * sr);
+    const knockF = [180, 180 * 2.4, 180 * 4.1];
+    for (let i = at; i < n; i++) {
+        const t = (i - at) / sr;
+        let v = 0;
+        for (let k = 0; k < knockF.length; k++)
+            v += (Math.sin(2 * Math.PI * knockF[k] * t) * Math.exp(-t * (14 + 10 * k))) / (k + 1);
+        out[i] += v * 0.9;
+    }
+    const body = thud(sr, seed + 1);
+    for (let i = 0; i + at < n && i < body.length; i++) out[i + at] += body[i] * 0.7;
+    return fadeEnds(normalize(out), sr);
+}
+
 /** The handbrake creeping off: a ratchet's clicks, slowing down. */
 function ratchet(sr: number, seed: number): Float32Array {
     const n = len(1.1, sr);
@@ -469,6 +491,7 @@ export const SOUND_NAMES = [
     'creak-2',
     'snap',
     'ratchet',
+    'clunk',
     'saw',
     'chop',
     'slosh',
@@ -544,6 +567,9 @@ export function synthesize(name: SoundName, sr = SYNTH_RATE): SynthSound {
                 break;
             case 'ratchet':
                 samples = ratchet(sr, 92);
+                break;
+            case 'clunk':
+                samples = clunk(sr, 97);
                 break;
             case 'saw':
                 samples = saw(sr, 93);
