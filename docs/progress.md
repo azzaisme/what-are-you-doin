@@ -25,7 +25,7 @@ Three follow-ups from the #145 audit.
 - **Mutation checks:** each change undone fails its test. Those were: "turned back" for everyone;
   no 60 s cap; the cap ignoring a hand on the barrier; and a different weather wording.
 - **Code:** `src/sim/hazard-road.ts` (CLOSURE.stopS, why it ended), `docs/playtest.md`.
-- **Unit tests:** COUNT pass (both voxel sizes), on `epics-5-10` 1eb75c1.
+- **Unit tests:** 1088 pass (112 files, both voxel sizes), on `epics-5-10` 1eb75c1.
 
 ## Epic 8: the playtest log says how each hazard ended (2026-11-23, #70)
 
