@@ -19,6 +19,8 @@ interface Scenario {
     cm: number;
     draws: string[];
     places: Place[];
+    /** Animation channels per object name (channel index: value). */
+    anims?: Record<string, Record<number, number>>;
 }
 
 // the ragdoll standing at the origin, its parts where the sim puts them at rest (DUMMY_PARTS)
@@ -58,13 +60,16 @@ export const SCENARIOS: Scenario[] = [
         name: '1 cm first-person limbs, holding the bucket, three avatars 0.55 m away',
         cm: 1,
         draws: ['fp-body'],
+        // posed carrying (#139: the arms hang otherwise), the bucket hanging by its handle top
+        // (0.44 m above its origin) from the left paw at (0.381, 0.373, 0.076), as the sim hangs it
         places: [
             ['fp-body', 0, 0, 0],
-            ['bucket', 0, 0.45, 0.3],
+            ['bucket', 0.381, 0.373 - 0.44, 0.076],
             ['avatar-1', 0.55, 0, 0],
             ['avatar-2', -0.55, 0, 0],
             ['avatar-3', 0, 0, -0.55]
-        ]
+        ],
+        anims: { 'fp-body': { 2: 1, 5: 1 } } // BEAVER_CARRY, BEAVER_FIRST_PERSON
     },
     {
         name: '1 cm ragdoll head, the beaver standing inside it',
@@ -138,6 +143,7 @@ async function run(s: Scenario): Promise<void> {
             st[o + 2] = y;
             st[o + 3] = z;
             st[o + 7] = 1;
+            for (const [c, v] of Object.entries(s.anims?.[n] ?? {})) st[o + 8 + Number(c)] = v;
         }
         // which goes first alternates too
         for (const k of f % 2 ? [1, 0] : [0, 1]) {

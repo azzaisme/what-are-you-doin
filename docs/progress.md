@@ -43,18 +43,22 @@ frame. Masks off (as before) and on run side by side, framed alternately; median
 on the container's CPU (Xeon, 2.1 GHz), idle. "Cells" is the cells charged against the budget a
 frame.
 
-| Lattice: its object; the others                                | Masks off (ms) | High: on (ms) | Masks (skipped) |  Cells | Hidden | Low: on (ms) | Masks (skipped) |
-| -------------------------------------------------------------- | -------------: | ------------: | --------------: | -----: | -----: | -----------: | --------------: |
-| 1 cm: the bucket, alone                                        |          14.26 |         14.55 |           0 (0) |      0 |      0 |        14.14 |           0 (0) |
-| 1 cm: the bucket; the beaver and the held plank touching it    |          14.19 |         14.03 |           1 (0) |  5,470 |    510 |        13.88 |           1 (0) |
-| 5 cm: the beaver; the 1 cm bucket in it                        |           4.05 |          4.32 |           1 (0) |    725 |    162 |         4.02 |           1 (0) |
-| 1 cm: your limbs holding the bucket; three players 0.55 m away |          18.90 |         19.99 |           1 (0) |    744 |      0 |        19.73 |           1 (0) |
-| 1 cm: the ragdoll's head; the beaver standing inside it        |          22.32 |         30.32 |           1 (0) | 46,435 | 46,414 |        21.50 |           0 (1) |
-| 1 cm: the ragdoll's head; three players 0.5 m away             |          20.71 |         23.60 |           1 (1) | 19,655 |  2,661 |        21.03 |           0 (2) |
-| 1 cm: the ragdoll's head; the beaver and four players around   |          20.99 |         27.82 |           1 (4) | 46,435 | 46,414 |        20.74 |           0 (5) |
-| 1 cm: the ragdoll's head and limbs; its 5 cm body              |          34.74 |         34.55 |           0 (0) |      0 |      0 |        36.00 |           0 (0) |
+| Lattice: its object; the others                                      | Masks off (ms) | High: on (ms) | Masks (skipped) |  Cells | Hidden | Low: on (ms) | Masks (skipped) |
+| -------------------------------------------------------------------- | -------------: | ------------: | --------------: | -----: | -----: | -----------: | --------------: |
+| 1 cm: the bucket, alone                                              |          14.26 |         14.55 |           0 (0) |      0 |      0 |        14.14 |           0 (0) |
+| 1 cm: the bucket; the beaver and the held plank touching it          |          14.19 |         14.03 |           1 (0) |  5,470 |    510 |        13.88 |           1 (0) |
+| 5 cm: the beaver; the 1 cm bucket in it                              |           4.05 |          4.32 |           1 (0) |    725 |    162 |         4.02 |           1 (0) |
+| 1 cm: your limbs carrying the bucket; three players 0.55 m away (\*) |          15.60 |         16.09 |           1 (0) |    746 |      4 |        16.79 |           1 (0) |
+| 1 cm: the ragdoll's head; the beaver standing inside it              |          22.32 |         30.32 |           1 (0) | 46,435 | 46,414 |        21.50 |           0 (1) |
+| 1 cm: the ragdoll's head; three players 0.5 m away                   |          20.71 |         23.60 |           1 (1) | 19,655 |  2,661 |        21.03 |           0 (2) |
+| 1 cm: the ragdoll's head; the beaver and four players around         |          20.99 |         27.82 |           1 (4) | 46,435 | 46,414 |        20.74 |           0 (5) |
+| 1 cm: the ragdoll's head and limbs; its 5 cm body                    |          34.74 |         34.55 |           0 (0) |      0 |      0 |        36.00 |           0 (0) |
 
 (Low's "masks off" column is within run-to-run noise of High's; Low's own run gave 13.97 to 35.88 ms.)
+
+(\*) Re-measured after #139, in a later run: your arms now hang unless you carry something, so the
+scene poses the limbs carrying, with the bucket hanging by its handle from the left paw as the sim
+hangs it. Its masks-off column (15.60 ms) is from that run.
 
 - Before the re-audit, the beaver standing in the head and the crowded head skipped their masks
   (0 hidden): the head drew through the beaver. At High they now cost +8.0 and +6.8 ms, the price

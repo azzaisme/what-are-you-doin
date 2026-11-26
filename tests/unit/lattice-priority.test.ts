@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { BEAVER_CARRY, BEAVER_FIRST_PERSON } from '../../src/assets/beaver.ts';
 import { assetTier } from '../../src/assets/cell-tier.ts';
+import { BUCKET_HANDLE_TOP } from '../../src/assets/props.ts';
 import { createLabEntities } from '../../src/sim/lab-entities.ts';
 import type { SimEntity } from '../../src/sim/lab-entities.ts';
 import { ANIM_MAX } from '../../src/sim/snapshots.ts';
@@ -286,7 +288,11 @@ describe('lattice priority (#107)', () => {
             onmessage: null as null | ((e: { data: ToWorker }) => unknown)
         };
         vi.stubGlobal('self', scope);
-        const run = async (draws: string[], places: [string, number, number, number][]) => {
+        const run = async (
+            draws: string[],
+            places: [string, number, number, number][],
+            anims: Record<string, Record<number, number>> = {}
+        ) => {
             vi.resetModules();
             replies.length = 0;
             await import('../../src/workers/voxel-worker.ts');
@@ -306,6 +312,7 @@ describe('lattice priority (#107)', () => {
                     st[o + 2] = y;
                     st[o + 3] = z;
                     st[o + 7] = 1;
+                    for (const [c, v] of Object.entries(anims[n] ?? {})) st[o + 8 + Number(c)] = v;
                 }
                 await scope.onmessage!({
                     data: { type: 'frame', frame: f, time: f / 20, policy: 'coverage50', reference: false, states: st }
@@ -317,16 +324,20 @@ describe('lattice priority (#107)', () => {
             return stats;
         };
         try {
-            // the first-person limbs holding the bucket, three avatars 0.55 m away (bench-lattice)
+            // the first-person limbs carrying the bucket, three avatars 0.55 m away (bench-lattice).
+            // Since #139 the arms hang unless carrying: posed carrying, the bucket hangs by its
+            // handle top from the left paw as the sim hangs it (paw at (0.381, 0.373, 0.076) from
+            // the root; the handle top 0.44 m above the bucket's origin).
             const fp = await run(
                 ['fp-body'],
                 [
                     ['fp-body', 0, 0, 0],
-                    ['bucket', 0, 0.45, 0.3],
+                    ['bucket', 0.381, 0.373 - (BUCKET_HANDLE_TOP - 0.02), 0.076],
                     ['avatar-1', 0.55, 0, 0],
                     ['avatar-2', -0.55, 0, 0],
                     ['avatar-3', 0, 0, -0.55]
-                ]
+                ],
+                { 'fp-body': { [BEAVER_CARRY]: 1, [BEAVER_FIRST_PERSON]: 1 } }
             );
             for (const s of fp) {
                 expect(s.maskLimit).toBeGreaterThanOrEqual(MASK_BUDGET);

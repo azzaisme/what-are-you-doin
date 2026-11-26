@@ -492,15 +492,8 @@ export class VoxelService {
             if (boxes) queue.push({ t, boxes });
             else if (this.world.objectCellCount(t.id) > 0) this.world.clearObject(t.id);
         }
-        const ran = this.maskRan;
-        if (queue.length === 0) {
-            ran.clear();
-            st.rejected = this.maskRaster.rejected;
-            return;
-        }
-        queue.sort((a, b) => (outranks(a.t, b.t) ? -1 : 1));
         // this lattice's own cells, per drawn object: what a mask can take (listed only once a
-        // mask that needs them runs)
+        // mask that needs them runs); the frame's budget is reported whether or not any mask runs
         let own = 0;
         for (let n = 0; n < this.local.length; n++) {
             const buf = this.ownCells[n] ?? (this.ownCells[n] = { a: new Int32Array(1024), n: -1 });
@@ -509,6 +502,13 @@ export class VoxelService {
         }
         const budget = Math.max(this.maskBudget, this.maskOwnBudget ? own : 0);
         st.limit = budget;
+        const ran = this.maskRan;
+        if (queue.length === 0) {
+            ran.clear();
+            st.rejected = this.maskRaster.rejected;
+            return;
+        }
+        queue.sort((a, b) => (outranks(a.t, b.t) ? -1 : 1));
         const nextRan = this.maskRanNext;
         nextRan.clear();
         for (const q of queue) {
