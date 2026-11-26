@@ -514,10 +514,12 @@ describe('beams by player input', () => {
             expect(Math.abs(b.pose.p.z - BRIDGE.zc)).toBeLessThan(0.3);
             expect(b.pose.p.y).toBeGreaterThan(YARD_Y);
         }
-        // and the yard's beams were never used
+        // and the yard's beams were never used (walked past and over their ends, not shoved)
         ['beam-0', 'beam-1'].forEach((n, i) => {
             const p = g.entity(n).pose.p;
-            expect(Math.hypot(p.x - yardBeams[i].x, p.z - yardBeams[i].z)).toBeLessThan(0.05);
+            const moved = Math.hypot(p.x - yardBeams[i].x, p.z - yardBeams[i].z);
+            console.log(`the yard's ${n} moved ${(moved * 1000).toFixed(1)} mm`);
+            expect(moved).toBeLessThan(0.05);
         });
     }, 300_000);
 });

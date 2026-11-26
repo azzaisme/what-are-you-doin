@@ -20,13 +20,17 @@ import RAPIER from '@dimforge/rapier3d-compat';
 
 import { quatMul, quatRotate, vec3 } from '../../voxels/math.ts';
 import type { Vec3 } from '../../voxels/math.ts';
+import { SIM_DT } from '../clock.ts';
 import { viewDir } from '../physics/grab.ts';
 import type { Quat, Vec3Like } from '../physics/grab.ts';
 import { LAYER, groups } from '../physics/world.ts';
 import type { PhysBody, PhysicsWorld } from '../physics/world.ts';
 
-import { GROUND, JointGraph, NAIL } from './graph.ts';
+import { JointHealth } from './breaking.ts';
+import type { JointEvent } from './breaking.ts';
+import { GROUND, JointGraph, NAIL, angularStiffness, linearStiffness, twistStiffness } from './graph.ts';
 import type { Connection, NailRefusal } from './graph.ts';
+import { StressMeter } from './stress.ts';
 
 const ALL = 0xffff;
 
@@ -40,6 +44,10 @@ export interface NailPreview {
     /** Where the nail head would go (world), and the joint point between the pieces. */
     head: Vec3;
     joint: Vec3;
+    /** Into b at the joint (world, unit): the face the nail entered, turned inwards (bearing axis). */
+    into: Vec3;
+    /** The collider the nail bites into (-1: none). */
+    behind: number;
     /** The existing connection it would reinforce, or 0. */
     reinforces: number;
     /** Measured gap between the pieces along the nail (m), and how far it bites into b. */
@@ -57,6 +65,8 @@ export function emptyPreview(): NailPreview {
         refusal: 'none',
         head: { x: 0, y: 0, z: 0 },
         joint: { x: 0, y: 0, z: 0 },
+        into: { x: 0, y: 0, z: 0 },
+        behind: -1,
         reinforces: 0,
         gap: 0,
         bite: 0
@@ -83,14 +93,21 @@ function quatConjMul(a: Quat, b: Quat): Quat {
  */
 export class JointSystem {
     readonly graph = new JointGraph();
+    /** Each connection's load over the last step. */
+    readonly stress: StressMeter;
+    /** Each connection's utilization, warnings and fatigue. */
+    readonly health = new JointHealth();
     private readonly pw: PhysicsWorld;
     private readonly rapier = new Map<number, RAPIER.ImpulseJoint>();
+    private readonly springK = new Map<number, { twist: number; tipY: number; tipZ: number; linear: number }>();
     private ground: RAPIER.RigidBody | null = null;
 
     constructor(pw: PhysicsWorld) {
         this.pw = pw;
         // a body put somewhere else (respawned, recovered, reset) or switched off comes loose
         pw.onRelocate = (id) => this.detach(id);
+        this.stress = new StressMeter(pw, this.graph);
+        pw.stepHooks.push(this.stress);
     }
 
     private groundBody(): RAPIER.RigidBody {
@@ -168,6 +185,7 @@ export class JointSystem {
         const tB = behind.timeOfImpact + eps;
         const B = pw.bodyOfCollider(behind.collider.handle);
         out.b = B ? B.id : GROUND;
+        out.behind = behind.collider.handle;
         out.gap = tB - depthA;
         out.bite = L - tB;
         if (tB - depthA > NAIL.maxGap || L - tB < NAIL.minBite) {
@@ -194,6 +212,16 @@ export class JointSystem {
         out.joint.x = J.x;
         out.joint.y = J.y;
         out.joint.z = J.z;
+        // into b: against the face the nail entered (the nail's own line where that is unknown)
+        if (n2len > 0.5) {
+            out.into.x = -n2.x / n2len;
+            out.into.y = -n2.y / n2len;
+            out.into.z = -n2.z / n2len;
+        } else {
+            out.into.x = d.x;
+            out.into.y = d.y;
+            out.into.z = d.z;
+        }
         // no fastening pieces that slide against each other
         const va = A.body.velocityAtPoint(J, _v);
         let sx = va.x;
@@ -248,28 +276,40 @@ export class JointSystem {
                 anchorB: B ? toLocal(B.body, pv.joint) : { ...pv.joint },
                 rel: B ? quatConjMul(B.body.rotation(), qa) : { x: qa.x, y: qa.y, z: qa.z, w: qa.w },
                 nails: [toLocal(A.body, pv.head)],
+                axis: B ? toLocalDir(B.body, pv.into) : { ...pv.into },
+                behind: pv.behind,
                 stiffness: B ? NAIL.stiffness : NAIL.anchorStiffness,
                 tick
             });
             if (conn) this.makeJoint(conn, A, B);
+            for (const pb of B ? [A, B] : [A]) {
+                pb.nailed = true;
+                pb.body.setAdditionalSolverIterations(NAIL.solverIterations);
+            }
         }
         for (const id of [pv.a, pv.b]) if (id >= 0) this.pw.releaseAll(id);
         return pv;
     }
 
     /**
-     * The physics joint: the anchor points are held together rigidly, and the pieces' relative
-     * turn springs back to where it was when nailed, with an angular stiffness (N m/rad) of
-     * stiffness x nails x NAIL.angularStiffness. So one nail flexes more than four, and a heavy
-     * load visibly bends a joint before it breaks.
+     * The physics joint: a spherical joint holding the anchor points together, and turn springs
+     * (position motors) holding the pieces' relative turn where it was when nailed, with the nail
+     * group's rotational stiffness, or the stiffer bedding of the faces they press together
+     * (graph.ts angularStiffness). How the load shares out between the nails and the faces is read
+     * afterwards (stress.ts): physics only has to hold the pieces as they would be held.
      */
     private makeJoint(c: Connection, A: PhysBody, B: PhysBody | null): void {
-        const data = RAPIER.JointData.spherical(c.anchorA, c.anchorB);
+        // every axis free, every axis sprung (stiffen): nails slip, they are not pins
+        const data = RAPIER.JointData.generic(c.anchorA, c.anchorB, { x: 1, y: 0, z: 0 }, 0 as RAPIER.JointAxesMask);
         const j = this.pw.world.createImpulseJoint(data, A.body, B ? B.body : this.groundBody(), true);
-        // spherical joint data takes no frames: set them on the joint (the turn at nailing is the rest)
-        j.setLocalFrame1(c.anchorA, { x: 0, y: 0, z: 0, w: 1 });
-        j.setLocalFrame2(c.anchorB, c.rel);
-        // the pieces were touching when nailed: their contact would only fight the joint
+        // the frames: the turn at nailing is the rest, with X along the nails (its own spring)
+        const qb = B ? B.body.rotation() : { x: 0, y: 0, z: 0, w: 1 };
+        const ax = c.axis ? quatRotate(qb, c.axis.x, c.axis.y, c.axis.z, vec3()) : null;
+        const r1 = ax ? fromXTo(toLocalDir(A.body, ax)) : { x: 0, y: 0, z: 0, w: 1 };
+        j.setLocalFrame1(c.anchorA, r1);
+        j.setLocalFrame2(c.anchorB, quatMul(c.rel, r1));
+        // timber to timber, the joint stands in for the faces' contact: left on, the two fought
+        // (a finished deck rattled at 1 rad/s and threw itself apart with nobody on it)
         if (B) j.setContactsEnabled(false);
         this.rapier.set(c.id, j);
         this.stiffen(c);
@@ -277,19 +317,67 @@ export class JointSystem {
 
     /** Angular stiffness of a connection's joint (N m/rad). */
     angularStiffness(c: Connection): number {
-        return c.stiffness * Math.max(1, c.nails.length) * NAIL.angularStiffness;
+        return angularStiffness(c);
     }
 
     /** Sets a connection's joint springs from its stiffness and nails. */
     private stiffen(c: Connection): void {
         const j = this.rapier.get(c.id);
         if (!j) return;
-        const k = this.angularStiffness(c);
         const proto = RAPIER.SphericalImpulseJoint.prototype;
-        for (const axis of [RAPIER.JointAxis.AngX, RAPIER.JointAxis.AngY, RAPIER.JointAxis.AngZ]) {
+        // about the nails (X): their couple; across them: the faces' bedding (stone's or timber's)
+        const across = this.angularStiffness(c);
+        // an anchor's, each no stiffer than the 60 Hz step can follow (omega dt <= 2) on the piece's
+        // inertia about that axis: a beam's bedding about its own long axis (0.19 kg m2) rang at
+        // 1000 rad/s, and an idle beam nailed at one end rolled 4 degrees onto its edge and back;
+        // that roll is its stone seat's contact's to hold anyway. (Timber to timber the joint
+        // stands in for the faces, so it keeps its full bedding.)
+        const A = this.pw.bodies.get(c.a)?.body;
+        const f = A ? quatMul(A.rotation(), j.frameX1()) : null;
+        const set: number[] = [];
+        for (const [axis, k0, e] of [
+            [RAPIER.JointAxis.AngX, twistStiffness(c), [1, 0, 0]],
+            [RAPIER.JointAxis.AngY, across, [0, 1, 0]],
+            [RAPIER.JointAxis.AngZ, across, [0, 0, 1]]
+        ] as const) {
+            let k = k0;
+            if (A && f && c.b === GROUND) {
+                // (into stone: the piece alone turns)
+                const u = quatRotate(f, e[0], e[1], e[2], vec3());
+                k = Math.min(k, inertiaAbout(A, u) * MAX_RING * MAX_RING);
+            }
+            set.push(k);
             proto.configureMotorModel.call(j, axis, RAPIER.MotorModel.ForceBased);
-            proto.configureMotorPosition.call(j, axis, 0, k, k * NAIL.angularDamping);
+            const damp = axis === RAPIER.JointAxis.AngX ? NAIL.twistDamping : NAIL.angularDamping;
+            proto.configureMotorPosition.call(j, axis, 0, k, k * damp);
         }
+        // the nails slip under load (EN 1995-1-1 K_ser per nail): a stiff spring, not a pin, so two
+        // anchors on one beam do not fight over its length (as pins they made it jitter, 0.1 rad/s)
+        const kl = c.stiffness * linearStiffness(c);
+        for (const axis of [RAPIER.JointAxis.LinX, RAPIER.JointAxis.LinY, RAPIER.JointAxis.LinZ]) {
+            proto.configureMotorModel.call(j, axis, RAPIER.MotorModel.ForceBased);
+            proto.configureMotorPosition.call(j, axis, 0, kl, kl * NAIL.angularDamping);
+        }
+        this.springK.set(c.id, { twist: set[0], tipY: set[1], tipZ: set[2], linear: kl });
+    }
+
+    /** The spring stiffnesses a connection's joint was given (N m/rad, N/m; tests). */
+    springs(id: number): { twist: number; tipY: number; tipZ: number; linear: number } | undefined {
+        return this.springK.get(id);
+    }
+
+    /**
+     * After each physics step: rates every connection's load, and breaks those past their limit
+     * (their joints are removed here, between steps, waking the pieces). Returns warnings and breaks.
+     */
+    update(tick: number): JointEvent[] {
+        if (this.graph.size === 0) {
+            this.health.states.clear();
+            return [];
+        }
+        const events = this.health.update(this.graph.connections(), this.stress.loads, tick);
+        for (const e of events) if (e.kind === 'break') this.remove(e.conn.id);
+        return events;
     }
 
     /** Removes one connection and its joint, waking both pieces (call between physics steps). */
@@ -300,7 +388,14 @@ export class JointSystem {
             this.pw.world.removeImpulseJoint(j, true);
             this.rapier.delete(id);
         }
-        for (const b of c ? [c.a, c.b] : []) this.pw.bodies.get(b)?.body.wakeUp();
+        this.springK.delete(id);
+        for (const b of c ? [c.a, c.b] : []) {
+            const pb = this.pw.bodies.get(b);
+            if (!pb) continue;
+            pb.body.wakeUp();
+            pb.nailed = this.graph.of(b).length > 0;
+            pb.body.setAdditionalSolverIterations(pb.nailed ? NAIL.solverIterations : 0);
+        }
         return c;
     }
 
@@ -313,8 +408,42 @@ export class JointSystem {
         for (const c of [...this.graph.connections()]) this.remove(c.id);
     }
 
+    /** 0 calm, 1 creaking, 2 groaning: how hard a connection is working (nail heads, guests). */
+    strainLevel(id: number): number {
+        return this.health.states.get(id)?.level ?? 0;
+    }
+
     /** The Rapier joint behind a connection (tests, stress readout). */
     jointOf(id: number): RAPIER.ImpulseJoint | undefined {
         return this.rapier.get(id);
     }
+}
+
+/** A world direction in body's local frame. */
+function toLocalDir(body: RAPIER.RigidBody, d: Vec3): Vec3 {
+    const q = body.rotation();
+    const out = { x: 0, y: 0, z: 0 };
+    quatRotate({ x: -q.x, y: -q.y, z: -q.z, w: q.w }, d.x, d.y, d.z, out);
+    return out;
+}
+
+/** The rotation that turns +X onto a unit vector (the shortest one). */
+function fromXTo(v: Vec3): { x: number; y: number; z: number; w: number } {
+    if (v.x < -0.999999) return { x: 0, y: 1, z: 0, w: 0 };
+    // axis = X cross v = (0, -v.z, v.y); q = (axis, 1 + v.x), normalised
+    const l = Math.hypot(v.z, v.y, 1 + v.x);
+    return { x: 0, y: -v.z / l, z: v.y / l, w: (1 + v.x) / l };
+}
+
+/** The fastest a joint spring may ring on its pieces (rad/s): two radians a 60 Hz step. */
+const MAX_RING = 2 / SIM_DT;
+
+/** A body's moment of inertia about a world axis through its centre of mass (kg m^2). */
+function inertiaAbout(b: RAPIER.RigidBody, u: Vec3): number {
+    const I = b.effectiveAngularInertia();
+    return (
+        u.x * (I.m11 * u.x + I.m12 * u.y + I.m13 * u.z) +
+        u.y * (I.m12 * u.x + I.m22 * u.y + I.m23 * u.z) +
+        u.z * (I.m13 * u.x + I.m23 * u.y + I.m33 * u.z)
+    );
 }
