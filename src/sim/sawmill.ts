@@ -27,7 +27,7 @@ import {
     SAW_STATE,
     SAW_STOPPED
 } from '../assets/forestry.ts';
-import { BEAM_HALF } from '../assets/props.ts';
+import { BEAM_HALF, PLANK_HALF } from '../assets/props.ts';
 import { SAWMILL, sawmillToWorld, worldToSawmill } from '../levels/forestry.ts';
 import type { SawmillSpot } from '../levels/forestry.ts';
 import { pose, quatFromYawPitchRoll, quatMul, quatRotate, quatSlerp } from '../voxels/math.ts';
@@ -242,7 +242,7 @@ export class Sawmill {
         const O = SAWMILL.outfeed;
         const flat = quatMul(quatFromYawPitchRoll(this.spot.yaw, 0, 0), quatFromYawPitchRoll(0, Math.PI / 2, 0));
         // half thickness lying flat (plank 0.1 m, beam 0.15 m)
-        const half = out === 'beam' ? BEAM_HALF.z : 0.05;
+        const half = out === 'beam' ? BEAM_HALF.z : PLANK_HALF.z;
         for (let layer = 0; layer < 2; layer++)
             for (const z of O.laneZ) {
                 const w = sawmillToWorld(this.spot, O.x, O.barTop + half + 0.003 + layer * (2 * half + 0.005), z);
@@ -262,7 +262,7 @@ export class Sawmill {
         const shape =
             out === 'beam'
                 ? new RAPIER.Cuboid(BEAM_HALF.x + 0.04, BEAM_HALF.y + 0.02, BEAM_HALF.z - 0.005)
-                : new RAPIER.Cuboid(1.24, 0.12, 0.045);
+                : new RAPIER.Cuboid(PLANK_HALF.x + 0.04, PLANK_HALF.y + 0.02, PLANK_HALF.z - 0.005);
         this.pw.world.intersectionsWithShape(
             p,
             q,
