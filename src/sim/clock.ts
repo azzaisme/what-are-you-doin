@@ -10,6 +10,8 @@
 export const SIM_HZ = 60;
 export const SIM_DT = 1 / SIM_HZ;
 export const MAX_CATCHUP_STEPS = 4;
+/** Catch-up cap of the browser tests' fast clock (one second of steps per drawn frame). */
+export const FAST_CATCHUP_STEPS = 60;
 export const VOXEL_RATES = [12, 20, 30, 60] as const;
 export type VoxelRate = (typeof VOXEL_RATES)[number];
 
@@ -19,15 +21,17 @@ export class FixedStepClock {
     private acc = 0;
     /** Ticks dropped because catch-up was capped (instrumented, not hidden). */
     droppedTicks = 0;
+    /** Most steps one call to `advance` returns (the browser tests' fast clock raises it). */
+    maxSteps = MAX_CATCHUP_STEPS;
 
-    /** Adds wall time; returns how many fixed steps to run now (0..MAX_CATCHUP_STEPS). */
+    /** Adds wall time; returns how many fixed steps to run now (0..maxSteps). */
     advance(frameDt: number): number {
         if (!(frameDt > 0) || !Number.isFinite(frameDt)) return 0;
         this.acc += frameDt;
         let steps = Math.floor(this.acc / SIM_DT + 1e-9);
-        if (steps > MAX_CATCHUP_STEPS) {
-            this.droppedTicks += steps - MAX_CATCHUP_STEPS;
-            steps = MAX_CATCHUP_STEPS;
+        if (steps > this.maxSteps) {
+            this.droppedTicks += steps - this.maxSteps;
+            steps = this.maxSteps;
             this.acc = steps * SIM_DT; // drop the backlog instead of spiralling
         }
         this.acc -= steps * SIM_DT;

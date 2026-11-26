@@ -23,6 +23,8 @@
 import type { LevelDef } from '../levels/level.ts';
 
 import { SIM_HZ } from './clock.ts';
+import { RoadClosure } from './hazard-road.ts';
+import type { ClosureEntities, RoadClosureSpec } from './hazard-road.ts';
 import { TreeHazard } from './hazard-tree.ts';
 import type { TreeHazardHost } from './hazard-tree.ts';
 import type { SimEvent } from './lab-sim.ts';
@@ -75,6 +77,8 @@ export interface HazardSpec {
     weather?: WeatherSpec;
     /** The tree that falls towards the ute (#74, src/sim/hazard-tree.ts). */
     tree?: boolean;
+    /** The road closure sign swap (#77, src/sim/hazard-road.ts). */
+    roadClosure?: RoadClosureSpec;
 }
 
 /** Timings (seconds) and budgets. */
@@ -157,6 +161,8 @@ export interface HazardHost {
     readonly driver: number;
     /** The logging stand (the falling-tree hazard). */
     readonly forestry?: TreeHazardHost['forestry'];
+    /** The road closure's barrier and sign. */
+    readonly closure?: ClosureEntities;
 }
 
 interface Quat4 {
@@ -213,12 +219,22 @@ export class HazardDirector {
     private gustOver = 0;
     /** The tree that falls towards the ute (#74). */
     readonly tree = new TreeHazard();
+    /** The road closure (#77), in levels that have one. */
+    road: RoadClosure | null = null;
     /** The handbrake prank: phase, ticks in it, count, how long the ute has stood parked. */
     brakePhase: number = PHASE.idle;
     brakeT = 0;
     brakeCount = 0;
     private brakeEnded = -1e9;
     private parkedTicks = 0;
+
+    /**
+     * How each hazard ended, for the playtest log (#70): host only, never sent (a guest's log has
+     * the toasts). Cleared on a run's reset.
+     */
+    readonly outcomes: { tick: number; hazard: string; what: string }[] = [];
+    /** The handbrake prank: was the ute chocked at any time this time? */
+    private brakeChockedEver = false;
 
     /** A prop stands against a downhill tyre (#75): the ute stays put with its handbrake off. */
     chocked = false;
@@ -231,12 +247,15 @@ export class HazardDirector {
     /** Weather along the level (Epic 9), and the crosswind's hold on each carried piece. */
     readonly weather: WeatherScheduler | null;
     private readonly windOver = new Map<number, number>();
+    /** Was weather (a hazard) on last tick? Its end starts a quiet spell. */
+    private weatherWas = false;
     /** Telemetry: the largest push the snow's crosswind gave (N). */
     lastWindForce = 0;
 
     /** `enabled` false: no hazards at all (tests of other mechanics in hazard levels). */
     constructor(level: LevelDef, enabled = true) {
         this.spec = enabled ? level.hazards : undefined;
+        if (this.spec?.roadClosure) this.road = new RoadClosure(this.spec.roadClosure);
         this.weather = this.spec?.weather ? new WeatherScheduler(this.spec.weather) : null;
         this.seed = level.hazards?.seed ?? 1;
         this.baseY = level.water.y;
@@ -246,8 +265,12 @@ export class HazardDirector {
     reset(): void {
         this.weather?.reset();
         this.windOver.clear();
+        this.weatherWas = false;
         this.lastWindForce = 0;
         this.tree.reset();
+        this.road?.reset();
+        this.outcomes.length = 0;
+        this.brakeChockedEver = false;
         this.waterY = this.baseY;
         this.rise = 0;
         this.floodPhase = this.gustPhase = PHASE.idle;
@@ -276,6 +299,7 @@ export class HazardDirector {
             this.gustPhase !== PHASE.idle ||
             this.brakePhase !== PHASE.idle ||
             this.tree.busy ||
+            !!this.road?.busy ||
             this.floodPending >= 0
         );
     }
@@ -312,12 +336,43 @@ export class HazardDirector {
         if (spec.tree && h.forestry) {
             const ute = h.vehicle?.pb.body.translation() ?? null;
             this.tree.step(
-                { tick, forestry: h.forestry, utePos: ute, say: (t) => this.say(h, t) },
+                {
+                    tick,
+                    forestry: h.forestry,
+                    utePos: ute,
+                    say: (t) => this.say(h, t),
+                    outcome: (t) => this.outcome(tick, 'falling tree', t)
+                },
                 this.canStart(h, tick)
             );
         }
+        if (this.road && h.closure) this.stepRoadClosure(h, this.road, h.closure, tick);
         if (this.busy) this.quietFrom = tick + S(HAZARD.safeS);
         if (this.weather) this.stepWeather(h, this.weather, tick);
+    }
+
+    /** The road closure (#77): who could be coming, on foot or in the ute. */
+    private stepRoadClosure(h: HazardHost, road: RoadClosure, closure: ClosureEntities, tick: number): void {
+        const walkers: { x: number; z: number; slot: number }[] = [];
+        h.players.forEach((p, i) => {
+            if (h.isSlotActive(i) && h.seatOf(i) < 0) walkers.push({ x: p.x, z: p.z, slot: i });
+        });
+        const b = h.vehicle?.pb.body;
+        const ute = b
+            ? { ...b.translation(), speed: Math.hypot(b.linvel().x, b.linvel().z), driven: h.driver >= 0 }
+            : null;
+        road.step(
+            {
+                tick,
+                physics: h.physics,
+                entities: closure,
+                walkers,
+                ute,
+                say: (t) => this.say(h, t),
+                outcome: (t) => this.outcome(tick, 'road closure', t)
+            },
+            this.canStart(h, tick)
+        );
     }
 
     /** May a new hazard start now? */
@@ -329,6 +384,10 @@ export class HazardDirector {
             !this.busy &&
             !this.weather?.hazardBusy
         );
+    }
+
+    private outcome(tick: number, hazard: string, what: string): void {
+        this.outcomes.push({ tick, hazard, what });
     }
 
     private say(h: HazardHost, text: string): void {
@@ -586,7 +645,11 @@ export class HazardDirector {
             rand: (k) => rand(this.seed, k, 0)
         });
         if (said) this.say(h, said);
-        if (w.hazardBusy) this.quietFrom = tick + S(HAZARD.safeS);
+        const cleared = said ? this.spec?.weather?.zones.find((z) => z.clear === said) : undefined;
+        if (cleared) this.outcome(tick, 'weather', `${cleared.name}: came and cleared`);
+        // the quiet spell after it, from when it is over (while it runs, canStart waits for it)
+        if (this.weatherWas && !w.hazardBusy) this.quietFrom = Math.max(this.quietFrom, tick + S(HAZARD.safeS));
+        this.weatherWas = w.hazardBusy;
         const pw = h.physics;
         // the river (never at the same time as a flood: one hazard at a time)
         if (this.floodPhase === PHASE.idle && this.floodPending < 0) {
@@ -697,8 +760,15 @@ export class HazardDirector {
         } else if (this.brakePhase === PHASE.active && this.chocked && !wasChocked) {
             this.say(h, 'Chocked: the ute stops.');
         }
+        if (this.chocked) this.brakeChockedEver = true;
         // someone at the wheel pulls it back on; or after a while it catches by itself
         if (h.driver >= 0 || (this.brakePhase === PHASE.active && this.brakeT >= S(H.offS))) {
+            this.outcome(
+                tick,
+                'handbrake',
+                this.brakeChockedEver ? 'chocked' : h.driver >= 0 ? 'someone got in' : 'rolled until it caught'
+            );
+            this.brakeChockedEver = false;
             this.brakePhase = PHASE.idle;
             this.chocked = false;
             this.brakeEnded = tick;

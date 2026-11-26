@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { eventSounds, soundBodies } from '../../src/audio/game-audio.ts';
+import { VOICED_ELSEWHERE, eventSounds, soundBodies } from '../../src/audio/game-audio.ts';
 import { HOLD_FADE, HeldLoops } from '../../src/audio/held-loops.ts';
 import { sfx } from '../../src/audio/sfx.ts';
 import type { SfxName } from '../../src/audio/sfx.ts';
@@ -8,7 +8,9 @@ import { LOOPS, SOUND_NAMES, SYNTH_RATE, synthesize } from '../../src/audio/synt
 import type { SoundName, SynthSound } from '../../src/audio/synth.ts';
 import { timberYardLevel } from '../../src/levels/timber-yard.ts';
 import { valleyLevel } from '../../src/levels/valley.ts';
+import { CLOSURE_OPEN, CLOSURE_SHUT, CLOSURE_TELL } from '../../src/sim/hazard-road.ts';
 import { TREE_TELL } from '../../src/sim/hazard-tree.ts';
+import type { SimEvent } from '../../src/sim/lab-sim.ts';
 
 // a test that installs an sfx sink never leaves it installed for later tests, even on a failure
 afterEach(() => sfx.setSink(null));
@@ -150,7 +152,50 @@ describe('sound: every sound is synthesized (original, nothing to license)', () 
         expect(eventSounds('hazard', TREE_TELL).map((x) => x.name)).toEqual(['snap', 'creak']);
         // other hazard toasts sound from their state (the siren, the gust), not their text
         expect(eventSounds('hazard', 'The handbrake is off! The ute is rolling.')).toEqual([]);
+        // the road closure's sign: a clunk as it swings closed, and as it swings back open
+        expect(eventSounds('hazard', CLOSURE_TELL).map((x) => x.name)).toEqual(['clunk']);
+        expect(eventSounds('hazard', CLOSURE_OPEN).map((x) => x.name)).toEqual(['clunk']);
+        expect(eventSounds('hazard', CLOSURE_SHUT).map((x) => x.name)).toEqual(['clunk']);
         expect(eventSounds('fell', 'Splash!')).toEqual([]);
+    });
+
+    it('every kind of event has a sound: here from its toast, or placed in the world where it happens', () => {
+        // a Record over SimEvent['kind'], so a new kind fails to type-check here until it is listed
+        const sample: Record<SimEvent['kind'], string> = {
+            goal: '',
+            fell: 'Splash! Fished out and put back on the bank.',
+            recovered: '',
+            step: '',
+            ute: 'The ute is back on its wheels.',
+            water: 'Filled up: 4.0 L in the bucket.',
+            hazard: TREE_TELL,
+            wood: 'Timber! The pine falls north.',
+            creak: '',
+            break: '',
+            hint: ''
+        };
+        for (const [kind, text] of Object.entries(sample) as [SimEvent['kind'], string][]) {
+            const here = eventSounds(kind, text).length > 0;
+            // exactly one of the two, so nothing is silent and nothing plays twice
+            expect(here !== VOICED_ELSEWHERE.has(kind), kind).toBe(true);
+        }
+        expect([...VOICED_ELSEWHERE].sort()).toEqual(['break', 'creak', 'fell']);
+        // the ute's toasts: the seat change already sounds the door; a recovery dings; its rule knocks
+        expect(eventSounds('ute', 'In the driver’s seat. E to get out.')).toEqual([]);
+        expect(eventSounds('ute', 'Player 2: Riding along. E to get out.')).toEqual([]);
+        expect(eventSounds('ute', 'The ute is back where it last stood on firm ground.').map((x) => x.name)).toEqual([
+            'ding'
+        ]);
+        expect(
+            eventSounds(
+                'ute',
+                'Loose beams shift under the ute: nail each beam down at both ends to drive across.'
+            ).map((x) => x.name)
+        ).toEqual(['thud']);
+        expect(eventSounds('water', 'The bucket made it, but it is empty.').map((x) => x.name)).toEqual(['slosh']);
+        expect(eventSounds('wood', 'Fresh logs have been delivered to the log pile.').map((x) => x.name)).toEqual([
+            'knock'
+        ]);
     });
 
     it('the Valley’s waterfall is heard from where it falls (its sound spot is the waterfall piece)', () => {

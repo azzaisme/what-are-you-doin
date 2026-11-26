@@ -12,7 +12,7 @@ import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs';
 import { BEAVER_ARM_REACH, BEAVER_LEAN, BEAVER_WALK_AMOUNT, BEAVER_WALK_PHASE } from './assets/beaver.ts';
 import { CELL_TIERS, assetTier, tierCellCm } from './assets/cell-tier.ts';
 import type { CellTier } from './assets/cell-tier.ts';
-import { SAW_MODE, TREE_CUT } from './assets/forestry.ts';
+import { SAW_MODE, TREE_CUT, TREE_SWAY, TREE_TILT_X, TREE_TILT_Z } from './assets/forestry.ts';
 import { BUCKET_CAPACITY } from './assets/props.ts';
 import { GameAudio, soundBodies } from './audio/game-audio.ts';
 import { DebugPanel } from './debug/panel.ts';
@@ -61,7 +61,7 @@ import type { Quality } from './render/scene.ts';
 import { VoxelClient } from './render/voxel-pipeline.ts';
 import type { LaneSpec } from './render/voxel-pipeline.ts';
 import { VoxelRenderer } from './render/voxel-renderer.ts';
-import { FixedStepClock, SIM_DT, VOXEL_RATES, VoxelClock } from './sim/clock.ts';
+import { FAST_CATCHUP_STEPS, FixedStepClock, SIM_DT, VOXEL_RATES, VoxelClock } from './sim/clock.ts';
 import type { VoxelRate } from './sim/clock.ts';
 import { ACTION_DROP_TEST, ACTION_RAGDOLL, ACTION_RESET_PROPS, neutralCommand } from './sim/commands.ts';
 import type { PlayerCommand } from './sim/commands.ts';
@@ -82,8 +82,17 @@ import { PlaytestPanel } from './ui/playtest-panel.ts';
 import { controlNames, interactionPrompt } from './ui/prompts.ts';
 import { SettingsMenu } from './ui/settings-menu.ts';
 import type { SettingValue } from './ui/settings-menu.ts';
-import { SETTING_RANGES, deviceDefaults, loadSettings, saveSettings, urlOverrides } from './ui/settings-store.ts';
+import {
+    DEVICE_KEYS,
+    SETTING_RANGES,
+    deviceDefaults,
+    loadChosen,
+    loadSettings,
+    saveSettings,
+    urlOverrides
+} from './ui/settings-store.ts';
 import type { Settings } from './ui/settings-store.ts';
+import { waterHudText } from './ui/water-hud.ts';
 import { woodLabel, woodPrompt } from './ui/wood-prompt.ts';
 import {
     CELL_SIZE_MAX_CM,
@@ -94,7 +103,7 @@ import {
     OLD_CELL_SIZE_STORAGE_KEYS,
     clampCellSizeCm
 } from './voxels/grid.ts';
-import { pose, quatFromYawPitchRoll } from './voxels/math.ts';
+import { pose, quatFromYawPitchRoll, quatRotate, vec3 } from './voxels/math.ts';
 import { SAMPLING_POLICIES } from './voxels/rasterizer.ts';
 import type { SamplingPolicy } from './voxels/rasterizer.ts';
 
@@ -120,6 +129,8 @@ const DEFAULT_SETTINGS = deviceDefaults({
     reducedMotion: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
 });
 const savedSettings: Settings = loadSettings(settingsStorage, DEFAULT_SETTINGS);
+// device-dependent settings the player has chosen: kept even when they match this device's default
+const chosenSettings = loadChosen(settingsStorage);
 const settings: Settings = { ...savedSettings, ...urlOverrides(params) };
 const initialQuality: Quality = QUALITY[settings.quality];
 // ?level=tutorial|yard|lab; otherwise the last level played; a first visit starts with the tutorial
@@ -233,15 +244,20 @@ if (level.stream)
 const pipeline = new VoxelClient(lanes, sim);
 /** The fog's start for the quality preset (the weather closes the fog in from here and from the level's end). */
 let baseFogStart = scene.app.scene.fog.start;
-/** Streamed levels: how far around the cameras the near world is built follows the quality preset. */
+/**
+ * The quality preset's share of the voxel workers: the mask budget (every level), and on streamed
+ * levels how far around the cameras the near world is built.
+ */
 function applyViewDistance(q: Quality): void {
+    pipeline.maskPreset = q.name;
     if (!level.stream) return;
     const v = viewDistance(level.stream, q.name);
     pipeline.nearRadius = v.radius;
     scene.app.scene.fog.start = baseFogStart = v.fogStart;
 }
 applyViewDistance(initialQuality);
-const build = await pipeline.init(1, level.id, level.data);
+// ?masks=off: objects on different lattices draw through one another, as before #107 (comparisons)
+const build = await pipeline.init(1, level.id, level.data, params.get('masks') !== 'off');
 setLoading('Uploading meshes…');
 await nextFrame();
 const tUpload = performance.now();
@@ -265,7 +281,8 @@ const watch = (name: string, bottom: number, timber: boolean) => {
     if (e) watched.push({ slot: e.slot, bottom, timber });
 };
 for (const e of sim.entities) {
-    if (e.name === 'plank' || e.name === 'held-plank' || e.name.startsWith('extra-plank')) watch(e.name, 0.05, true);
+    if (e.name === 'plank' || e.name === 'held-plank' || e.name === 'long-plank' || e.name.startsWith('extra-plank'))
+        watch(e.name, 0.05, true);
     else if (e.name.startsWith('beam-')) watch(e.name, 0.075, true);
     else if (e.name.startsWith('crate-')) watch(e.name, 0.25, true);
 }
@@ -421,7 +438,18 @@ const localViews = () => localSlots.length;
 
 /** Test hook: fields merged into local view v's next command (no real pads in headless tests). */
 const injectedFor = new Map<number, Partial<PlayerCommand>>();
+/** Test hook: runs after each simulation step the page runs (stop on the tick a condition is met). */
+let stepHook: (() => void) | null = null;
 const clock = new FixedStepClock();
+/**
+ * Browser tests only: a Playwright init script sets `window.__uncivilFastClock = true` before the
+ * page loads (no URL, setting or key turns it on). Software GL draws about one frame a second, and
+ * the normal clock (the engine's dt, capped at 0.1 s, at most 4 steps a frame) then runs the game
+ * 10-20x slower than real time. The fast clock takes the wall time since the last frame (up to 1 s)
+ * and runs up to 60 steps a frame: the same steps in the same order, only more per drawn frame.
+ */
+const fastClock = (window as { __uncivilFastClock?: unknown }).__uncivilFastClock === true;
+if (fastClock) clock.maxSteps = FAST_CATCHUP_STEPS;
 const voxelClock = new VoxelClock();
 
 // ------------------------------------------------------------------------------------- state
@@ -603,6 +631,7 @@ class LabDirector extends Script {
 
     postUpdate(dt: number): void {
         const now = performance.now();
+        const wallDt = (now - lastFrameStamp) / 1000;
         frameTimes[frameTimeHead] = now - lastFrameStamp;
         frameTimeHead = (frameTimeHead + 1) % frameTimes.length;
         frameTimeCount = Math.min(frameTimes.length, frameTimeCount + 1);
@@ -639,11 +668,12 @@ class LabDirector extends Script {
             else if (guestSession.hostGone) leaveOnline('The host left the game.');
             else noteReconnect(guestSession);
         } else if (!state.paused) {
-            const steps = clock.advance(dt);
+            const steps = clock.advance(fastClock ? Math.min(1, wallDt) : dt);
             for (let s = 0; s < steps; s++) {
                 const c = slotCommands();
                 sim.step(playerOneCommand(), c[1], c.slice(2));
                 hostSession?.afterStep((slot) => sim.interactionIds(slot));
+                stepHook?.();
                 physTimes[physHead] = sim.physicsMs;
                 physHead = (physHead + 1) % physTimes.length;
                 physCount = Math.min(physTimes.length, physCount + 1);
@@ -1429,6 +1459,7 @@ function setUiHidden(h: boolean): void {
 const PROP_LABEL: Record<string, string> = {
     plank: 'plank',
     'held-plank': 'plank',
+    'long-plank': 'long plank',
     log: 'log (heavy)',
     cube: 'crate',
     sphere: 'ball',
@@ -1505,9 +1536,8 @@ function updateWater(): void {
         const stages = level.rules?.stages;
         const k = guestSession ? guestSession.step : sim.progress.step;
         const flower = stages && stages[Math.min(k, stages.length - 1)]?.flower;
-        const full = Math.max(0, Math.min(10, Math.round((w.volume / BUCKET_CAPACITY) * 10)));
-        t = `Bucket ${'▮'.repeat(full)}${'▯'.repeat(10 - full)} ${w.volume.toFixed(1)} L`;
-        if (flower) t += ` · flower ${w.poured.toFixed(1)} / ${WATER.minDelivery} L`;
+        // (from the 0.01 L the host sends its guests, so every device shows the same line)
+        t = waterHudText(w.volume, w.poured, BUCKET_CAPACITY, flower ? WATER.minDelivery : undefined);
     }
     if (t !== waterText) {
         waterText = t;
@@ -1535,7 +1565,15 @@ function pollEvents(): void {
         playtest.note(performance.now(), e.kind, e.text);
         updateObjective();
     }
+    // how each hazard ended (the host's own account: not sent to guests)
+    const outs = sim.hazards.outcomes;
+    if (outs.length < seenOutcomes) seenOutcomes = 0;
+    while (seenOutcomes < outs.length) {
+        const o = outs[seenOutcomes++];
+        playtest.note(performance.now(), 'outcome', `${o.hazard}: ${o.what}`);
+    }
 }
+let seenOutcomes = 0;
 let promptText = '';
 
 /** Context prompt (design doc §2.3): what a click (or a trigger) would do right now. */
@@ -1596,6 +1634,8 @@ function guestInteraction(): {
 let hostNails: NailMark[] = [];
 let hostNailsKey: unknown = null;
 let hostNailsVersion = -1;
+/** The connection of each host nail mark (its strain). */
+let hostNailConn: number[] = [];
 function updateNails(time: number): void {
     let marks: NailMark[];
     if (guestSession) marks = guestSession.nails;
@@ -1606,7 +1646,10 @@ function updateNails(time: number): void {
             hostNailsVersion = g.version;
             const index = new Map(sim.entities.map((e, i) => [e.id, i]));
             hostNails = nailMarks(g, (id) => index.get(id) ?? -1);
+            hostNailConn = [];
+            for (const c of g.connections()) for (let k = 0; k < c.nails.length; k++) hostNailConn.push(c.id);
         }
+        hostNails.forEach((m, i) => (m.strain = sim.joints.strainLevel(hostNailConn[i])));
         marks = hostNails;
     }
     // every local player's hammer outline, each in its own view (split screen)
@@ -1771,6 +1814,12 @@ const EMPTY_FRAME_STATS = {
     dirtyCells: 0,
     dynDynOverlaps: 0,
     dynStaticOverlaps: 0,
+    latticeMasks: 0,
+    latticeHidden: 0,
+    maskSkipped: 0,
+    maskCells: 0,
+    maskLimit: 0,
+    maskRejected: 0,
     staticRebuilt: 0,
     dynamicRebuilt: 0,
     rasterMs: 0,
@@ -1824,6 +1873,7 @@ function collectStats() {
         drawables: t.drawables,
         heapMB: mem ? mem.usedJSHeapSize / 1e6 : null,
         droppedTicks: clock.droppedTicks,
+        fastClock,
         physics: {
             props: sim.propsMode,
             tickMsAvg: physAvg(),
@@ -1869,7 +1919,7 @@ function statsText(): string {
         `  candidates ${v.candidates} samples ${v.samples}`,
         `  occupied ${v.occupied} changed ${v.changedCells}`,
         `  dirty chunks: static ${v.staticRebuilt} dyn ${v.dynamicRebuilt}`,
-        `  overlap dyn/dyn ${v.dynDynOverlaps} dyn/static ${v.dynStaticOverlaps}`,
+        `  overlap dyn/dyn ${v.dynDynOverlaps} dyn/static ${v.dynStaticOverlaps} lattices ${v.latticeHidden}`,
         `  worker ms raster ${f(v.rasterMs)} resolve ${f(v.resolveMs)} mesh ${f(v.meshMs)}`,
         `  worker total ${f(v.totalMs)}   main-thread upload ${f(v.uploadMs)}`,
         `physics  ${s.physics.props}  tick ms avg ${f(s.physics.tickMsAvg)} p95 ${f(s.physics.tickMsP95)} max ${f(s.physics.tickMsMax)}`,
@@ -2166,7 +2216,8 @@ function setSetting<K extends keyof Settings>(key: K, v: Settings[K]): void {
     if (settings[key] === v) return;
     settings[key] = v;
     savedSettings[key] = v;
-    saveSettings(settingsStorage, savedSettings, DEFAULT_SETTINGS);
+    if (DEVICE_KEYS.includes(key)) chosenSettings.add(key);
+    saveSettings(settingsStorage, savedSettings, DEFAULT_SETTINGS, chosenSettings);
 }
 
 /** Settings that also live in the game state (the debug panel and hotkeys change them too). */
@@ -2328,6 +2379,9 @@ const menu = new SettingsMenu(
                         if (pid) host.set(pid, v);
                         else (setSetting as (k: keyof Settings, v: SettingValue) => void)(k, v);
                     }
+                    // back to following the device: no setting counts as the player's choice any more
+                    chosenSettings.clear();
+                    saveSettings(settingsStorage, savedSettings, DEFAULT_SETTINGS, chosenSettings);
                     applyInputSettings();
                     applyUiSettings();
                     updateHud();
@@ -2639,6 +2693,13 @@ window.__riverLab = {
         };
     },
     dynamicHash: () => pipeline.query<number>('hash'),
+    /** Per object name: cells an object on another lattice takes from it (lattice priority, #107). */
+    latticeHidden: async () => {
+        const by = await pipeline.query<Record<number, number>>('lattice');
+        return Object.fromEntries(sim.entities.filter((e) => by[e.id]).map((e) => [e.name, by[e.id]]));
+    },
+    /** Each worker lane's stand trees as its static layer draws them (tests: a leaning tree is not there). */
+    standStatic: () => pipeline.query<{ drawn: string; trunk: number }[][]>('stand'),
     /** True when no voxel frame is in flight or waiting to be applied. */
     voxelIdle: () => !pipeline.inFlight && !state.forceVoxel,
     entities: () =>
@@ -2653,6 +2714,8 @@ window.__riverLab = {
                         2 * (e.pose.q.w * e.pose.q.y + e.pose.q.x * e.pose.q.z),
                         1 - 2 * (e.pose.q.y * e.pose.q.y + e.pose.q.x * e.pose.q.x)
                     ),
+                    /** Its local X axis in the world (a plank's or a beam's long axis). */
+                    axis: quatRotate(e.pose.q, 1, 0, 0, vec3()),
                     visible: e.visible
                 }
             ])
@@ -2727,6 +2790,13 @@ window.__riverLab = {
         /** The sun's shadows now (fewer at three or four views: `splitShadows`). */
         shadows: { cast: scene.sun.light!.castShadows, cascades: scene.sun.light!.numCascades }
     }),
+    /**
+     * Tests: `fn` runs after every simulation step from now on (null clears it), so a test can act on
+     * the very tick a condition is met (the fast clock runs many steps a frame).
+     */
+    afterStep: (fn: (() => void) | null) => {
+        stepHook = fn;
+    },
     /** Merges fields into the next player command (grab / throw / move edges for tests). */
     input: (c: Record<string, unknown>) => fpInput.inject(c),
     player: () => ({ ...sim.player, holding: sim.physics.heldId, eyeHeight: EYE_HEIGHT }),
@@ -2784,6 +2854,10 @@ window.__riverLab = {
         floods: sim.hazards.floodCount,
         gusts: sim.hazards.gustCount,
         tree: sim.hazards.tree.phase,
+        closure: sim.hazards.road?.phase ?? -1,
+        closureSign: sim.closure.sign.anim[0],
+        /** The tick the falling tree's phase began (its tell's start while it leans). */
+        treeSince: sim.hazards.tree.since,
         planeY: scene.waterEntity.getPosition().y
     }),
     /** The playtest log as text. */
@@ -2796,7 +2870,11 @@ window.__riverLab = {
     },
     /** Logging: each stand tree's phase and cut, and the sawmill's state and totals. */
     wood: () => ({
-        trees: Array.from({ length: sim.forestry.treeCount }, (_, n) => sim.forestry.treeState(n)),
+        trees: Array.from({ length: sim.forestry.treeCount }, (_, n) => {
+            const a = sim.forestry.ents.markers[n].anim;
+            // the falling-tree hazard's lean on its marker (what every device draws)
+            return { ...sim.forestry.treeState(n), lean: a[TREE_SWAY], tiltX: a[TREE_TILT_X], tiltZ: a[TREE_TILT_Z] };
+        }),
         sawmill: sim.sawmill
             ? { phase: sim.sawmill.phase, stopped: sim.sawmill.stopped, mode: sim.sawmill.mode, ...sim.sawmill.stats }
             : null
@@ -2815,11 +2893,11 @@ window.__riverLab = {
             drivable: !!sim.vehicle
         };
     },
-    /** Sets the first-person look angles (as mouse look would). */
     /** The main camera's field of view (degrees), as drawn. */
     cameraFov: () => camera.camera!.fov,
     /** The camera's bob and kick offsets this frame (all 0 with Camera bob & kick off). */
     cameraFeel: () => ({ ...feel }),
+    /** Sets the first-person look angles (as mouse look would). */
     look(yaw: number, pitch: number) {
         fpInput.yaw = yaw;
         fpInput.pitch = pitch;

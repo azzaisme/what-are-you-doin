@@ -15,6 +15,7 @@ import {
 } from '../assets/forestry.ts';
 import { BODY } from '../assets/player-body.ts';
 import {
+    LONG_PLANK_LENGTH,
     beamAsset,
     bucketAsset,
     cubeAsset,
@@ -23,6 +24,7 @@ import {
     sphereAsset,
     windsockAsset
 } from '../assets/props.ts';
+import { barrierAsset, closureSignAsset } from '../assets/road-closure.ts';
 import { uteAsset } from '../assets/ute.ts';
 import { SAWMILL } from '../levels/forestry.ts';
 import { pose } from '../voxels/math.ts';
@@ -160,6 +162,8 @@ export function createLabEntities(): LabEntities {
     for (let n = 0; n < EXTRA_BEAMS; n++) extras.push(add(320 + n, `beam-${n}`, beamAsset(`beam-${n}`), 1));
     for (let n = 0; n < EXTRA_LOGS; n++) extras.push(add(340 + n, `extra-log-${n}`, logAsset(), 1));
     for (let n = 0; n < EXTRA_CRATES; n++) extras.push(add(360 + n, `crate-${n}`, cubeAsset(0.5, M.Timber), 1));
+    // the tutorial's long plank (only the tutorial places it)
+    extras.push(add(370, 'long-plank', plankAsset('long-plank', LONG_PLANK_LENGTH), 1));
     const windsock = add(950, 'windsock', windsockAsset(), 2);
     const markers: SimEntity[] = [];
     for (let n = 0; n < STAND_TREES; n++) markers.push(add(400 + n, `tree-${n}`, standMarkerAsset(), 4));
@@ -189,6 +193,10 @@ export function createLabEntities(): LabEntities {
         4
     );
     const chips = add(442, 'chips-fx', counterAsset('chips-fx'), 0);
+    // the road closure (Epic 8, #77): placed and shown by the hazard, hidden otherwise
+    const barrier = add(444, 'barrier', barrierAsset(), 2);
+    const closureSign = add(445, 'closure-sign', closureSignAsset(M.HiVis, 'right'), 3);
+    barrier.visible = closureSign.visible = false;
     const needles = add(443, 'needles-fx', counterAsset('needles-fx'), 0);
     const forestry: ForestryEntities = { markers, crowns, felled, short, sawn, beams, axe, sawmill, chips, needles };
     for (const e of [...markers, ...crowns, ...felled, ...short, ...sawn, ...beams, axe, sawmill, chips, needles])

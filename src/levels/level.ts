@@ -109,6 +109,12 @@ export interface WaterSource {
     h: number;
     /** Litres it holds (it runs dry). */
     litres: number;
+    /**
+     * Journeys: it gives water only from this stage on (`progress.step`), and the stage before it
+     * must be done first: the Valley's sources past a crossing stay shut until it is crossed, so a
+     * dry bucket thrown over can't be refilled before its flag (Epic 9).
+     */
+    opensAt?: number;
 }
 
 /** Where water poured counts as watering the flower: within `r` of (x, z), across the ground. */

@@ -140,6 +140,8 @@ class LocalChannel implements NetChannel {
     private readonly bc: BroadcastChannel;
     private pending = false;
     private lastSent = 0;
+    /** After leave(): the channel is closed, so nothing more may be posted on it. */
+    private closed = false;
     private readonly timer: ReturnType<typeof setInterval>;
 
     constructor(name: string, me: string) {
@@ -189,6 +191,8 @@ class LocalChannel implements NetChannel {
     }
 
     private send(): void {
+        // an update coalesced before leave() fires after it: the channel is closed by then
+        if (this.closed) return;
         this.lastSent = Date.now();
         this.bc.postMessage({ t: 'state', id: this.me, state: this.state, hidden: pageHidden() } satisfies LocalMsg);
     }
@@ -223,6 +227,8 @@ class LocalChannel implements NetChannel {
     }
 
     leave(): void {
+        if (this.closed) return;
+        this.closed = true;
         clearInterval(this.timer);
         if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.onVisibility);
         try {
