@@ -941,10 +941,11 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         expect(routeU(s.player.x, s.player.z)).toBeLessThan(R.from + 1.5);
         while (s.hazards.road!.busy && s.tick - tell < S(CLOSURE.stopS + 10)) p.step();
         expect(s.hazards.road!.busy).toBe(false);
-        // CLOSURE.stopS after their last 0.5 m along: no sooner than that after the tell, and no
-        // later than that after they stood still
-        expect(s.tick - tell).toBeGreaterThanOrEqual(S(CLOSURE.stopS));
-        expect(s.tick - stopped).toBeLessThanOrEqual(S(CLOSURE.stopS));
+        // CLOSURE.stopS after their last 0.5 m along, to the tick (that was before they stood still)
+        const last = s.hazards.road!.lastProgress;
+        expect(last).toBeGreaterThanOrEqual(tell);
+        expect(last).toBeLessThanOrEqual(stopped);
+        expect((s.tick - last) / 60).toBeCloseTo(CLOSURE.stopS, 1);
         // still standing there, the barrier still across the road, the sign still closed
         expect(routeU(s.player.x, s.player.z)).toBeGreaterThanOrEqual(R.from);
         expect(s.hazards.road!.blocking(s.physics, s.closure.barrier.id)).toBe(true);

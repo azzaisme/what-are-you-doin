@@ -165,6 +165,10 @@ export class RoadClosure {
     private heldAt = 0;
     /** The last tick anyone holding it got CLOSURE.progressM further along; and how far each had got. */
     private progressAt = 0;
+    /** The tick anyone holding it last got CLOSURE.progressM further along (for tests). */
+    get lastProgress(): number {
+        return this.progressAt;
+    }
     private readonly progressMark = new Map<number, number>();
     /** Has anyone held it this time (been in the closed stretch)? */
     private everHeld = false;
