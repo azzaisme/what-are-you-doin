@@ -101,7 +101,7 @@ The rest:
   with its waterfall). The ute's red was tried for area 4 first, but it sat next to area 5's brick
   (35 apart in RGB). Tests check the area colours use no test material, are all different, and
   that next-door areas are more than 60 apart (the closest pair now is hi-vis and leaf gold, 65).
-- npm test 1056/1056 (5 cm and 10 cm).
+- npm test 1144/1144 (5 cm and 10 cm), with `epics-5-10` 085dd00 merged in.
 
 ## Objects on different lattices resolve by priority (2026-11-22, Epic 10, #107)
 
