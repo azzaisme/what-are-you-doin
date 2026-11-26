@@ -1630,16 +1630,6 @@ test('logging in the Timber Yard: chew a pine down, the voxel tree becomes a stu
     expect(problems).toEqual([]);
 });
 
-/** Waits until the sim has run `n` more ticks (not wall time: software GL can run a few ticks a second). */
-async function ticks(page: Page, n: number): Promise<void> {
-    const t0 = await lab(page, (l) => l.hazards().tick);
-    await page.waitForFunction(
-        (t) => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().tick >= t,
-        t0 + n,
-        { timeout: 120_000 }
-    );
-}
-
 /** Waits until a prop has moved under 5 mm over 30 sim ticks (it has come to rest; wind may nudge it). */
 async function atRest(page: Page, name: string): Promise<void> {
     for (let k = 0; k < 20; k++) {
