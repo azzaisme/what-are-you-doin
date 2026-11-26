@@ -137,7 +137,9 @@ All by input, 10 cm cells, from the tests' own lines.
     - with it (141 entities, this protocol, v2): 4090;
     - with the winch rope hooked at its widest (`[2,140,-100,-20,-20]`, +26): **4116, over the
       limit on v2**. On #141's v3 the audit measured 4045 with the rope.
-    - Open: which lands first decides where this is fixed (see the PR).
+    - **So this chunk is blocked on #141:** #141 lands first, then this branch merges it and
+      asserts the combined worst case, with the rope hooked, under 4096 UTF-8 bytes. Until then
+      the test asserts the worst case without the rope (4090), as v2 can carry it.
 - **Bundle:** chunk B adds 13.4 KB to the main chunk (6.242 → 6.255 MB minified) and 2.3 KB to the
   voxel service. The overlay's module is 827 B minified; with its drawing and recording, about
   2 KB (estimated).
