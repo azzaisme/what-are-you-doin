@@ -727,7 +727,7 @@ describe('told, online too', () => {
     }, 60_000);
 
     it('the Works objective says how: set the bucket on a crate and lift it from the top', () => {
-        expect(VALLEY_STAGES[4].objective).toContain('set the bucket on one and lift it up from the top');
+        expect(VALLEY_STAGES[4].objective).toContain('set the bucket on one, lift it from the top');
     });
 });
 

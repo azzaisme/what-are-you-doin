@@ -935,12 +935,13 @@ export class LabSim {
     }
 
     /**
-     * The detour piece a player stands on (its name for players), or null: feet over its top face,
-     * within a hand's width of its edges and a few centimetres of its top (a plank laid on a stone
-     * lifts the feet off it: building over the stones is building).
+     * The detour piece a player stands on (its name for players), or null: one whose top touches
+     * the character's footprint, all of it, out to the capsule's radius (PhysicsWorld
+     * detourUnderFoot): a beaver walking a trunk's or a boulder's edge, its middle beyond it, is on
+     * it. A plank laid on a stone lifts the feet off it: building over the stones is building.
      */
     detourUnder(p: { x: number; y: number; z: number; grounded: boolean }): string | null {
-        return p.grounded ? this.detourAt(p, 0.15, 0.08) : null;
+        return p.grounded ? this.physics.detourUnderFoot(p.x, p.y, p.z, CHARACTER.radius) : null;
     }
 
     /**

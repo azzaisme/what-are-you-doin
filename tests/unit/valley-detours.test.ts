@@ -26,7 +26,7 @@ import type { PlayerCommand } from '../../src/sim/commands.ts';
 import { EYE_HEIGHT, HANDOVER_REACH, LabSim } from '../../src/sim/lab-sim.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
 import { pose, quatFromYawPitchRoll } from '../../src/voxels/math.ts';
-import { M } from '../../src/voxels/palette.ts';
+import { M, MATERIALS } from '../../src/voxels/palette.ts';
 
 import { Player } from './play.ts';
 import { bridge, hAt } from './valley-play.ts';
@@ -368,6 +368,42 @@ describe('the foot detours: on foot', () => {
         }, 120_000);
 });
 
+describe('the bucket can’t be walked over a detour along its edge (a sweep across each)', () => {
+    // (measured before: a beaver walking the trunk 0.4 to 0.45 m off its middle line, or the
+    // boulders 0.5 to 0.55 m off theirs, its own middle beyond the piece's edge but standing on it
+    // by its rim, kept the bucket and the stage counted it)
+    for (const [which, d, far] of [
+        ['stepping stones', CREEK, FAR_BANK.creek],
+        ['fallen trunk', CULVERT, FAR_BANK.culvert],
+        ['boulders', CRACK, FAR_BANK.crevasse]
+    ] as const)
+        it(`the ${which}: at every offset a beaver stays on, the bucket doesn't get over`, () => {
+            let stayedOn = 0;
+            const seen: string[] = [];
+            for (let off = -0.75; off <= 0.751; off += 0.05) {
+                const t = d.t + off;
+                const s = run(d.stage);
+                const pl = new Player(s);
+                putBucket(s, d.near - 1, t);
+                stand(pl, d.near - 2.1, t);
+                if (!pl.grabBucket()) continue;
+                faceAcross(pl, t);
+                walkAlong(pl, t, far + 1.2, 0.5);
+                pl.step({}, 60);
+                const u = routeU(s.player.x, s.player.z);
+                const over = u > far && s.progress.falls === 0;
+                if (over) stayedOn++;
+                const bu = bucketU(s);
+                const got = holds(s, 0) && bu > far;
+                seen.push(`${off.toFixed(2)}: ${over ? 'over' : 'not over'}${got ? ' WITH the bucket' : ''}`);
+                expect(got, `at ${off.toFixed(2)} m off the line: ${seen.join(', ')}`).toBe(false);
+                expect(s.progress.step, `at ${off.toFixed(2)} m`).toBe(d.stage);
+            }
+            // (the sweep reaches past the piece's edge: some offsets fall in, the middle ones get over)
+            expect(stayedOn, seen.join(', ')).toBeGreaterThan(2);
+        }, 600_000);
+});
+
 describe('the bucket can’t go over a detour (each way of trying, by input)', () => {
     it('carried onto the stepping stones, it drops where the beaver stands, and goes back to the start', () => {
         const s = run(CREEK.stage);
@@ -597,33 +633,34 @@ describe('building over the detours is building', () => {
         expect(s.progress.falls).toBe(0);
     }, 120_000);
 
-    it('a beaver on a plank laid over the stepping stones holds the bucket (feet on the plank)', () => {
+    it('a plank laid flat over the stepping stones: a bucket set on it stays, and a beaver on it picks it up', () => {
+        // (laid flat, on its 0.2 m face, as the level lays its planks: on its 0.1 m edge, a bucket
+        // set on it slid off onto the stones within a second)
         const s = run(CREEK.stage);
         const pl = new Player(s);
         const [, s1, s2] = DETOURS.creek.stones;
         const plank = s.entities.find((e) => e.name === 'extra-plank-0')!;
         const w = routeToWorld((s1 + s2) / 2, CREEK.t);
         const top = Math.max(DETOURS.creek.tops[1], DETOURS.creek.tops[2]);
-        s.physics.place(plank.id, pose(w.x, top + 0.08, w.z, quatFromYawPitchRoll(ROUTE_YAW + Math.PI / 2, 0, 0)));
-        pl.step({}, 60);
+        s.physics.place(
+            plank.id,
+            pose(w.x, top + 0.06, w.z, quatFromYawPitchRoll(ROUTE_YAW + Math.PI / 2, Math.PI / 2, 0))
+        );
+        pl.step({}, 90);
         const pp = plank.pose.p;
-        standOn(pl, (s1 + s2) / 2 + 0.3, CREEK.t, pp.y + 0.05);
+        standOn(pl, (s1 + s2) / 2 + 0.35, CREEK.t, pp.y + 0.06);
         expect(s.detourUnder(s.player), 'on the plank, not the stones').toBeNull();
-        const b = routeToWorld((s1 + s2) / 2 - 0.4, CREEK.t);
-        s.physics.place(s.bucket.id, pose(b.x, pp.y + 0.1, b.z));
-        pl.step({}, 30);
+        // the full bucket set on the plank in front of the beaver, left there two and a half seconds
+        const b = routeToWorld((s1 + s2) / 2 - 0.35, CREEK.t);
+        s.physics.place(s.bucket.id, pose(b.x, pp.y + 0.06, b.z));
+        pl.step({}, 150);
+        const bp = s.bucket.pose.p;
         expect(s.bucketOnDetour(), 'the bucket on the plank is not on the stones').toBeNull();
-        // aimed straight at it (the full bucket settles on the plank a little while a slow look
-        // turns to it), and a click
-        const bk = s.bucket.pose.p;
-        const ft = pl.p;
-        pl.yaw = Math.atan2(-(bk.x - ft.x), -(bk.z - ft.z));
-        pl.pitch = Math.atan2(bk.y + 0.15 - (ft.y + EYE_HEIGHT), Math.hypot(bk.x - ft.x, bk.z - ft.z));
-        pl.step();
-        expect(s.interaction(0).target).toBe('bucket');
-        pl.step({ grab: true });
-        expect(holds(s, 0), 'picked up on the plank').toBe(true);
-        expect(texts(s, 'hint')).toEqual([]);
+        expect(Math.abs(routeT(bp.x, bp.z) - CREEK.t), 'still on the plank (it has not slid off)').toBeLessThan(0.08);
+        expect(bp.y, 'still up on the plank').toBeGreaterThan(pp.y);
+        expect(s.progress.recoveries).toBe(0);
+        // a slow look round to it and a click
+        expect(pl.grabBucket(), 'picked up on the plank').toBe(true);
         expect(texts(s, 'hint')).toEqual([]);
         pl.step({}, 60);
         expect(holds(s, 0)).toBe(true);
@@ -637,7 +674,10 @@ describe('building over the detours is building', () => {
         const plank = s.entities.find((e) => e.name === 'extra-plank-0')!;
         // from the bank's edge out onto the first two stones, along the stones' line
         const mid = routeToWorld(-1.0, CREEK.t);
-        s.physics.place(plank.id, pose(mid.x, 0.55, mid.z, quatFromYawPitchRoll(ROUTE_YAW + Math.PI / 2, 0, 0)));
+        s.physics.place(
+            plank.id,
+            pose(mid.x, 0.55, mid.z, quatFromYawPitchRoll(ROUTE_YAW + Math.PI / 2, Math.PI / 2, 0))
+        );
         a.step({}, 90);
         const pp = plank.pose.p;
         putBucket(s, CREEK.near - 1, CREEK.t);
@@ -698,11 +738,23 @@ describe('players are told', () => {
         expect(new Set(STAGE_COLOURS).size).toBe(STAGE_COLOURS.length);
     });
 
+    it('next-door areas’ colours are easy to tell apart (base shades well apart in RGB)', () => {
+        const rgb = (m: number) => {
+            const c = MATERIALS[m].shades[0];
+            return [(c >> 16) & 255, (c >> 8) & 255, c & 255];
+        };
+        for (let k = 1; k < STAGE_COLOURS.length; k++) {
+            const [a, b] = [rgb(STAGE_COLOURS[k - 1]), rgb(STAGE_COLOURS[k])];
+            // (measured: the old area 4, ute red, sat 35 from area 5's brick; the closest pair now is
+            // hi-vis and leaf gold, 65)
+            expect(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]), `areas ${k} and ${k + 1}`).toBeGreaterThan(60);
+        }
+    });
+
     it('each detour stage’s objective says its detour is for feet only', () => {
         expect(VALLEY_STAGES[CREEK.stage].objective).toContain('stepping stones are feet only');
         expect(VALLEY_STAGES[CULVERT.stage].objective).toContain('fallen trunk is feet only');
         expect(VALLEY_STAGES[CRACK.stage].objective).toContain('boulders are feet only');
-        expect(VALLEY_STAGES[CRACK.stage].objective).toContain('the bucket goes over the bridge');
     });
 });
 

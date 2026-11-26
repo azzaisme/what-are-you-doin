@@ -472,7 +472,7 @@ export const CHECKPOINTS = [
     { u: 174.2, t: roadT(174.2) }, // 6: past the crevasse, on the level bench
     { u: SUMMIT_U, t: 0 } // 7: the flower
 ];
-export const STAGE_COLOURS = [M.HiVis, M.LeafGold, M.Grass, M.UtePaint, M.Brick, M.Snow, M.Flower];
+export const STAGE_COLOURS = [M.HiVis, M.LeafGold, M.Grass, M.BucketWater, M.Brick, M.Snow, M.Flower];
 
 function valleyPieces(): StaticPiece[] {
     const P: StaticPiece[] = [];
@@ -1324,8 +1324,7 @@ export const VALLEY_STAGES: LevelStage[] = [
     },
     {
         name: 'Shallow Creek',
-        objective:
-            'Bridge the creek and get the bucket to the flag on the far bank (the stepping stones are feet only)',
+        objective: 'Bridge the creek to the far bank (the stepping stones are feet only)',
         goal: square(CHECKPOINTS[1].u, CHECKPOINTS[1].t, 2.6),
         start: restart(-4.5, 1),
         bucket: bucketAt(-4.5, 1.6),
@@ -1333,7 +1332,7 @@ export const VALLEY_STAGES: LevelStage[] = [
     },
     {
         name: 'Forest Road',
-        objective: 'Carry the long beams from the log dump over the washed-out culvert (the fallen trunk is feet only)',
+        objective: 'Carry the long beams over the culvert (the fallen trunk is feet only)',
         goal: square(CHECKPOINTS[2].u, CHECKPOINTS[2].t, 2.6),
         start: restart(8, roadT(8)),
         bucket: bucketAt(8, roadT(8) + 0.8),
@@ -1351,7 +1350,7 @@ export const VALLEY_STAGES: LevelStage[] = [
     },
     {
         name: 'Old Industrial Works',
-        objective: 'Stack crates to climb the wall: set the bucket on one and lift it up from the top',
+        objective: 'Stack crates up the wall: set the bucket on one, lift it from the top',
         goal: square(CHECKPOINTS[4].u, CHECKPOINTS[4].t, 3),
         start: restart(96, 1),
         bucket: bucketAt(96, 1.8),
@@ -1359,8 +1358,7 @@ export const VALLEY_STAGES: LevelStage[] = [
     },
     {
         name: 'Mountain Approach',
-        objective:
-            'Bridge the crevasse on the mountain road: the boulders are feet only, the bucket goes over the bridge',
+        objective: 'Bridge the crevasse on the road (the boulders are feet only)',
         goal: square(CHECKPOINTS[5].u, CHECKPOINTS[5].t, 2.6),
         start: restart(128, -2),
         bucket: bucketAt(128, -1.2),
@@ -1370,7 +1368,7 @@ export const VALLEY_STAGES: LevelStage[] = [
     },
     {
         name: 'Flower Summit',
-        objective: 'Water the flower: hold the bucket inside the ring of stones and pour (R)',
+        objective: 'Water the flower: hold the bucket in the stone ring and pour (R)',
         goal: square(SUMMIT_U, 0, 2.0),
         start: restart(175, roadT(175)),
         bucket: bucketAt(175, roadT(175) + 0.8),
