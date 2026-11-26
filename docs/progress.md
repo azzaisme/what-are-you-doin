@@ -134,15 +134,19 @@ All by input, 10 cm cells, from the tests' own lines.
 
 - **Snapshot:** the dolly is one entity, 15 bytes; the winch is scenery, 0. A rope on the drum
   costs nothing on the wire.
-- **The Valley's worst-case host state** (8 players, every entity visible, long events), in UTF-8
-  bytes, of the room's 4096:
-    - before the road closure (#131) merged in: 4026 → 4046 with the dolly;
-    - with it (141 entities, this protocol, v2): 4090;
-    - with the winch rope hooked at its widest (`[2,140,-100,-20,-20]`, +26): **4116, over the
-      limit on v2**. The combined measurement on #141's v3 goes here once #141 is merged in.
-    - **So this chunk is blocked on #141:** #141 lands first, then this branch merges it and
-      asserts the combined worst case, with the rope hooked, under 4096 UTF-8 bytes. Until then
-      the test asserts the worst case without the rope (4090), as v2 can carry it.
+- **The Valley's worst-case host state**, in UTF-8 bytes, of the room's 4096:
+    - **On v2** (before #141), with every entity visible and long events: 4026 → 4046 with the
+      dolly; 4090 once the road closure (#131) was in. A hooked rope adds up to 26 bytes, which
+      made 4116, over the limit. That is why this chunk waited for #141.
+    - **On v3 (#141 merged in), `net-headroom.test.ts`'s worst case:** all 142 entities moving
+      (the dolly among them, and a stand-in for the goose), 64 nails, the longest messages, eight
+      players, none acknowledging.
+        - Without the rope: 4045 bytes, the longest wait 2 snapshots.
+        - With the winch's real rope out, hooked into the dolly (the last entity) at a corner of
+          its stop (`wr` `[2,140,30,53,-32]`, on the wire in every update): **4043 bytes**, every
+          entity still listed, the longest wait 2 snapshots.
+        - Both are asserted. v3 fits the snapshot to what the rest of the state leaves, so the
+          rope costs some of the snapshot's room, not the room's limit.
 - **Bundle:** chunk B adds 13.4 KB to the main chunk (6.242 → 6.255 MB minified) and 2.3 KB to the
   voxel service. The overlay's module is 827 B minified; with its drawing and recording, about
   2 KB (estimated).

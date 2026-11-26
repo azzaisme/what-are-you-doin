@@ -29,6 +29,8 @@ import { EYE_HEIGHT, LabSim, MAX_PLAYERS } from '../../src/sim/lab-sim.ts';
 import { CHARACTER, GRAVITY, initPhysics } from '../../src/sim/physics/world.ts';
 import { pose } from '../../src/voxels/math.ts';
 
+import { hookDolly } from './winch-helpers.ts';
+
 beforeAll(() => initPhysics());
 
 const cmd = (n: number, c: Partial<PlayerCommand> = {}): PlayerCommand => ({ ...neutralCommand(n), ...c });
@@ -454,13 +456,17 @@ describe('host state size', () => {
             }
             return bytes;
         };
-        // (in UTF-8 bytes, as the room counts them. The winch's rope hooked at its widest adds 26:
-        // that worst case is asserted once #141's protocol is in, which #144 waits for)
+        // (in UTF-8 bytes, as the room counts them)
         const bytes = measure();
+        // and with the winch's rope out, hooked into the log dolly (the last entity) at a corner:
+        // a real rope, on the wire in every update (Epic 5, #52)
+        const rope = hookDolly(sim);
+        const withRope = measure();
         console.info(
-            `worst-case host state, Valley, 8 players, all ${sim.entities.length} entities: ${bytes} UTF-8 bytes`
+            `worst-case host state, Valley, 8 players, all ${sim.entities.length} entities: ${bytes} UTF-8 bytes; with the winch rope hooked (wr ${JSON.stringify(rope)}): ${withRope}`
         );
         expect(bytes).toBeLessThan(4096);
+        expect(withRope).toBeLessThan(4096);
     });
 });
 
