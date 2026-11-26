@@ -894,6 +894,10 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         // the ute still stands on the closed road, empty: the closure is over all the same
         expect(routeU(s.ute.pose.p.x, s.ute.pose.p.z)).toBeCloseTo(parked, 0);
         expect(s.hazards.road!.busy).toBe(false);
+        // the playtest log's account says where the ute was left
+        expect(s.hazards.outcomes.map((o) => o.what)).toEqual([
+            'took the track on foot; left the ute on the closed road'
+        ]);
         // and the next hazard comes once the quiet spell is out
         const w = s.hazards.weather!;
         for (let i = 0; i < S(HAZARD.safeS + 5) && !w.hazardBusy; i++) p.step();
@@ -905,19 +909,23 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         const s = closed();
         const p = inputs(s);
         expect(routeU(s.player.x, s.player.z)).toBeGreaterThanOrEqual(R.from);
-        // back over the creek's beams into the yard, and wait there
+        // back over the creek's beams into the yard, and wait there (from the tick they leave the
+        // closed stretch)
+        let back = -1;
+        const leaving = () => {
+            if (back < 0 && routeU(s.player.x, s.player.z) < R.from) back = s.tick;
+        };
         for (const u of [0, -2, -6]) {
             const w = at(u, 0);
-            p.walkTo(w.x, w.z);
+            p.walkTo(w.x, w.z, false, leaving);
         }
         expect(routeU(s.player.x, s.player.z)).toBeLessThan(R.from);
-        const back = s.tick;
+        expect(s.hazards.road!.busy, 'still on when they reach the yard').toBe(true);
         while (s.hazards.road!.busy && s.tick - back < S(CLOSURE.goneS + 5)) p.step();
         const took = (s.tick - back) / 60;
-        // it was still on when they got there; it ended CLOSURE.goneS after they left the stretch
+        // it ended CLOSURE.goneS after they left the stretch, to the tick
         expect(s.hazards.road!.busy).toBe(false);
-        expect(took).toBeGreaterThan(CLOSURE.goneS - 3);
-        expect(took).toBeLessThanOrEqual(CLOSURE.goneS);
+        expect(took).toBeCloseTo(CLOSURE.goneS, 1);
         // the barrier stays across the road, and the sign says so
         expect(s.hazards.road!.blocking(s.physics, s.closure.barrier.id)).toBe(true);
         expect(s.closure.sign.anim[SIGN_SWING]).toBe(1);
@@ -926,8 +934,10 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
 
     it('a player who stays behind (across the creek) does not hold it: the other walks the track, and it is over', () => {
         const s = closed();
-        // player 2 joins in the yard and stays there
+        // player 2 joins, in the yard across the creek, and stays there
         s.setSlotActive(1, true);
+        const yard = at(-6, 0);
+        s.placePlayer(yard.x, yard.z, 0, 1);
         const p = inputs(s);
         p.step({}, 30);
         const behind = s.players[1];
