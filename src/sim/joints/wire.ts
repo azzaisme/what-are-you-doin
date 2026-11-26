@@ -23,18 +23,45 @@ export interface NailMark {
     x: number;
     y: number;
     z: number;
+    /** How hard its connection is working: 0 calm, 1 creaking, 2 groaning (strainLevels). */
+    strain: number;
 }
 
-/** The marks of a graph, with entity ids turned into entity indices. */
-export function nailMarks(graph: JointGraph, indexOf: (id: number) => number): NailMark[] {
+/**
+ * The marks of a graph, with entity ids turned into entity indices; `strainOf` gives each
+ * connection's strain level (default calm).
+ */
+export function nailMarks(
+    graph: JointGraph,
+    indexOf: (id: number) => number,
+    strainOf: (connectionId: number) => number = () => 0
+): NailMark[] {
     const out: NailMark[] = [];
     for (const c of graph.connections()) {
         const a = indexOf(c.a);
         if (a < 0) continue;
         const b = c.b === GROUND ? -1 : indexOf(c.b);
-        for (const n of c.nails) out.push({ a, b, x: n.x, y: n.y, z: n.z });
+        const strain = strainOf(c.id);
+        for (const n of c.nails) out.push({ a, b, x: n.x, y: n.y, z: n.z, strain });
     }
     return out;
+}
+
+/** Strain levels of marks as a short string, one digit per mark (sent when it changes). */
+export function encodeStrain(marks: readonly NailMark[]): string {
+    let s = '';
+    for (let i = 0; i < Math.min(marks.length, NAIL.maxTotal); i++)
+        s += String(Math.max(0, Math.min(2, marks[i].strain)));
+    return s;
+}
+
+/** Applies a strain string (untrusted) to decoded marks, in order. */
+export function applyStrain(marks: NailMark[], s: unknown): void {
+    const str = typeof s === 'string' ? s : '';
+    for (let i = 0; i < marks.length; i++) {
+        const d = str.charCodeAt(i) - 48;
+        marks[i].strain = d >= 0 && d <= 2 ? d : 0;
+    }
 }
 
 const clampI16 = (v: number) => Math.max(-32768, Math.min(32767, Math.round(v)));
@@ -76,7 +103,8 @@ export function decodeNails(bytes: Uint8Array, entityCount: number): NailMark[] 
             b,
             x: dv.getInt16(o + 4, true) * MM,
             y: dv.getInt16(o + 6, true) * MM,
-            z: dv.getInt16(o + 8, true) * MM
+            z: dv.getInt16(o + 8, true) * MM,
+            strain: 0
         });
     }
     return out;
