@@ -48,7 +48,8 @@ canvas {
     position: fixed;
     left: 18px;
     top: 16px;
-    max-width: calc(100vw - 36px);
+    /* the text size's zoom scales vw and px: divide it back out, so it fits at any size */
+    max-width: calc(100vw / var(--ui-scale) - 36px);
     z-index: 10;
     pointer-events: none;
     text-shadow: 0 1px 3px #0009;
@@ -112,12 +113,15 @@ kbd {
 /* the action prompt sits under the crosshair in first person */
 .hud-prompt:not(:empty) {
     position: fixed;
-    left: 50%;
+    /* centred across the whole width, as wide as the screen allows at any text size (zoom scales vw
+       and px, so divide them back out) */
+    left: 0;
+    right: 0;
+    width: fit-content;
     top: calc(50% + 22px);
-    transform: translateX(-50%);
-    margin: 0;
+    margin: 0 auto;
     padding: 3px 9px;
-    max-width: calc(100vw - 32px);
+    max-width: calc(100vw / var(--ui-scale) - 32px);
     text-align: center;
     border-radius: 6px;
     background: #0008;
@@ -339,7 +343,9 @@ body.ui-hidden .inspector-hint {
 /* wide screens: keep the HUD clear of the side panel */
 @media (min-width: 701px) {
     body.debug-open .hud {
-        max-width: calc(100vw - var(--panel-w) - 18px - 12px - 16px);
+        /* on screen: the width, less the panel, its 12 px margin, a 16 px gap and the HUD's own left
+           margin (18 px, zoomed) */
+        max-width: calc((100vw - var(--panel-w) - 12px - 16px) / var(--ui-scale) - 18px);
     }
 }
 
@@ -496,18 +502,26 @@ body.split .crosshair-p2 {
     top: 75%;
 }
 
+/* player 1's: under their crosshair, or under the HUD's text when large text makes it reach lower */
 body.split .hud-prompt:not(:empty) {
-    top: calc(25% + 22px);
+    top: max(calc(25% + 22px), calc(var(--hud-bottom) / var(--ui-scale) + 6px));
 }
 
 body.split .prompt-p2:not(:empty) {
     display: block;
     position: fixed;
-    left: 50%;
-    top: calc(75% + 22px);
-    transform: translateX(-50%);
+    /* centred across the whole width (not shrunk into the half right of the middle), and as wide as
+       the screen allows at any text size: vw scales with the zoom, so divide it out */
+    left: 0;
+    right: 0;
+    margin-inline: auto;
+    width: fit-content;
+    /* at the bottom of player 2's view, held up by its bottom edge just above the dock: placed under
+       player 2's crosshair, a long prompt in large text would run into the dock */
+    top: auto;
+    bottom: calc(var(--dock-h) / var(--ui-scale) + 8px);
     padding: 3px 9px;
-    max-width: calc(100vw - 32px);
+    max-width: calc(100vw / var(--ui-scale) - 32px);
     font-size: 13px;
     color: #ffd27a;
     text-align: center;
@@ -582,8 +596,9 @@ body.ui-hidden .crosshair-p2 {
     left: 50%;
     top: 50%;
     transform: translate(-50%, -50%);
-    width: min(360px, calc(100vw - 32px));
-    max-height: calc(100vh - 32px);
+    /* scaled with the text size (zoom): it still fits the screen */
+    width: min(360px, calc(100vw / var(--ui-scale) - 32px));
+    max-height: calc(100dvh / var(--ui-scale) - 32px);
     overflow-y: auto;
     z-index: 40;
     padding: 16px;
@@ -926,6 +941,9 @@ body.ui-hidden .designer {
 .ui-dock,
 .toast,
 .touch-ui,
+.prompt-p2,
+.player-tag,
+.online-panel,
 .settings-backdrop {
     zoom: var(--ui-scale);
 }
@@ -1151,6 +1169,8 @@ body.settings-open .crosshair {
 }
 
 .settings-panel {
+    /* its rows lay out by the panel's own width (which the text size's zoom narrows), not the screen's */
+    container-type: inline-size;
     flex: 1 1 auto;
     overflow-y: auto;
     overscroll-behavior: contain;
@@ -1160,6 +1180,31 @@ body.settings-open .crosshair {
     flex-direction: column;
     /* rock between the slots */
     gap: calc(var(--vx) * 2);
+}
+
+/* a narrow panel (a phone, or large text): label above its control, full width */
+@container (max-width: 340px) {
+    .settings-row:not(.settings-button) {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+        padding: 8px 12px;
+    }
+
+    .settings-row:not(.settings-button) .settings-control {
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+
+    .settings-bind {
+        flex: 1 1 5em;
+        min-width: 0;
+    }
+
+    .settings-range input {
+        flex: 1 1 auto;
+        width: auto;
+    }
 }
 
 .settings-row {
@@ -1185,6 +1230,8 @@ body.settings-open .crosshair {
     display: flex;
     flex-direction: column;
     gap: 2px;
+    min-width: 0;
+    overflow-wrap: anywhere;
     font-size: 15px;
     font-weight: 600;
     cursor: default;
@@ -1228,10 +1275,10 @@ body.settings-open .crosshair {
     min-width: 96px;
     max-width: 132px;
     padding: 0 10px 2px;
-    overflow: hidden;
     font-weight: 700;
-    white-space: nowrap;
-    text-overflow: ellipsis;
+    /* a long name (Right Shift, Wheel down) wraps onto a second line rather than being cut */
+    line-height: 1.15;
+    overflow-wrap: anywhere;
 }
 
 .settings-bind.capturing,
@@ -1241,12 +1288,6 @@ body.settings-open .crosshair {
 }
 
 /* narrow screens: six sections fit (or scroll) without clipping their names */
-@media (max-width: 480px) {
-    .settings-bind {
-        min-width: 84px;
-    }
-}
-
 .settings-status {
     min-height: 1.3em;
     margin-top: 4px;
@@ -1343,13 +1384,23 @@ body.settings-open .crosshair {
     font-weight: 800;
 }
 
+.settings-button {
+    flex-wrap: wrap;
+}
+
 .settings-button .settings-control {
     flex: 1 1 auto;
     justify-content: flex-start;
 }
 
+/* beside its button when there is room, under it when not */
 .settings-button .settings-label {
     order: 2;
+    flex: 1 1 10em;
+}
+
+.settings-button .settings-label:empty {
+    display: none;
 }
 
 .settings-button .settings-control button {
@@ -1446,22 +1497,6 @@ body.has-pad .settings-foot .foot-pad {
 @media (max-width: 480px) {
     .settings-backdrop {
         padding: 8px;
-    }
-
-    .settings-row:not(.settings-button) {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 6px;
-        padding: 8px 12px;
-    }
-
-    .settings-row:not(.settings-button) .settings-control {
-        justify-content: flex-end;
-    }
-
-    .settings-range input {
-        flex: 1 1 auto;
-        width: auto;
     }
 
     /* six sections: each keeps its whole name; the row scrolls (the current one is kept in view) */
@@ -1629,4 +1664,26 @@ body.has-pad .settings-foot .foot-pad {
     background: #26313b;
     border: 0;
     cursor: pointer;
+}
+
+/* ---- less motion: the system's setting, or Camera bob & kick off (#21) ----------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        transition-duration: 0s !important;
+        animation-duration: 0s !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+body.reduced-motion *,
+body.reduced-motion *::before,
+body.reduced-motion *::after {
+    transition-duration: 0s !important;
+    animation-duration: 0s !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
 }
