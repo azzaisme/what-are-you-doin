@@ -179,8 +179,9 @@ An existing cheat: the Valley could be finished without building a single bridge
     - A thrown bucket lands with its water gone: 0.02 L at most, measured with 0–3.4 L in it. A
       full one falls short into the creek.
     - Carried over a built crossing, it keeps nearly all of its 10 L.
-    - At the flag, a bucket that's too dry gets the message "it needs at least 1 L of water in it.
-      Carry it over the crossing, don't throw it."
+    - At the flag, a bucket that's too dry gets the message "it needs at least 1 L of water. Carry
+      it over the crossing, don't throw it." (shortened from "…of water in it." so it fits the 120
+      characters an online update carries, with room for the amount)
 - **Spare buckets:** a bucket lost at the Forest Road, Gorge or Mountain Approach comes back with
   3 L in it ("A spare bucket (3 L) is waiting…"). There's no water near those stage starts, and an
   empty spare would have meant a walk back to the yard.

@@ -81,7 +81,6 @@ async function valleyHost(extra = true) {
     const sim = new LabSim({ level: valleyLevel });
     if (extra) {
         const animated = sim.entities.find((e) => e.asset.animChannels >= 4)!;
-        const plain = sim.entities.find((e) => e.asset.animChannels === 0)!;
         const add = (src: SimEntity, channels: number) =>
             (sim.entities as SimEntity[]).push({
                 ...src,
