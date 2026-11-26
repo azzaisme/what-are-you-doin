@@ -38,6 +38,8 @@ export interface AnimEvents {
     missed: boolean;
     thrown: boolean;
     dropped: boolean;
+    /** A jump refused (holding the bucket): a small dip, as if bracing for a hop that never comes. */
+    balked?: boolean;
 }
 
 export interface AnimInput {
@@ -254,6 +256,7 @@ export class PlayerAnimator {
         if (e.missed) this.fire('miss', 1);
         if (e.thrown) this.fire('throw', 1);
         if (e.dropped) this.fire('drop', 1);
+        if (e.balked) this.fire('land', 0.35);
         // landing: dip forward by how hard you came down
         if (!i.grounded) this.fallSpeed = Math.max(this.fallSpeed, -i.vy);
         if (i.grounded && !this.wasGrounded) {

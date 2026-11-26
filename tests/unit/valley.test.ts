@@ -4,6 +4,7 @@ import { BRIDGE, CREEK_WATER_Y } from '../../src/levels/timber-yard.ts';
 import {
     CREVASSE,
     DITCH,
+    SPARE_LITRES,
     GORGE,
     ROUTE_YAW,
     VALLEY_STAGES,
@@ -84,11 +85,13 @@ describe('the Valley: one map, seven areas', () => {
         const placed: { id: number; u: number; t: number; rim: number }[] = [];
         for (const c of [DITCH.u, GORGE.u, CREVASSE.u]) {
             const t = roadT(c);
-            // the gaps along the road: runs of ground below the fall line
+            // the gaps along the road: runs of ground well below the rims (the crevasse's bed is at
+            // the fall line itself, so "below the fall line" would miss its edges)
+            const rims = Math.min(hAt(c - 6, t), hAt(c + 6, t));
             const gaps: [number, number][] = [];
             let start = NaN;
             for (let u = c - 6; u <= c + 6; u += 0.02) {
-                const low = hAt(u, t) < fall;
+                const low = hAt(u, t) < Math.min(rims, fall + 1) - 0.5;
                 if (low && Number.isNaN(start)) start = u;
                 if (!low && !Number.isNaN(start)) {
                     gaps.push([start, u]);
@@ -295,8 +298,9 @@ describe('the Valley: one map, seven areas', () => {
         expect(s.progress.recoveries).toBe(1);
         const b = VALLEY_STAGES[2].bucket;
         expect(Math.hypot(s.bucket.pose.p.x - b.x, s.bucket.pose.p.z - b.z)).toBeLessThan(0.5);
-        // its water went with it; the spare is empty (refills are only at the water butts)
-        expect(s.water.volume).toBe(0);
+        // its water went with it; the spare holds 3 L (no water butt near the forest road: its flag
+        // wants 1 L, so a spare with nothing in it would mean a walk back to the yard)
+        expect(s.water.volume).toBe(SPARE_LITRES);
         const w = s.water;
         expect(w.spilled + w.lost).toBeCloseTo(10, 6);
         expect(Math.abs(w.imbalance)).toBeLessThan(1e-9);

@@ -17,6 +17,7 @@ import {
     PLANK_HALF,
     PLANK_LENGTH
 } from '../assets/props.ts';
+import { BARRIER_HALF } from '../assets/road-closure.ts';
 import { OAK, PINE_TIERS, PINE_TRUNK_HEIGHT, ROCK_CENTRE_LIFT, oakCrown, pineTrunkRadius } from '../levels/common.ts';
 import type { LevelDef } from '../levels/level.ts';
 import { pose, quatFromYawPitchRoll, quatMul } from '../voxels/math.ts';
@@ -123,6 +124,16 @@ export function propBody(name: string): { shape: ShapeSpec; opts: BodyOptions } 
         return {
             shape: { type: 'box', hx: 0.25, hy: 0.25, hz: 0.25 },
             opts: { density: 200, friction: 0.7, restitution: 0.1, nailable: true }
+        };
+    if (name === 'barrier')
+        // the road closure's barrier (#77): 5.6 m on trestles, ~45 kg, to drag or carry off the road
+        return {
+            shape: { type: 'box', hx: BARRIER_HALF.x, hy: BARRIER_HALF.y, hz: BARRIER_HALF.z },
+            opts: {
+                density: 45 / (8 * BARRIER_HALF.x * BARRIER_HALF.y * BARRIER_HALF.z),
+                friction: 0.7,
+                restitution: 0.05
+            }
         };
     if (name === 'sphere')
         return {

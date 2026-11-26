@@ -109,7 +109,7 @@ export type ToWorker =
           /** Streamed levels: the near world's radius (m) for this device's quality preset. */
           nearRadius?: number;
       }
-    | { type: 'query'; id: number; what: 'hash' | 'verify' };
+    | { type: 'query'; id: number; what: 'hash' | 'verify' | 'stand' };
 
 export type FromWorker =
     | { type: 'ready'; build: BuildInfo; units: UnitMesh[] }

@@ -59,6 +59,213 @@ stopped the goose (Epic 8) and the road closure (#131) being added.
 - Browser: every online co-op test (local, peer to peer, the bad network rejoin, the flood reaching
   a guest, the Valley) and the online embed test.
 
+## Epic 8: the road closure sign swap (2026-11-23, #77)
+
+The Valley's forest road can now be closed on you. Come up from Shallow Creek and the sign at the
+old logging track's mouth clunks over to "ROAD CLOSED / DETOUR →", with a barrier across the road
+beyond it. Drive round by the track, or shift the barrier; on foot you can also squeeze past.
+
+- **Where:** the forest road between the logging track's two ends (Epic 9's side path, from u = 11
+  to 35.5). The sign stands at the track's mouth (u = 9). The barrier, 5.6 m of striped board on
+  trestles, stands across the road and its verges at u = 22, 1.2 m past each edge.
+- **The old fence line:** the barrier stands in a post-and-rail fence across the valley floor.
+    - The posts are evenly spaced, 1.1 m apart. The rail, at 1.5 m, is above a beaver's head, so a
+      beaver fits between two posts and the ute doesn't.
+    - There's a gap where the logging track crosses, and the log dump is part of the line.
+    - Where something else already stops the ute (a pine, the dump, the terraces), there is no
+      post. Each of the 15 posts holds the ute somewhere. A test takes each one out in turn and
+      drives the ute at the line where it stood (the same scan as below): every time, it gets
+      through.
+- **What the fence holds, and what it doesn't:** it holds the valley floor. Driven at the line by
+  input every 0.2 m, straight and at an angle (330 drives, out to 24.6 m from the road on both
+  sides), the ute never gets past it; the only way through is the logging track.
+- **The valley sides are not a wall.** Driven up them from the floor (27 tries: 5 places, 3
+  angles, each side), the ute climbs as far as 26.1 m out, which took 24.5 s.
+    - Then driven along the side, up the route, for 20 s more, it never got past the line in any
+      try.
+    - So it is at best a long way round. The logging track takes 11.2 s from its mouth to the road
+      beyond. The test checks that any way round by the side takes longer than that.
+- **When:** a player on foot is in the tell's window: 2.5 s from the junction at a run
+  (4.2 m/s), 1.5 m deep, on the creek crossing. Anyone on foot in the window counts, standing or
+  facing either way. Or the ute, coming up the road, gets close enough that,
+  flat out from the speed it's going, it could reach the junction in 3 s.
+    - That reckoning assumes 5 m/s² of acceleration, more than the ute makes. Measured by input,
+      its peak along the road is 3.6–3.7 m/s², and the test asserts it stays under 4. The #131
+      audit measured 4.6 m/s² coming off the creek's bridge another way, which 5 still covers.
+    - One already closer when it could not start gets no closure at all rather than a late one.
+    - Once a run, through the shared budget: not in the first 20 s, one hazard at a time, and not
+      during the weather or the quiet spell after it (each tested: the test fails if either
+      check is removed).
+    - Tested on the full Valley too: crossing the creek on a finished bridge brings the flood
+      first and no closure; after the flood and its quiet spell the next one in the window gets
+      it; while it runs, the forest road's rain waits.
+- **Lead time, measured by input:** at a run 3.03 s before the junction, at a walk 5.65 s.
+    - **The ute, on the real layout:** driven flat out from the yard's side over the creek, on two
+      beams nailed under its wheels, then up the road past the checkpoint flag. From 12 m before
+      the creek, the tell came 4.18 s before the junction; from 16 m before, 4.08 s. The fastest it
+      went on that stretch is 7.6 and 7.8 m/s.
+    - **Extra test, not the real layout and not by input:** the same closure, moved up the forest
+      road beyond the culvert, with the ute set going at its top speed of 10 m/s (the test sets
+      that speed), then driven on by input: 3.10 s at 9.1 m/s.
+- **The tell:** a clunk (a latch click, then a metal thunk) and a toast: "Road closed ahead: drive
+  round by the old logging track, or shift the barrier. On foot, you can squeeze past."
+    - The sign's board (2.4 × 1.2 m) swings half round over 1.2 s. Its closed face says "ROAD
+      CLOSED" and "DETOUR" in black 5 cm letters on cream, with a big hi-vis orange arrow towards the track
+      in a striped border.
+    - The arrow points right: going up the road, the track leaves to the right (the approved
+      design said ←).
+    - Every pixel falls on whole voxel cells. At the 10 cm quality setting the letters can't be
+      drawn (they'd be noise), so the board shows its stripes and the arrow.
+    - The open face is the area's route sign ("2", straight on), in orange.
+- **The barrier is pinned:** its movement is locked until someone takes hold of it. Tested: the ute
+  driven into it at full throttle for 3 s stops; the barrier moves under 0.1 m, nothing goes over
+  15 m/s, nothing breaks. Any player's grab frees it (a guest's too: tested through real sessions),
+  and it is then a 45 kg prop.
+- **Ways round, each tested by input:**
+    - walk the logging track and rejoin the road beyond;
+    - drive the ute round the track;
+    - drag the barrier off the road: one player, by its end, straight back down the road first,
+      since it stands in the fence line, then out to the side;
+    - two players carry it off together;
+    - on foot, squeeze round either end or between two fence posts, then on up the road.
+- **No timer:** the closure ends when the barrier is clear of the road (every corner more than 1 m
+  past the edge), or when every player, and the ute if someone is driving it, is past it.
+    - **An empty ute doesn't hold it**, wherever it was left. Before this was fixed (found in the
+      #131 audit), a ute parked on the closed stretch kept the closure going for the rest of the
+      run, and with it every other hazard and the weather.
+    - **Tested by input:** park the ute on the closed road at u 15 and get out, then walk round by
+      the track. The closure ends, and the next weather comes after its quiet spell. Put the old
+      rule back and the test fails.
+- **The sign never lies:** it shows "closed" exactly while the barrier stands on the road.
+    - Cleared, it clunks back to "the road goes on" (once).
+    - Dragged back onto the road, it clunks closed again, with a toast ("The barrier is back across
+      the road"). Tested.
+    - If everyone took the track and left the barrier, it stays closed.
+    - A run's reset puts the barrier away and the sign back. (There is no checkpoint reset in the
+      game: a lost bucket comes back at the stage's start, and the closure stays as it is.)
+- **Online, tested:** the guest gets the toast (and so the clunk), the sign's swing on its channel,
+  and the barrier where the host has it.
+- **Network budget:** the Valley's worst-case host state (8 players, every entity visible, long
+  events) is now 4041 of the room's 4096 bytes. That leaves little room for more entities.
+- **In the browser:** a test brings the closure on in the Valley and photographs the sign and the
+  barrier (`test-results/road-closure-*.png`).
+- **Code:**
+    - `src/sim/hazard-road.ts`: the closure;
+    - `src/assets/road-closure.ts`: the barrier and the sign;
+    - `valley.ts`: the Valley's spec, the barrier's place and the fence;
+    - the barrier in the prop list and its body;
+    - the clunk in `synth.ts`;
+    - a few lines in the director: the closure's step, and the weather's quiet spell starting when
+      it ends.
+    - No new HazardNet fields.
+- **Also in this PR (the #127 audit's follow-ups):** the falling-tree browser test steps the sim by
+  ticks instead of waiting in real time, and now checks the lean and that the static tree is gone
+  in every worker lane.
+- **Tests:** `tests/unit/road-closure.test.ts` has 20 tests. All but two use the Valley with
+  only the closure among its hazards, so the flood the test's bridge brings doesn't get in first.
+  New since the #131 audit: the empty ute left on the closed road, and every fence post counting.
+  Unit tests: 896 pass at both voxel sizes, with `epics-5-10` 8f7d418 merged in.
+
+## Valley flags want water in the bucket: the empty-bucket throw is closed (2026-11-23, Epic 9)
+
+An existing cheat: the Valley could be finished without building a single bridge.
+
+- An empty bucket thrown from the near bank lands across Shallow Creek, the culvert, the gorge (in
+  one throw, pier and all) and the crevasse.
+- The stage flags counted any bucket resting at them, and the works tank and the mountain spring
+  refill it later.
+
+- **The fix:** every flag past the Timber Yard now wants at least 1 L of water in the bucket.
+    - A thrown bucket lands with its water gone: 0.02 L at most, measured with 0–3.4 L in it. A
+      full one falls short into the creek.
+    - Carried over a built crossing, it keeps nearly all of its 10 L.
+    - At the flag, a bucket that's too dry gets the message "it needs at least 1 L of water in it.
+      Carry it over the crossing, don't throw it."
+- **Spare buckets:** a bucket lost at the Forest Road, Gorge or Mountain Approach comes back with
+  3 L in it ("A spare bucket (3 L) is waiting…"). There's no water near those stage starts, and an
+  empty spare would have meant a walk back to the yard.
+    - Spares at the other stages stay empty: they have water nearby.
+    - Thrown, a 3 L spare also lands nearly empty, so it doesn't reopen the cheat.
+- **Beavers can jump three of the crossings; the bucket can't.** Measured by input, with no bridge,
+  sprinting along the road: a beaver jumps the culvert, the gorge (onto the old pier and on) and the
+  crevasse, with no falls. At the gorge the ground gaps are 2.3 m, but the stone caps on the rims
+  and the pier leave only about 2.15 m between cap and pier. Only Shallow Creek (4.3 m) is too wide.
+  That's fine: it's the bucket that needs the bridge. Four small rules make sure it does:
+    - **No jumping while holding the bucket.** Any beaver holding it, a co-carrier too. A press of
+      jump gets a small dip (as if bracing) and, the first time, "Too heavy to jump with the bucket:
+      build the crossing to get it over." Before the rule, sprint-jumping with the full bucket got it
+      over each of the three, landing with 0.05 to 1.09 L: enough for the crevasse's 1 L flag.
+    - **No taking hold of it in mid-air.** A beaver who jumps empty-handed and grabs it on the way
+      up or down is refused (the same toast). Before, grabbed on the first airborne tick, it went
+      over the culvert and the crevasse.
+    - **Taken only with ground between you and it.** Any grab of the bucket, lying somewhere or in
+      another beaver's hands, needs something to stand on all along the line from the grabber's
+      feet to the bucket: the ground, a prop or a built span, checked every 15 cm (and 15 cm either
+      side), down to 0.5 m under the lower end, and not within 0.3 m of either end, where what
+      stands or rests there is held up already. A step down to a crate, or off the top of a wall, is
+      ground; a crossing's gap metres deep is not. Hand to hand, the feet must also be within 1.9 m.
+        - Measured where beavers stand still at the very edges: the gorge's rim cap at u 82.41 and
+          the pier at 84.14 are 1.73 m apart, as are the pier at 85.86 and the far cap at 87.59.
+          Closeness alone didn't stop a hand-over there: the bucket went rim → pier → far rim, 10 L,
+          the Gorge done with no bridge.
+        - Nor did a check on hand-overs alone: set down at the near rim, it was taken from the pier
+          (2.3 m away), set down at the pier's far edge and taken from the far rim: the Gorge done
+          with 9.95 L. A resting bucket can be reached from 2.6 m.
+        - Now both are refused ("Can't take the bucket across a gap or from far off: stand close,
+          or build the crossing."). The tests, each by input, and what each does:
+            - **hand to hand, rim → pier and pier → far rim:** the beavers are placed at the
+              measured stable edges (found by stepping out 3 cm at a time and standing still), not
+              jumped there;
+            - **set down and reached across:** the beavers get onto the pier and the far rim by real
+              jumps and walk up near the edges (on the pier under u 84.5, its edge at 84.14; on the
+              far rim under u 88, its edge at 87.59). The bucket is set down at the near rim by
+              input; on the pier it is placed there;
+            - **two crate stacks** 1.5 m apart, the beavers placed on top: within the reach, with
+              the yard floor 1 m down between them;
+            - at the culvert and the crevasse, a bucket placed at a rim's edge is about 3 m from the
+              far edge: out of reach.
+        - Still fine: side by side; picking it up at each crossing's rim edge; on a built bridge
+          (set down on the beams, picked up from the far rim beside them); reaching down beside a
+          crate stack; along a built span (rim → a beaver on the beams → far rim).
+        - With the ground check switched off, the gorge tests and the crate test fail.
+        - The hand-over check (feet within 1.9 m, ground between the feet) is defensive: in the
+          Valley the reach check (ground between the grabber and the bucket) refuses first, and no
+          test fails with the hand-over check alone switched off.
+    - **The water past a crossing stays shut until its stage.** The works tank (3 m past the Gorge
+      flag) opens at the Old Industrial Works stage, and the mountain spring butt (0.8 m past the
+      crevasse's flag) at Flower Summit. A dry bucket thrown over the gorge or the crevasse can't be
+      refilled across before the flag ("The works water tank is shut until the Gorge stage is done.").
+      It follows the stage, so a reset or a checkpoint sets it right.
+    - So the 1 L flags rely on the bucket not getting over unbuilt: it can't be jumped with, handed
+      across, reached for across a gap, grabbed in mid-air, or refilled across. Each is tested by
+      input, a guest too.
+- **The Old Industrial Works flag wants 1 L too, and the stage is fair for it.** The works tank is
+  below the retaining wall, and a bucket jumped or thrown up the wall arrives dry. The way up keeps
+  the water: set the bucket on a crate against the wall, climb a 1-then-2 crate stair without it,
+  hop onto the wall's coping (0.66 m: a jump clears about 0.9 m), reach down for the bucket and
+  carry it to the flag. A test plays it alone by input (the crates placed), and the bucket arrives
+  with all 10 L. The stage's objective now says so: "Stack crates to climb the wall: set the bucket
+  on one and lift it up from the top".
+- **Tests** (`tests/unit/valley-water-flags.test.ts`, by input; the bridges are placed):
+    - at Shallow Creek, the culvert, the gorge and the crevasse, the bucket thrown over lands across
+      with under 1 L, and a second beaver carrying it to the flag doesn't complete the stage;
+    - the 3 L spare carried over the built culvert and gorge crossings, and a full bucket over the
+      crevasse, each complete their stage, with no falls.
+- **Weather follow-ups from the #128 audit:**
+    - The fog's sky now has one dome per local view, each round its own camera and drawn in that
+      view only. In split screen, player 2 can be far from player 1, and a dome round player 1's
+      camera would have stood inside player 2's fog. A browser test puts the two views about
+      130 m apart at full fog and checks each dome sits on its own camera.
+    - The debug weather hook never starts a zone over the gorge mist. The mist is atmosphere, so no
+      hazard is running, but weather is (tested).
+    - The six-height rain carry has a dry control: the same carry alone holds at −0.8 and −1.2 in
+      the dry, so it is the wet grip that loses it in the rain.
+- **Also fixed: a weak check in the Valley's crossing test.** It looked for each crossing's rim
+  30 cm back from where the ground drops below the fall line. The crevasse's bed is at the fall line
+  itself, so the "rim" it found was 2 m up the crevasse wall, not on the bench at 9.3 m, and its beam
+  had been resting inside the crevasse. It now finds the gap as ground well below the rims. A
+  beam laid there rests on the bench.
+
 ## Epic 5, part 2: joints strain, creak and break (2026-11-23, #49 #50)
 
 Nailed joints now carry measured loads and can fail. A joint that is working hard creaks, one close
