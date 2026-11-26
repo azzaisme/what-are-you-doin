@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import pngjs from 'pngjs';
 
+import { fastClock, REALCLOCK } from './fast-clock.ts';
 import { startRelay } from './nostr-relay.ts';
 
 const { PNG } = pngjs;
@@ -59,6 +60,7 @@ type Lab = {
         planeY: number;
         tick: number;
         tree: number;
+        treeSince: number;
     };
     placeUte(x: number, z: number, yaw?: number): boolean;
     audio(): { started: boolean; context: string; played: number; recent: string[]; loops: Record<string, number> };
@@ -106,7 +108,21 @@ const lab = <T>(page: Page, fn: (l: Lab) => T) =>
         fn.toString()
     ) as Promise<T>;
 
-test('boots the River Lab with no console errors and a non-blank frame', async ({ page }) => {
+/** Waits until the game has run `n` more simulation ticks (game time, not wall time). */
+async function ticks(page: Page, n: number): Promise<void> {
+    const t0 = await lab(page, (l) => l.hazards().tick);
+    await page.waitForFunction(
+        ([t, k]) => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().tick >= t + k,
+        [t0, n],
+        { timeout: 120_000 }
+    );
+}
+
+// the fast clock (and a smaller page) for every test without @realtime (or @realclock: the clock only) in
+// its title: see fast-clock.ts
+test.beforeEach(({ context, page }, info) => fastClock(context, page, info));
+
+test('boots the River Lab with no console errors and a non-blank frame @realtime', async ({ page }) => {
     const problems = await boot(page);
     const shot = await page.screenshot();
     expect(shot.byteLength).toBeGreaterThan(50_000); // a blank canvas compresses to a few kB
@@ -186,7 +202,7 @@ test('first-person mode carries a voxelized plank', async ({ page }) => {
     const problems = await boot(page);
     await lab(page, (l) => l.setFirstPerson(0, 6, 0, -0.1));
     await lab(page, (l) => l.set('carry', true));
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(1500); // (the lab is paused here: the plank is drawn, not simulated)
     const e = await lab(page, (l) => l.entities());
     expect(e['held-plank'].visible).toBe(true);
     expect(problems).toEqual([]);
@@ -306,7 +322,10 @@ test('settings menu: mouse, keyboard and gamepad reach every setting, and it is 
     expect(problems).toEqual([]);
 });
 
-test('remappable controls: rebind a key and a pad button in Settings; they work and are saved', async ({ page }) => {
+// (the normal clock: it catches the top of each jump between frames, so a frame must not hold a whole jump)
+test('remappable controls: rebind a key and a pad button in Settings; they work and are saved @realclock', async ({
+    page
+}) => {
     test.setTimeout(600_000); // two boots of the game page
     await page.addInitScript(() => {
         const buttons = Array.from({ length: 17 }, () => ({ pressed: false, touched: false, value: 0 }));
@@ -577,7 +596,7 @@ test('UI boxes never overlap: small and large portrait phones, portrait tablet, 
 test('physics sandbox: grab and carry the plank, launch the ragdoll, switch to scripted props', async ({ page }) => {
     const problems = await boot(page, '?level=lab&t=0.01&quality=low&noui#cell100');
     await lab(page, (l) => l.action('pause')); // resume: the sandbox runs live from here
-    await page.waitForTimeout(3000); // props settle
+    await ticks(page, 180); // props settle
     const plank = (await lab(page, (l) => l.entities())).plank;
     // stand 1.6 m behind the plank (towards +Z) facing it, and aim the crosshair at it
     await page.evaluate(
@@ -585,7 +604,7 @@ test('physics sandbox: grab and carry the plank, launch the ragdoll, switch to s
         [plank.x, plank.z]
     );
     await lab(page, (l) => l.set('carry', false));
-    await page.waitForTimeout(1500);
+    await ticks(page, 90);
     const p = await lab(page, (l) => l.player());
     expect(p.grounded).toBe(true);
     const pitch = -Math.atan2(p.y + p.eyeHeight - plank.y, Math.hypot(plank.x - p.x, plank.z - p.z));
@@ -775,7 +794,7 @@ test('the Timber Yard ute: get in, drive it with the keyboard, get out', async (
         { timeout: 120_000 }
     );
     await page.keyboard.up('KeyW');
-    await page.waitForTimeout(2000);
+    await ticks(page, 120);
     await page.screenshot({ path: 'test-results/ute-driving.png' });
     // get out
     await lab(page, (l) => l.input({ grab: true }));
@@ -819,7 +838,7 @@ test('the Timber Yard hammer: look at a beam, F nails it down and the nail head 
     });
     // the same spot again is refused: still one nail
     await page.keyboard.press('KeyF');
-    await page.waitForTimeout(500);
+    await ticks(page, 30);
     expect(await lab(page, (l) => l.joints())).toMatchObject({ connections: 1, nails: 1 });
     expect(await lab(page, (l) => l.interaction().nail)).toBeGreaterThan(1);
     await page.screenshot({ path: 'test-results/hammer-nail.png' });
@@ -870,7 +889,9 @@ test('the Valley: one streamed map, stages advance in order and the world follow
     expect(problems).toEqual([]);
 });
 
-test('local co-op: split screen renders both views, player 2 moves with their own commands', async ({ page }) => {
+test('local co-op: split screen renders both views, player 2 moves with their own commands @realtime', async ({
+    page
+}) => {
     const problems = await boot(page, '?level=yard&t=0.01&quality=low&noui#cell100');
     await lab(page, (l) => l.action('pause'));
     await lab(page, (l) => (l as unknown as { setPlayers(n: number): void }).setPlayers(2));
@@ -933,7 +954,9 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
     expect(problems).toEqual([]);
 });
 
-test("split screen: player 2's hammer aim shows player 2's nail outline in player 2's view only", async ({ page }) => {
+test("split screen: player 2's hammer aim shows player 2's nail outline in player 2's view only @realtime", async ({
+    page
+}) => {
     test.setTimeout(300_000);
     const problems = await boot(page, '?level=yard&t=0.01&quality=low&noui#cell100');
     await lab(page, (l) => l.action('pause'));
@@ -1033,7 +1056,7 @@ test("split screen: player 2's hammer aim shows player 2's nail outline in playe
 // claude.ai room in the published artifact); ?net=p2p is the itch.io transport, WebRTC between the
 // pages, signalled through a local Nostr relay instead of the public ones
 for (const transport of ['local', 'p2p'] as const)
-    test(`online co-op (${transport}): a second device joins the host, plays as player 2 and renders the host world`, async ({
+    test(`online co-op (${transport}): a second device joins the host, plays as player 2 and renders the host world${transport === 'p2p' ? ` ${REALCLOCK}` : ''}`, async ({
         page,
         context
     }) => {
@@ -1224,8 +1247,15 @@ test('online co-op over a bad network: the guest reloads and rejoins as the same
     await guest.keyboard.up('KeyW');
     // (a fresh join would appear back on the start spot: 1.5 m off is well clear of 0.5 m)
     expect(away).toBeGreaterThan(1.5);
-    await page.waitForTimeout(1500); // the last of the walk arrives and the player stops
-    const left = await avatar2();
+    // the last of the walk arrives and the player stops: still for a second of game time (the
+    // delayed inputs arrive within about 0.4 s)
+    let left = await avatar2();
+    for (let still = false; !still;) {
+        await ticks(page, 60);
+        const p = await avatar2();
+        still = Math.hypot(p.x - left.x, p.z - left.z) < 0.001;
+        left = p;
+    }
 
     // the guest reloads: the host holds player 2 where they stood...
     await guest.reload();
@@ -1428,9 +1458,13 @@ test("online co-op in the Valley: the guest streams its own world and follows th
         { timeout: 120_000 }
     );
     await expect(guest.locator('#hud-objective')).toContainText('2/7 Shallow Creek', { timeout: 60_000 });
-    // both devices show the host's water (Epic 7: the volume travels in the host state)
-    const hostLitres = (await lab(page, (l) => l.water())).volume.toFixed(1);
-    await expect(guest.locator('#hud-water')).toContainText(`${hostLitres} L`, { timeout: 30_000 });
+    // both devices show the host's water (Epic 7: the volume travels in the host state, to 0.01 L):
+    // the host's line has its litres, and the guest's whole line (bar and litres) is the host's
+    const hostLitres = (Math.round((await lab(page, (l) => l.water())).volume * 100) / 100).toFixed(1);
+    await expect(page.locator('#hud-water')).toContainText(`${hostLitres} L`);
+    const hostLine = await page.locator('#hud-water').textContent();
+    expect(hostLine).toMatch(/^Bucket [▮▯]{10} /);
+    await expect(guest.locator('#hud-water')).toHaveText(hostLine!, { timeout: 30_000 });
     expect(await call(guest, '(l) => l.nearTiles()')).toBeGreaterThan(10);
     const gs = await guest.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.stats());
     expect(gs.voxel.rejected).toBe(0);
@@ -1502,9 +1536,9 @@ test('logging in the Timber Yard: chew a pine down, the voxel tree becomes a stu
     );
     // the felled log lies east; the static tree has gone from the voxel world, a stump stays (the
     // worker side is unit tested: tests/unit/forestry.test.ts; here, look at the screenshot)
-    await page.waitForTimeout(4000);
+    await ticks(page, 240);
     await lab(page, (l) => l.look(-Math.PI / 2 + 0.3, -0.45));
-    await page.waitForTimeout(1500);
+    await ticks(page, 90);
     await page.screenshot({ path: 'test-results/logging-felled.png' });
     // a grab press that landed after the fall picks the log up (on a slow software renderer the
     // presses queue up), and full hands never aim at the lever: let go first
@@ -1700,29 +1734,35 @@ test('the falling tree in the Timber Yard: a bite with the ute by the stand, and
         { timeout: 60_000 }
     );
     const cells0 = (await lab(page, (l) => l.stats())).dynamicCells;
-    for (let tries = 0; tries < 30 && (await lab(page, (l) => l.hazards().tree)) === 0; tries++) {
+    // (held still as soon as the crack is seen, to look at it)
+    let crack = await lab(page, (l) => l.hazards());
+    for (let tries = 0; tries < 30 && crack.tree === 0; tries++) {
         await lab(page, (l) => l.input({ grab: true }));
         await page.waitForTimeout(500);
+        crack = await lab(page, (l) => {
+            const h = l.hazards();
+            if (h.tree === 1) l.action('pause');
+            return h;
+        });
     }
-    expect(await lab(page, (l) => l.hazards().tree)).toBe(1);
+    expect(crack.tree).toBe(1);
+    expect(await lab(page, (l) => l.paused())).toBe(true);
     await lab(page, (l) => {
         // south-east of it, outside its crown, looking at it diagonally (forward is
         // (-sin yaw, -cos yaw)): the lean towards the ute (east) tips it to the left
         l.teleport(20.0, 1.5, Math.atan2(4, -3));
         l.look(Math.atan2(4, -3), 0.3);
     });
-    await page.waitForTimeout(1500);
+    await idle(page);
     await page.screenshot({ path: 'test-results/falling-tree-crack.png' });
-    // the tell: the static tree is gone and the marker draws it, leaning further over time
-    const t0 = await lab(page, (l) => l.hazards().tick);
-    await page.waitForFunction(
-        (t) => (window as unknown as { __riverLab: Lab }).__riverLab.hazards().tick >= t + 5 * 60,
-        t0,
-        { timeout: 120_000 }
+    // the tell: the static tree is gone and the marker draws it, leaning further over time. Step the
+    // simulation (deterministic) to 5 s into the 7 s tell and hold it there to look at it
+    await page.evaluate(
+        (t) => (window as unknown as { __riverLab: Lab }).__riverLab.seek(t),
+        (crack.treeSince + 5 * 60) / 60
     );
-    // 5 s into the 7 s tell
     expect(await lab(page, (l) => l.hazards().tree)).toBe(1);
-    await page.waitForTimeout(1500);
+    await idle(page);
     await page.screenshot({ path: 'test-results/falling-tree-leaning.png' });
     const cells1 = (await lab(page, (l) => l.stats())).dynamicCells;
     // a whole tree's worth of moving cells (at 10 cm: its trunk and four needle tiers)
