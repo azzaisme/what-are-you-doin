@@ -150,8 +150,12 @@ export const TUTORIAL_DATA: LevelData = {
     props: [
         { name: 'cube', x: 2, z: 0.6 },
         { name: 'sphere', x: 2.2, z: -3.2 },
-        // the plank already points across the ditch: push or carry it over
-        { name: 'plank', x: -1.8, z: -7.6, yaw: Math.PI / 2 },
+        // the long plank (3.8 m, only here) already points across the ditch, its far end 10 cm short
+        // of the edge (and clear of the bin). It is carried balanced, its middle 2.2 m ahead of you
+        // wherever you grab it and wherever you look: let go with your toes 0.4 to 1.0 m short of the
+        // edge and it lies 0.3 m or more on each bank (tests/unit/tutorial.test.ts). Dropped into the
+        // ditch, it comes back here.
+        { name: 'long-plank', x: -0.75, z: -6.85, yaw: Math.PI / 2 },
         { name: 'bucket', x: 1.6, z: -6.8 }
     ],
     spawn: { x: 0, z: 10.5, yaw: 0 },
@@ -180,7 +184,7 @@ export const TUTORIAL_DATA: LevelData = {
         },
         {
             kind: 'reach',
-            text: 'Push the plank across the ditch and walk over it.',
+            text: 'Lay the plank across the ditch: carry it toward the ditch and let go a step before the edge, then walk over.',
             rect: { minX: -4, maxX: 4, minZ: -14, maxZ: -11.2 }
         },
         { kind: 'goal', text: 'Bring the bucket to the flag. (Falling in? You are fished out.)' }
