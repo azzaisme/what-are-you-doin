@@ -1,5 +1,80 @@
 # Progress log
 
+## Epic 8: the playtest log says how each hazard ended (2026-11-23, #70)
+
+The playtest log's summary used to count floods and gusts only. Now it says what each hazard met
+was, and how it ended, so the facilitator can check the testers' explanations against what the
+game saw.
+
+- **New counts:** road closures, alongside the floods, gusts, handbrake pranks and falling trees.
+- **"How the hazards ended":** one line per hazard met, grouped, with repeats counted, for example
+  "handbrake: chocked (2×); someone got in".
+    - **Falling tree:** fell towards the ute, cut from the ute's side (fell away from it), the ute
+      moved out of reach, or left standing.
+    - **Handbrake:** someone got in, chocked, or rolled until it caught.
+    - **Road closure:** took the track on foot, squeezed past on foot (or some of each), drove the
+      ute round the track (or got it round another way), barrier shifted off the road, or turned
+      back; plus "left the ute on the closed road" when they did.
+    - **Weather:** came and cleared, by area.
+- **Where the account comes from:** the hazard director keeps it as each hazard ends. It's on the
+  host only and never sent, so it adds nothing to the network. A guest's log has the toasts, as
+  before. A run's reset clears it.
+- **Tested from real play, by input:** each account is checked in the scenario that brings it
+  about:
+    - the falling tree: cut with the ute in reach, cut from its side, the ute driven out of reach,
+      left standing;
+    - the handbrake: rolled, got in, chocked;
+    - the road closure: walked the track, drove the track, squeezed past (three ways), dragged the
+      barrier off;
+    - the weather: a test shower.
+- **Code:** `src/sim/hazards.ts` (`outcomes`), a few lines in `hazard-tree.ts` and
+  `hazard-road.ts`, the Valley's track test in `valley.ts`, `main.ts` (fed into the log), and
+  `src/playtest/telemetry.ts`.
+- **The goose's outcomes** (pecked, put down, outrun, distracted) come with the goose (#78).
+- **Road closure fixes (from the #131 audit), in this PR:**
+    - **A closure the driver brought on ended on the spot.** With the ute still behind the closed
+      stretch at the tell (it always is: the tell lands 2.5 s out), "everyone is past" was true at
+      once. So it was over on its first tick and freed the director. It also said "the barrier is
+      back across the road" along with the tell (two clunks). This came in with #131. Now the
+      ute test checks the closure holds from the tell until the ute is past, with one toast.
+        - Mutation check: with the old rule back, it fails (over at the tell, both toasts).
+    - **Who holds it:** the players on foot, and the ute if someone drives it, that are in the
+      closed stretch (past `from`) or beyond. A player who stays behind across the creek, or goes
+      back there, no longer holds it, and with it every other hazard. If nobody holds it for 10 s
+      (all turned back), it is over too. The barrier still stands, and the sign stays closed.
+        - Tested by input: one player walks back into the yard, and it ends 10 s after they leave
+          the stretch ("turned back"). Another stays in the yard while the other walks the track,
+          and it ends when that one is past.
+        - Mutation check: with walkers counted wherever they are, both fail.
+    - **An empty ute brings nobody:** an empty ute rolling at the junction no longer brings the
+      tell. An empty ute only moves when shoved or when the handbrake prank lets it go, so this test
+      plays the closure's own step with the same roll at 8 m/s, empty and driven. The driven roll
+      brings the tell; the empty one doesn't.
+        - Mutation check: without the check, the empty roll brings it.
+    - **The account:** an empty ute left on the closed road adds "left the ute on the closed road".
+      "Got the ute round another way" now needs the ute past the barrier, not just in the stretch.
+- **Why the road closure's drag tests changed in #131 (measured).**
+    - They used to walk forward with the barrier trailing behind, round the corner from "back down
+      the road" to "out to the side". That walk is a coin flip. The grip's error peaks at 2.13–2.19 m, within one tick of its 0.4 s
+      break time. Waiting 0 to 9 idle ticks before the grab loses the grip 5 to 7 times in 10.
+      That held with or without the creek bridge, and with or without #136's under-foot
+      restore. The old tests passed on a lucky tick alignment, and #136's merge moved it.
+    - The tests now pull the barrier facing it, stepping back, as a player hauling something
+      heavy would. That kept the grip 20 times in 20 over the same sweep, with the error at
+      most 1.04 m, under the 1.25 m break distance. They still drive it by input, and the
+      assertions are unchanged.
+    - Walking forward round a corner with it still loses the grip about half the time, on
+      tick phase alone. That is a follow-up, not changed here.
+- **Every event kind has a sound** (`eventSounds` is now keyed on every kind, so a new one won't
+  type-check without one).
+    - Played from the toast: a step, the goal, a recovery, a hint, the hazards' toasts.
+    - The ute's toasts: a recovery dings and its rule knocks. Getting in or out already sounds the
+      door.
+    - Water notices slosh, and wood notices (the pine falls, logs bucked or delivered) knock.
+    - Creaks, snaps and falls into the creek are played where they happen (the nail markers, the
+      splash), so they aren't doubled.
+- **Unit tests:** 1040 pass (110 files, both voxel sizes), on `epics-5-10` 225a26c.
+
 ## Objects on different lattices resolve by priority (2026-11-22, Epic 10, #107)
 
 Objects drawn on different lattices (1 cm fine, the 5–10 cm base, the coarse 10–20 cm) used to draw
