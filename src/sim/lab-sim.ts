@@ -701,6 +701,8 @@ export class LabSim {
                 }
             }
         }
+        // hand to hand, also feet within HANDOVER_REACH with ground between them (defensive: in the
+        // Valley the reach check above refuses first, and no test fails with this alone switched off)
         if (heldBefore !== this.bucket.id && pw.heldIdOf(i) === this.bucket.id) {
             for (let j = 0; j < this.players.length; j++) {
                 if (j === i || pw.heldIdOf(j) !== this.bucket.id) continue;

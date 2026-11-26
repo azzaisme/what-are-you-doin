@@ -46,14 +46,25 @@ An existing cheat: the Valley could be finished without building a single bridge
           (2.3 m away), set down at the pier's far edge and taken from the far rim: the Gorge done
           with 9.95 L. A resting bucket can be reached from 2.6 m.
         - Now both are refused ("Can't take the bucket across a gap or from far off: stand close,
-          or build the crossing."): tested by input with the beavers getting onto the pier and the
-          far rim by real jumps, at the measured edges, and on two stacks of crates 1.5 m apart
-          (within the reach, with the yard floor 1 m down between them). At the culvert and the
-          crevasse a bucket at a rim's edge is about 3 m from the far edge: out of reach.
+          or build the crossing."). The tests, each by input, and what each does:
+            - **hand to hand, rim → pier and pier → far rim:** the beavers are placed at the
+              measured stable edges (found by stepping out 3 cm at a time and standing still), not
+              jumped there;
+            - **set down and reached across:** the beavers get onto the pier and the far rim by real
+              jumps and walk up near the edges (on the pier under u 84.5, its edge at 84.14; on the
+              far rim under u 88, its edge at 87.59). The bucket is set down at the near rim by
+              input; on the pier it is placed there;
+            - **two crate stacks** 1.5 m apart, the beavers placed on top: within the reach, with
+              the yard floor 1 m down between them;
+            - at the culvert and the crevasse, a bucket placed at a rim's edge is about 3 m from the
+              far edge: out of reach.
         - Still fine: side by side; picking it up at each crossing's rim edge; on a built bridge
           (set down on the beams, picked up from the far rim beside them); reaching down beside a
           crate stack; along a built span (rim → a beaver on the beams → far rim).
         - With the ground check switched off, the gorge tests and the crate test fail.
+        - The hand-over check (feet within 1.9 m, ground between the feet) is defensive: in the
+          Valley the reach check (ground between the grabber and the bucket) refuses first, and no
+          test fails with the hand-over check alone switched off.
     - **The water past a crossing stays shut until its stage.** The works tank (3 m past the Gorge
       flag) opens at the Old Industrial Works stage, and the mountain spring butt (0.8 m past the
       crevasse's flag) at Flower Summit. A dry bucket thrown over the gorge or the crevasse can't be
