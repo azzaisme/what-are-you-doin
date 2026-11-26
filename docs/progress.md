@@ -105,7 +105,7 @@ beyond it. Drive round by the track, or shift the barrier; on foot you can also 
 - **Tests:** `tests/unit/road-closure.test.ts` has 20 tests. All but two use the Valley with
   only the closure among its hazards, so the flood the test's bridge brings doesn't get in first.
   New since the #131 audit: the empty ute left on the closed road, and every fence post counting.
-  Unit tests: UNITCOUNT pass at both voxel sizes.
+  Unit tests: 896 pass at both voxel sizes, with `epics-5-10` 8f7d418 merged in.
 
 ## The tutorial's long plank, and a better plank throw (2026-11-23)
 
