@@ -967,7 +967,7 @@ export class LabSim {
                 this.events.push({
                     tick: this.tick,
                     kind: 'water',
-                    text: `The bucket made it, but it needs at least ${need} L of water in it. Carry it over the crossing, don't throw it.`
+                    text: `The bucket made it, but it needs at least ${need} L of water. Carry it over the crossing, don't throw it.`
                 });
             }
             return;

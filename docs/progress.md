@@ -1,5 +1,70 @@
 # Progress log
 
+## Online play: room to grow in the host's updates (2026-11-26, Epic 10, #20)
+
+The host sends its world to the other players about 20 times a second. On claude.ai that update has
+to fit in 4 KiB (the room's limit per player). In the Valley it had nearly run out, which would have
+stopped the goose (Epic 8) and the road closure (#131) being added.
+
+### What changed
+
+- **Each update lists only what the guests don't have yet** (network version 3). Before, every
+  visible piece went in every update.
+    - Every guest tells the host which update it last got (it always did, for the round-trip
+      time). A piece is in every update until each guest has got an update with it where it is now:
+      the players, and anyone watching a full game or waiting to rejoin. Then it stops, until it
+      moves.
+    - So nothing depends on which updates arrive: a guest missing updates (on a slow host only one
+      in 20 may get through) or joining late gets each piece in the first update that reaches it.
+- **It can't go over the limit**, counted in UTF-8 bytes (it isn't known whether the room counts
+  characters or bytes, and bytes is the larger count). When a lot moves at once, the pieces that
+  have waited longest go first, nearest to a player among equals. The rest wait one update; none
+  waits longer than two (0.1 s).
+- **A piece shown again waits for its new place.** One that was hidden (picked up, out of range)
+  and moved meanwhile isn't drawn where it last was.
+- **A player on another version is told so.** A guest of this version facing a host of the last one
+  now sees "That game runs another version", instead of an empty world.
+
+### Measured (the Valley)
+
+|                                                                                                                                                          | Before (version 2)                                                           | Now                                                                                                                          |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Normal play: the host walking, seven guests seated                                                                                                       | 2050 bytes                                                                   | median 615, at most 703                                                                                                      |
+| Worst case: every piece visible and moving, the longest message (with emoji), 64 nails, every player aiming a nail, seven guests seated and one watching | 4018 with the long plank; about 4094 with a goose and the road closure added | 4045 UTF-8 bytes (4018 characters), with the road closure (#131) in and a stand-in for the goose: under 4096 by construction |
+| Longest wait for a piece in that worst case                                                                                                              | none (all sent)                                                              | 2 updates (0.1 s)                                                                                                            |
+| Host's time to build an update (141 pieces moving)                                                                                                       | not measured                                                                 | 0.1 to 0.4 ms on average, depending on the machine's load                                                                    |
+
+### Tests
+
+- `tests/unit/net-headroom.test.ts`:
+    - the worst case and the longest wait; the same with messages written entirely in 3-byte
+      characters;
+    - normal play with real guests;
+    - the time to build an update;
+    - a piece that stops while updates are lost is right in the first update after the gap;
+    - an acknowledgement of an older place doesn't count for the new one;
+    - a guest that gets one update in k, for every k from 2 to 40, has every piece in the first
+      that arrives, and within a budget after as many as the budget takes;
+    - nothing is drawn before its place arrives, and a piece shown again waits for its new one;
+    - someone who joins a full game to watch, and a guest waiting to rejoin, draw the whole world;
+    - acknowledgements arriving 3 to 40 updates late still confirm, so normal play shrinks;
+    - the stalest go first; version 2 against 3.
+- Each fails without what it guards (checked):
+    - no budget: 5321 bytes in the worst case;
+    - no stalest-first: 41 of the 141 pieces were never sent;
+    - confirming a piece without the guest's acknowledgement: the stopped piece was 0.6 m out;
+    - counting an older acknowledgement;
+    - drawing a piece shown again at its old place;
+    - counting characters, not bytes: 4762 bytes;
+    - sending only to the guests playing: someone watching a full game drew 4 of the 49 pieces;
+    - remembering only the last update's list: acknowledgements arriving late never confirmed
+      anything, and every piece kept being sent.
+- `tests/unit/event-text.test.ts`: every message the game can show fits the 120 characters an update
+  carries (the longest are the siren at 111 and the handbrake at 114), assuming nothing put into a
+  message is longer than 20 characters (the longest stage name is exactly 20).
+- Browser: every online co-op test (local, peer to peer, the bad network rejoin, the flood reaching
+  a guest, the Valley) and the online embed test.
+
 ## Epic 8: the playtest log says how each hazard ended (2026-11-23, #70)
 
 The playtest log's summary used to count floods and gusts only. Now it says what each hazard met
@@ -347,8 +412,9 @@ An existing cheat: the Valley could be finished without building a single bridge
     - A thrown bucket lands with its water gone: 0.02 L at most, measured with 0–3.4 L in it. A
       full one falls short into the creek.
     - Carried over a built crossing, it keeps nearly all of its 10 L.
-    - At the flag, a bucket that's too dry gets the message "it needs at least 1 L of water in it.
-      Carry it over the crossing, don't throw it."
+    - At the flag, a bucket that's too dry gets the message "it needs at least 1 L of water. Carry
+      it over the crossing, don't throw it." (shortened from "…of water in it." so it fits the 120
+      characters an online update carries, with room for the amount)
 - **Spare buckets:** a bucket lost at the Forest Road, Gorge or Mountain Approach comes back with
   3 L in it ("A spare bucket (3 L) is waiting…"). There's no water near those stage starts, and an
   empty spare would have meant a walk back to the yard.
