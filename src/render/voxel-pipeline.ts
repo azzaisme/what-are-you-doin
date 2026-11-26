@@ -47,7 +47,10 @@ interface Lane extends LaneSpec {
     build: BuildInfo | null;
 }
 
-/** Stats summed over lanes (counts), or the slowest lane (times). */
+/**
+ * Stats summed over lanes (counts), or the slowest lane (times). `maskLimit` sums only the lanes
+ * that can mask (a lane with no objects of other lattices reports 0): the masking lanes' budgets.
+ */
 const SUMMED: (keyof FrameStats)[] = [
     'objects',
     'parts',
@@ -59,12 +62,30 @@ const SUMMED: (keyof FrameStats)[] = [
     'dirtyCells',
     'dynDynOverlaps',
     'dynStaticOverlaps',
+    'latticeMasks',
+    'latticeHidden',
+    'maskSkipped',
+    'maskCells',
+    'maskLimit',
+    'maskRejected',
     'staticRebuilt',
     'dynamicRebuilt',
     'dynamicCells',
     'chunks'
 ];
 const SLOWEST: (keyof FrameStats)[] = ['rasterMs', 'resolveMs', 'meshMs', 'totalMs'];
+
+/** One frame's stats over every lane: the world lane's, with counts summed and times the slowest. */
+export function combineLaneStats(world: FrameStats, lanes: readonly (FrameStats | null)[]): FrameStats {
+    const out = { ...world };
+    for (const k of SUMMED) out[k] = 0;
+    for (const st of lanes) {
+        if (!st) continue;
+        for (const k of SUMMED) out[k] += st[k];
+        for (const k of SLOWEST) out[k] = Math.max(out[k], st[k]);
+    }
+    return out;
+}
 
 export class VoxelClient {
     policy: SamplingPolicy = 'coverage50';
@@ -97,6 +118,8 @@ export class VoxelClient {
     focus: (() => Float32Array) | null = null;
     /** Streamed levels: the near world's radius (m), from the quality preset (null: the level's). */
     nearRadius: number | null = null;
+    /** This device's quality preset, for the lattices' mask budget (see MASK_PRESETS). */
+    maskPreset: 'high' | 'low' = 'high';
     /** Streamed levels: near tiles built (ti, tk keys) and their size (m). */
     readonly nearTiles = new Set<number>();
     nearTileSize = 0;
@@ -184,7 +207,8 @@ export class VoxelClient {
     }
 
     /** Builds the static world (and each lane's objects); resolves once every lane is ready. */
-    init(seed: number, level: string, data?: unknown): Promise<BuildInfo> {
+    /** `masks`: false turns lattice priority off (objects on different lattices intersect, #107). */
+    init(seed: number, level: string, data?: unknown, masks = true): Promise<BuildInfo> {
         return new Promise((resolve, reject) => {
             this.readyResolve = resolve;
             this.readyReject = reject;
@@ -198,7 +222,8 @@ export class VoxelClient {
                     data,
                     objects: l.objects,
                     world: l.world,
-                    far: l.far
+                    far: l.far,
+                    masks
                 });
         });
     }
@@ -258,23 +283,22 @@ export class VoxelClient {
     }
 
     private combine(): FrameStats {
-        const base = this.laneStats[this.lanes.indexOf(this.worldLane)]!;
-        const out = { ...base };
-        for (const k of SUMMED) out[k] = 0;
-        for (const st of this.laneStats) {
-            if (!st) continue;
-            for (const k of SUMMED) out[k] += st[k];
-            for (const k of SLOWEST) out[k] = Math.max(out[k], st[k]);
-        }
-        return out;
+        return combineLaneStats(this.laneStats[this.lanes.indexOf(this.worldLane)]!, this.laneStats);
     }
 
     /**
      * `hash`: dynamic content of every lane combined; `verify`: grid checks summed over lanes;
+     * `lattice`: per object id, the cells an object on another lattice takes from it (summed);
      * `stand`: each lane's stand trees as its static layer draws them (an array per lane).
      */
-    async query<T>(what: 'hash' | 'verify' | 'stand'): Promise<T> {
+    async query<T>(what: 'hash' | 'verify' | 'lattice' | 'stand'): Promise<T> {
         const results = await Promise.all(this.lanes.map((l) => this.queryLane(l, what)));
+        if (what === 'lattice') {
+            const out: Record<number, number> = {};
+            for (const r of results as Record<number, number>[])
+                for (const [id, n] of Object.entries(r)) out[Number(id)] = (out[Number(id)] ?? 0) + n;
+            return out as T;
+        }
         if (what === 'stand') return results as T;
         if (what === 'hash') return results.reduce((h: number, r) => (Math.imul(h, 31) + (r as number)) >>> 0, 17) as T;
         const v = { vertices: 0, misaligned: 0 };
@@ -285,7 +309,7 @@ export class VoxelClient {
         return v as T;
     }
 
-    private queryLane(lane: Lane, what: 'hash' | 'verify' | 'stand'): Promise<unknown> {
+    private queryLane(lane: Lane, what: 'hash' | 'verify' | 'lattice' | 'stand'): Promise<unknown> {
         const id = ++this.queryId;
         return new Promise((resolve) => {
             this.queries.set(id, resolve);
@@ -360,7 +384,8 @@ export class VoxelClient {
                     focus: l.world && !l.far && focus ? focus.slice() : undefined,
                     nearTiles: l.far && this.nearTileList ? this.nearTileList.slice() : undefined,
                     nearTileSize: l.far ? this.nearTileSize : undefined,
-                    nearRadius: l.world && !l.far && this.nearRadius !== null ? this.nearRadius : undefined
+                    nearRadius: l.world && !l.far && this.nearRadius !== null ? this.nearRadius : undefined,
+                    maskPreset: this.maskPreset
                 },
                 transfer
             );
