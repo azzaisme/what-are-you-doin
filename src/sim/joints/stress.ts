@@ -62,6 +62,19 @@ export interface JointLoad {
     fz: number;
 }
 
+/** A contact on a jointed piece, as the meter read it (debug overlay). */
+export interface StressContact {
+    x: number;
+    y: number;
+    z: number;
+    /** The contact's force on the jointed piece (N), world frame, over this step. */
+    fx: number;
+    fy: number;
+    fz: number;
+    /** True when it belongs to a joint (folded into the joint's load), false for a free contact (a seat). */
+    folded: boolean;
+}
+
 interface BodyState {
     pb: PhysBody;
     vx: number;
@@ -186,6 +199,11 @@ export class StressMeter {
     rescaleLoose = true;
     /** This step's scale of each loose piece's reported contact impulses (after: rescale). */
     private readonly scales = new Map<number, number>();
+    /**
+     * Debug overlay only (#51): when set to an array, each step's contacts on jointed pieces are
+     * recorded into it (cleared every step). Null, the default, records nothing.
+     */
+    debugContacts: StressContact[] | null = null;
 
     constructor(pw: PhysicsWorld, graph: JointGraph) {
         this.pw = pw;
@@ -310,6 +328,7 @@ export class StressMeter {
     }
 
     after(): void {
+        if (this.debugContacts) this.debugContacts.length = 0;
         // connections gone since: forget them
         for (const id of [...this.loads.keys()]) if (!this.graph.get(id)) this.loads.delete(id);
         for (const id of [...this.mean.keys()]) if (!this.graph.get(id)) this.mean.delete(id);
@@ -415,7 +434,17 @@ export class StressMeter {
                             const fx = sign * n.x * jn;
                             const fy = sign * n.y * jn;
                             const fz = sign * n.z * jn;
-                            if (own.length && this.nearest(own, qx, qy, qz)) continue;
+                            const folded = own.length > 0 && this.nearest(own, qx, qy, qz) !== null;
+                            this.debugContacts?.push({
+                                x: qx,
+                                y: qy,
+                                z: qz,
+                                fx: fx / SIM_DT,
+                                fy: fy / SIM_DT,
+                                fz: fz / SIM_DT,
+                                folded
+                            });
+                            if (folded) continue;
                             this.subtract(r, i, com[i], qx, qy, qz, fx, fy, fz);
                             if (j >= 0) this.subtract(r, j, com[j], qx, qy, qz, -fx, -fy, -fz);
                             jnSum += jn;

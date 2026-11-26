@@ -17,6 +17,7 @@ import { BUCKET_CAPACITY } from './assets/props.ts';
 import { GameAudio, soundBodies } from './audio/game-audio.ts';
 import { DebugPanel } from './debug/panel.ts';
 import type { PanelHost } from './debug/panel.ts';
+import { emptyLines, structureLines } from './debug/structure-overlay.ts';
 import { DESIGN_KEY, Designer, loadDraft } from './editor/designer.ts';
 import { ParticleFX } from './fx/particles.ts';
 import type { WatchedEntity } from './fx/particles.ts';
@@ -61,6 +62,7 @@ import type { Quality } from './render/scene.ts';
 import { VoxelClient } from './render/voxel-pipeline.ts';
 import type { LaneSpec } from './render/voxel-pipeline.ts';
 import { VoxelRenderer } from './render/voxel-renderer.ts';
+import { WinchRope } from './render/winch-rope.ts';
 import { FAST_CATCHUP_STEPS, FixedStepClock, SIM_DT, VOXEL_RATES, VoxelClock } from './sim/clock.ts';
 import type { VoxelRate } from './sim/clock.ts';
 import { ACTION_DROP_TEST, ACTION_RAGDOLL, ACTION_RESET_PROPS, neutralCommand } from './sim/commands.ts';
@@ -73,6 +75,8 @@ import { initPhysics } from './sim/physics/world.ts';
 import { ANIM_MAX } from './sim/snapshots.ts';
 import { WATER } from './sim/water.ts';
 import { weatherCovers, weatherFog } from './sim/weather.ts';
+import { WINCH, decodeWinchRope, encodeWinchRope } from './sim/winch.ts';
+import type { WinchRopeEnd } from './sim/winch.ts';
 import type { CameraControlsApi } from './types/engine-scripts.ts';
 import { CreditsPanel } from './ui/credits.ts';
 import { fullscreenAvailable, isFullscreen, onPageHidden, setFullscreen } from './ui/embed.ts';
@@ -265,6 +269,7 @@ pipeline.applyStatic();
 const staticUploadMs = performance.now() - tUpload;
 const reference = new ReferenceRenderer(app, sim, scene.worldLayer, scene.immediateLayer);
 const nailMarkers = new NailMarkers(app, scene.worldLayer, scene.viewLayers);
+const winchRope = new WinchRope(app, scene.worldLayer);
 const fpInput = new FirstPersonInput(canvas);
 // remappable controls (#98): one table shared by the keyboard, the pads and the settings menu
 const bindings = loadBindings(settingsStorage);
@@ -473,6 +478,8 @@ interface State {
     forceVoxel: boolean;
     props: PropsMode;
     colliders: boolean;
+    /** The structural debug overlay (#51): joint loads and contacts. */
+    structure: boolean;
     players: number;
     particles: boolean;
     look: 'default' | 'pixel';
@@ -505,6 +512,7 @@ const state: State = {
     forceVoxel: true,
     props: sim.propsMode,
     colliders: false,
+    structure: false,
     players: 1,
     particles: settings.particles,
     look: settings.look,
@@ -583,6 +591,17 @@ let physCount = 0;
 let physHead = 0;
 const COLLIDER_COLOR = new Color(1, 0.35, 0.8);
 const colliderPoints: Vec3[] = [];
+const STRAIN_COLORS = [
+    new Color(0.3, 0.9, 0.35),
+    new Color(1, 0.85, 0.2),
+    new Color(1, 0.5, 0.1),
+    new Color(1, 0.15, 0.15)
+];
+const FORCE_COLOR = new Color(1, 1, 1);
+const FOLDED_COLOR = new Color(0.2, 0.9, 1);
+const FREE_COLOR = new Color(0.6, 0.6, 0.6);
+const structure = emptyLines();
+const structurePoints: Vec3[] = [];
 let frameTimeCount = 0;
 let frameTimeHead = 0;
 let lastFrameStamp = performance.now();
@@ -762,7 +781,9 @@ class LabDirector extends Script {
         pipeline.lockBody(sim.fpBody.id, bodyNow);
         reference.update(renderTime);
         updateNails(renderTime);
+        updateWinchRope(renderTime);
         if (state.colliders) drawColliders();
+        if (state.structure) drawStructure();
         // gusts stir the water
         windAt(renderTime, level.wind ?? CALM, windNow);
         scene.water.rippleSpeed = 0.03 + 0.012 * windNow.speed;
@@ -975,6 +996,36 @@ function drawColliders(): void {
     if (n >= 2) app.drawLines(colliderPoints.slice(0, n & ~1), COLLIDER_COLOR, false, scene.immediateLayer);
 }
 
+/**
+ * Debug only (#51): what the host's joints carry and the contacts its stress meter reads (on a
+ * guest, which runs no physics, there is nothing to draw). Off, the meter records nothing.
+ */
+function setStructure(on: boolean): void {
+    state.structure = on;
+    sim.joints.stress.debugContacts = on ? [] : null;
+}
+
+function drawStructure(): void {
+    if (guestSession) return;
+    // (the physics, and so the meter, is rebuilt when the props mode changes)
+    sim.joints.stress.debugContacts ??= [];
+    structureLines(sim.joints, sim.joints.stress.debugContacts, structure);
+    structure.bands.forEach((v, i) => drawFlat(v, STRAIN_COLORS[i]));
+    drawFlat(structure.forces, FORCE_COLOR);
+    drawFlat(structure.folded, FOLDED_COLOR);
+    drawFlat(structure.free, FREE_COLOR);
+}
+
+/** Draws flat x, y, z pairs as lines (pooling its points). */
+function drawFlat(v: readonly number[], color: Color): void {
+    const n = (v.length / 3) & ~1;
+    if (n < 2) return;
+    while (structurePoints.length < n) structurePoints.push(new Vec3());
+    const pts = structurePoints.slice(0, n);
+    for (let i = 0; i < n; i++) pts[i].set(v[i * 3], v[i * 3 + 1], v[i * 3 + 2]);
+    app.drawLines(pts, color, false, scene.immediateLayer);
+}
+
 // ------------------------------------------------------------------------------------- actions
 
 function setPaused(p: boolean): void {
@@ -1144,6 +1195,9 @@ const host: PanelHost = {
             case 'colliders':
                 state.colliders = Boolean(v);
                 break;
+            case 'structure':
+                setStructure(Boolean(v));
+                break;
             case 'players':
                 setPlayers(Number(v));
                 break;
@@ -1198,6 +1252,7 @@ const panel = new DebugPanel(host, [
             { kind: 'button', id: 'dropTest', label: 'Drop test' },
             { kind: 'button', id: 'resetProps', label: 'Reset props' },
             { kind: 'toggle', id: 'colliders', label: 'Physics colliders' },
+            { kind: 'toggle', id: 'structure', label: 'Structure loads (F4)' },
             { kind: 'toggle', id: 'particles', label: 'Leaves & particles' },
             {
                 kind: 'select',
@@ -1396,7 +1451,8 @@ const PROP_LABEL: Record<string, string> = {
     log: 'log (heavy)',
     cube: 'crate',
     sphere: 'ball',
-    bucket: 'bucket'
+    bucket: 'bucket',
+    dolly: 'log dolly (tow it)'
 };
 const propLabel = (name: string) =>
     PROP_LABEL[name] ??
@@ -1597,6 +1653,23 @@ function updateNails(time: number): void {
     nailMarkers.update(marks, sim.ring, time, tierCellCm('base', cellCm) / 100, previews);
 }
 
+/** The winch's rope (Epic 5, #52): the host's own, or what it sent a guest. */
+function updateWinchRope(time: number): void {
+    const w = level.winch;
+    let end: WinchRopeEnd | null = null;
+    if (guestSession) end = guestSession.winchRope;
+    else if (sim.winch) {
+        const index = new Map(sim.entities.map((e, i) => [e.id, i]));
+        end = decodeWinchRope(
+            encodeWinchRope(sim.winch.view(), (id) => index.get(id) ?? -1),
+            sim.entities.length,
+            sim.avatars.length
+        );
+    }
+    const drum = w ? { x: w.x, y: w.y + WINCH.drumHeight, z: w.z } : null;
+    winchRope.update(drum, end, sim.ring, time, (k) => (k < sim.avatars.length ? sim.avatars[k].slot : -1));
+}
+
 /** The ute's yaw last render frame, per local view (NaN when that view's player isn't in it). */
 const lastUteYaw = [NaN, NaN];
 const utePose = pose();
@@ -1700,6 +1773,11 @@ window.addEventListener('keydown', (e) => {
             break;
         case 'F3':
             panel.visible = !panel.visible;
+            e.preventDefault();
+            break;
+        case 'F4':
+            setStructure(!state.structure);
+            panel.sync();
             e.preventDefault();
             break;
     }
@@ -2756,7 +2834,15 @@ window.__riverLab = {
         ),
         /** Split screen: player 2's slot (-1 when one player). */
         slot2: localSlot2,
-        preview: sim.nailPreview(0)
+        preview: sim.nailPreview(0),
+        /** The structural overlay (#51, F4): on, and what it drew last frame (segments). */
+        structure: {
+            on: state.structure,
+            recording: sim.joints.stress.debugContacts !== null,
+            joints: state.structure ? structure.bands.reduce((n, b) => n + b.length / 18, 0) : 0,
+            forces: state.structure ? structure.forces.length / 6 : 0,
+            contacts: state.structure ? (structure.folded.length + structure.free.length) / 6 : 0
+        }
     }),
     /** The hazards (Epic 8): water level, phases, and the rendered water plane's height. */
     hazards: () => ({

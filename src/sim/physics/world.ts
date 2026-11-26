@@ -129,6 +129,12 @@ export interface PhysBody {
     carryAhead?: number;
     /** The collision shape of a single-shape body (floodwater samples it: sim/physics/water.ts). */
     shape?: ShapeSpec;
+    /**
+     * Towed, not carried (the log dolly, Epic 5 #52): a grip on it only pulls it along the ground,
+     * horizontally, with the same cap (GRAB.maxForce) and the same letting go when it will not come;
+     * no lift, no wrist (it swings about the hand like a cart's handle).
+     */
+    towed?: boolean;
 }
 
 /**
@@ -142,6 +148,8 @@ export const SET_DOWN = { speed: 1.2, slack: 0.12, reach: 2.2 } as const;
 /** How far a poured bucket tips from hanging (rad): past horizontal, mouth down towards the view. */
 export const POUR_ANGLE = (115 * Math.PI) / 180;
 export const RELEASE_MIN_CAP = 8;
+/** A towing hand's reach ahead of the eye, level (m; PhysBody.towed: the log dolly). */
+export const TOW_REACH = 1.0;
 /** Long timber carried balanced (BodyOptions.carryAhead) is held as if looking this far down (rad). */
 export const CARRY_PITCH = -0.35;
 
@@ -533,13 +541,31 @@ export class PhysicsWorld {
 
     /**
      * A dynamic body built from several shapes, each with its own density (a vehicle: a heavy
-     * chassis, a light cab). Not grabbable; the wind leaves it alone.
+     * chassis, a light cab) and, if given, its own friction. A shape that slides on whatever it
+     * touches (`slides`: the log dolly's casters) keeps its own low friction (Rapier's Min rule);
+     * every other shape grips as before (the two frictions averaged). Not grabbable unless asked;
+     * the wind leaves it alone.
      */
     addDynamicCompound(
         id: number,
-        shapes: { shape: ShapeSpec; x: number; y: number; z: number; density: number }[],
+        shapes: {
+            shape: ShapeSpec;
+            x: number;
+            y: number;
+            z: number;
+            density: number;
+            friction?: number;
+            slides?: boolean;
+        }[],
         spawn: Pose,
-        o: { friction?: number; linearDamping?: number; angularDamping?: number; canSleep?: boolean }
+        o: {
+            friction?: number;
+            linearDamping?: number;
+            angularDamping?: number;
+            canSleep?: boolean;
+            grabbable?: boolean;
+            towed?: boolean;
+        }
     ): PhysBody {
         const body = this.world.createRigidBody(
             RAPIER.RigidBodyDesc.dynamic()
@@ -556,7 +582,12 @@ export class PhysicsWorld {
             const t = d.translation;
             d.setTranslation(t.x + s.x, t.y + s.y, t.z + s.z)
                 .setDensity(s.density)
-                .setFriction(o.friction ?? 0.6)
+                .setFriction(s.friction ?? o.friction ?? 0.6)
+                // a sliding shape's friction is its own, whatever it touches (averaged, the dolly's
+                // 0.03 casters on gravel came to 0.47, and it would not roll under 30 N)
+                .setFrictionCombineRule(
+                    s.slides ? RAPIER.CoefficientCombineRule.Min : RAPIER.CoefficientCombineRule.Average
+                )
                 .setRestitution(0.05)
                 .setCollisionGroups(groups(LAYER.prop, ALL));
             colliders.push(this.world.createCollider(d, body));
@@ -566,12 +597,13 @@ export class PhysicsWorld {
             body,
             colliders,
             kind: 'dynamic',
-            grabbable: false,
+            grabbable: o.grabbable ?? false,
             spawn: { p: { ...spawn.p }, q: { ...spawn.q } },
             baseAngularDamping: o.angularDamping ?? 0.3,
             enabled: true,
             windArea: 0,
-            alwaysAwake: o.canSleep === false
+            alwaysAwake: o.canSleep === false,
+            ...(o.towed ? { towed: true } : {})
         };
         this.bodies.set(id, pb);
         for (const c of colliders) this.byCollider.set(c.handle, pb);
@@ -950,6 +982,17 @@ export class PhysicsWorld {
         return true;
     }
 
+    /**
+     * Read-only: the grabbable body the view ray hits within reach and where (world), or null
+     * (the winch's hook goes in there).
+     */
+    viewHit(eye: Vec3Like, yaw: number, pitch: number, p = 0): { pb: PhysBody; point: Vec3Like } | null {
+        const hit = this.castView(eye, yaw, pitch, p);
+        if (!hit) return null;
+        const d = viewDir(yaw, pitch, _dir);
+        return { pb: hit.pb, point: { x: eye.x + d.x * hit.toi, y: eye.y + d.y * hit.toi, z: eye.z + d.z * hit.toi } };
+    }
+
     /** Read-only: id of the grabbable body the view ray hits within reach, or -1 (for UI prompts). */
     probe(eye: Vec3Like, yaw: number, pitch: number, p = 0): number {
         const hit = this.castView(eye, yaw, pitch, p);
@@ -1168,6 +1211,14 @@ export class PhysicsWorld {
                 oz = r.prevOffset.z + ez * k;
             }
         }
+        if (pb.towed) {
+            // towed: the hand is out in front at a towing reach, level, wherever you look (looking
+            // up or down neither lifts it nor draws it in under your feet)
+            const f = viewDir(yaw, 0, _v);
+            ox = f.x * TOW_REACH;
+            oy = 0;
+            oz = f.z * TOW_REACH;
+        }
         r.prevOffset.x = ox;
         r.prevOffset.y = oy;
         r.prevOffset.z = oz;
@@ -1190,6 +1241,10 @@ export class PhysicsWorld {
             }
         }
         const av = b.velocityAtPoint(anchor);
+        if (pb.towed) {
+            // towed: the hold point at the grip's own height, so the pull is all along the ground
+            _target.y = anchor.y;
+        }
         // the hold point's own velocity: walking plus swinging round with the view
         if (r.hasPrevTarget) {
             _tv.x = (_target.x - r.prevTarget.x) / SIM_DT;
@@ -1215,11 +1270,13 @@ export class PhysicsWorld {
             y: effectiveMassAlong(m, lever, invI, AXIS_Y) * share,
             z: effectiveMassAlong(m, lever, invI, AXIS_Z) * share
         };
+        // towed: no lift (no weight support), and no vertical spring or damping either
+        if (pb.towed) _tv.y = av.y;
         const f = grabForce(
             {
                 mass: b.mass() * share,
                 springMass,
-                gravity: GRAVITY,
+                gravity: pb.towed ? 0 : GRAVITY,
                 anchor,
                 anchorVelocity: av,
                 target: _target,
@@ -1231,7 +1288,7 @@ export class PhysicsWorld {
         b.applyImpulseAtPoint({ x: f.fx * SIM_DT, y: f.fy * SIM_DT, z: f.fz * SIM_DT }, anchor, true);
         r.grabError = f.error;
         r.grabForce = Math.hypot(f.fx, f.fy, f.fz);
-        this.applyWrist(r, pb, yaw);
+        if (!pb.towed) this.applyWrist(r, pb, yaw);
         const s = this.stats;
         if (p === 0) {
             s.grabError = f.error;
