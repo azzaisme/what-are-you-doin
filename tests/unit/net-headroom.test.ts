@@ -55,8 +55,9 @@ const hostState = (hub: MemoryHub, room: string) =>
         .find((p) => p.id === 'host')!.state;
 
 /**
- * The Valley with eight players and stand-ins for entities still to come (a goose with every
- * animation channel, a long plank and a road closure's two pieces), hosted.
+ * The Valley with eight players (the long plank of #134 among its entities) and stand-ins for
+ * entities still to come: a goose with every animation channel, and a road closure's two pieces
+ * (#131). Hosted.
  */
 async function valleyHost(extra = true) {
     const hub = new MemoryHub();
@@ -73,8 +74,7 @@ async function valleyHost(extra = true) {
                 anim: new Float64Array(ANIM_MAX)
             });
         add(animated, ANIM_MAX); // the goose
-        add(plain, 0);
-        add(plain, 0);
+        add(plain, 0); // the closure's barrier and sign
         add(plain, 0);
     }
     sim.step(neutralCommand(0));
