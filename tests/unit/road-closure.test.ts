@@ -105,13 +105,14 @@ function inputs(s: LabSim, slot = 0) {
     };
     const me = () => s.players[slot];
     /** Walks (or runs) to (x, z), facing the way it goes; calls `each` every tick. */
-    const walkTo = (x: number, z: number, sprint = false, each?: () => void, near = 0.3) => {
+    /** (`pitch`: where it looks as it goes; dragging something heavy, down at the ground.) */
+    const walkTo = (x: number, z: number, sprint = false, each?: () => void, near = 0.3, pitch = 0) => {
         for (let i = 0; i < 60 * 60; i++) {
             const dx = x - me().x;
             const dz = z - me().z;
             if (Math.hypot(dx, dz) < near) return;
             v.yaw = Math.atan2(-dx, -dz);
-            v.pitch = 0;
+            v.pitch = pitch;
             step({ moveZ: 1, sprint });
             each?.();
         }
@@ -196,6 +197,30 @@ function takeHold(s: LabSim, slot: number, lx: number, walk = slot === 0) {
     p.step({ grab: true });
     p.step({}, 2);
     return p;
+}
+
+/**
+ * Drags what player `slot` holds (the barrier) to (x, z) as a player pulls something heavy: facing
+ * it, looking down at it, stepping backwards and sideways towards (x, z), by input. `each` runs
+ * every tick.
+ */
+function dragTo(s: LabSim, p: ReturnType<typeof inputs>, x: number, z: number, each?: () => void, near = 0.3): void {
+    for (let i = 0; i < 60 * 30; i++) {
+        const me = p.me();
+        const dx = x - me.x;
+        const dz = z - me.z;
+        const l = Math.hypot(dx, dz);
+        if (l < near) return;
+        const b = s.closure.barrier.pose.p;
+        p.v.yaw = Math.atan2(me.x - b.x, me.z - b.z);
+        p.v.pitch = -0.5;
+        // the way to go in the view's frame (forward is (-sin yaw, -cos yaw))
+        const fx = -Math.sin(p.v.yaw);
+        const fz = -Math.cos(p.v.yaw);
+        p.step({ moveZ: (dx * fx + dz * fz) / l, moveX: (dx * -fz + dz * fx) / l });
+        each?.();
+    }
+    throw new Error(`could not drag it to ${x.toFixed(1)}, ${z.toFixed(1)}`);
 }
 
 /** The ute put on the road at u, facing up it, with player 0 in the driver's seat. */
@@ -673,8 +698,8 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         // (straight back down the road first: across, it stands in the old fence line)
         const back1 = at(CLOSURE_AT.barrierU - 2.5, roadT(CLOSURE_AT.barrierU) - 2.3);
         try {
-            p.walkTo(back1.x, back1.z);
-            p.walkTo(out.x, out.z, false, () => {
+            dragTo(s, p, back1.x, back1.z);
+            dragTo(s, p, out.x, out.z, () => {
                 if (!s.hazards.road!.blocking(s.physics, s.closure.barrier.id)) throw new Error('clear');
             });
         } catch (e) {
@@ -755,8 +780,8 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         // (straight back down the road first: across, it stands in the old fence line)
         const back1 = at(CLOSURE_AT.barrierU - 2.5, roadT(CLOSURE_AT.barrierU) - 2.3);
         try {
-            p.walkTo(back1.x, back1.z);
-            p.walkTo(out.x, out.z, false, () => {
+            dragTo(s, p, back1.x, back1.z);
+            dragTo(s, p, out.x, out.z, () => {
                 if (!s.hazards.road!.blocking(s.physics, s.closure.barrier.id)) throw new Error('clear');
             });
         } catch (err) {
@@ -917,9 +942,9 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         // just clear of the road (back down it, then out to the side), and wait there, holding it
         const out = at(CLOSURE_AT.barrierU - 2.5, roadT(CLOSURE_AT.barrierU) - 10.5);
         const back1 = at(CLOSURE_AT.barrierU - 2.5, roadT(CLOSURE_AT.barrierU) - 2.3);
-        p.walkTo(back1.x, back1.z);
+        dragTo(s, p, back1.x, back1.z);
         try {
-            p.walkTo(out.x, out.z, false, () => {
+            dragTo(s, p, out.x, out.z, () => {
                 if (!s.hazards.road!.blocking(s.physics, s.closure.barrier.id)) throw new Error('clear');
             });
         } catch (e) {
@@ -939,7 +964,7 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         const q = takeHold(s, 0, tOf(-2.3) < tOf(2.3) ? -2.3 : 2.3);
         expect(s.interaction().holding).toBe('barrier');
         const across = at(CLOSURE_AT.barrierU - 2.5, roadT(CLOSURE_AT.barrierU) + 1.5);
-        q.walkTo(across.x, across.z);
+        dragTo(s, q, across.x, across.z);
         q.step({}, 10);
         const bb = s.closure.barrier.pose.p;
         const ww = (x: number, z: number) =>
