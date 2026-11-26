@@ -14,12 +14,15 @@ came earlier.
     - long key names (Right Shift, Wheel down) wrap instead of ending in "…";
     - a button's note goes under the button instead of pushing the panel sideways;
     - player 2's prompt spans the screen instead of squeezing into a tall column that ran off the
-      bottom.
+      bottom;
+    - the HUD keeps clear of the debug panel on a tablet (its width didn't allow for large text, so
+      its text ran under the panel).
 - **Less motion:**
     - A device set to reduce motion (the system's accessibility setting) starts with **Camera bob &
       kick** off. Turning it back on is saved as your choice, and stays your choice if the system
       setting changes later. Before, a choice that matched the device's default wasn't stored, so it
-      flipped when the system setting changed.
+      flipped when the system setting changed. **Reset all settings** clears that choice, so the
+      bob follows the device again.
     - With the switch off, or the system setting on, toasts stop sliding and fading, and the menu's
       buttons stop animating.
 - **Clicking never grabs by accident**, and a fix found while testing it:
@@ -37,8 +40,10 @@ came earlier.
 | Test                                            | Result                                                                                                                                                                                                                                                                                                                                                                               |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Text size 160 %, 390 × 844 and 1280 × 720       | Every visible text (HUD, dock, every Settings section, credits, online panel, level chooser, split screen with player 2's prompt and both labels) has an effective zoom of 1.6 and is on screen; nothing is cut off or scrolls sideways (except the row of section tabs, which scrolls by design); P1's label is in the top half, P2's in the bottom; the HUD and dock don't overlap |
-| A device set to reduce motion                   | Camera bob off, UI transitions 0 s; a 2 m walk on flat ground from the spawn (distance walked checked, no fall) has bob and kick exactly 0; switched on, the same walk bobs over 5 mm, and that's saved across a reload                                                                                                                                                              |
+| A device set to reduce motion                   | Camera bob off, UI transitions 0 s; a 2 m walk on flat ground from the spawn (distance walked checked, no fall) has bob and kick exactly 0; switched on, the same walk bobs over 5 mm, and that's saved across a reload; Reset all saves nothing of it, and the bob then follows the system setting both ways                                                                        |
 | Less motion by the switch alone                 | Without the system setting the toasts and menu buttons animate; switched off, `body.reduced-motion` alone brings them to 0 s                                                                                                                                                                                                                                                         |
+| Text size 160 %, every screen shape             | On a small and a large phone, a tablet, a desktop and a phone held sideways, with the debug panel open and closed: the HUD, the debug panel, the settings chip and the debug chip are on screen and never overlap                                                                                                                                                                    |
+| Touch controls on a phone (#97)                 | Dragging the on-screen stick walks the beaver over 1 m; the Jump button lifts it over 20 cm                                                                                                                                                                                                                                                                                          |
 | The online panel while nothing changes          | Over 3.5 s (three refreshes) no change at all to the panel, and its Close button is the same element                                                                                                                                                                                                                                                                                 |
 | Field of view                                   | The camera's field of view follows the slider live (52° → 60°)                                                                                                                                                                                                                                                                                                                       |
 | Menu clicks with the bucket under the crosshair | The click that takes the mouse, clicks on the menu over the crosshair, its tabs, the backdrop, the online panel, the level chooser and Resume grab nothing (the bucket stays the target throughout); then a click on the game grabs it                                                                                                                                               |
