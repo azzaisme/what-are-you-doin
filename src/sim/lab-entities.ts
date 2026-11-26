@@ -15,6 +15,7 @@ import {
 } from '../assets/forestry.ts';
 import { BODY } from '../assets/player-body.ts';
 import {
+    LONG_PLANK_LENGTH,
     beamAsset,
     bucketAsset,
     cubeAsset,
@@ -161,6 +162,8 @@ export function createLabEntities(): LabEntities {
     for (let n = 0; n < EXTRA_BEAMS; n++) extras.push(add(320 + n, `beam-${n}`, beamAsset(`beam-${n}`), 1));
     for (let n = 0; n < EXTRA_LOGS; n++) extras.push(add(340 + n, `extra-log-${n}`, logAsset(), 1));
     for (let n = 0; n < EXTRA_CRATES; n++) extras.push(add(360 + n, `crate-${n}`, cubeAsset(0.5, M.Timber), 1));
+    // the tutorial's long plank (only the tutorial places it)
+    extras.push(add(370, 'long-plank', plankAsset('long-plank', LONG_PLANK_LENGTH), 1));
     const windsock = add(950, 'windsock', windsockAsset(), 2);
     const markers: SimEntity[] = [];
     for (let n = 0; n < STAND_TREES; n++) markers.push(add(400 + n, `tree-${n}`, standMarkerAsset(), 4));
