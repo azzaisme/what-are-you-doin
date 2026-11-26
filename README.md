@@ -129,8 +129,9 @@ npm run check        # typecheck + lint + unit tests + build
 ```
 
 Pull requests into `main` run everything except the browser tests in GitHub Actions, and merging
-releases the build to itch.io ([`docs/releasing.md`](docs/releasing.md)). Run `npm run test:e2e`
-yourself before pushing a branch for review: CI doesn't.
+releases the build to itch.io ([`docs/releasing.md`](docs/releasing.md)). The browser tests run locally
+instead (`npm run test:e2e`): the ones covering a change before review, and the full suite before
+every release. CI doesn't run them.
 
 Measurement and evidence scripts:
 

@@ -117,6 +117,17 @@ const arm = implicit(
     () => true,
     (x, y, z) => (y < -BEAVER_ARM_LENGTH / 2 + 0.1 ? voxel(M.FurDark) : fur(x, y, z))
 );
+// The close-up silhouette tapers from shoulder to wrist and rounds off into a small paw.
+const firstPersonArm = implicit(
+    aabb(-0.055, -BEAVER_ARM_LENGTH / 2 - 0.01, -0.055, 0.055, BEAVER_ARM_LENGTH / 2 + 0.01, 0.055),
+    (x, y, z) => {
+        const fromTip = y + BEAVER_ARM_LENGTH / 2 + 0.01;
+        const radius = 0.035 + 0.02 * (fromTip / (BEAVER_ARM_LENGTH + 0.02));
+        const cap = Math.max(0, radius - fromTip);
+        return x * x + z * z + cap * cap <= radius * radius;
+    },
+    (x, y, z) => (y < -BEAVER_ARM_LENGTH / 2 + 0.075 ? voxel(M.FurDark) : fur(x, y, z))
+);
 const tail = box(0.15, 0.05, 0.26, (x, _y, z) =>
     voxel(M.Tail, (Math.floor(x / 0.07) + Math.floor(z / 0.07)) & 1 ? 1 : 2)
 );
@@ -200,16 +211,8 @@ const HEAD_PART_SET = new Set(HEAD_PARTS);
 /** Raised arms also turn inward by up to this much (radians), so both hands come into view. */
 export const BEAVER_ARM_INWARD = 0.15;
 const ARM_INWARD = BEAVER_ARM_INWARD;
-/**
- * First person only (the player's own camera): the beaver's short arms hang 38 cm below the eye and
- * could never reach into view, so for that one camera the shoulders move up and forward (spine
- * frame, m) and the arms rest in a ready pose at the bottom corners of the view. Every other camera
- * sees the normal beaver.
- */
-const FP_SHOULDER = { x: 0.08, y: 0.1, z: 0.25 };
 /** First person: the torso sits this far back (m), so it shows only when you look well down. */
 const FP_SPINE_Z = -0.12;
-const FP_READY_RAISE = 1.55;
 
 const _root = pose();
 const _hand = pose(0, -BEAVER_ARM_LENGTH + 0.02, 0.02);
@@ -237,26 +240,22 @@ function poseRig(root: Pose, anim: ArrayLike<number>): void {
     const carry = anim[BEAVER_CARRY] ?? 0;
     const headYaw = anim[BEAVER_HEAD_YAW] ?? 0;
     const fp = (anim[BEAVER_FIRST_PERSON] ?? 0) > 0.5;
-    // empty-handed in first person, the paws are held up ready in view; holding something, they
-    // aim at it from the real shoulders, like everyone else sees them
-    const ready = fp && carry < 0.5;
-    const raise = Math.max(ready ? FP_READY_RAISE : 0, Math.min(2.7, anim[BEAVER_ARM_RAISE] ?? 0));
+    const raise = Math.max(0, Math.min(2.7, anim[BEAVER_ARM_RAISE] ?? 0));
     const reach = anim[BEAVER_ARM_REACH] ?? 0;
     const spread = anim[BEAVER_ARM_SPREAD] ?? 0;
     const lean = anim[BEAVER_LEAN] ?? 0;
     const headPitch = anim[BEAVER_HEAD_PITCH] ?? 0;
-    // the torso leans back out of the lower view; the shoulders come forward and in. Reaching
-    // brings the shoulders forward and a little up
+    // Reaching brings the shoulders forward and a little up.
     const spinePitch = 0.05 * amount + 0.6 * Math.max(0, reach) - lean;
     // leaning back with raised arms, the shoulders slide forward along the torso (the arms reach
     // out), so the hands stay on what they hold
     const raised = Math.min(1, raise);
     const keep = SHOULDER_ABOVE_SPINE * Math.tan(Math.max(0, -spinePitch)) * raised;
     rig.setShift(J.spine, 0, 0, fp ? FP_SPINE_Z : 0);
-    const sz = (ready ? FP_SHOULDER.z : 0) - (fp ? FP_SPINE_Z : 0) + reach + keep;
-    const sy = (ready ? FP_SHOULDER.y : 0) + REACH_RISE * Math.max(0, reach);
-    rig.setShift(J.shoulderL, ready ? -FP_SHOULDER.x : 0, sy, sz);
-    rig.setShift(J.shoulderR, ready ? FP_SHOULDER.x : 0, sy, sz);
+    const sz = reach + keep - (fp ? FP_SPINE_Z : 0);
+    const sy = REACH_RISE * Math.max(0, reach);
+    rig.setShift(J.shoulderL, 0, sy, sz);
+    rig.setShift(J.shoulderR, 0, sy, sz);
     // raised arms stop swinging; hanging arms swing fully
     const hang = Math.max(0, 1 - raise / 0.6);
     const inward = ARM_INWARD * Math.min(1, raise) - spread;
@@ -295,19 +294,20 @@ function poseRig(root: Pose, anim: ArrayLike<number>): void {
 }
 
 /**
- * Your own limbs in first person, on the 1 cm lattice: arms, legs and feet, posed exactly like the
- * player's beaver in first person (shoulders forward, paws in view). The renderer draws it in place
- * of your own beaver, for your camera only; the torso is left out, since it would fill the lower
- * view a hand's width from the camera.
+ * The 1 cm limb asset uses the beaver's existing joints and a slimmer arm silhouette for your own
+ * camera. It draws arms, legs and feet, leaving room for the lower view.
  */
 const FP_LIMBS = ['armL', 'armR', 'legL', 'legR', 'footL', 'footR'].map((n) => parts.findIndex((p) => p.name === n));
 const _fpAnim = new Float64Array(BEAVER_ANIM_CHANNELS);
 export const beaverFirstPersonAsset: VoxelAsset = {
     schema: ASSET_SCHEMA_VERSION,
     name: 'beaver-first-person',
-    // one sample per 1 cm cell is plenty for 13 cm limbs, and several times cheaper (they are rebuilt
-    // every voxel frame)
-    parts: FP_LIMBS.map((i) => ({ ...parts[i], policy: 'center' as const })),
+    // Use one sample per 1 cm cell, since the limbs are rebuilt every voxel frame.
+    parts: FP_LIMBS.map((i) => {
+        const part = parts[i];
+        const volume = part.volume === arm ? firstPersonArm : part.volume;
+        return { ...part, volume, policy: 'center' as const };
+    }),
     animChannels: BEAVER_ANIM_CHANNELS,
     cellTier: 'fine',
     evaluate(root: Pose, anim: ArrayLike<number>, out: Pose[]) {
