@@ -64,31 +64,36 @@ ragdoll's head and limbs; your limbs have their own lane). Masks off (as before)
 side, framed alternately; median over 200 frames, on the container's CPU (Xeon, 2.1 GHz), idle.
 "Work" is the mask work a frame, in units (its peak over the run in brackets).
 
-| Lattice: its object; the others                                              | Masks off (ms) | High: on (ms) | Masks (skipped) |       Work (peak) | Hidden |  Low: on (ms) | Masks (skipped) |
-| ---------------------------------------------------------------------------- | -------------: | ------------: | --------------: | ----------------: | -----: | ------------: | --------------: |
-| 1 cm: the bucket, alone                                                      |          13.35 | 13.33 (-0.03) |           0 (0) |             0 (0) |      0 | 12.64 (+0.02) |           0 (0) |
-| 1 cm: the bucket, the beaver and the held plank touching it                  |          13.36 | 13.05 (-0.31) |           1 (0) |   16,026 (20,090) |    510 | 13.02 (-0.28) |           1 (0) |
-| 5 cm beaver, the 1 cm bucket in it                                           |           3.65 |  3.90 (+0.25) |           1 (0) |    7,421 (10,944) |    162 |  3.95 (+0.22) |           1 (0) |
-| 1 cm your limbs carrying the bucket, three avatars 0.55 m away (a real grab) |          15.72 | 16.00 (+0.28) |           1 (0) |   29,866 (29,875) |      0 | 15.48 (+0.24) |           1 (0) |
-| 1 cm: the ragdoll standing, the beaver touching its head from above          |          34.36 | 34.63 (+0.27) |           0 (1) |   6,712 (134,232) |      0 | 33.88 (+0.21) |           0 (1) |
-| 1 cm: the ragdoll standing, the beaver deep inside it                        |          34.46 | 34.53 (+0.08) |           0 (1) |   6,695 (133,904) |      0 | 34.66 (+0.33) |           0 (1) |
-| 1 cm: the ragdoll standing, three avatars 0.5 m away                         |          34.48 | 38.00 (+3.52) |           3 (0) | 100,375 (112,820) |  9,825 | 35.33 (+1.12) |           1 (2) |
-| 1 cm: the ragdoll, the beaver and four avatars in it                         |          34.06 | 34.66 (+0.60) |           0 (5) |  33,521 (134,432) |      0 | 34.09 (+0.52) |           0 (5) |
-| 1 cm: pile-up, the beaver and eight avatars deep in the ragdoll              |          34.90 | 35.84 (+0.94) |           0 (9) |  60,515 (135,984) |      0 | 34.04 (+0.52) |           0 (9) |
-| 1 cm: the ragdoll at rest, its 5 cm body at the joints                       |          34.46 | 34.37 (-0.09) |           0 (0) |             0 (0) |      0 | 33.31 (-0.20) |           0 (0) |
+| Lattice: its object; the others                                              | Masks off (ms) | High: on (ms) | Masks (skipped) |         Work (peak) / limit | Hidden |  Low: on (ms) | Masks (skipped) |
+| ---------------------------------------------------------------------------- | -------------: | ------------: | --------------: | --------------------------: | -----: | ------------: | --------------: |
+| 1 cm: the bucket, alone                                                      |          10.66 | 10.83 (+0.18) |           0 (0) |              0 (0) / 50,000 |      0 | 11.64 (-0.03) |           0 (0) |
+| 1 cm: the bucket, the beaver and the held plank touching it                  |          11.59 | 11.46 (-0.12) |           1 (0) |    16,026 (20,090) / 50,000 |    510 | 12.74 (-0.16) |           1 (0) |
+| 5 cm beaver, the 1 cm bucket in it                                           |           3.27 |  3.49 (+0.21) |           1 (0) |     7,421 (10,944) / 50,000 |    162 |  3.87 (+0.31) |           1 (0) |
+| 1 cm your limbs carrying the bucket, three avatars 0.55 m away (a real grab) |          13.49 | 13.70 (+0.21) |           1 (0) |   29,866 (29,875) / 116,188 |      0 | 14.41 (+0.00) |           1 (0) |
+| 1 cm: the ragdoll standing, the beaver touching its head from above          |          31.98 | 31.96 (-0.02) |           0 (1) |   7,497 (149,940) / 150,000 |      0 | 32.79 (-0.17) |           0 (1) |
+| 1 cm: the ragdoll standing, the beaver deep inside it                        |          29.45 | 29.77 (+0.32) |           0 (1) |   7,497 (149,940) / 150,000 |      0 | 31.26 (-0.18) |           0 (1) |
+| 1 cm: the ragdoll standing, three avatars 0.5 m away                         |          29.31 | 33.16 (+3.86) |           3 (0) | 100,375 (112,820) / 150,000 |  9,825 | 33.55 (+0.86) |           1 (2) |
+| 1 cm: the ragdoll, the beaver and four avatars in it                         |          31.35 | 32.51 (+1.16) |           0 (5) |  37,485 (149,944) / 150,000 |      0 | 30.98 (+0.59) |           0 (5) |
+| 1 cm: pile-up, the beaver and eight avatars deep in the ragdoll              |          30.93 | 32.04 (+1.11) |           0 (9) |  67,474 (149,944) / 150,000 |      0 | 31.37 (-0.14) |           0 (9) |
+| 1 cm: the ragdoll at rest, its 5 cm body at the joints                       |          31.99 | 31.65 (-0.34) |           0 (0) |             0 (0) / 150,000 |      0 | 30.48 (-0.89) |           0 (0) |
 
-- **Worst case measured:** High +3.52 ms (three players 0.5 m from the ragdoll: 3 masks, 9,825
-  cells hidden, peak work 112,820 of 150,000); Low +1.12 ms. The deep overlaps skip (tried, stopped
-  by the budget, then waiting 20 frames: +0.1 to +0.9 ms).
+- **Worst case measured:** High +3.86 ms (three players 0.5 m from the ragdoll: 3 masks, 9,825
+  cells hidden, peak work 112,820 of 150,000); Low +0.86 ms. The deep overlaps skip (tried, stopped
+  by the budget, then waiting 20 frames: at most +1.2 ms). Peak work stayed under the limit in
+  every scene (at most 149,944 of 150,000 at High, 49,940 of 50,000 at Low).
 - **Off the main thread:** this is voxel-worker time. In the browser (scripted River Lab, High,
   8 masks hiding 45,271 cells, SwiftShader at 640 × 360, measured before the cap), the main thread's
   mesh upload per voxel frame went from 2.6 to 2.8 ms (median; p95 4.2 to 5.0 ms), and the slowest
-  worker's frame from 49 to 67 ms. COOP
+  worker's frame from 49 to 67 ms.
+- **Local co-op, split screen** (the same scene with `setPlayers(2)`, 90 frames, one run each, with
+  the cap): High, 3 masks hiding 23 cells, the slowest worker 40.7 ms against 42.9 off, the upload
+  2.6 ms against 2.8, the frame 1,129 against 1,150 ms; Low, 2 masks, 43.3 ms against 44.0. No
+  page errors.
 - The ragdoll at rest: its 5 cm body does not touch its 1 cm head or limbs, so it costs nothing.
 
 Pixels (`node scripts/verify-pixels.mjs`, scenes in `scripts/verify-pixels-107.json`; frozen
 frames, 480 × 270, SwiftShader, High, waiting until the camera has held still for 5 frames before
-it captures). Measured on this head against its epics-5-10 base (6425ef9); two captures of each
+it captures). Measured on this head against its epics-5-10 base (8f7d418); two captures of each
 build match exactly in all ten scenes.
 
 - **Unchanged, 0 of 129,600 pixels differ in each:**

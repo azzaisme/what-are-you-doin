@@ -90,8 +90,7 @@ tell whether it held water. It also held none: the asset had a water level but n
       matters more; only the debug stress scene and pile-ups make them. The small cases the
       priority is for (the 1 cm bucket in a 5 cm paw) cost a few thousand units and are kept.
     - **Cost** (`scripts/bench-lattice.ts`, everything moving, masks off and on side by side; the
-      1 cm scenes on the real fine lane): at most +3.5 ms at High (three players beside the
-      ragdoll, 3 masks), +1.1 ms at Low; the bucket in the paw +0.25 ms. The work is voxel-worker
+      1 cm scenes on the real fine lane): at most +3.9 ms at High (three players beside the ragdoll, 3 masks), +0.9 ms at Low; the bucket in the paw +0.2 to +0.3 ms. The work is voxel-worker
       time: the main thread only uploads the remeshed cut (+0.2 ms median measured in the browser).
     - `?masks=off` turns it off, for comparisons.
 - **The fine lattice reaches ±160 m across and ±18 m up** (its chunk coordinates are limited;
