@@ -10,6 +10,7 @@
 import { Color, Vec3 } from 'playcanvas';
 import type { AppBase, Entity, Layer } from 'playcanvas';
 
+import { BEAM_HALF, plankHalfOf } from '../assets/props.ts';
 import { MATERIAL_NAMES, dataHeight, parseLevelData } from '../levels/data.ts';
 import type { GroundFeature, LevelData, MaterialName, PieceData } from '../levels/data.ts';
 import { starterLevel } from '../levels/starter.ts';
@@ -429,9 +430,9 @@ export class Designer {
         );
         d.props.forEach((p, i) => {
             const long = p.name.includes('plank')
-                ? 1.2
+                ? plankHalfOf(p.name).x
                 : p.name.startsWith('beam')
-                  ? 1.6
+                  ? BEAM_HALF.x
                   : p.name.includes('log')
                     ? 1
                     : 0.25;

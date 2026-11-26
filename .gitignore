@@ -27,3 +27,4 @@ artifacts/
 dist-publish
 test-results/
 playwright-report/
+.vp/

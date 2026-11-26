@@ -24,6 +24,8 @@
  * Pure module (no engine).
  */
 
+import { BARRIER_HALF } from '../assets/road-closure.ts';
+import type { RoadClosureSpec } from '../sim/hazard-road.ts';
 import { crossingFrame } from '../sim/hazards.ts';
 import type { HazardSpec } from '../sim/hazards.ts';
 import { WEATHER } from '../sim/weather.ts';
@@ -470,6 +472,7 @@ function valleyPieces(): StaticPiece[] {
                 darkTimber
             )
         );
+    P.push(...closurePosts());
     P.push(...signpost(8, roadT(8) - 2.4, 2));
     P.push(...flag(CHECKPOINTS[2].u, CHECKPOINTS[2].t - 2.2, STAGE_COLOURS[2]));
 
@@ -1129,6 +1132,113 @@ const VALLEY_FORESTRY: ForestryDef = (() => {
     };
 })();
 
+/**
+ * The road closure (Epic 8, #77, src/sim/hazard-road.ts) on the forest road: the old logging track
+ * (SIDE_PATHS) leaves the road at u = 11 and rejoins it at 35.5. Coming up the road, the sign at the
+ * track's mouth clunks over to "closed, down the track", and a barrier stands across the road and
+ * its cleared verges at u = 22. Take the track, or shift the barrier.
+ */
+export const CLOSURE_AT = { junction: 11, rejoin: 35.5, barrierU: 22, signU: 9, signT: 3.2 };
+
+/**
+ * The old fence line the barrier stands in: posts at u = 22, evenly spaced, from the barrier's ends
+ * out across the valley floor, with a top rail between them at 1.5 m. The gaps under the rail
+ * (1.1 m between posts) let a beaver through but not the ute: on foot, going round the barrier is
+ * a way past; in the ute it is the logging track (the line leaves a gap where the track crosses),
+ * or shift the barrier. The line holds the valley floor; the terraced sides beyond are not a wall
+ * (the ute can climb them, 26 m out at most: a long way round, never quicker than the track in the
+ * tests). Where something else already stops the ute (the log dump, a pine, the terraces), there is
+ * no post: every post holds the ute somewhere, and the rail runs between neighbouring posts, up to
+ * 5 m apart (tests/unit/road-closure.test.ts).
+ */
+export const CLOSURE_POSTS = {
+    spacing: 1.25,
+    gap: 1.1,
+    half: { x: 0.08, y: 0.8, z: 0.08 },
+    /** The rail's height (its middle, m above the ground at the posts). */
+    rail: 1.52
+};
+/** The posts: the side (-1: left going up the road, +1: right) and how far out (m, from the road's centre). */
+export function closurePostSpots(): { side: number; a: number }[] {
+    const out: { side: number; a: number }[] = [];
+    const runs: [number, number, number][] = [
+        // left: from the barrier's end up the valley side, as far as the ute can climb (23 m out)
+        [-1, BARRIER_HALF.x + CLOSURE_POSTS.gap + CLOSURE_POSTS.half.x, 24],
+        // right: past the log dump out to the logging track (its own gap), and beyond it (the ute
+        // climbs to 20 m out on this side)
+        [1, 5.4, 22]
+    ];
+    const u = CLOSURE_AT.barrierU;
+    // no post where something else already holds the ute (found by driving at the line every 0.2 m,
+    // straight and at an angle, with each post taken out in turn, outermost first): the pine just
+    // beyond the line at t -9.5, the log dump and the pine at t 4.7, and the terraces' benches
+    const needless = [-23.98, -22.73, -21.48, -17.73, -16.48, -10.23, -8.98, 5.4, 7.9, 16.65, 17.9, 19.15, 21.65];
+    for (const [side, first, last] of runs)
+        for (let a = first; a <= last + 1e-6; a += CLOSURE_POSTS.spacing) {
+            if (nearestPath(SIDE_PATHS, u, roadT(u) + side * a, 1.6 + 0.4)) continue;
+            if (needless.some((v) => Math.abs(side * a - v) < 0.02)) continue;
+            out.push({ side, a });
+        }
+    return out;
+}
+function closurePosts(): StaticPiece[] {
+    const u = CLOSURE_AT.barrierU;
+    const t0 = roadT(u);
+    const H = CLOSURE_POSTS.half;
+    const out: StaticPiece[] = [];
+    const spots = closurePostSpots();
+    const top = (a: number, side: number) => groundUT(u, t0 + side * a);
+    spots.forEach((p, i) => {
+        const t = t0 + p.side * p.a;
+        out.push(piece('fence-post', boxS(H.x, H.y, H.z), u, groundUT(u, t) + H.y - 0.1, t, darkTimber));
+        // the rail to the next post out on this side (an old rail, up to 5 m long), not across the track
+        const q = spots[i + 1];
+        if (!q || q.side !== p.side || q.a - p.a > 5.1) return;
+        if (nearestPath(SIDE_PATHS, u, t0 + (p.side * (p.a + q.a)) / 2, 1.6 + 0.4)) return;
+        const y0 = top(p.a, p.side) + CLOSURE_POSTS.rail;
+        const y1 = top(q.a, q.side) + CLOSURE_POSTS.rail;
+        const tm = t0 + (p.side * (p.a + q.a)) / 2;
+        out.push(
+            piece('fence-rail', boxS((q.a - p.a) / 2 + H.x, 0.04, 0.05), u, (y0 + y1) / 2, tm, darkTimber, {
+                roll: Math.atan2(p.side * (y1 - y0), q.a - p.a),
+                collide: false
+            })
+        );
+    });
+    return out;
+}
+
+export const VALLEY_ROAD_CLOSURE: RoadClosureSpec = (() => {
+    const u = CLOSURE_AT.barrierU;
+    const t = roadT(u);
+    // the barrier's long axis (local x) across the road, square to it where it bends
+    const slope = roadT(u + 0.5) - roadT(u - 0.5);
+    const barrier = atUT(u, t, BARRIER_HALF.y + 0.02, Math.atan(slope));
+    // the sign, right of the road: axis-aligned like the route signs (its face looks along -x, at
+    // traffic coming up the road), its board snapped to 10 cm lines so its pixels fall on whole
+    // cells (the board's middle is 1.6 m up the post, on a line: it is 12 pixels tall)
+    const sw = routeToWorld(CLOSURE_AT.signU, roadT(CLOSURE_AT.signU) + CLOSURE_AT.signT);
+    const snap = (v: number, off = 0) => Math.round((v - off) / 0.1) * 0.1 + off;
+    const sy = snap(groundUT(CLOSURE_AT.signU, roadT(CLOSURE_AT.signU) + CLOSURE_AT.signT) + 1.6) - 1.6;
+    const sign = pose(snap(sw.x), sy, snap(sw.z), quatFromYawPitchRoll(-Math.PI / 2, 0, 0));
+    return {
+        along: routeU,
+        junction: CLOSURE_AT.junction,
+        rejoin: CLOSURE_AT.rejoin,
+        // past the creek (the yard's side is before it)
+        from: 2,
+        across: (x, z) => routeT(x, z) - roadT(routeU(x, z)),
+        track: (x, z) => {
+            const track = SIDE_PATHS.filter((q) => q.name === 'logging-track');
+            return !!nearestPath(track, routeU(x, z), routeT(x, z), track[0].halfWidth + 0.6);
+        },
+        roadHalf: 1.6,
+        barrier,
+        barrierHalf: BARRIER_HALF,
+        sign
+    };
+})();
+
 /** How many of each prop the Valley uses (sim/lab-entities.ts sizes its pools from these). */
 export const VALLEY_PROPS = { planks: 12, beams: 12, crates: 6 };
 
@@ -1142,6 +1252,8 @@ function valleyProps(): PropPlacement[] {
     for (let n = 0; n < 4; n++) P.push({ name: `beam-${5 + n}`, pose: atUT(gu - 0.7 + n * 0.45, gt, 0.08, 0, FLAT) });
     for (let n = 0; n < 4; n++)
         P.push({ name: `extra-plank-${5 + n}`, pose: atUT(gu - 3, gt + 0.4, 0.06 + n * 0.105, 0, FLAT) });
+    // the road closure's barrier (hidden until the closure sets it across the road)
+    P.push({ name: 'barrier', pose: VALLEY_ROAD_CLOSURE.barrier });
     // the works: six crates in the lower yard
     const [cu, ct] = STAGING[2];
     for (let n = 0; n < 6; n++)
@@ -1175,11 +1287,14 @@ const stump = yardToWorld(BUCKET_STUMP.x, BUCKET_STUMP.z);
  * spot, its barrel to the side of the road (+t).
  */
 function valleyButts(): ReturnType<typeof waterButt>[] {
-    const butt = (name: string, u: number, t: number, litres: number) => {
+    const butt = (name: string, u: number, t: number, litres: number, opensAt: number) => {
         const w = routeToWorld(u, t);
-        return waterButt(name, w.x, w.z, groundUT(u, t), groundUT(u, t + 0.62), -Math.PI / 4, litres);
+        const b = waterButt(name, w.x, w.z, groundUT(u, t), groundUT(u, t + 0.62), -Math.PI / 4, litres);
+        return { ...b, source: { ...b.source, opensAt } };
     };
-    return [butt('works water tank', 96, 1.8, 30), butt('mountain spring butt', 175, roadT(175) + 0.8, 20)];
+    // each past a crossing a beaver can jump: shut until the stage it serves (the Works, the summit),
+    // so a dry bucket thrown over can't be refilled before the crossing's flag
+    return [butt('works water tank', 96, 1.8, 30, 4), butt('mountain spring butt', 175, roadT(175) + 0.8, 20, 6)];
 }
 
 function valleySources(): WaterSource[] {
@@ -1189,6 +1304,15 @@ function valleySources(): WaterSource[] {
 }
 
 const summit = routeToWorld(SUMMIT_U, 0);
+
+/**
+ * Each flag past the yard wants at least this much water in the bucket (litres): a thrown bucket
+ * lands with its water gone (0.02 L at most, measured), one carried over a crossing keeps nearly all
+ * of its 10 L, so the crossings have to be built.
+ */
+export const FLAG_LITRES = 1;
+/** A bucket lost at a stage with no water nearby comes back with this much in it (litres). */
+export const SPARE_LITRES = 3;
 
 export const VALLEY_STAGES: LevelStage[] = [
     {
@@ -1203,35 +1327,44 @@ export const VALLEY_STAGES: LevelStage[] = [
         objective: 'Bridge the creek and get the bucket to the flag on the far bank',
         goal: square(CHECKPOINTS[1].u, CHECKPOINTS[1].t, 2.6),
         start: restart(-4.5, 1),
-        bucket: bucketAt(-4.5, 1.6)
+        bucket: bucketAt(-4.5, 1.6),
+        minLitres: FLAG_LITRES
     },
     {
         name: 'Forest Road',
         objective: 'Carry the long beams from the log dump over the washed-out culvert',
         goal: square(CHECKPOINTS[2].u, CHECKPOINTS[2].t, 2.6),
         start: restart(8, roadT(8)),
-        bucket: bucketAt(8, roadT(8) + 0.8)
+        bucket: bucketAt(8, roadT(8) + 0.8),
+        minLitres: FLAG_LITRES,
+        spareLitres: SPARE_LITRES
     },
     {
         name: 'Gorge',
         objective: 'Span the gorge to the old pier and on to the far side',
         goal: square(CHECKPOINTS[3].u, CHECKPOINTS[3].t, 2.6),
         start: restart(50, roadT(50)),
-        bucket: bucketAt(50, roadT(50) + 0.8)
+        bucket: bucketAt(50, roadT(50) + 0.8),
+        minLitres: FLAG_LITRES,
+        spareLitres: SPARE_LITRES
     },
     {
         name: 'Old Industrial Works',
-        objective: 'Stack the crates and get the bucket up onto the works’ upper yard',
+        objective: 'Stack crates to climb the wall: set the bucket on one and lift it up from the top',
         goal: square(CHECKPOINTS[4].u, CHECKPOINTS[4].t, 3),
         start: restart(96, 1),
-        bucket: bucketAt(96, 1.8)
+        bucket: bucketAt(96, 1.8),
+        minLitres: FLAG_LITRES
     },
     {
         name: 'Mountain Approach',
         objective: 'Bridge the crevasse on the mountain road',
         goal: square(CHECKPOINTS[5].u, CHECKPOINTS[5].t, 2.6),
         start: restart(128, -2),
-        bucket: bucketAt(128, -1.2)
+        bucket: bucketAt(128, -1.2),
+        minLitres: FLAG_LITRES,
+        // (the works tank is below the retaining wall)
+        spareLitres: SPARE_LITRES
     },
     {
         name: 'Flower Summit',
@@ -1427,7 +1560,7 @@ export const valleyLevel: LevelDef = {
     },
     props: valleyProps(),
     forestry: VALLEY_FORESTRY,
-    hazards: VALLEY_HAZARDS,
+    hazards: { ...VALLEY_HAZARDS, roadClosure: VALLEY_ROAD_CLOSURE },
     rules: {
         objective: 'Bring water to the flower on the summit',
         goal: VALLEY_STAGES[VALLEY_STAGES.length - 1].goal,

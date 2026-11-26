@@ -44,6 +44,32 @@ describe('the playtest log', () => {
         expect(log.count('where')).toBe(1);
     });
 
+    it('says how each hazard ended, grouped by hazard, from the host’s account (#70)', () => {
+        const log = new PlaytestLog({ level: 'Valley' }, 0);
+        log.note(
+            10_000,
+            'hazard',
+            '🚧 Clunk! Road closed ahead: drive round by the old logging track, or shift the barrier.'
+        );
+        log.note(30_000, 'outcome', 'road closure: took the track on foot');
+        log.note(40_000, 'outcome', 'handbrake: chocked');
+        log.note(90_000, 'outcome', 'handbrake: chocked');
+        log.note(120_000, 'outcome', 'handbrake: someone got in');
+        log.note(150_000, 'outcome', 'weather: Forest Road rain: came and cleared');
+        const text = log.summary(200_000);
+        expect(text).toContain('road closures: 1');
+        expect(text).toContain(
+            [
+                '  how the hazards ended:',
+                '    road closure: took the track on foot',
+                '    handbrake: chocked (2×); someone got in',
+                '    weather: Forest Road rain: came and cleared'
+            ].join('\n')
+        );
+        // none: no such section
+        expect(new PlaytestLog({}, 0).summary(1000)).not.toContain('how the hazards ended');
+    });
+
     it('a real handbrake prank, fed in as the game feeds the log, is counted', () => {
         const s = new LabSim({ level: timberYardLevel });
         const z = -13.5;

@@ -4,7 +4,7 @@ import { BEAVER_HEIGHT, BEAVER_WALK_AMOUNT, BEAVER_WALK_PHASE, beaverAsset } fro
 import { BUCKET_HANDLE_TOP } from '../../src/assets/props.ts';
 import { UTE_WHEEL_RADIUS, uteAsset } from '../../src/assets/ute.ts';
 import { PLATEAU_Y } from '../../src/levels/river-lab.ts';
-import { FixedStepClock, MAX_CATCHUP_STEPS, SIM_DT, VoxelClock } from '../../src/sim/clock.ts';
+import { FAST_CATCHUP_STEPS, FixedStepClock, MAX_CATCHUP_STEPS, SIM_DT, VoxelClock } from '../../src/sim/clock.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
 import { LabSim } from '../../src/sim/lab-sim.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
@@ -26,6 +26,21 @@ describe('fixed step clock (§4.4)', () => {
         expect(c.droppedTicks).toBeGreaterThan(50);
         expect(c.advance(NaN)).toBe(0);
         expect(c.advance(-1)).toBe(0);
+    });
+
+    it('the browser tests’ fast clock runs the same steps, only more per call', () => {
+        const normal = new FixedStepClock();
+        expect(normal.maxSteps).toBe(MAX_CATCHUP_STEPS);
+        const fast = new FixedStepClock();
+        fast.maxSteps = FAST_CATCHUP_STEPS;
+        // a whole second of slow frame: every step runs, none dropped
+        expect(fast.advance(1.0 + 1e-6)).toBe(60);
+        expect(fast.droppedTicks).toBe(0);
+        // frames at or under the normal cap run exactly the steps the normal clock runs
+        for (const dt of [SIM_DT * 0.5, SIM_DT * 0.6, SIM_DT * 2.3, 0.05, SIM_DT * 3.9])
+            expect(fast.advance(dt)).toBe(normal.advance(dt));
+        expect(fast.advance(5)).toBe(FAST_CATCHUP_STEPS);
+        expect(fast.droppedTicks).toBeGreaterThan(200);
     });
 
     it('voxel clock enters a new frame exactly at multiples of 1/hz', () => {

@@ -36,6 +36,12 @@ export class BucketWaterState {
     toppedUp = 0;
     /** Set by the simulation: once the level's goal is met, sources may run dry. */
     goalMet = false;
+    /** Set by the simulation: the journey stage being played (sources with `opensAt` wait for it). */
+    stage = 0;
+    /** Names the stage a shut source waits for (set by the simulation), for its message. */
+    stageDone: (step: number) => string = (step) => `stage ${step + 1}`;
+    /** Shut sources already explained this run (by index). */
+    private shutSaid = new Set<number>();
     /** The source filling the bucket (index), or -1. */
     filling = -1;
     private fillFrom = 0;
@@ -66,15 +72,21 @@ export class BucketWaterState {
         for (const s of this.sources) s.litres = s.def.litres;
         this.spilled = this.lost = this.poured = this.toppedUp = 0;
         this.goalMet = false;
+        this.shutSaid.clear();
         this.filling = -1;
         this.pourQuiet = -1;
         this.massApplied = -1;
     }
 
-    /** The bucket fell in and is replaced by a spare: its water is gone with it, the spare is empty. */
-    bucketLost(): void {
+    /**
+     * The bucket fell in and is replaced by a spare: its water is gone with it. The spare is empty,
+     * or holds `spare` litres (stages with no water nearby; counted as water topped up).
+     */
+    bucketLost(spare = 0): void {
         this.lost += this.water.volume;
-        this.water.reset(0);
+        const v = Math.max(0, Math.min(WATER.capacity, spare));
+        this.water.reset(v);
+        this.toppedUp += v;
         this.filling = -1;
     }
 
@@ -172,6 +184,14 @@ export class BucketWaterState {
                 const s = this.sources[n];
                 const d = s.def;
                 if (Math.hypot(mx - d.x, mz - d.z) < d.r && my > d.y && my < d.y + d.h) {
+                    if (d.opensAt !== undefined && this.stage < d.opensAt) {
+                        // shut until its stage: said once a run
+                        if (!this.shutSaid.has(n)) {
+                            this.shutSaid.add(n);
+                            msgs.push(`The ${d.name} is shut until ${this.stageDone(d.opensAt - 1)} is done.`);
+                        }
+                        break;
+                    }
                     at = n;
                     break;
                 }

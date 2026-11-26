@@ -70,6 +70,24 @@ function buildAndCross(pullPlankNails = false) {
     let floodWas: number = PHASE.idle;
     let floodBefore = new Map<number, { x: number; y: number; z: number }>();
     const onCrossing = () => [...beams, ...landed.map((l) => s.entities.find((e) => e.id === l.id)!)];
+    /**
+     * Once the deck is finished, every step: how far each nailed plank's underside is from the
+     * beams' tops under it (nailed pieces do not collide, their joint holds them apart: sinking in
+     * or lifting off are both wrong). The worst, either way (m).
+     */
+    const seat = { on: false, worst: 0, name: '', tick: 0 };
+    const checkSeats = () => {
+        for (const l of landed) {
+            const p = s.entities.find((e) => e.id === l.id)!;
+            // the beams' tops under it, along their (sloping) centre lines
+            const tops = beams.map((b) => {
+                const ax = quatRotate(b.pose.q, 1, 0, 0, vec3());
+                return b.pose.p.y + ax.y * ((p.pose.p.z - b.pose.p.z) / ax.z) + 0.075;
+            });
+            const gap = p.pose.p.y - 0.05 - Math.max(...tops);
+            if (Math.abs(gap) > Math.abs(seat.worst)) [seat.worst, seat.name, seat.tick] = [gap, p.name, s.tick];
+        }
+    };
     const rawStep = s.step.bind(s);
     s.step = ((...args: Parameters<LabSim['step']>) => {
         const px = s.player.x,
@@ -78,6 +96,15 @@ function buildAndCross(pullPlankNails = false) {
             falls = s.progress.falls;
         const gw = s.hazards.gustPhase;
         rawStep(...args);
+        if (process.env.GATE_STRAIN)
+            for (const c of s.joints.graph.connections()) {
+                const h = s.joints.health.states.get(c.id);
+                const l = s.joints.stress.loads.get(c.id);
+                if (!h || !l || h.util < 0.5) continue;
+                log.push(
+                    `STRAIN t ${(s.tick / 60).toFixed(2)} c${c.id} ${c.a}>${c.b} n${c.nails.length}: u ${h.util.toFixed(2)} raw ${h.raw.toFixed(2)} shear ${l.shear.toFixed(0)} pull ${l.pull.toFixed(0)} bearing ${l.bearing.toFixed(0)} moment ${l.moment.toFixed(0)} f (${l.fx.toFixed(0)},${l.fy.toFixed(0)},${l.fz.toFixed(0)}) player (${s.player.x.toFixed(2)},${s.player.y.toFixed(2)},${s.player.z.toFixed(2)}) held ${s.physics.heldId}`
+                );
+            }
         if (process.env.GATE_DEBUG && gw === PHASE.idle && s.hazards.gustPhase !== PHASE.idle)
             log.push(
                 `gust at ${(s.tick / 60).toFixed(1)} s holding ${s.physics.heldId} at (${s.player.x.toFixed(2)}, ${s.player.z.toFixed(2)})`
@@ -86,6 +113,7 @@ function buildAndCross(pullPlankNails = false) {
             log.push(
                 `fell at ${(s.tick / 60).toFixed(1)} s from (${px.toFixed(2)}, ${py.toFixed(2)}, ${pz.toFixed(2)}) holding ${s.physics.heldId} water ${s.hazards.net().waterY.toFixed(2)} gust ${s.hazards.gustPhase}`
             );
+        if (seat.on) checkSeats();
         const ph = s.hazards.floodPhase;
         if (floodWas === PHASE.idle && ph !== PHASE.idle) {
             floods.push({ tell: s.tick, end: -1, moved: 0 });
@@ -234,7 +262,14 @@ function buildAndCross(pullPlankNails = false) {
         step({}, 120);
         // into the capstone, well back from the beam's end
         const end = beam.pose.p.z + 1.6;
-        for (const dz of [0.07, 0.14]) nail(onBeam(beam, end - dz), `beam ${b} near end`);
+        // four nails, spread along it and across it: nailed at this end only until the deck is
+        // down, it must not swing round when a gust or the flood comes (two nails 8 cm apart in a
+        // row hold a turn by their couple alone; a gust's 300 N m on the beam put 3.75 kN on each)
+        for (const dz of [0.07, 0.15])
+            for (const dx of [-0.05, 0.05]) {
+                const at = onBeam(beam, end - dz);
+                nail({ ...at, x: at.x + dx }, `beam ${b} near end`);
+            }
     }
     // the beams span the gap: the flood comes. Back off the crossing into the yard and wait it out:
     // the beams are nailed down at their near ends
@@ -307,8 +342,17 @@ function buildAndCross(pullPlankNails = false) {
             step({}, 30);
             // lowered just above the beams: shuffle until it hangs over its spot, then let go
             for (let t = 0; t < 8 && Math.abs(p.pose.p.z - z) > 0.03; t++) {
+                const z0 = s.player.z;
                 walkTo(s.player.x + (BRIDGE_X - p.pose.p.x), s.player.z + (z - p.pose.p.z));
                 step({}, 20);
+                // held short and not getting closer: the shuffle's creep does not get you up the
+                // deck's first plank edge (at half pace the controller slides back off its rounded
+                // edge). Step up onto the deck firmly, as a player does, then shuffle on
+                if (Math.abs(s.player.z - z0) < 0.01 && p.pose.p.z - z > 0.03) {
+                    const want = s.player.z - (p.pose.p.z - z);
+                    for (let i = 0; i < 40 && s.player.z > want; i++) step({ moveZ: 1 });
+                    step({}, 20);
+                }
             }
             step({ grab: true });
             pitch = 0;
@@ -350,9 +394,40 @@ function buildAndCross(pullPlankNails = false) {
     waitForSafe(60);
     // ---- 3. out on the deck: nail both beams' far ends into the far capstone
     walkTo(BRIDGE_X, deck[deck.length - 2] + 0.5);
-    for (let b = 0; b < 2; b++) nail(onBeam(beams[b], farNailZ), `beam ${b} far end`, deck[deck.length - 2]);
+    // two nails across each far end. Where the hammer is refused (a beam lying a little off its
+    // seat's flat: under one edge the stone is 5.6 cm down, past the nail's 5 cm), move the spot,
+    // as a player would, until both are in
+    const farNails: number[] = [];
+    for (let b = 0; b < 2; b++) {
+        let got = 0;
+        for (const [dx, dz] of [
+            [-0.05, 0],
+            [0.05, 0],
+            [0, 0],
+            [-0.05, -0.06],
+            [0.05, -0.06],
+            [0, -0.06]
+        ]) {
+            if (got === 2) break;
+            const at = onBeam(beams[b], farNailZ + dz);
+            if (nail({ ...at, x: at.x + dx }, `beam ${b} far end`, deck[deck.length - 2])) got++;
+        }
+        farNails.push(got);
+    }
     walkTo(BRIDGE_X, deck[deck.length - 2] + 1.2);
     layPlank(deck[deck.length - 1]);
+    // ---- the finished bridge, built by input, stands a minute with nobody on it (off it, by the
+    // yard end): its joints carry next to nothing and never creak
+    phase('idle');
+    seat.on = !pullPlankNails;
+    walkTo(BRIDGE_X, BRIDGE.nearEdge + 2.5, true);
+    const idle = { peak: 0, events: 0 };
+    const e0 = s.events.length;
+    for (let k = 0; k < 60 * 60; k++) {
+        step();
+        for (const st of s.joints.health.states.values()) idle.peak = Math.max(idle.peak, st.util);
+    }
+    idle.events = s.events.slice(e0).filter((e) => e.kind === 'creak' || e.kind === 'break').length;
     phase('to the ute');
     // ---- 4. back to the yard, along past the stacks to the ute's driver's door (its right side)
     const ute = s.ute;
@@ -449,7 +524,24 @@ function buildAndCross(pullPlankNails = false) {
         const b = s.entities.find((e) => e.id === l.id)!.pose.p;
         return Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
     });
-    return { s, log, deck, placed, target, minY, beams, phases, landed, shift, atStart, u0, floods };
+    return {
+        s,
+        log,
+        deck,
+        placed,
+        target,
+        minY,
+        beams,
+        phases,
+        landed,
+        shift,
+        atStart,
+        u0,
+        floods,
+        idle,
+        seat,
+        farNails
+    };
 }
 
 /** A nailed deck barely moves under the ute; the same planks only laid are shoved about (m). */
@@ -484,6 +576,10 @@ describe('the yard crossing, built by a player and driven over (Epic 5 gate)', (
     it('from inputs alone: beams, a nailed plank deck, both ends anchored; the ute drives from its spawn, bank to bank', () => {
         const r = buildAndCross();
         const { anchors, deckJoints } = report('player-built bridge', r);
+        // built by input and left a minute with nobody on it: under 10 % and not a creak
+        console.log(`   idle a minute: peak utilization ${r.idle.peak.toFixed(3)}, ${r.idle.events} creaks or breaks`);
+        expect(r.idle.peak).toBeLessThan(0.1);
+        expect(r.idle.events).toBe(0);
         expect(r.log.filter((l) => l.includes('ute'))).toEqual([]);
         expect(r.placed).toBe(r.deck.length);
         // every plank came to rest flat on both beams, on its spot
@@ -500,9 +596,15 @@ describe('the yard crossing, built by a player and driven over (Epic 5 gate)', (
             expect(ends.length).toBe(2);
             expect(ends.filter((c) => c.anchorB.z > BRIDGE.nearFace - 0.1).length).toBe(1);
             expect(ends.filter((c) => c.anchorB.z < BRIDGE.farFace + 0.1).length).toBe(1);
+            // every nail the builder set out to drive went in: four across the near end, two
+            // across the far end
+            expect(ends.find((c) => c.anchorB.z > BRIDGE.nearFace - 0.1)!.nails.length).toBe(4);
+            expect(ends.find((c) => c.anchorB.z < BRIDGE.farFace + 0.1)!.nails.length).toBe(2);
         }
+        expect(r.farNails).toEqual([2, 2]);
         // every deck plank nailed to both beams
         expect(deckJoints).toBe(2 * r.deck.length);
+        expect(g.nailCount).toBe(2 * 4 + 2 * 2 + 2 * r.deck.length);
         for (const l of r.landed)
             for (const beam of r.beams) expect(g.find(l.id, beam.id), `plank ${l.id} to ${beam.name}`).toBeDefined();
         // driven from where it was parked, turned round in the yard, onto the bridge's line
@@ -518,6 +620,12 @@ describe('the yard crossing, built by a player and driven over (Epic 5 gate)', (
         expect(r.s.hazards.floodMoved).toBe(0);
         // the nailed deck held its shape under the ute
         expect(Math.max(...r.shift)).toBeLessThan(NAILED_SHIFT_MAX);
+        // and from the finished deck on, through the idle minute, both floods and the ute, every
+        // step: no nailed plank sank into a beam or lifted off it by a centimetre
+        console.log(
+            `   nailed planks on the beams, every step from the finished deck to the far bank: at worst ${(r.seat.worst * 1000).toFixed(1)} mm (${r.seat.name} at ${(r.seat.tick / 60).toFixed(1)} s)`
+        );
+        expect(Math.abs(r.seat.worst)).toBeLessThanOrEqual(0.01);
         expect(r.s.progress.falls).toBe(0);
     }, 300_000);
 

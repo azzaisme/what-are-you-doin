@@ -729,7 +729,7 @@ describe('wood effects', () => {
     it('a leaning stand tree (the falling-tree hazard) sheds needles towards its lean, further as it grows, with a creak', () => {
         const creaks: number[] = [];
         sfx.setSink({ play: (n, _at, o) => n === 'creak' && creaks.push(o?.gain ?? 0), hold: () => undefined });
-        // one marker at (10, 2, 5) swaying east (yaw pi/2), its amount set by the test
+        // one marker at (10, 2, 5) leaning east (yaw pi/2), its amount set by the test
         const sway = { amount: 0.25 };
         const ring = {
             sample(slot: number, _time: number, out: Pose, anim: Float64Array) {
@@ -755,14 +755,14 @@ describe('wood effects', () => {
         const [a, b] = bursts;
         expect(a.kind).toBe('needles');
         expect(a.y).toBeCloseTo(2 + SWAY_FX.crownY);
-        // east of the trunk, and further out once it sways more
+        // east of the trunk, and further out once it leans more
         expect(a.x).toBeGreaterThan(10.5);
         expect(Math.abs(a.z - 5)).toBeLessThan(1e-6);
         expect(b.x - 10).toBeCloseTo(SWAY_FX.out1);
         expect(b.x).toBeGreaterThan(a.x + 0.5);
         expect(creaks).toHaveLength(2);
         expect(creaks[1]).toBeGreaterThan(creaks[0]);
-        // no sway: nothing
+        // no lean: nothing
         sway.amount = 0;
         at(0.1 + 3 * SWAY_FX.every);
         expect(bursts).toHaveLength(2);
