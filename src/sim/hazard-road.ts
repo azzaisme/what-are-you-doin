@@ -4,8 +4,8 @@
  * stands across the road further on. Counterplay: take the side track (on foot or in the ute), or
  * move the barrier by hand.
  *
- * - **Trigger:** a player on foot coming up the road CLOSURE.leadS from the junction at a run, in
- *   a window CLOSURE.window deep; or the ute closing on it, once the quickest it could get there
+ * - **Trigger:** a player on foot CLOSURE.leadS from the junction at a run, in a window
+ *   CLOSURE.window deep (anyone on foot in the window: standing, or facing either way, counts); or the ute closing on it, once the quickest it could get there
  *   (flat out from its speed now: quickest()) drops to leadS (+ CLOSURE.uteWindowS). Either way the
  *   tell lands at least 2.5 s before it reaches the junction however it speeds up, and one already
  *   closer (when the closure could not start before) gets none. Once a run, through the director's
@@ -17,9 +17,9 @@
  *   until someone takes hold of it (any player, a guest too: the grab is the host's); then it is a
  *   light prop to drag or carry off the road.
  * - **Over** (the director is free again) when the barrier is clear of the road, every corner more
- *   than CLOSURE.clearM outside the road's edge, or when every player and the ute are past it
- *   (rejoined the road beyond, by the track; a ute left behind before the closed stretch, across
- *   the creek, does not count). No timer: waiting is not a way round.
+ *   than CLOSURE.clearM outside the road's edge, or when every player, and the ute if someone is
+ *   driving it, is past it (rejoined the road beyond, by the track). An empty ute, wherever it was
+ *   left, does not hold it. No timer: waiting is not a way round.
  * - **The sign never lies:** it shows the closed face exactly while the barrier stands on the road;
  *   it clunks back to "the road goes on" once the barrier is clear, and stays closed if everyone took
  *   the track and left the barrier where it was; dragged back onto the road, it clunks closed again
@@ -43,9 +43,10 @@ export const CLOSURE = {
     /** On foot: a run (m/s). */
     runSpeed: 4.2,
     /**
-     * The ute: its top speed (m/s) and, to be safe, more than its best acceleration (m/s^2: measured
-     * by input, 3.5 from a standstill on the road, 3.1 along it, and 4.6 at its peak, coming off the
-     * creek's bridge on its slope down; tests/unit/road-closure.test.ts). Its tell comes
+     * The ute: its top speed (m/s) and, to be safe, more than its best acceleration (m/s^2): its
+     * peak along the road, driven by input from the yard over the creek, is 3.7 (asserted under 4
+     * in tests/unit/road-closure.test.ts); the #131 audit measured 4.6 coming off the creek's
+     * bridge another way. Its tell comes
      * when the quickest it could reach the junction from where and how fast it is going drops to
      * leadS + uteWindowS: so its own lead is at least leadS however it is driven.
      */
@@ -84,8 +85,8 @@ export interface RoadClosureSpec {
     junction: number;
     rejoin: number;
     /**
-     * Where the closed stretch of road begins (along): a ute left behind before it (in the yard,
-     * across the creek) does not keep the closure going; every player does.
+     * Where the closed stretch of road begins (along): a driven ute still before it (in the yard,
+     * across the creek) does not keep the closure going; every player does. An empty ute never does.
      */
     from: number;
     /** Distance from the road's centre line, across it (m), and the road's half width. */
@@ -110,7 +111,8 @@ export interface RoadClosureHost {
     readonly entities: ClosureEntities;
     /** Who could be coming: players on foot, and the ute (its speed). */
     readonly walkers: readonly { x: number; z: number }[];
-    readonly ute: { x: number; z: number; speed: number } | null;
+    /** The ute (where, how fast, and whether someone is driving it), or null without one. */
+    readonly ute: { x: number; z: number; speed: number; driven?: boolean } | null;
     say(text: string): void;
 }
 
@@ -275,7 +277,9 @@ export class RoadClosure {
         const sp = this.spec;
         const past = (x: number, z: number) => sp.along(x, z) >= sp.rejoin;
         const left = (x: number, z: number) => sp.along(x, z) < sp.from;
-        return h.walkers.every((w) => past(w.x, w.z)) && (!h.ute || left(h.ute.x, h.ute.z) || past(h.ute.x, h.ute.z));
+        // an empty ute does not hold it, wherever it was left: only one with a driver counts
+        const ute = h.ute && h.ute.driven !== false ? h.ute : null;
+        return h.walkers.every((w) => past(w.x, w.z)) && (!ute || left(ute.x, ute.z) || past(ute.x, ute.z));
     }
 
     /** Locks (or frees) the barrier's movement: locked, the ute stops against it. */

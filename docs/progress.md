@@ -14,8 +14,9 @@ beyond it. Drive round by the track, or shift the barrier; on foot you can also 
       beaver fits between two posts and the ute doesn't.
     - There's a gap where the logging track crosses, and the log dump is part of the line.
     - Where something else already stops the ute (a pine, the dump, the terraces), there is no
-      post. Each of the 15 posts holds the ute somewhere: take any one away and the fence test
-      fails (checked post by post).
+      post. Each of the 15 posts holds the ute somewhere. A test takes each one out in turn and
+      drives the ute at the line where it stood (the same scan as below): every time, it gets
+      through.
 - **What the fence holds, and what it doesn't:** it holds the valley floor. Driven at the line by
   input every 0.2 m, straight and at an angle (330 drives, out to 24.6 m from the road on both
   sides), the ute never gets past it; the only way through is the logging track.
@@ -25,11 +26,13 @@ beyond it. Drive round by the track, or shift the barrier; on foot you can also 
       try.
     - So it is at best a long way round. The logging track takes 11.2 s from its mouth to the road
       beyond. The test checks that any way round by the side takes longer than that.
-- **When:** a player crossing the creek on foot reaches the tell's window: 2.5 s from the
-  junction at a run (4.2 m/s), 1.5 m deep. Or the ute, coming up the road, gets close enough that,
+- **When:** a player on foot is in the tell's window: 2.5 s from the junction at a run
+  (4.2 m/s), 1.5 m deep, on the creek crossing. Anyone on foot in the window counts, standing or
+  facing either way. Or the ute, coming up the road, gets close enough that,
   flat out from the speed it's going, it could reach the junction in 3 s.
-    - That reckoning assumes 5 m/s² of acceleration, more than the ute makes: measured by input,
-      its peak along the road is 3.7 m/s² (asserted in the test).
+    - That reckoning assumes 5 m/s² of acceleration, more than the ute makes. Measured by input,
+      its peak along the road is 3.6–3.7 m/s², and the test asserts it stays under 4. The #131
+      audit measured 4.6 m/s² coming off the creek's bridge another way, which 5 still covers.
     - One already closer when it could not start gets no closure at all rather than a late one.
     - Once a run, through the shared budget: not in the first 20 s, one hazard at a time, and not
       during the weather or the quiet spell after it (each tested: the test fails if either
@@ -42,12 +45,13 @@ beyond it. Drive round by the track, or shift the barrier; on foot you can also 
       beams nailed under its wheels, then up the road past the checkpoint flag. From 12 m before
       the creek, the tell came 4.18 s before the junction; from 16 m before, 4.08 s. The fastest it
       went on that stretch is 7.6 and 7.8 m/s.
-    - **Extra test, not the real layout:** the same closure, moved up the forest road beyond the
-      culvert, with the ute already at top speed: 3.10 s at 9.1 m/s.
+    - **Extra test, not the real layout and not by input:** the same closure, moved up the forest
+      road beyond the culvert, with the ute set going at its top speed of 10 m/s (the test sets
+      that speed), then driven on by input: 3.10 s at 9.1 m/s.
 - **The tell:** a clunk (a latch click, then a metal thunk) and a toast: "Road closed ahead: drive
   round by the old logging track, or shift the barrier. On foot, you can squeeze past."
     - The sign's board (2.4 × 1.2 m) swings half round over 1.2 s. Its closed face says "ROAD
-      CLOSED" and "DETOUR" in black 5 cm letters on white, with a big red arrow towards the track
+      CLOSED" and "DETOUR" in black 5 cm letters on cream, with a big hi-vis orange arrow towards the track
       in a striped border.
     - The arrow points right: going up the road, the track leaves to the right (the approved
       design said ←).
@@ -66,8 +70,13 @@ beyond it. Drive round by the track, or shift the barrier; on foot you can also 
     - two players carry it off together;
     - on foot, squeeze round either end or between two fence posts, then on up the road.
 - **No timer:** the closure ends when the barrier is clear of the road (every corner more than 1 m
-  past the edge), or when every player, and the ute if it has come up the road, is past it. A ute
-  left behind in the yard does not keep it going.
+  past the edge), or when every player, and the ute if someone is driving it, is past it.
+    - **An empty ute doesn't hold it**, wherever it was left. Before this was fixed (found in the
+      #131 audit), a ute parked on the closed stretch kept the closure going for the rest of the
+      run, and with it every other hazard and the weather.
+    - **Tested by input:** park the ute on the closed road at u 15 and get out, then walk round by
+      the track. The closure ends, and the next weather comes after its quiet spell. Put the old
+      rule back and the test fails.
 - **The sign never lies:** it shows "closed" exactly while the barrier stands on the road.
     - Cleared, it clunks back to "the road goes on" (once).
     - Dragged back onto the road, it clunks closed again, with a toast ("The barrier is back across
@@ -93,9 +102,10 @@ beyond it. Drive round by the track, or shift the barrier; on foot you can also 
 - **Also in this PR (the #127 audit's follow-ups):** the falling-tree browser test steps the sim by
   ticks instead of waiting in real time, and now checks the lean and that the static tree is gone
   in every worker lane.
-- **Tests:** `tests/unit/road-closure.test.ts` has 18 tests. All but two use the Valley with
+- **Tests:** `tests/unit/road-closure.test.ts` has 20 tests. All but two use the Valley with
   only the closure among its hazards, so the flood the test's bridge brings doesn't get in first.
-  Unit tests: 796 pass at both voxel sizes.
+  New since the #131 audit: the empty ute left on the closed road, and every fence post counting.
+  Unit tests: UNITCOUNT pass at both voxel sizes.
 
 ## Credits and licences (2026-11-23, Epic 10, #104)
 

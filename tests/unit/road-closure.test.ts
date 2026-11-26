@@ -1,9 +1,11 @@
+import type { Collider } from '@dimforge/rapier3d-compat';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { UTE_TRACK_HALF } from '../../src/assets/ute.ts';
 import { BRIDGE, BRIDGE_X, YARD_Y } from '../../src/levels/timber-yard.ts';
 import {
     CLOSURE_AT,
+    closurePostSpots,
     ROUTE_YAW,
     SIDE_PATHS,
     VALLEY_ROAD_CLOSURE as R,
@@ -176,7 +178,11 @@ function byBarrier(s: LabSim, lx: number, lz: number): { x: number; z: number } 
     return { x: b.p.x + c.x, z: b.p.z + c.z };
 }
 
-/** Player `slot` walks up to the barrier at local x = lx (from its -u face) and takes hold of it. */
+/**
+ * Player `slot` comes to the barrier at local x = lx (from its -u face) and takes hold of it, by
+ * input: walking there (`walk`, the default for player 1), or set down beside it (setup); the look
+ * and the grab are commands either way.
+ */
 function takeHold(s: LabSim, slot: number, lx: number, walk = slot === 0) {
     const p = inputs(s, slot);
     const stand = byBarrier(s, lx, 1.3);
@@ -390,7 +396,9 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
             console.log(
                 `the ute from u ${back}: the tell at ${tellSpeed.toFixed(2)} m/s, ${lead.toFixed(2)} s before the junction (fastest ${fastest.toFixed(1)} m/s, hardest acceleration ${hardest.toFixed(2)} m/s²)`
             );
-            expect(hardest, 'the trigger assumes more acceleration than it makes').toBeLessThan(CLOSURE.uteAccel);
+            // measured 3.6-3.7: under 4, and the trigger assumes more (5)
+            expect(hardest, 'its peak acceleration along the road').toBeLessThan(4);
+            expect(CLOSURE.uteAccel).toBeGreaterThan(4.6);
             expect(lead, `from u ${back}: lead ${lead.toFixed(2)} s`).toBeGreaterThanOrEqual(2.5);
             expect(s.hazards.road!.count).toBe(1);
         }
@@ -399,11 +407,12 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         expect(quickest(25, 10)).toBeCloseTo(CLOSURE.leadS, 5);
     }, 300_000);
 
-    it('extra (not the real layout): the ute at its top speed, 10 m/s, on a junction moved up the forest road; the tell still lands at least 2.5 s before it', () => {
+    it('extra (not the real layout, set speed): the ute set going at 10 m/s, its top speed, on a junction moved up the forest road; the tell still lands at least 2.5 s before it', () => {
         // the Valley's road has no straight run-up to the junction at u = 11 (the ute crosses the
-        // creek just before it, and from the yard reaches about 7 m/s: the test above), so this
-        // puts the same closure's junction up the forest road beyond the culvert, and drives the
-        // ute at it at top speed, by input
+        // creek just before it, and from the yard reaches about 7.8 m/s by input: the test above),
+        // so this puts the same closure's junction up the forest road beyond the culvert and SETS
+        // the ute going at its top speed (inTheUte's speed: not reached by input), then drives it
+        // on by input at full throttle
         const level = {
             ...valleyLevel,
             hazards: { seed: 1, roadClosure: { ...R, junction: 80, rejoin: 84, from: 41 } }
@@ -532,6 +541,28 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         expect(r.track, 'along the logging track').toBeGreaterThan(30);
         expect(r.furthest).toBeLessThan(CLOSURE_AT.barrierU);
     }, 600_000);
+
+    it('every fence post counts: take any one out and the ute gets through there (driven at the line by input)', () => {
+        const spots = closurePostSpots();
+        expect(spots).toHaveLength(15);
+        for (const post of spots) {
+            const s = closed();
+            inTheUte(s, 12);
+            // take this post out of the world (its collider: the rail has none)
+            const w = at(CLOSURE_AT.barrierU, roadT(CLOSURE_AT.barrierU) + post.side * post.a);
+            const gone: Collider[] = [];
+            s.physics.world.colliders.forEach((c) => {
+                const tr = c.translation();
+                if (c.parent() === null && Math.hypot(tr.x - w.x, tr.z - w.z) < 0.05) gone.push(c);
+            });
+            expect(gone, `the post ${(post.side * post.a).toFixed(2)} m out`).toHaveLength(1);
+            s.physics.world.removeCollider(gone[0], false);
+            // the same scan as above (on the same 0.2 m and 0.4 m steps), round where it stood
+            const from = Math.max(3, 3 + Math.floor((post.a - 2.6 - 3) / 0.4) * 0.4);
+            const r = scanFence(s, inputs(s), [post.side], from, post.a + 2.6);
+            expect(r.through.length, `without the post ${(post.side * post.a).toFixed(2)} m out`).toBeGreaterThan(0);
+        }
+    }, 900_000);
 
     it('the valley sides: the ute can climb them, a long way round; measured against the logging track by input', () => {
         // the logging track, at the careful pace the ute keeps on it: from its mouth to the road beyond
@@ -762,6 +793,65 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         expect(s.closure.barrier.visible).toBe(true);
     }, 300_000);
 
+    it('an empty ute left on the closed road does not hold it: park it there, walk round by the track, and the next weather comes', () => {
+        // the closure-only Valley with a short spell of weather beyond the closed stretch: it comes
+        // only once the closure is over and its quiet spell out
+        const beyond = (x: number, z: number) => routeU(x, z) > CLOSURE_AT.rejoin + 1;
+        const level = {
+            ...CLOSURE_ONLY,
+            hazards: {
+                ...CLOSURE_ONLY.hazards,
+                weather: {
+                    zones: [
+                        {
+                            name: 'test shower',
+                            kind: WEATHER.rain,
+                            contains: beyond,
+                            tellS: 2,
+                            activeS: 4,
+                            clearS: 2,
+                            delayS: 0,
+                            delayJitterS: 0,
+                            tell: 'test shower',
+                            clear: 'test shower over'
+                        }
+                    ]
+                }
+            }
+        };
+        const s = closed(level);
+        // into the ute (set beside it on the road at u 12), drive it on to u 15, stop, get out
+        const d = inTheUte(s, 12);
+        d.drive(roadPoints(13, 15, 1), 0.4);
+        const p = inputs(s);
+        for (let i = 0; i < S(5) && Math.abs(s.vehicle!.speed()) > 0.05; i++) p.step({ jump: true });
+        p.step({ jump: true }, 20);
+        p.step({ grab: true });
+        p.step({}, 20);
+        expect(s.driver).toBe(-1);
+        const parked = routeU(s.ute.pose.p.x, s.ute.pose.p.z);
+        expect(parked).toBeGreaterThan(R.from);
+        expect(parked).toBeLessThan(CLOSURE_AT.barrierU);
+        expect(s.hazards.road!.busy).toBe(true);
+        // on foot back to the track's mouth, along it, and out onto the road beyond
+        const track = SIDE_PATHS.find((q) => q.name === 'logging-track')!;
+        for (const [u, t] of track.points) {
+            const w = at(u, t);
+            p.walkTo(w.x, w.z, false, undefined, 0.6);
+        }
+        const out = roadAt(CLOSURE_AT.rejoin + 3);
+        p.walkTo(out.x, out.z);
+        p.step({}, 5);
+        // the ute still stands on the closed road, empty: the closure is over all the same
+        expect(routeU(s.ute.pose.p.x, s.ute.pose.p.z)).toBeCloseTo(parked, 0);
+        expect(s.hazards.road!.busy).toBe(false);
+        // and the next hazard comes once the quiet spell is out
+        const w = s.hazards.weather!;
+        for (let i = 0; i < S(HAZARD.safeS + 5) && !w.hazardBusy; i++) p.step();
+        expect(w.hazardBusy).toBe(true);
+        expect(texts(s)).toContain('test shower');
+    }, 300_000);
+
     it('the budget: not while the weather is on, nor in the quiet spell after it; then it comes', () => {
         // the closure-only Valley with a short spell of weather over the whole map, from the moment
         // the quiet start is over
@@ -895,18 +985,32 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         const guestSim = new LabSim({ level: valleyLevel });
         const gs = await GuestSession.join(hub.transport('guest'), guestSim, ad, { now: () => clock });
         const guestCmd: Partial<PlayerCommand> = {};
+        const hostCmd: Partial<PlayerCommand> = {};
         const run = (ticks: number) => {
             for (let i = 0; i < ticks; i++) {
                 gs.sendInput({ ...neutralCommand(host.tick), ...guestCmd });
-                host.step(neutralCommand(host.tick), hs.commandFor(1), [hs.commandFor(2), hs.commandFor(3)]);
+                host.step({ ...neutralCommand(host.tick), ...hostCmd }, hs.commandFor(1), [
+                    hs.commandFor(2),
+                    hs.commandFor(3)
+                ]);
                 hs.afterStep((slot) => host.interactionIds(slot));
                 clock += 1000 / 60;
             }
         };
         run(10);
-        // the host's player steps onto the bridge, in the tell's window
-        const w = at(0, 0);
-        host.placePlayer(w.x, w.z, 0);
+        // the host's player, set down on the yard side, walks up onto the bridge by its commands,
+        // into the tell's window
+        const start = at(-5, 0);
+        host.placePlayer(start.x, start.z, 0);
+        run(20);
+        const onto = at(2.5, 0);
+        for (let i = 0; i < S(10) && host.hazards.road!.count === 0; i++) {
+            const me = host.players[0];
+            hostCmd.yaw = Math.atan2(-(onto.x - me.x), -(onto.z - me.z));
+            hostCmd.moveZ = 1;
+            run(1);
+        }
+        hostCmd.moveZ = 0;
         run(S(2));
         expect(host.hazards.road!.count).toBe(1);
         expect(gs.events.some((e) => e.kind === 'hazard' && e.text === CLOSURE_TELL)).toBe(true);
@@ -920,7 +1024,8 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         const hb = host.closure.barrier.pose.p;
         expect(Math.hypot(out.p.x - hb.x, out.p.z - hb.z)).toBeLessThan(0.05);
         expect(Math.abs(routeU(out.p.x, out.p.z) - CLOSURE_AT.barrierU)).toBeLessThan(0.1);
-        // the guest (slot 1 on the host) walks up to it and takes hold through its own commands
+        // the guest (slot 1 on the host), set down beside it, looks at it and takes hold through its
+        // own commands
         expect(host.hazards.road!.pinned).toBe(true);
         const stand = byBarrier(host, -1.6, 1.3);
         host.placePlayer(stand.x, stand.z, 0, 1);
@@ -955,13 +1060,15 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         expect(s.hazards.busy).toBe(false);
         expect(s.hazards.floodCount).toBe(1);
         p.step({}, S(HAZARD.safeS) + 5);
-        // the next one in the window (on the crossing) brings it
+        // the next one in the window brings it: set down on the crossing, in the window, standing
+        // (the trigger takes anyone on foot in the window, whichever way they face)
         const w = at(-0.5, 0);
         s.placePlayer(w.x, w.z, 0);
         p.step({}, 3);
         expect(s.hazards.road!.count).toBe(1);
         expect(texts(s)).toContain(CLOSURE_TELL);
-        // up onto the forest road (the rain's area) and wait there: while the closure runs, no rain
+        // set down up on the forest road (the rain's area) and wait there: while the closure runs,
+        // no rain
         const fr = roadAt(13);
         s.placePlayer(fr.x, fr.z, 0);
         for (let i = 0; i < S(40); i++) {

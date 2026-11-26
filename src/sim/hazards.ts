@@ -342,7 +342,9 @@ export class HazardDirector {
             if (h.isSlotActive(i) && h.seatOf(i) < 0) walkers.push(p);
         });
         const b = h.vehicle?.pb.body;
-        const ute = b ? { ...b.translation(), speed: Math.hypot(b.linvel().x, b.linvel().z) } : null;
+        const ute = b
+            ? { ...b.translation(), speed: Math.hypot(b.linvel().x, b.linvel().z), driven: h.driver >= 0 }
+            : null;
         road.step(
             { tick, physics: h.physics, entities: closure, walkers, ute, say: (t) => this.say(h, t) },
             this.canStart(h, tick)

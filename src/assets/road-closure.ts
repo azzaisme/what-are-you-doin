@@ -4,7 +4,7 @@
  * - barrier: a long striped board on three trestles, set across the road. Its origin is the middle
  *   of its collision box (BARRIER_HALF), as the physics body's is;
  * - closure sign: a post at the side track's mouth carrying a board with two faces, back to back:
- *   the road goes on (an arrow straight up, on the area's colour) and closed (red and white, an
+ *   the road goes on (an arrow straight up, on the area's colour) and closed (orange and cream, an
  *   arrow down the track). Its channel swings the board over, 0 (the road goes on) to 1 (closed).
  */
 
@@ -24,7 +24,7 @@ export const BARRIER_HALF = { x: 2.8, y: 0.55, z: 0.3 };
 
 const timber: MaterialField = (x, y, z) => voxel(M.LogBark, latticeShade(x, y, z, 0.2, 6) & 1);
 
-/** Red and white stripes, 40 cm wide, slanting. */
+/** Hi-vis orange and cream stripes, 40 cm wide, slanting. */
 const stripes: MaterialField = (x, y) => voxel(Math.floor((x + y) / 0.4) & 1 ? M.HiVis : M.HiVisStripe, 0);
 
 export function barrierAsset(): VoxelAsset {
@@ -101,9 +101,9 @@ function textLit(text: string, col: number, row: number): boolean {
 }
 
 /**
- * The closed face, read across the board (board-local m, x to the reader's right, y up): a red and
- * white striped border (10 cm), and on white "ROAD CLOSED" in black 5 cm letters, then "DETOUR" and
- * a big red arrow (10 cm pixels) towards the track. Every pixel falls on whole 5 or 10 cm cells (the
+ * The closed face, read across the board (board-local m, x to the reader's right, y up): an orange and
+ * cream striped border (10 cm), and on cream "ROAD CLOSED" in black 5 cm letters, then "DETOUR" and
+ * a big orange arrow (10 cm pixels) towards the track. Every pixel falls on whole 5 or 10 cm cells (the
  * board stands on 10 cm lines: src/levels/valley.ts).
  */
 function closedFace(arrow: 'left' | 'right'): MaterialField {
