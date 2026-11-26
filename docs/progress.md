@@ -1,5 +1,32 @@
 # Progress log
 
+## Epic 8: the road closure's last two stalls, and the log's wording (2026-11-26, #77 #70)
+
+Three follow-ups from the #145 audit.
+
+- **"Never came" is not "turned back".** The closure ends when nobody has been in the closed
+  stretch for 10 s. If someone was in it and went back, the log says "turned back". If nobody ever
+  got that far (whoever brought it on stayed on the crossing), it now says "never came".
+- **Standing just inside the closed stretch no longer holds every other hazard forever.** Someone
+  in the stretch, not past it, holds the closure at most 60 s from the tell. Then it is over:
+  "stopped in the closure". The barrier still stands and the sign stays closed.
+    - Not while anyone has hold of the barrier: shifting it is the way round being taken.
+    - Why 60 s: walking the track from the tell to the road beyond took 21.3 s (measured in the
+      track test, which now asserts it's under 30 s). 60 s is about three times that.
+- **The playtest summary test** used a made-up weather line ("Forest Road rain: came and
+  cleared"). The real one is "Forest Road: came and cleared". A new test runs the Valley's own
+  Forest Road rain, short, feeds its outcome into the log the way `main.ts` does, and checks the
+  summary line.
+- **Tests, by input:**
+    - never came: bring it on and stand on the crossing; over 10 s after the tell;
+    - stopped in the closure: stand just inside the stretch; over 60 s after the tell, the
+      barrier still across the road;
+    - hold the barrier past 60 s: still on; let go: over at once.
+- **Mutation checks:** each change undone fails its test. Those were: "turned back" for everyone;
+  no 60 s cap; the cap ignoring a hand on the barrier; and a different weather wording.
+- **Code:** `src/sim/hazard-road.ts` (CLOSURE.stopS, why it ended), `docs/playtest.md`.
+- **Unit tests:** COUNT pass (both voxel sizes), on `epics-5-10` 1eb75c1.
+
 ## Epic 8: the playtest log says how each hazard ended (2026-11-23, #70)
 
 The playtest log's summary used to count floods and gusts only. Now it says what each hazard met

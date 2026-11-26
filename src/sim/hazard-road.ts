@@ -21,7 +21,9 @@
  *   the road beyond, by the track). It is held by the players on foot, and the ute if someone is
  *   driving it, that are in the closed stretch (past `from`) or beyond. One still behind it (across
  *   the creek, in the yard), or gone back there, doesn't hold it; nor does an empty ute, wherever it
- *   was left. With nobody holding it for CLOSURE.goneS (all turned back), it is over too.
+ *   was left. With nobody holding it for CLOSURE.goneS (all turned back, or whoever brought it on
+ *   never came), it is over too; and with someone stopped in the closed stretch, CLOSURE.stopS
+ *   after the tell (not while anyone has hold of the barrier).
  * - **Waiting is not a way round:** over, the barrier still stands where it was, and the sign
  *   stays closed; only the director is free.
  * - **The sign never lies:** it shows the closed face exactly while the barrier stands on the road;
@@ -72,6 +74,13 @@ export const CLOSURE = {
      * never came on): it is over (s). Long enough for whoever brought it on to get there.
      */
     goneS: 10,
+    /**
+     * Someone stopped in the closed stretch (in it, not past it) holds it at most this long from
+     * the tell (s), then it is over: "stopped in the closure". Not while anyone has hold of the
+     * barrier (shifting it is the way round being taken). Walking the track from the tell takes
+     * about 20 s (tests/unit/road-closure.test.ts measures it), so this is three times that.
+     */
+    stopS: 60,
     max: 1
 } as const;
 
@@ -149,6 +158,10 @@ export class RoadClosure {
     private uteByTrack = false;
     /** The last tick anyone counted was in the closed stretch (or the tell's). */
     private heldAt = 0;
+    /** Has anyone held it this time (been in the closed stretch)? */
+    private everHeld = false;
+    /** Why it was over: everyone past, all turned back, nobody came, or someone stopped in it. */
+    private why: 'past' | 'turned back' | 'never came' | 'stopped in the closure' = 'past';
     private readonly spec: RoadClosureSpec;
 
     constructor(spec: RoadClosureSpec) {
@@ -167,6 +180,8 @@ export class RoadClosure {
         this.byTrack.clear();
         this.uteByTrack = false;
         this.heldAt = 0;
+        this.everHeld = false;
+        this.why = 'past';
     }
 
     get busy(): boolean {
@@ -227,6 +242,7 @@ export class RoadClosure {
                 this.since = h.tick;
                 this.tellDistance = d;
                 this.heldAt = h.tick;
+                this.everHeld = false;
                 this.count++;
                 h.say(CLOSURE_TELL);
             }
@@ -248,7 +264,7 @@ export class RoadClosure {
             if (h.ute && between(h.ute.x, h.ute.z)) this.uteByTrack = true;
         }
         // over once the road is open, or everyone has gone round
-        if (this.phase !== CLOSURE_PHASE.idle && (!blocking || this.everyonePast(h))) {
+        if (this.phase !== CLOSURE_PHASE.idle && (!blocking || this.everyonePast(h, pw.holders(bid) > 0))) {
             this.phase = CLOSURE_PHASE.idle;
             h.outcome?.(this.account(h, blocking));
         }
@@ -323,7 +339,8 @@ export class RoadClosure {
             else if (slots.length) parts.push('some took the track, some squeezed past');
             if (h.ute && past(h.ute.x, h.ute.z))
                 parts.push(this.uteByTrack ? 'drove the ute round the track' : 'got the ute round another way');
-            if (!parts.length) parts.push('turned back');
+            if (this.why === 'stopped in the closure') parts.push(this.why);
+            else if (!parts.length) parts.push(this.why === 'never came' ? this.why : 'turned back');
         }
         // an empty ute still on the closed stretch (it doesn't hold it)
         if (h.ute && h.ute.driven === false && blocking) {
@@ -348,13 +365,27 @@ export class RoadClosure {
 
     /**
      * Over: everyone who holds it is on the road beyond the barrier; or nobody has held it for
-     * CLOSURE.goneS (they all turned back, or whoever brought it on never came).
+     * CLOSURE.goneS (they all turned back, or whoever brought it on never came); or someone has
+     * stopped in it for CLOSURE.stopS since the tell (not while the barrier is held). Sets `why`.
      */
-    private everyonePast(h: RoadClosureHost): boolean {
+    private everyonePast(h: RoadClosureHost, barrierHeld: boolean): boolean {
         const who = this.holding(h);
-        if (who.length === 0) return h.tick - this.heldAt >= S(CLOSURE.goneS);
+        if (who.length === 0) {
+            if (h.tick - this.heldAt < S(CLOSURE.goneS)) return false;
+            this.why = this.everHeld ? 'turned back' : 'never came';
+            return true;
+        }
         this.heldAt = h.tick;
-        return who.every((w) => this.spec.along(w.x, w.z) >= this.spec.rejoin);
+        this.everHeld = true;
+        if (who.every((w) => this.spec.along(w.x, w.z) >= this.spec.rejoin)) {
+            this.why = 'past';
+            return true;
+        }
+        if (!barrierHeld && h.tick - this.since >= S(CLOSURE.stopS)) {
+            this.why = 'stopped in the closure';
+            return true;
+        }
+        return false;
     }
 
     /** Locks (or frees) the barrier's movement: locked, the ute stops against it. */
