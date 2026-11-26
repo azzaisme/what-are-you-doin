@@ -479,7 +479,11 @@ export class HostSession {
         const bytes = this.encoder.encode(
             sim.tick,
             sim.entities,
-            [...this.slots.keys()],
+            // every guest of this version: playing, watching a full game, or waiting to rejoin
+            this.ch
+                .peers()
+                .filter((p) => !p.isMe && p.state.role === 'guest' && p.state.v === NET_PROTOCOL)
+                .map((p) => p.id),
             snapshotBudget(PRESENCE_LIMIT - PRESENCE_MARGIN - used),
             (i) => {
                 const p = sim.entities[i].pose.p;

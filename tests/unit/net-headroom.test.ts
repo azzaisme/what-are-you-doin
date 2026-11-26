@@ -73,8 +73,8 @@ const LONG_MESSAGE =
 /**
  * The Valley with eight players (its real entities: the long plank of #134, the road closure's
  * barrier and sign of #131) and a stand-in for the goose still to come, with every animation
- * channel. Hosted, with seven guests seated who never acknowledge anything (every entity stays
- * theirs to receive).
+ * channel. Hosted, with seven guests seated and an eighth watching (the game is full), none of whom
+ * acknowledges anything (every entity stays theirs to receive).
  */
 async function valleyHost(extra = true) {
     const hub = new MemoryHub();
@@ -94,7 +94,8 @@ async function valleyHost(extra = true) {
     sim.step(neutralCommand(0));
     sim.fpActive = true;
     const hs = await HostSession.start(hub.transport('host'), sim, 'valley', 'size');
-    for (let g = 1; g < MAX_PLAYERS; g++) {
+    // seven seated and an eighth watching (the game is full): none acknowledges anything
+    for (let g = 1; g <= MAX_PLAYERS; g++) {
         const ch = await hub.transport(`guest-${g}`).join('ue-size');
         ch.setState({ role: 'guest', v: NET_PROTOCOL, in: {} });
     }
@@ -393,6 +394,95 @@ describe('a guest that misses updates, or joins late, still gets every pose', ()
         const es = boxes(30);
         const enc = new SnapshotEncoder();
         expect(listed(enc.encode(3, es, []))).toEqual([]);
+    });
+});
+
+/** Where a guest session draws entity i now (null: hidden), at the host's last snapshot tick. */
+function guestDraws(sim: LabSim, i: number, tick: number) {
+    const p = pose();
+    return sim.ring.sample(i, tick / 60, p, new Float64Array(ANIM_MAX)) ? p.p : null;
+}
+
+/** The yard, hosted, with `n` guest sessions; `step` runs the host (and the guests react at once). */
+async function yardGame() {
+    const hub = new MemoryHub();
+    const sim = new LabSim({ level: timberYardLevel });
+    sim.step(neutralCommand(0));
+    sim.fpActive = true;
+    const hs = await HostSession.start(hub.transport('host'), sim, 'yard', 'full');
+    const ad = { code: 'full', level: 'yard', host: 'host', players: 1, max: MAX_PLAYERS, v: NET_PROTOCOL };
+    const join = async (id: string, token?: string) => {
+        const gsim = new LabSim({ level: timberYardLevel });
+        return { sim: gsim, s: await GuestSession.join(hub.transport(id), gsim, ad, { token }) };
+    };
+    const step = (n: number) => {
+        for (let k = 0; k < n; k++) {
+            sim.step(neutralCommand(sim.tick));
+            hs.afterStep((s) => sim.interactionIds(s));
+        }
+    };
+    /** Host-visible entities the guest doesn't draw where the host has them (at the last snapshot). */
+    const missing = (g: { sim: LabSim }) => {
+        const t = Math.floor(sim.tick / 3) * 3;
+        return sim.entities.flatMap((e, i) => {
+            if (!e.visible) return [];
+            const at = guestDraws(g.sim, i, t);
+            return at && Math.hypot(at.x - e.pose.p.x, at.y - e.pose.p.y, at.z - e.pose.p.z) < 0.01 ? [] : [i];
+        });
+    };
+    return { sim, hs, join, step, missing };
+}
+
+describe('every guest of this version is sent the world, playing or not', { timeout: 60_000 }, () => {
+    it('a watcher who joins a full game late draws the whole world (after the others confirmed it all)', async () => {
+        const g = await yardGame();
+        const players = [];
+        for (let k = 1; k < MAX_PLAYERS; k++) players.push(await g.join(`p${k}`));
+        g.step(300);
+        expect(g.hs.guestCount).toBe(MAX_PLAYERS - 1);
+        for (const p of players) expect(g.missing(p)).toEqual([]);
+        const watcher = await g.join('watcher');
+        g.step(300);
+        expect(g.hs.guestCount, 'the game is full: the eighth watches').toBe(MAX_PLAYERS - 1);
+        expect(watcher.s.received).toBeGreaterThan(50);
+        const visible = g.sim.entities.filter((e) => e.visible).length;
+        expect(visible).toBeGreaterThan(30);
+        expect(g.missing(watcher), `of ${visible} visible`).toEqual([]);
+    });
+
+    it('a guest waiting to rejoin (its token still held by a seated tab) draws the whole world while it waits', async () => {
+        const g = await yardGame();
+        const first = await g.join('tab-1', 'token0123456789a');
+        g.step(300);
+        expect(g.missing(first)).toEqual([]);
+        // the same player in a second tab: it waits for the first to go before it may take the place
+        const second = await g.join('tab-2', 'token0123456789a');
+        g.step(120);
+        expect(g.hs.guestCount, 'still waiting').toBe(1);
+        expect(g.missing(second)).toEqual([]);
+    });
+});
+
+describe('acknowledgements that arrive late', () => {
+    it('still confirm what the snapshots they acknowledge listed, so normal play shrinks (acks 3 to 40 snapshots late)', () => {
+        for (const late of [3, 10, 40]) {
+            const es = boxes(30);
+            es.forEach((e, i) => (e.pose.p.z = i));
+            const enc = new SnapshotEncoder();
+            const dec = new SnapshotDecoder(es.length);
+            const ring = new SnapshotRing(es.length);
+            const acks: number[] = [];
+            for (let n = 1; n <= 120; n++) {
+                es[4].pose.p.x = n * 0.01; // one keeps moving
+                const bytes = enc.encode(n * 3, es, ['g']);
+                if (dec.apply(bytes, ring)) acks.push(n * 3);
+                // the guest's acknowledgement reaches the host `late` snapshots after it got the snapshot
+                while (acks.length && acks[0] <= (n - late) * 3) enc.ack('g', acks.shift()!);
+            }
+            // only the moving one is still sent
+            expect(enc.listed, `acks ${late} late`).toBe(1);
+            for (let i = 0; i < es.length; i++) expect(drawn(ring, i, 360)!.z).toBeCloseTo(i, 2);
+        }
     });
 });
 
