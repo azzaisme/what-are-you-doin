@@ -489,13 +489,20 @@ export class PhysicsWorld {
 
     /**
      * A dynamic body built from several shapes, each with its own density (a vehicle: a heavy
-     * chassis, a light cab). Not grabbable; the wind leaves it alone.
+     * chassis, a light cab) and, if given, its own friction (the log dolly's grippy cradle on
+     * slippery wheels). Not grabbable unless asked; the wind leaves it alone.
      */
     addDynamicCompound(
         id: number,
-        shapes: { shape: ShapeSpec; x: number; y: number; z: number; density: number }[],
+        shapes: { shape: ShapeSpec; x: number; y: number; z: number; density: number; friction?: number }[],
         spawn: Pose,
-        o: { friction?: number; linearDamping?: number; angularDamping?: number; canSleep?: boolean }
+        o: {
+            friction?: number;
+            linearDamping?: number;
+            angularDamping?: number;
+            canSleep?: boolean;
+            grabbable?: boolean;
+        }
     ): PhysBody {
         const body = this.world.createRigidBody(
             RAPIER.RigidBodyDesc.dynamic()
@@ -512,7 +519,12 @@ export class PhysicsWorld {
             const t = d.translation;
             d.setTranslation(t.x + s.x, t.y + s.y, t.z + s.z)
                 .setDensity(s.density)
-                .setFriction(o.friction ?? 0.6)
+                .setFriction(s.friction ?? o.friction ?? 0.6)
+                // a shape's own friction is its, whatever it touches (Rapier averages the two by
+                // default: the dolly's 0.03 wheels on gravel came to 0.47, and it would not roll)
+                .setFrictionCombineRule(
+                    s.friction !== undefined ? RAPIER.CoefficientCombineRule.Min : RAPIER.CoefficientCombineRule.Average
+                )
                 .setRestitution(0.05)
                 .setCollisionGroups(groups(LAYER.prop, ALL));
             colliders.push(this.world.createCollider(d, body));
@@ -522,7 +534,7 @@ export class PhysicsWorld {
             body,
             colliders,
             kind: 'dynamic',
-            grabbable: false,
+            grabbable: o.grabbable ?? false,
             spawn: { p: { ...spawn.p }, q: { ...spawn.q } },
             baseAngularDamping: o.angularDamping ?? 0.3,
             enabled: true,
