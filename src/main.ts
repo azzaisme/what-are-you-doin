@@ -2262,6 +2262,9 @@ const menu = new SettingsMenu(
                         if (pid) host.set(pid, v);
                         else (setSetting as (k: keyof Settings, v: SettingValue) => void)(k, v);
                     }
+                    // back to following the device: no setting counts as the player's choice any more
+                    chosenSettings.clear();
+                    saveSettings(settingsStorage, savedSettings, DEFAULT_SETTINGS, chosenSettings);
                     applyInputSettings();
                     applyUiSettings();
                     updateHud();

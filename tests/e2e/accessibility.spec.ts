@@ -271,6 +271,70 @@ test('text size 160 %: every HUD and menu text is 1.6× and stays on screen, pho
     expect(problems).toEqual([]);
 });
 
+test('text size 160 %: the HUD, debug panel, settings chip and debug chip never overlap, on every screen shape', async ({
+    page
+}) => {
+    test.setTimeout(600_000);
+    await page.addInitScript(() => localStorage.setItem('uncivil.settings', JSON.stringify({ uiScale: 1.6 })));
+    const problems = await boot(page, '?level=yard&t=4&debug&quality=low#cell100');
+    type Rect = { l: number; t: number; r: number; b: number };
+    const rects = () =>
+        page.evaluate(() => {
+            const out: Record<string, Rect | null> = {};
+            for (const s of ['.hud', '.debug-panel', '.settings-chip', '.debug-chip']) {
+                const e = document.querySelector(s) as HTMLElement | null;
+                if (!e || getComputedStyle(e).display === 'none') {
+                    out[s] = null;
+                    continue;
+                }
+                // the HUD's visible extent is its text, not the full line box
+                const range = document.createRange();
+                range.selectNodeContents(e);
+                const b = s === '.hud' ? range.getBoundingClientRect() : e.getBoundingClientRect();
+                out[s] = { l: b.left, t: b.top, r: b.right, b: b.bottom };
+            }
+            return out;
+        });
+    const hit = (a: Rect, b: Rect) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
+    const assertLayout = async (label: string, w: number, h: number) => {
+        const r = await rects();
+        const names = Object.keys(r).filter((k) => r[k]);
+        for (const n of names) {
+            const b = r[n]!;
+            expect(
+                b.l >= -0.5 && b.t >= -0.5 && b.r <= w + 0.5 && b.b <= h + 0.5,
+                `${label}: ${n} inside the viewport ${JSON.stringify(b)}`
+            ).toBe(true);
+            for (const m of names) if (m < n) expect(hit(r[n]!, r[m]!), `${label}: ${n} overlaps ${m}`).toBe(false);
+        }
+        return r;
+    };
+    expect(await page.evaluate(() => document.querySelector('.hud')!.currentCSSZoom)).toBeCloseTo(1.6, 2);
+    for (const [w, h] of [
+        [360, 740],
+        [390, 844],
+        [768, 1408],
+        [1280, 720],
+        [844, 390]
+    ]) {
+        await page.setViewportSize({ width: w, height: h });
+        await page.waitForTimeout(400);
+        await lab(page, (l) => (l as unknown as { showPanel(v: boolean): void }).showPanel(true));
+        // the layout follows the HUD and dock sizes a frame after a resize (ResizeObserver)
+        await expect(async () => {
+            const open = await assertLayout(`${w}x${h} panel open`, w, h);
+            expect(open['.debug-panel']).not.toBeNull();
+            expect(open['.hud']).not.toBeNull();
+            expect(open['.settings-chip']).not.toBeNull();
+        }).toPass({ timeout: 20_000 });
+        await lab(page, (l) => (l as unknown as { showPanel(v: boolean): void }).showPanel(false));
+        await expect(async () => {
+            await assertLayout(`${w}x${h} panel closed`, w, h);
+        }).toPass({ timeout: 20_000 });
+    }
+    expect(problems).toEqual([]);
+});
+
 test('less motion: a device set to reduce motion starts with the camera steady and the UI still; the player can turn it back on', async ({
     browser
 }) => {
@@ -311,6 +375,26 @@ test('less motion: a device set to reduce motion starts with the camera steady a
     await page.reload();
     await ready(page);
     expect(await lab(page, (l) => l.state.cameraFeel)).toBe(true);
+    // Reset all settings: back to this device's default (off), and nothing of it saved...
+    await page.locator('.settings-chip').click();
+    await page.locator('.settings-tabs button', { hasText: 'Interface' }).click();
+    await page.locator('.settings-row button', { hasText: 'Reset all settings' }).click();
+    await expect.poll(() => lab(page, (l) => l.state.cameraFeel)).toBe(false);
+    const stored = await page.evaluate(() => localStorage.getItem('uncivil.settings'));
+    expect(
+        stored === null ? {} : JSON.parse(stored),
+        'nothing device-dependent saved after Reset all'
+    ).not.toHaveProperty('cameraBob');
+    await page.keyboard.press('Escape');
+    // ...so it follows the device again when the system setting changes, both ways
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.reload();
+    await ready(page);
+    expect(await lab(page, (l) => l.state.cameraFeel)).toBe(true);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.reload();
+    await ready(page);
+    expect(await lab(page, (l) => l.state.cameraFeel)).toBe(false);
     expect(problems).toEqual([]);
     await context.close();
 });
@@ -369,6 +453,49 @@ test('the online panel is not rebuilt while nothing changes (its buttons stay th
     });
     expect(changes).toEqual({ records: 0, sameButton: true });
     expect(problems).toEqual([]);
+});
+
+test('touch controls on a phone: the stick walks the beaver, the Jump button jumps (#97)', async ({ browser }) => {
+    test.setTimeout(300_000);
+    const context = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    const problems = await boot(page, '?level=yard&t=1&quality=low#cell100');
+    await lab(page, (l) => l.action('pause')); // play live
+    await expect(page.locator('.touch-ui')).toHaveClass(/\bon\b/);
+    const cdp = await context.newCDPSession(page);
+    const touch = (type: 'touchStart' | 'touchMove' | 'touchEnd', x: number, y: number) =>
+        cdp.send('Input.dispatchTouchEvent', {
+            type,
+            touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 1, radiusX: 4, radiusY: 4, force: 1 }]
+        });
+    // the stick: a touch on the left of the play area, pushed up (forward) and held
+    const start = await lab(page, (l) => l.player());
+    await touch('touchStart', 90, 560);
+    await touch('touchMove', 90, 500);
+    let walked = 0;
+    for (let i = 0; i < 60 && walked < 1; i++) {
+        await page.waitForTimeout(200);
+        await touch('touchMove', 90, i % 2 ? 499 : 500); // held: a finger trembles
+        walked = (await lab(page, (l) => l.player())).walkDist - start.walkDist;
+    }
+    await touch('touchEnd', 90, 500);
+    expect(walked, 'walked with the stick').toBeGreaterThanOrEqual(1);
+    const p = await lab(page, (l) => l.player());
+    expect(Math.hypot(p.x - start.x, p.z - start.z), 'moved on the ground').toBeGreaterThan(0.5);
+    // the Jump button: the beaver leaves the ground
+    await page.waitForTimeout(500);
+    const ground = (await lab(page, (l) => l.player())).y;
+    const jump = await page.locator('.touch-jump').boundingBox();
+    await touch('touchStart', jump!.x + jump!.width / 2, jump!.y + jump!.height / 2);
+    await touch('touchEnd', 0, 0);
+    let rise = 0;
+    for (let i = 0; i < 30 && rise < 0.2; i++) {
+        await page.waitForTimeout(50);
+        rise = Math.max(rise, (await lab(page, (l) => l.player())).y - ground);
+    }
+    expect(rise, 'jumped').toBeGreaterThan(0.2);
+    expect(problems).toEqual([]);
+    await context.close();
 });
 
 test('field of view: the setting is the camera’s, live', async ({ page }) => {

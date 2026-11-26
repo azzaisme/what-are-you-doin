@@ -48,7 +48,8 @@ canvas {
     position: fixed;
     left: 18px;
     top: 16px;
-    max-width: calc(100vw - 36px);
+    /* the text size's zoom scales vw and px: divide it back out, so it fits at any size */
+    max-width: calc(100vw / var(--ui-scale) - 36px);
     z-index: 10;
     pointer-events: none;
     text-shadow: 0 1px 3px #0009;
@@ -342,7 +343,9 @@ body.ui-hidden .inspector-hint {
 /* wide screens: keep the HUD clear of the side panel */
 @media (min-width: 701px) {
     body.debug-open .hud {
-        max-width: calc(100vw - var(--panel-w) - 18px - 12px - 16px);
+        /* on screen: the width, less the panel, its 12 px margin, a 16 px gap and the HUD's own left
+           margin (18 px, zoomed) */
+        max-width: calc((100vw - var(--panel-w) - 12px - 16px) / var(--ui-scale) - 18px);
     }
 }
 
