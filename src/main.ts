@@ -1498,7 +1498,15 @@ function pollEvents(): void {
         playtest.note(performance.now(), e.kind, e.text);
         updateObjective();
     }
+    // how each hazard ended (the host's own account: not sent to guests)
+    const outs = sim.hazards.outcomes;
+    if (outs.length < seenOutcomes) seenOutcomes = 0;
+    while (seenOutcomes < outs.length) {
+        const o = outs[seenOutcomes++];
+        playtest.note(performance.now(), 'outcome', `${o.hazard}: ${o.what}`);
+    }
 }
+let seenOutcomes = 0;
 let promptText = '';
 
 /** Context prompt (design doc §2.3): what a click (or a trigger) would do right now. */

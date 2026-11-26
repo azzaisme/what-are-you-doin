@@ -66,10 +66,15 @@ export const TREE_TELL =
 
 export interface TreeHazardHost {
     readonly tick: number;
-    readonly forestry: Pick<Forestry, 'def' | 'treeCount' | 'treeState' | 'fallBias' | 'holdFall' | 'sway'>;
+    readonly forestry: Pick<
+        Forestry,
+        'def' | 'treeCount' | 'treeState' | 'fallBias' | 'holdFall' | 'sway' | 'fallDirection'
+    >;
     /** Where the ute's body is (null: no drivable ute). */
     readonly utePos: { x: number; z: number } | null;
     say(text: string): void;
+    /** How it ended, for the playtest log (host only, not sent). */
+    outcome?(text: string): void;
 }
 
 export class TreeHazard {
@@ -83,6 +88,9 @@ export class TreeHazard {
     /** Each tree's cut count at the last step: a fresh bite is a rise. */
     private seen: number[] = [];
     private host: TreeHazardHost | null = null;
+    /** While it stands: was the ute in reach, and would it fall towards the ute (for the outcome)? */
+    private lastInReach = false;
+    private lastTowards = false;
 
     reset(): void {
         this.phase = TREE_PHASE.idle;
@@ -128,9 +136,27 @@ export class TreeHazard {
             return;
         }
         if (this.phase === TREE_PHASE.tell && h.tick - this.since >= S(TREE.tellS)) this.phase = TREE_PHASE.active;
+        // where it would go, while it still stands (the outcome is told from the last of these)
+        if (f.treeState(this.tree).phase === 'standing') {
+            const t = f.def.trees[this.tree];
+            this.lastInReach = this.uteDistance(h, this.tree) <= TREE.reach;
+            if (t && h.utePos) {
+                const d = f.fallDirection(this.tree);
+                this.lastTowards = d.x * (h.utePos.x - t.x) + d.z * (h.utePos.z - t.z) > 0;
+            }
+        }
         const st = f.treeState(this.tree);
         // over once it is down (or nobody finished it for a long while)
         if (st.phase !== 'standing' || h.tick - this.since >= S(TREE.giveUpS)) {
+            h.outcome?.(
+                st.phase === 'standing'
+                    ? 'left standing'
+                    : !this.lastInReach
+                      ? 'the ute moved out of reach'
+                      : this.lastTowards
+                        ? 'fell towards the ute'
+                        : 'cut from the ute’s side: fell away from it'
+            );
             this.phase = TREE_PHASE.idle;
             this.tree = -1;
             this.ended = h.tick;

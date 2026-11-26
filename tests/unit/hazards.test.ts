@@ -533,6 +533,8 @@ describe('hazard director: the handbrake prank (#75)', () => {
         d.step({}, S(H.offS));
         expect(s.hazards.brakePhase).toBe(PHASE.idle);
         expect(hazardTexts(s).some((t) => t.includes('caught'))).toBe(true);
+        // and the playtest log's account of it (#70)
+        expect(s.hazards.outcomes.map((o) => `${o.hazard}: ${o.what}`)).toEqual(['handbrake: rolled until it caught']);
     }, 120_000);
 
     it('parked with its handbrake on, on the prank slope, it holds: under 2 cm in 30 s', () => {
@@ -612,6 +614,7 @@ describe('hazard director: the handbrake prank (#75)', () => {
         expect(s.hazards.handbrakeOff).toBe(false);
         expect(Math.abs(s.ute.pose.p.z - z0)).toBeLessThan(0.5);
         expect(hazardTexts(s).some((t) => t.includes('back on'))).toBe(true);
+        expect(s.hazards.outcomes.map((o) => `${o.hazard}: ${o.what}`)).toEqual(['handbrake: someone got in']);
     }, 60_000);
 
     /**
@@ -639,6 +642,17 @@ describe('hazard director: the handbrake prank (#75)', () => {
         expect(r.held).toBe(true);
         expect(Math.abs(r.moved)).toBeLessThan(0.05);
         expect(r.texts.some((t) => t.includes('chock holds'))).toBe(true);
+    }, 60_000);
+
+    it('the playtest log’s account (#70): chocked, until the handbrake catches again', () => {
+        const s = yard();
+        parkOnRoad(s);
+        s.runTo(settle() - 60);
+        placeByUte(s, 'cube', 0.68, 0.28, 1.84 + 0.28);
+        runUntil(s, () => s.hazards.brakePhase === PHASE.active, S(30));
+        expect(s.hazards.outcomes).toEqual([]);
+        runUntil(s, () => s.hazards.brakePhase === PHASE.idle, S(H.offS + 2));
+        expect(s.hazards.outcomes.map((o) => `${o.hazard}: ${o.what}`)).toEqual(['handbrake: chocked']);
     }, 60_000);
 
     it('counterplay: a beam on edge across the front tyres chocks it', () => {
@@ -905,7 +919,12 @@ describe('hazard director: a tree falls towards the ute (#74)', () => {
         // the playtest log, fed the events as the game feeds it, counts it
         const log = new PlaytestLog({ level: 'Timber Yard' }, 0);
         for (const e of s.events) log.note((e.tick / 60) * 1000, e.kind, e.text);
-        expect(log.summary((s.tick / 60) * 1000)).toContain('falling trees: 1');
+        // and how it ended (the host's account, as main.ts adds it)
+        expect(s.hazards.outcomes.map((o) => `${o.hazard}: ${o.what}`)).toEqual(['falling tree: fell towards the ute']);
+        for (const o of s.hazards.outcomes) log.note((o.tick / 60) * 1000, 'outcome', `${o.hazard}: ${o.what}`);
+        const summary = log.summary((s.tick / 60) * 1000);
+        expect(summary).toContain('falling trees: 1');
+        expect(summary).toContain('how the hazards ended:\n    falling tree: fell towards the ute');
     }, 120_000);
 
     it('cut square to the ute, it is pulled round towards it (the plain cut falls square)', () => {
@@ -939,6 +958,10 @@ describe('hazard director: a tree falls towards the ute (#74)', () => {
             expect(s.hazards.tree.count, `tree ${n}`).toBe(1);
             // straight away from the ute: the push beats the pull by 0.035, whatever the tree's lean
             expect(angleTo(fallen(s, n), toUte), `tree ${n}`).toBeGreaterThan(160);
+            expect(
+                s.hazards.outcomes.map((o) => o.what),
+                `tree ${n}`
+            ).toEqual(['cut from the ute’s side: fell away from it']);
         }
     }, 240_000);
 
@@ -993,7 +1016,8 @@ describe('hazard director: a tree falls towards the ute (#74)', () => {
                 d.faceTrunk();
             }
             d.chew();
-            return { dir: fallen(s, T), count: s.hazards.tree.count, outOfReach };
+            const dir = fallen(s, T);
+            return { dir, count: s.hazards.tree.count, outOfReach, outcomes: s.hazards.outcomes.map((o) => o.what) };
         };
         const plain = cut(false, false);
         const moved = cut(true, true);
@@ -1005,6 +1029,7 @@ describe('hazard director: a tree falls towards the ute (#74)', () => {
         expect(moved.outOfReach).toBeLessThanOrEqual(S(TREE.tellS - 2));
         // the same cut, the same fall: nothing pulled it towards where the ute was
         expect(angleTo(moved.dir, plain.dir)).toBeLessThan(5);
+        expect(moved.outcomes).toEqual(['the ute moved out of reach']);
     }, 120_000);
 
     it('only a fresh bite or blow sets it off: a cut left from the quiet start, or a tell given up, stays quiet', () => {
@@ -1048,6 +1073,7 @@ describe('hazard director: a tree falls towards the ute (#74)', () => {
         expect(crownTowards(leaning.anim, toUteOf(s, T))).toBe(-1);
         expect(s.hazards.tree.count).toBe(1);
         expect(hazardTexts(s).filter((t) => t === TREE_TELL)).toHaveLength(1);
+        expect(s.hazards.outcomes.map((o) => o.what)).toEqual(['left standing']);
     }, 120_000);
 
     it('the budget: not in the quiet start, not within 60 s of the last, at most two, not during another hazard', () => {

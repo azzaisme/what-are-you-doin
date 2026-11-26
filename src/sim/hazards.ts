@@ -228,6 +228,14 @@ export class HazardDirector {
     private brakeEnded = -1e9;
     private parkedTicks = 0;
 
+    /**
+     * How each hazard ended, for the playtest log (#70): host only, never sent (a guest's log has
+     * the toasts). Cleared on a run's reset.
+     */
+    readonly outcomes: { tick: number; hazard: string; what: string }[] = [];
+    /** The handbrake prank: was the ute chocked at any time this time? */
+    private brakeChockedEver = false;
+
     /** A prop stands against a downhill tyre (#75): the ute stays put with its handbrake off. */
     chocked = false;
 
@@ -261,6 +269,8 @@ export class HazardDirector {
         this.lastWindForce = 0;
         this.tree.reset();
         this.road?.reset();
+        this.outcomes.length = 0;
+        this.brakeChockedEver = false;
         this.waterY = this.baseY;
         this.rise = 0;
         this.floodPhase = this.gustPhase = PHASE.idle;
@@ -326,7 +336,13 @@ export class HazardDirector {
         if (spec.tree && h.forestry) {
             const ute = h.vehicle?.pb.body.translation() ?? null;
             this.tree.step(
-                { tick, forestry: h.forestry, utePos: ute, say: (t) => this.say(h, t) },
+                {
+                    tick,
+                    forestry: h.forestry,
+                    utePos: ute,
+                    say: (t) => this.say(h, t),
+                    outcome: (t) => this.outcome(tick, 'falling tree', t)
+                },
                 this.canStart(h, tick)
             );
         }
@@ -337,16 +353,24 @@ export class HazardDirector {
 
     /** The road closure (#77): who could be coming, on foot or in the ute. */
     private stepRoadClosure(h: HazardHost, road: RoadClosure, closure: ClosureEntities, tick: number): void {
-        const walkers: { x: number; z: number }[] = [];
+        const walkers: { x: number; z: number; slot: number }[] = [];
         h.players.forEach((p, i) => {
-            if (h.isSlotActive(i) && h.seatOf(i) < 0) walkers.push(p);
+            if (h.isSlotActive(i) && h.seatOf(i) < 0) walkers.push({ x: p.x, z: p.z, slot: i });
         });
         const b = h.vehicle?.pb.body;
         const ute = b
             ? { ...b.translation(), speed: Math.hypot(b.linvel().x, b.linvel().z), driven: h.driver >= 0 }
             : null;
         road.step(
-            { tick, physics: h.physics, entities: closure, walkers, ute, say: (t) => this.say(h, t) },
+            {
+                tick,
+                physics: h.physics,
+                entities: closure,
+                walkers,
+                ute,
+                say: (t) => this.say(h, t),
+                outcome: (t) => this.outcome(tick, 'road closure', t)
+            },
             this.canStart(h, tick)
         );
     }
@@ -360,6 +384,10 @@ export class HazardDirector {
             !this.busy &&
             !this.weather?.hazardBusy
         );
+    }
+
+    private outcome(tick: number, hazard: string, what: string): void {
+        this.outcomes.push({ tick, hazard, what });
     }
 
     private say(h: HazardHost, text: string): void {
@@ -617,6 +645,8 @@ export class HazardDirector {
             rand: (k) => rand(this.seed, k, 0)
         });
         if (said) this.say(h, said);
+        const cleared = said ? this.spec?.weather?.zones.find((z) => z.clear === said) : undefined;
+        if (cleared) this.outcome(tick, 'weather', `${cleared.name}: came and cleared`);
         // the quiet spell after it, from when it is over (while it runs, canStart waits for it)
         if (this.weatherWas && !w.hazardBusy) this.quietFrom = Math.max(this.quietFrom, tick + S(HAZARD.safeS));
         this.weatherWas = w.hazardBusy;
@@ -730,8 +760,15 @@ export class HazardDirector {
         } else if (this.brakePhase === PHASE.active && this.chocked && !wasChocked) {
             this.say(h, 'Chocked: the ute stops.');
         }
+        if (this.chocked) this.brakeChockedEver = true;
         // someone at the wheel pulls it back on; or after a while it catches by itself
         if (h.driver >= 0 || (this.brakePhase === PHASE.active && this.brakeT >= S(H.offS))) {
+            this.outcome(
+                tick,
+                'handbrake',
+                this.brakeChockedEver ? 'chocked' : h.driver >= 0 ? 'someone got in' : 'rolled until it caught'
+            );
+            this.brakeChockedEver = false;
             this.brakePhase = PHASE.idle;
             this.chocked = false;
             this.brakeEnded = tick;
