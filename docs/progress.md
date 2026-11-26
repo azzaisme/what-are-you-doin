@@ -1,5 +1,168 @@
 # Progress log
 
+## Input and accessibility: text size everywhere, less motion, menus never grab (2026-11-23, Epic 10, #21)
+
+This finishes the input and accessibility list (#21). Remapping (#98) and the sound sliders (Epic 8)
+came earlier.
+
+### What changed for players
+
+- **Text & menu size reaches every panel.** The online panel, the level chooser, player 2's
+  split-screen prompt and the P1/P2 labels didn't follow the setting before.
+- **At 160 % on a phone, nothing is cut off.** The settings menu lays out by its own width, which
+  large text narrows, not the screen's:
+    - long key names (Right Shift, Wheel down) wrap instead of ending in "…";
+    - a button's note goes under the button instead of pushing the panel sideways;
+    - player 2's prompt spans the screen instead of squeezing into a tall column that ran off the
+      bottom;
+    - the HUD keeps clear of the debug panel on a tablet (its width didn't allow for large text, so
+      its text ran under the panel).
+- **Less motion:**
+    - A device set to reduce motion (the system's accessibility setting) starts with **Camera bob &
+      kick** off. Turning it back on is saved as your choice, and stays your choice if the system
+      setting changes later. Before, a choice that matched the device's default wasn't stored, so it
+      flipped when the system setting changed. **Reset all settings** clears that choice, so the
+      bob follows the device again.
+    - With the switch off, or the system setting on, toasts stop sliding and fading, and the menu's
+      buttons stop animating.
+- **Clicking never grabs by accident**, and a fix found while testing it:
+    - A click on a menu, a panel, the dock or Resume never grabs the timber under the crosshair (it
+      didn't before either; now it is tested).
+    - Every click in first person with the mouse taken used to throw an uncaught error behind the
+      scenes. The engine's orbit controls stayed on the canvas and asked for pointer capture, which
+      the browser refuses while the mouse is locked. Fixed.
+- **The online panel stops eating clicks.** It refreshes every second (round trips, relay status)
+  and used to rebuild its buttons each time, so a click could land on a button that was just
+  replaced. It now changes only what changed.
+
+### Tests (actual, `tests/e2e/accessibility.spec.ts`)
+
+| Test                                            | Result                                                                                                                                                                                                                                                                                                                                                                               |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Text size 160 %, 390 × 844 and 1280 × 720       | Every visible text (HUD, dock, every Settings section, credits, online panel, level chooser, split screen with player 2's prompt and both labels) has an effective zoom of 1.6 and is on screen; nothing is cut off or scrolls sideways (except the row of section tabs, which scrolls by design); P1's label is in the top half, P2's in the bottom; the HUD and dock don't overlap |
+| A device set to reduce motion                   | Camera bob off, UI transitions 0 s; a 2 m walk on flat ground from the spawn (distance walked checked, no fall) has bob and kick exactly 0; switched on, the same walk bobs over 5 mm, and that's saved across a reload; Reset all saves nothing of it, and the bob then follows the system setting both ways                                                                        |
+| Less motion by the switch alone                 | Without the system setting the toasts and menu buttons animate; switched off, `body.reduced-motion` alone brings them to 0 s                                                                                                                                                                                                                                                         |
+| Text size 160 %, every screen shape             | On a small and a large phone, a tablet, a desktop and a phone held sideways, with the debug panel open and closed: the HUD, the debug panel, the settings chip and the debug chip are on screen and never overlap                                                                                                                                                                    |
+| Touch controls on a phone (#97)                 | Dragging the on-screen stick walks the beaver over 1 m; the Jump button lifts it over 20 cm                                                                                                                                                                                                                                                                                          |
+| The online panel while nothing changes          | Over 3.5 s (three refreshes) no change at all to the panel, and its Close button is the same element                                                                                                                                                                                                                                                                                 |
+| Field of view                                   | The camera's field of view follows the slider live (52° → 60°)                                                                                                                                                                                                                                                                                                                       |
+| Menu clicks with the bucket under the crosshair | The click that takes the mouse, clicks on the menu over the crosshair, its tabs, the backdrop, the online panel, the level chooser and Resume grab nothing (the bucket stays the target throughout); then a click on the game grabs it                                                                                                                                               |
+
+- Unit tests (`tests/unit/device-defaults.test.ts`):
+    - a reduce-motion device's defaults, and the player's own choice saved and restored against them;
+    - the choice survives the system setting changing, in both directions, while other settings are
+      saved;
+    - if never touched, it follows the device.
+- Effective zoom is read with `Element.currentCSSZoom`, so a panel left out of the setting fails the
+  test.
+
+### Known limits
+
+- **The developer's debug panel** (F3) isn't scaled. It's left out of the test on purpose.
+- **Touch controls aren't remappable** (from #98).
+
+## The tutorial's long plank, and a better plank throw (2026-11-23)
+
+Owner: "the planks need to be about 1.5 longer so that they can easily clear the tutorial level
+(and throwing them should be a bit more effective)". Then the owner decided, through the conductor:
+**the longer plank is for the tutorial only.** Everywhere else planks stay 2.4 m, so the beams are
+still needed at the Timber Yard and Valley crossings. **The better throw is for every plank.**
+
+### What changed
+
+- **The tutorial's long plank:** a new prop, `long-plank`, 3.8 × 0.2 × 0.1 m of the same wood
+  (38 kg).
+    - Only the tutorial places it, and the level designer has no tool for it.
+    - It is its own entity, so a guest draws and simulates the same 3.8 m plank as the host.
+    - The standard plank (`plank`, `extra-plank-N`, the sawmill's planks) stays 2.4 m and 24 kg.
+- **Carried balanced, so laying it is easy:**
+    - Wherever you grab the long plank, your grip slides onto its long axis, 1.3 m behind its
+      middle (centred if it lies across you).
+    - It is shouldered like a beam (braced), so it stays level, and it is held low in front of you
+      whatever you look at.
+    - Its middle rides 2.2 m ahead of where you stand, so the whole plank is ahead of you.
+    - When you let go, it passes through players for half a second, so it never lands on you.
+- **The window: let go with your toes 0.4 to 1.0 m short of the edge.**
+    - Measured by input (`tests/unit/tutorial.test.ts`): grabbed by its near end, a quarter along or
+      its middle; looking anywhere from level to 1.2 rad down (in steps of 0.2); walking slowly or
+      at full speed (W).
+    - Let go with your toes 0.4, 0.7 or 1.0 m short of the lip, every case lies level with at
+      least 0.33, 0.63 and 0.48 m on a bank, and you walk over it.
+    - The ditch is 2.3 m from lip to lip; a 2.4 m plank has 5 cm on each bank at best.
+- **Why not right at the edge:** with the whole plank ahead of you, its near end is past the lip
+  when your toes are at the lip, so it cannot rest on the near bank. That holds for any length.
+- **Mistakes are cheap:**
+    - Let go with your toes at the lip, and it hangs off the near lip, propped. You take it again
+      and lay it (tested: then 0.65 and 0.85 m).
+    - Dropped into the ditch (for example carried across you), it is out of reach from the bank.
+      After 1.5 s it comes back where it started, with a toast: "carry it toward the ditch and let
+      go a step before the edge" (tested: then laid with 0.72 and 0.78 m).
+- **Thrown** from 2.25 m back from the lip, it lands 0.72 m and 0.78 m on the banks (2.1 to 2.4 m back
+  all span it).
+- **Why 3.8 m, not 3.6 m:** before the balanced carry, a 3.6 m plank held by its middle and let go
+  at the lip lay only 0.38 m on the far bank. You carry a plank at arm's length, so its middle was
+  only about 0.9 m past your toes.
+- **The tutorial:** the plank used to lie through the bin's south wall (found by the new spawn
+  check). The long plank now lies at (-0.75, -6.85), still pointing across the ditch, its far end
+  10 cm short of the edge. Pushing a plank over the ditch never worked: it tips in before its front
+  end reaches the far bank. The step now says: "Lay the plank across the ditch: carry it toward the
+  ditch and let go a step before the edge, then walk over."
+- **Throwing a plank (every plank):** planks get their own throw (`src/sim/lab-physics.ts`).
+    - They leave your hands at 2.9 m/s. The 24 kg plank used to leave at 1.9 m/s, capped by the
+      general 45 N s; the new cap is 70 N s for it and 110 N s for the long plank.
+    - They let go clean: no spin from the grip and no sideways swing in your hands, so they fly
+      flat along your view.
+    - Only the plank's own velocity changes, and it keeps the way you were moving (running or
+      strafing), like anything else you throw. The thrower's own motion is untouched.
+    - `GRAB.throwSpeed` and `GRAB.maxThrowImpulse` are as they were, so every other throw is
+      unchanged.
+- **Unchanged:** the Timber Yard and Valley layouts, the sawmill, the ute and Epic 5's bridge (all
+  2.4 m planks). The sawmill's rack check now reads the plank size from `PLANK_HALF` instead of a
+  copy of it (the same numbers).
+
+### Measured, by input (`tests/unit/throw.test.ts`, flat ground, from the thrower's feet to where the piece's centre first touches down)
+
+| Throw                      | Before (epics-5-10) | Now     | Change |
+| -------------------------- | ------------------- | ------- | ------ |
+| 2.4 m plank, looking 0 rad | 1.72 m              | 2.27 m  | +32%   |
+| 2.4 m plank, 0.3 rad       | 1.77 m              | 2.50 m  | +41%   |
+| 2.4 m plank, 0.6 rad       | 1.68 m              | 2.48 m  | +48%   |
+| 2.4 m plank, at a sprint   | 4.33 m              | 5.29 m  | +22%   |
+| Long plank, 0.3 rad        | –                   | 2.38 m  |        |
+| Empty bucket, 0.3 rad      | 8.738 m             | 8.738 m | none   |
+| Beam, 0.3 rad              | 1.372 m             | 1.372 m | none   |
+| Crate, 0.3 rad             | 1.769 m             | 1.769 m | none   |
+
+- At rest, the sprint throw ends 5.72 m out (was 4.55 m) and the bucket 12.19 m out (unchanged).
+- **Straighter:** thrown while turning at 2 rad/s, the plank used to turn 0.51 rad in the air and
+  land 0.97 m off the line you looked along. Now it turns 0.00 rad and lands 0.02 m off it.
+- **Shallow Creek:** a thrown 2.4 m plank lands about 2.5 m out standing and 5.3 m at a sprint.
+  Either way it is shorter than the creek's 2.6 m gap, so it cannot land across it; bridging still
+  needs the beams.
+- **What a thrown plank hits:** a crate where it comes down is knocked at up to 1.3 m/s and never
+  leaves the ground. The bouncy ball is knocked at up to 6.0 m/s and hops at most 0.11 m. A
+  direct throw sends either at up to 9 m/s.
+
+### Tests (actual)
+
+- New:
+    - `tests/unit/throw.test.ts`: the distances above; the bucket, a beam and a crate thrown
+      exactly as before (each checked to be in the hands when thrown); a plank thrown while
+      strafing keeps the thrower's sideways speed (2.20 m/s both); what a thrown plank hits, over
+      its whole flight.
+    - `tests/unit/planks.test.ts`: sizes and masses; every plank in every level starts clear of
+      everything (with its own length); only the tutorial places the long plank; the sawmill's
+      outfeed spots are clear; and online, a guest has the long plank with the host's id and slot,
+      a 3.8 m asset, and the host's pose while the host carries it.
+    - Tutorial tests, by input: the window sweep above (3 grabs × 3 distances × 7 pitches × 2
+      speeds), the two misses and their recovery, and the throw.
+    - A browser test: grab the long plank by its near end, walk it (W) to a step before the ditch
+      (toes 0.4–1.0 m short), let go, check it lies 0.3 m or more past each lip, walk over. It
+      waits on sim ticks, not wall time, and takes about 1.4 min. Its screenshot
+      (`test-results/tutorial-plank-span.png`) shows the plank across the ditch beyond the beaver.
+- The tutorial's placed-plank test now uses the long plank (the tutorial has no standard plank). No
+  existing expected values changed.
+
 ## Credits and licences (2026-11-23, Epic 10, #104)
 
 The game now says what it is made with, and ships the licence notices its parts ask for.

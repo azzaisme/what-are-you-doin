@@ -15,6 +15,8 @@ import { expect, test } from '@playwright/test';
 
 import config from '../../playwright.config.ts';
 
+import { fastClock } from './fast-clock.ts';
+
 // real browsers block sound until a gesture; this Chrome does by default too, and the flag is a
 // safeguard for a browser whose default allows autoplay (the asserts don't depend on it)
 test.use({
@@ -23,6 +25,10 @@ test.use({
         args: [...(config.use?.launchOptions?.args ?? []), '--autoplay-policy=user-gesture-required']
     }
 });
+
+// the fast clock for every test without @realtime in its title (the page keeps its size: the
+// frame sizes and full screen are what these check); see fast-clock.ts
+test.beforeEach(({ context, page }, info) => fastClock(context, page, info, { viewport: false }));
 
 type Lab = {
     ready: boolean;
@@ -53,7 +59,6 @@ const IGNORED = [
     /favicon/i,
     /status of 404/
 ];
-const BUILD = 'http://localhost:4173';
 
 /**
  * The iframe permissions the stand-in itch page grants: the features the game uses (sound,
@@ -74,9 +79,11 @@ const ITCH_PAGE = (src: string, w: number, h: number, allow: string) => `<!docty
 </body></html>`;
 
 async function routeEmbed(context: BrowserContext): Promise<void> {
+    // the built game, wherever this run's config serves it (PW_PORT, or a copy of the config on another port)
+    const build = new URL(String(test.info().project.use.baseURL)).origin;
     await context.route('http://game.test/**', async (route) => {
         const u = new URL(route.request().url());
-        const res = await route.fetch({ url: BUILD + u.pathname + u.search });
+        const res = await route.fetch({ url: build + u.pathname + u.search });
         await route.fulfill({ response: res });
     });
     await context.route('http://itch.test/**', (route) => {
@@ -184,7 +191,7 @@ const view = (f: Frame) =>
         };
     });
 
-test('itch embed: in a cross-origin iframe, a click takes the mouse and starts sound (never grabs); resizes, full screen both ways, a hidden page pauses', async ({
+test('itch embed: in a cross-origin iframe, a click takes the mouse and starts sound (never grabs); resizes, full screen both ways, a hidden page pauses @realtime', async ({
     page,
     context
 }) => {

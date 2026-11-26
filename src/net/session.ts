@@ -29,6 +29,7 @@ import { decodeNails, encodeNails, nailMarks } from '../sim/joints/wire.ts';
 import type { NailMark } from '../sim/joints/wire.ts';
 import { MAX_PLAYERS } from '../sim/lab-entities.ts';
 import type { LabSim } from '../sim/lab-sim.ts';
+import { wireLitres } from '../ui/water-hud.ts';
 
 import { CHUNK, SnapshotDecoder, SnapshotEncoder, fromBase64Chunks, snapshotTick, toBase64Chunks } from './codec.ts';
 import type { NetChannel, NetPeer, NetTransport } from './transport.ts';
@@ -442,7 +443,7 @@ export class HostSession {
             goal: sim.progress.goalReached,
             step: sim.progress.step,
             // the bucket's water (Epic 7): litres in it and litres the flower has had
-            wat: [Math.round(sim.water.volume * 100) / 100, Math.round(sim.water.poured * 100) / 100],
+            wat: [wireLitres(sim.water.volume), wireLitres(sim.water.poured)],
             ev: this.recent,
             hz: packHazardNet(sim.hazards.net()),
             seed: sim.hazards.seed,

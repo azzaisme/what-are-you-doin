@@ -98,8 +98,14 @@ export class OnlinePanel {
                   : 'Play online';
         this.button.classList.toggle('live', st.mode !== 'off');
         if (!this.open) return;
-        const el = this.el;
-        el.replaceChildren();
+        // built off-screen and swapped in only when something changed: the panel refreshes every
+        // second (round trips, relay status), and a button replaced under the pointer loses a click
+        const next = document.createElement('div');
+        this.fill(next, st);
+        if (next.innerHTML !== this.el.innerHTML) this.el.replaceChildren(...next.childNodes);
+    }
+
+    private fill(el: HTMLDivElement, st: OnlineStatus): void {
         const h = document.createElement('div');
         h.className = 'online-title';
         h.textContent = 'Play online';
