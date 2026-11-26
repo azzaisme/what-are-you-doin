@@ -84,6 +84,7 @@ import { SettingsMenu } from './ui/settings-menu.ts';
 import type { SettingValue } from './ui/settings-menu.ts';
 import { DEFAULT_SETTINGS, SETTING_RANGES, loadSettings, saveSettings, urlOverrides } from './ui/settings-store.ts';
 import type { Settings } from './ui/settings-store.ts';
+import { waterHudText } from './ui/water-hud.ts';
 import { woodLabel, woodPrompt } from './ui/wood-prompt.ts';
 import {
     CELL_SIZE_MAX_CM,
@@ -1422,11 +1423,8 @@ function updateWater(): void {
         const stages = level.rules?.stages;
         const k = guestSession ? guestSession.step : sim.progress.step;
         const flower = stages && stages[Math.min(k, stages.length - 1)]?.flower;
-        const full = Math.max(0, Math.min(10, Math.round((w.volume / BUCKET_CAPACITY) * 10)));
-        // (from the 0.01 L the host sends its guests, so every device shows the same litres)
-        const litres = (v: number) => (Math.round(v * 100) / 100).toFixed(1);
-        t = `Bucket ${'▮'.repeat(full)}${'▯'.repeat(10 - full)} ${litres(w.volume)} L`;
-        if (flower) t += ` · flower ${litres(w.poured)} / ${WATER.minDelivery} L`;
+        // (from the 0.01 L the host sends its guests, so every device shows the same line)
+        t = waterHudText(w.volume, w.poured, BUCKET_CAPACITY, flower ? WATER.minDelivery : undefined);
     }
     if (t !== waterText) {
         waterText = t;

@@ -1455,10 +1455,13 @@ test("online co-op in the Valley: the guest streams its own world and follows th
         { timeout: 120_000 }
     );
     await expect(guest.locator('#hud-objective')).toContainText('2/7 Shallow Creek', { timeout: 60_000 });
-    // both devices show the host's water (Epic 7: the volume travels in the host state, to 0.01 L)
+    // both devices show the host's water (Epic 7: the volume travels in the host state, to 0.01 L):
+    // the host's line has its litres, and the guest's whole line (bar and litres) is the host's
     const hostLitres = (Math.round((await lab(page, (l) => l.water())).volume * 100) / 100).toFixed(1);
     await expect(page.locator('#hud-water')).toContainText(`${hostLitres} L`);
-    await expect(guest.locator('#hud-water')).toContainText(`${hostLitres} L`, { timeout: 30_000 });
+    const hostLine = await page.locator('#hud-water').textContent();
+    expect(hostLine).toMatch(/^Bucket [▮▯]{10} /);
+    await expect(guest.locator('#hud-water')).toHaveText(hostLine!, { timeout: 30_000 });
     expect(await call(guest, '(l) => l.nearTiles()')).toBeGreaterThan(10);
     const gs = await guest.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.stats());
     expect(gs.voxel.rejected).toBe(0);
