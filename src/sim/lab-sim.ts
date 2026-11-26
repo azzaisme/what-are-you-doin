@@ -75,7 +75,15 @@ import type { NailPreview } from './joints/joints.ts';
 import { RopeSystem } from './joints/rope.ts';
 import { MAX_PLAYERS, MAX_STRESS, createLabEntities } from './lab-entities.ts';
 import type { SimEntity } from './lab-entities.ts';
-import { addDummy, addLabKinematics, buildLabPhysics, launchDummy, propBody, stressDef } from './lab-physics.ts';
+import {
+    addDolly,
+    addDummy,
+    addLabKinematics,
+    buildLabPhysics,
+    launchDummy,
+    propBody,
+    stressDef
+} from './lab-physics.ts';
 import { NO_DRIVE, UteVehicle } from './physics/vehicle.ts';
 import type { DriveInput } from './physics/vehicle.ts';
 import { CHARACTER } from './physics/world.ts';
@@ -231,6 +239,7 @@ export class LabSim {
     readonly ute: SimEntity;
     readonly plank: SimEntity;
     readonly log: SimEntity;
+    readonly dolly: SimEntity;
     readonly cube: SimEntity;
     readonly sphere: SimEntity;
     readonly held: SimEntity;
@@ -283,6 +292,7 @@ export class LabSim {
         this.beaver = c.beaver;
         this.bucket = c.bucket;
         this.ute = c.ute;
+        this.dolly = c.dolly;
         this.plank = c.plank;
         this.log = c.log;
         this.cube = c.cube;
@@ -383,7 +393,8 @@ export class LabSim {
             ...this.extras,
             ...this.forestry.props,
             ...this.stress,
-            ...this.dummy
+            ...this.dummy,
+            this.dolly
         ];
     }
 
@@ -407,11 +418,12 @@ export class LabSim {
             // the level places its props by entity name; entities it does not place stay hidden
             for (const placement of this.level.props) {
                 const e = this.entities.find((x) => x.name === placement.name);
+                if (e && e === this.dolly) addDolly(pw, e.id, placement.pose);
                 const body = propBody(placement.name);
                 if (e && body) pw.addDynamic(e.id, body.shape, placement.pose, body.opts);
             }
             pw.setEnabled(this.held.id, false);
-            for (const e of [this.plank, this.log, this.cube, this.sphere, this.bucket, ...this.extras])
+            for (const e of [this.plank, this.log, this.cube, this.sphere, this.bucket, ...this.extras, this.dolly])
                 if (!pw.bodies.has(e.id)) e.visible = false;
             this.forestry.build(pw);
             this.sawmill?.build(pw);

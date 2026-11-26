@@ -722,6 +722,8 @@ export function yardProps(): PropPlacement[] {
     P.push({ name: 'log', pose: at(7.2, YARD_Y + 0.21, 7.1, Math.PI / 2) });
     P.push({ name: 'extra-log-0', pose: at(7.62, YARD_Y + 0.21, 7.1, Math.PI / 2) });
     P.push({ name: 'extra-log-1', pose: at(7.41, YARD_Y + 0.58, 7.1, Math.PI / 2) });
+    // the log dolly (Epic 5, #52) south of the log pile, clear of where its logs come back
+    P.push({ name: 'dolly', pose: at(8.6, YARD_Y + 0.005, 5.4, 0) });
     P.push({ name: 'cube', pose: at(-8.4, YARD_Y + 0.26, 7.6, 0.3) });
     P.push({ name: 'bucket', pose: at(BUCKET_STUMP.x, BUCKET_STUMP.top + 0.01, BUCKET_STUMP.z, 0.4) });
     P.push({ name: 'held-plank', pose: at(-5, YARD_Y + 0.06, 11, 0, FLAT) });

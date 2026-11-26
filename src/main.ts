@@ -1446,7 +1446,8 @@ const PROP_LABEL: Record<string, string> = {
     log: 'log (heavy)',
     cube: 'crate',
     sphere: 'ball',
-    bucket: 'bucket'
+    bucket: 'bucket',
+    dolly: 'log dolly (tow it)'
 };
 const propLabel = (name: string) =>
     PROP_LABEL[name] ??
