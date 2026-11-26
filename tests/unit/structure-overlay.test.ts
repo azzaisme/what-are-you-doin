@@ -80,11 +80,9 @@ describe('structural debug overlay (#51)', () => {
             `overlay: ${n} joints; seats (folded into joints) carry ${up.toFixed(0)} N of the beams' ${(mass * 9.81).toFixed(0)} N; a log across mid-span: ${nFree} free contacts, ${(-down).toFixed(0)} N down of its ${logW.toFixed(0)} N`
         );
         expect(structureLines(on.s.joints, on.s.joints.stress.debugContacts!).free.length).toBeGreaterThan(0);
-        expect(-down).toBeGreaterThan(0.8 * logW);
-        // (it draws what Rapier reports. On the nailed bridge that runs about 1.3 x the log's
-        // weight, averaged, while on a still support it is the weight to 0.5 %: the deck's quiver
-        // keeps Rapier's penetration correction working, and its reported impulse includes it.
-        // The stress meter reads the same impulses: an open finding of #49, not of this view)
+        // (it draws the contacts as the meter reads them: a loose piece's scaled to its own
+        // momentum, so the log presses with its weight)
+        expect(Math.abs(-down - logW) / logW).toBeLessThan(0.05);
         // switched off again: nothing recorded
         on.s.joints.stress.debugContacts = null;
         run(on.s, 2);
