@@ -30,6 +30,7 @@ type Lab = {
     player(): { x: number; y: number; z: number; eyeHeight: number };
     placeProp(id: string, x: number, y: number, z: number, yaw: number): void;
     showNailOutlines(on: boolean): void;
+    hideUi(h: boolean): void;
     joints(): { outlines: number[][]; viewLayers: string[][] };
 };
 
@@ -264,6 +265,45 @@ test("four views: a player's hammer outline shows in that player's quarter only"
     expect(j.outlines).toEqual([[], [], [slots[2]], []]);
     // each camera draws its own view's layer and no other
     expect(j.viewLayers).toEqual([['View1'], ['View2'], ['View3'], ['View4']]);
+    // player 3's prompt (and any other shown) sits in its own view, clear of the dock and the others
+    // (the page runs with the HUD hidden for the pixel check below: shown for this)
+    await lab(page, (l) => l.hideUi(false));
+    await page.waitForFunction(
+        () => [...document.querySelectorAll('.prompt-p2')].some((e) => (e.textContent ?? '').includes('beam')),
+        null,
+        { timeout: 30_000 }
+    );
+    const prompts = await page.evaluate(() =>
+        [...document.querySelectorAll<HTMLElement>('.hud-prompt')]
+            .filter((e) => (e.textContent ?? '').trim() !== '' && getComputedStyle(e).display !== 'none')
+            .map((e) => {
+                const b = e.getBoundingClientRect();
+                return { text: e.textContent!.trim(), l: b.left, t: b.top, r: b.right, b: b.bottom };
+            })
+    );
+    const dock = await page.evaluate(() => {
+        const b = document.querySelector('.ui-dock')!.getBoundingClientRect();
+        return { l: b.left, t: b.top, r: b.right, b: b.bottom, w: innerWidth, h: innerHeight };
+    });
+    const p3 = prompts.find((p) => p.text.includes('beam'));
+    expect(p3, "player 3's prompt").toBeDefined();
+    const q3 = rects[2];
+    expect(
+        p3!.l >= q3.x * dock.w - 0.5 &&
+            p3!.r <= (q3.x + q3.w) * dock.w + 0.5 &&
+            p3!.t >= q3.y * dock.h - 0.5 &&
+            p3!.b <= (q3.y + q3.h) * dock.h + 0.5,
+        "player 3's prompt inside player 3's view"
+    ).toBe(true);
+    const hit = (
+        a: { l: number; t: number; r: number; b: number },
+        b: { l: number; t: number; r: number; b: number }
+    ) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
+    for (const p of prompts) {
+        expect(hit(p, dock), `"${p.text}" clear of the dock`).toBe(false);
+        for (const o of prompts) if (o !== p) expect(hit(p, o), `"${p.text}" clear of "${o.text}"`).toBe(false);
+    }
+    await lab(page, (l) => l.hideUi(true));
     // on screen: the pixels that change with the outline (the same in every shot with it and in
     // every shot without, and different between) are all in player 3's quarter
     // with the world paused (still drawing), so animated things don't change between shots

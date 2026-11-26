@@ -257,10 +257,12 @@ test('text size 160 %: every HUD and menu text is 1.6× and stays on screen, pho
         );
         await check(`${w}x${h} split screen`);
         const tags = await page.evaluate(() =>
-            [...document.querySelectorAll<HTMLElement>('.player-tag')].map((e) => {
-                const r = e.getBoundingClientRect();
-                return { text: e.textContent, top: r.top, bottom: r.bottom };
-            })
+            [...document.querySelectorAll<HTMLElement>('.player-tag')]
+                .filter((e) => getComputedStyle(e).display !== 'none')
+                .map((e) => {
+                    const r = e.getBoundingClientRect();
+                    return { text: e.textContent, top: r.top, bottom: r.bottom };
+                })
         );
         expect(tags.map((t) => t.text)).toEqual(['P1', 'P2']);
         expect(tags[0].bottom, `${w}x${h}: P1 in the top half`).toBeLessThanOrEqual(h / 2);

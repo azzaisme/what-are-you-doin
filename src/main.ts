@@ -1362,6 +1362,35 @@ const viewHud = Array.from({ length: MAX_VIEWS }, (_, v) => {
     return { crosshair: c, prompt, tag };
 });
 
+/**
+ * Places a view's action prompt in its part of the screen (or back to the one-view layout, `r`
+ * null): centred across the view and as wide as it allows at any text size (the text size's zoom
+ * scales vw and px, so they are divided back out); under the view's crosshair, below the HUD's text
+ * when large text makes that reach lower (a view along the top), or held just above the dock (a
+ * view along the bottom, where a long prompt under the crosshair would run into it).
+ */
+function placePrompt(prompt: HTMLElement, r: { x: number; y: number; w: number; h: number } | null): void {
+    const st = prompt.style;
+    if (!r) {
+        st.left = st.right = st.top = st.bottom = st.maxWidth = '';
+        return;
+    }
+    const cy = (r.y + r.h / 2) * 100;
+    st.left = `${r.x * 100}%`;
+    st.right = `${(1 - r.x - r.w) * 100}%`;
+    st.maxWidth = `calc(${r.w * 100}vw / var(--ui-scale) - 24px)`;
+    if (r.y + r.h > 0.999 && r.y > 0.001) {
+        st.top = 'auto';
+        st.bottom = 'calc(var(--dock-h) / var(--ui-scale) + 8px)';
+    } else {
+        st.bottom = '';
+        st.top =
+            r.y < 0.001
+                ? `max(calc(${cy}% + 22px), calc(var(--hud-bottom) / var(--ui-scale) + 6px))`
+                : `calc(${cy}% + 22px)`;
+    }
+}
+
 /** Places each view's crosshair, prompt and label in its part of the screen (CSS percentages). */
 function layoutViewHud(): void {
     const n = localViews();
@@ -1375,7 +1404,7 @@ function layoutViewHud(): void {
         if (!shown) {
             if (v === 0) {
                 h.crosshair.style.left = h.crosshair.style.top = '';
-                if (prompt) prompt.style.left = prompt.style.top = '';
+                if (prompt) placePrompt(prompt, null);
             } else {
                 h.crosshair.style.display = 'none';
                 if (prompt) prompt.style.display = 'none';
@@ -1390,9 +1419,7 @@ function layoutViewHud(): void {
         h.crosshair.style.top = `${cy}%`;
         if (prompt) {
             prompt.style.display = '';
-            prompt.style.left = `${cx}%`;
-            prompt.style.top = `calc(${cy}% + 22px)`;
-            if (v > 0) prompt.style.maxWidth = `calc(${r.w * 100}vw - 24px)`;
+            placePrompt(prompt, r);
         }
         h.tag.style.display = '';
         h.tag.style.left = `calc(${(r.x + r.w) * 100}% - 14px)`;
