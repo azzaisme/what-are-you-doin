@@ -1,5 +1,66 @@
 # Progress log
 
+## Input and accessibility: text size everywhere, less motion, menus never grab (2026-11-23, Epic 10, #21)
+
+This finishes the input and accessibility list (#21). Remapping (#98) and the sound sliders (Epic 8)
+came earlier.
+
+### What changed for players
+
+- **Text & menu size reaches every panel.** The online panel, the level chooser, player 2's
+  split-screen prompt and the P1/P2 labels didn't follow the setting before.
+- **At 160 % on a phone, nothing is cut off.** The settings menu lays out by its own width, which
+  large text narrows, not the screen's:
+    - long key names (Right Shift, Wheel down) wrap instead of ending in "…";
+    - a button's note goes under the button instead of pushing the panel sideways;
+    - player 2's prompt spans the screen instead of squeezing into a tall column that ran off the
+      bottom;
+    - the HUD keeps clear of the debug panel on a tablet (its width didn't allow for large text, so
+      its text ran under the panel).
+- **Less motion:**
+    - A device set to reduce motion (the system's accessibility setting) starts with **Camera bob &
+      kick** off. Turning it back on is saved as your choice, and stays your choice if the system
+      setting changes later. Before, a choice that matched the device's default wasn't stored, so it
+      flipped when the system setting changed. **Reset all settings** clears that choice, so the
+      bob follows the device again.
+    - With the switch off, or the system setting on, toasts stop sliding and fading, and the menu's
+      buttons stop animating.
+- **Clicking never grabs by accident**, and a fix found while testing it:
+    - A click on a menu, a panel, the dock or Resume never grabs the timber under the crosshair (it
+      didn't before either; now it is tested).
+    - Every click in first person with the mouse taken used to throw an uncaught error behind the
+      scenes. The engine's orbit controls stayed on the canvas and asked for pointer capture, which
+      the browser refuses while the mouse is locked. Fixed.
+- **The online panel stops eating clicks.** It refreshes every second (round trips, relay status)
+  and used to rebuild its buttons each time, so a click could land on a button that was just
+  replaced. It now changes only what changed.
+
+### Tests (actual, `tests/e2e/accessibility.spec.ts`)
+
+| Test                                            | Result                                                                                                                                                                                                                                                                                                                                                                               |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Text size 160 %, 390 × 844 and 1280 × 720       | Every visible text (HUD, dock, every Settings section, credits, online panel, level chooser, split screen with player 2's prompt and both labels) has an effective zoom of 1.6 and is on screen; nothing is cut off or scrolls sideways (except the row of section tabs, which scrolls by design); P1's label is in the top half, P2's in the bottom; the HUD and dock don't overlap |
+| A device set to reduce motion                   | Camera bob off, UI transitions 0 s; a 2 m walk on flat ground from the spawn (distance walked checked, no fall) has bob and kick exactly 0; switched on, the same walk bobs over 5 mm, and that's saved across a reload; Reset all saves nothing of it, and the bob then follows the system setting both ways                                                                        |
+| Less motion by the switch alone                 | Without the system setting the toasts and menu buttons animate; switched off, `body.reduced-motion` alone brings them to 0 s                                                                                                                                                                                                                                                         |
+| Text size 160 %, every screen shape             | On a small and a large phone, a tablet, a desktop and a phone held sideways, with the debug panel open and closed: the HUD, the debug panel, the settings chip and the debug chip are on screen and never overlap                                                                                                                                                                    |
+| Touch controls on a phone (#97)                 | Dragging the on-screen stick walks the beaver over 1 m; the Jump button lifts it over 20 cm                                                                                                                                                                                                                                                                                          |
+| The online panel while nothing changes          | Over 3.5 s (three refreshes) no change at all to the panel, and its Close button is the same element                                                                                                                                                                                                                                                                                 |
+| Field of view                                   | The camera's field of view follows the slider live (52° → 60°)                                                                                                                                                                                                                                                                                                                       |
+| Menu clicks with the bucket under the crosshair | The click that takes the mouse, clicks on the menu over the crosshair, its tabs, the backdrop, the online panel, the level chooser and Resume grab nothing (the bucket stays the target throughout); then a click on the game grabs it                                                                                                                                               |
+
+- Unit tests (`tests/unit/device-defaults.test.ts`):
+    - a reduce-motion device's defaults, and the player's own choice saved and restored against them;
+    - the choice survives the system setting changing, in both directions, while other settings are
+      saved;
+    - if never touched, it follows the device.
+- Effective zoom is read with `Element.currentCSSZoom`, so a panel left out of the setting fails the
+  test.
+
+### Known limits
+
+- **The developer's debug panel** (F3) isn't scaled. It's left out of the test on purpose.
+- **Touch controls aren't remappable** (from #98).
+
 ## The tutorial's long plank, and a better plank throw (2026-11-23)
 
 Owner: "the planks need to be about 1.5 longer so that they can easily clear the tutorial level
