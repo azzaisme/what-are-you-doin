@@ -71,10 +71,10 @@ const LONG_MESSAGE =
     '🔧 Click… click… click… The ute’s handbrake is creeping off! Get in and hold the brake, or chock a downhill wheel.';
 
 /**
- * The Valley with eight players (the long plank of #134 among its entities) and stand-ins for
- * entities still to come: a goose with every animation channel, and the road closure's barrier (no
- * animation) and sign (one channel, as `closureSignAsset` has on epic8-hazards). Hosted, with seven
- * guests seated who never acknowledge anything (every entity stays theirs to receive).
+ * The Valley with eight players (its real entities: the long plank of #134, the road closure's
+ * barrier and sign of #131) and a stand-in for the goose still to come, with every animation
+ * channel. Hosted, with seven guests seated who never acknowledge anything (every entity stays
+ * theirs to receive).
  */
 async function valleyHost(extra = true) {
     const hub = new MemoryHub();
@@ -91,8 +91,6 @@ async function valleyHost(extra = true) {
                 anim: new Float64Array(ANIM_MAX)
             });
         add(animated, ANIM_MAX); // the goose
-        add(plain, 0); // the closure's barrier
-        add(plain, 1); // and its sign
     }
     sim.step(neutralCommand(0));
     sim.fpActive = true;
