@@ -103,10 +103,12 @@ export const EYE_HEIGHT = BODY.eyeHeight;
 export const HANDOVER_REACH = 1.9;
 /** Along a hand-over, ground every this far (m) between the two beavers' feet... */
 export const HANDOVER_STEP = 0.15;
-/** ...within this much (m) under the line between their feet: a gap between them refuses it. */
+/** ...no lower than this (m) under the lower end: a gap between them refuses it. */
 export const HANDOVER_DROP = 0.5;
-/** Said the first time a beaver reaches for the bucket in another's hands from too far or over a gap. */
-export const HANDOVER_TEXT = 'Can’t hand the bucket over a gap or from far off: stand close, or build the crossing.';
+/** ...but not within this far (m) of either end: what stands or rests there is held up already. */
+export const HANDOVER_END = 0.3;
+/** Said the first time a beaver reaches for the bucket across a gap or from too far (resting, or in another's hands). */
+export const HANDOVER_TEXT = 'Can’t take the bucket across a gap or from far off: stand close, or build the crossing.';
 /** Said the first time a beaver tries to jump holding the bucket (or grab it in mid-air). */
 export const HEAVY_JUMP_TEXT = 'Too heavy to jump with the bucket: build the crossing to get it over.';
 /** Stress bodies get a deterministic upward kick this often (ticks), so 25 bodies keep moving. */
@@ -684,6 +686,17 @@ export class LabSim {
         // them (Epic 9): reaching it out of another's hands across a gap would get it over a
         // crossing nobody built (a built span is ground: along a bridge, it passes)
         if (heldBefore !== this.bucket.id && pw.heldIdOf(i) === this.bucket.id) {
+            // reaching for it at all: ground from your feet to where it is (not across a gap: set
+            // down on one side, it can't be taken from the other)
+            if (!this.groundBetween(p, this.bucket.pose.p)) {
+                pw.release(i);
+                if (!this.farNoticed) {
+                    this.farNoticed = true;
+                    this.events.push({ tick: this.tick, kind: 'hint', text: HANDOVER_TEXT });
+                }
+            }
+        }
+        if (heldBefore !== this.bucket.id && pw.heldIdOf(i) === this.bucket.id) {
             for (let j = 0; j < this.players.length; j++) {
                 if (j === i || pw.heldIdOf(j) !== this.bucket.id) continue;
                 const o = this.players[j];
@@ -817,9 +830,10 @@ export class LabSim {
     }
 
     /**
-     * Ground all along the line between two players' feet (sampled every HANDOVER_STEP): something
-     * to stand on (the ground, a prop, a built span) within HANDOVER_DROP under the line. A gap
-     * between them, a crossing nobody built, says no.
+     * Ground all along the line between two points (a player's feet, another's or where the bucket
+     * rests), sampled every HANDOVER_STEP: something to stand on (the ground, a prop, a built span)
+     * no lower than HANDOVER_DROP under the lower end. A gap between them, a crossing nobody built,
+     * says no.
      */
     private groundBetween(a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): boolean {
         const len = Math.hypot(b.x - a.x, b.z - a.z);
@@ -827,12 +841,18 @@ export class LabSim {
         // (across a beaver's width too: one standing on two beams side by side is on the bridge)
         const sx = len > 1e-6 ? (-(b.z - a.z) / len) * 0.15 : 0;
         const sz = len > 1e-6 ? ((b.x - a.x) / len) * 0.15 : 0;
+        // (down to HANDOVER_DROP under the lower end: a step down to a crate or off a wall's top is
+        // ground, a crossing's gap metres deep is not)
+        const floor = Math.min(a.y, b.y) - HANDOVER_DROP;
         for (let k = 0; k <= n; k++) {
             const f = k / n;
+            // (not right under either end: a beaver standing at an edge has its middle over the
+            // drop, held up by its feet's width, and a bucket's base is 0.16 m round its middle)
+            if (len > 0 && (f * len < HANDOVER_END || (1 - f) * len < HANDOVER_END)) continue;
             const x = a.x + (b.x - a.x) * f;
             const y = a.y + (b.y - a.y) * f + 0.3;
             const z = a.z + (b.z - a.z) * f;
-            const r = 0.3 + HANDOVER_DROP;
+            const r = y - floor;
             const pw = this.physics;
             if (
                 pw.supportY(x, z, y, r) === null &&

@@ -32,23 +32,36 @@ An existing cheat: the Valley could be finished without building a single bridge
     - **No taking hold of it in mid-air.** A beaver who jumps empty-handed and grabs it on the way
       up or down is refused (the same toast). Before, grabbed on the first airborne tick, it went
       over the culvert and the crevasse.
-    - **Handed over only standing close, with ground between** (feet within 1.9 m, and something to
-      stand on all along the line between them: the ground, a prop or a built span, checked every
-      15 cm and within 0.5 m under their feet). Measured where beavers can stand still at the very
-      edges: the gorge's rim cap at u 82.41 and the pier at 84.14 are 1.73 m apart, and so are the
-      pier at 85.86 and the far cap at 87.59. So closeness alone didn't stop it: the bucket was handed
-      rim → pier → far rim with all 10 L and the Gorge completed with no bridge. With the ground
-      check, that's refused ("Can't hand the bucket over a gap or from far off: stand close, or build
-      the crossing."). Across the culvert and the crevasse, edge to edge, it's refused too. Side by
-      side, and along a built span (rim → a beaver on the beams → the far rim), hand-overs work. With
-      the ground check switched off, both gorge tests fail.
+    - **Taken only with ground between you and it.** Any grab of the bucket, lying somewhere or in
+      another beaver's hands, needs something to stand on all along the line from the grabber's
+      feet to the bucket: the ground, a prop or a built span, checked every 15 cm (and 15 cm either
+      side), down to 0.5 m under the lower end, and not within 0.3 m of either end, where what
+      stands or rests there is held up already. A step down to a crate, or off the top of a wall, is
+      ground; a crossing's gap metres deep is not. Hand to hand, the feet must also be within 1.9 m.
+        - Measured where beavers stand still at the very edges: the gorge's rim cap at u 82.41 and
+          the pier at 84.14 are 1.73 m apart, as are the pier at 85.86 and the far cap at 87.59.
+          Closeness alone didn't stop a hand-over there: the bucket went rim → pier → far rim, 10 L,
+          the Gorge done with no bridge.
+        - Nor did a check on hand-overs alone: set down at the near rim, it was taken from the pier
+          (2.3 m away), set down at the pier's far edge and taken from the far rim: the Gorge done
+          with 9.95 L. A resting bucket can be reached from 2.6 m.
+        - Now both are refused ("Can't take the bucket across a gap or from far off: stand close,
+          or build the crossing."): tested by input with the beavers getting onto the pier and the
+          far rim by real jumps, at the measured edges, and on two stacks of crates 1.5 m apart
+          (within the reach, with the yard floor 1 m down between them). At the culvert and the
+          crevasse a bucket at a rim's edge is about 3 m from the far edge: out of reach.
+        - Still fine: side by side; picking it up at each crossing's rim edge; on a built bridge
+          (set down on the beams, picked up from the far rim beside them); reaching down beside a
+          crate stack; along a built span (rim → a beaver on the beams → far rim).
+        - With the ground check switched off, the gorge tests and the crate test fail.
     - **The water past a crossing stays shut until its stage.** The works tank (3 m past the Gorge
       flag) opens at the Old Industrial Works stage, and the mountain spring butt (0.8 m past the
       crevasse's flag) at Flower Summit. A dry bucket thrown over the gorge or the crevasse can't be
       refilled across before the flag ("The works water tank is shut until the Gorge stage is done.").
       It follows the stage, so a reset or a checkpoint sets it right.
     - So the 1 L flags rely on the bucket not getting over unbuilt: it can't be jumped with, handed
-      across, grabbed in mid-air, or refilled across. Each is tested by input, a guest too.
+      across, reached for across a gap, grabbed in mid-air, or refilled across. Each is tested by
+      input, a guest too.
 - **The Old Industrial Works flag wants 1 L too, and the stage is fair for it.** The works tank is
   below the retaining wall, and a bucket jumped or thrown up the wall arrives dry. The way up keeps
   the water: set the bucket on a crate against the wall, climb a 1-then-2 crate stair without it,

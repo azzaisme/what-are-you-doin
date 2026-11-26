@@ -815,6 +815,43 @@ function holdOut(pl: Player, ticks: number): void {
     pl.step({}, ticks);
 }
 
+/** The bucket placed as close to a gap's near edge as it stays resting on the rim (5 cm steps back). */
+function restAtEdge(s: LabSim, g0: number, t: number, top: number): void {
+    for (let d = 0; d < 1.5; d += 0.05) {
+        const w = routeToWorld(g0 - d, t);
+        s.physics.place(s.bucket.id, pose(w.x, top + 0.05, w.z));
+        for (let i = 0; i < 90; i++) s.step(neutralCommand(s.tick));
+        const p = s.bucket.pose.p;
+        if (p.y > top - 0.2 && Math.abs(routeU(p.x, p.z) - (g0 - d)) < 0.3) return;
+    }
+}
+
+/** Sets the held bucket down where it hangs (lowered until it rests). */
+function setDownHere(pl: Player): void {
+    pl.step({ grab: true });
+    for (let n = 0; n < 150 && pl.s.physics.heldIdOf(pl.slot) >= 0; n++) pl.step();
+    pl.step({}, 20);
+}
+
+/**
+ * A running jump up the road along `t`, taking off at the gap's near edge `edge`, and stopping once
+ * landed between `lo` and `hi`; whether it landed there.
+ */
+function jumpOnto(pl: Player, edge: number, t: number, lo: number, hi: number): boolean {
+    for (let i = 0; i < 60 * 6; i++) {
+        const u = routeU(pl.p.x, pl.p.z);
+        if (pl.p.grounded && u > lo && u < hi) {
+            pl.step({}, 40);
+            break;
+        }
+        const w = routeToWorld(u + 3, t);
+        pl.yaw = Math.atan2(-(w.x - pl.p.x), -(w.z - pl.p.z));
+        pl.step({ moveZ: 1, sprint: true, jump: u > edge - 0.35 && u < edge });
+    }
+    const u = routeU(pl.p.x, pl.p.z);
+    return pl.p.grounded && u > lo - 0.3 && u < hi + 0.3 && pl.p.y > WALL.low - 0.3;
+}
+
 const feetApart = (s: LabSim, i: number, j: number) =>
     Math.hypot(s.players[i].x - s.players[j].x, s.players[i].z - s.players[j].z);
 
@@ -901,6 +938,9 @@ describe('the bucket passes hand to hand only between beavers standing close, wi
             a.step({}, 30);
             expect(take(a)).toBe(true);
             holdOut(a, 90);
+            // (over the 1.9 m reach here: this one is refused by distance; the crate stacks test
+            // the ground check where the feet are close)
+            expect(feetApart(s, 0, 1)).toBeGreaterThan(HANDOVER_REACH);
             expect(take(b)).toBe(false);
             expect(holds(s, 0)).toBe(true);
         }, 120_000);
@@ -927,6 +967,177 @@ describe('the bucket passes hand to hand only between beavers standing close, wi
         holdOut(b, 90);
         expect(take(c), 'and hands it on to the far rim').toBe(true);
         expect(hints(s)).toEqual([]);
+    }, 120_000);
+
+    it('set down and reached for across a gap (beavers getting there by real jumps): refused at both gorge gaps', () => {
+        // (measured before: set down at the near rim, taken from the pier, set down at its far edge,
+        // taken from the far rim, the Gorge done with 9.95 L and no bridge)
+        const s = at(3);
+        const [a, b, c] = crew(s, 3);
+        const t = 0.8;
+        // A sets it down on the near rim's edge (standing back from it until the bucket stays on top)
+        let onRim = NaN;
+        for (let back = 0.6; back < 2 && !(onRim > 81.7); back += 0.1) {
+            stand(a, 82.2 - back - 0.9, t);
+            const bw = routeToWorld(82.2 - back - 1.7, t);
+            s.physics.place(s.bucket.id, pose(bw.x, WALL.low + 0.05, bw.z));
+            a.step({}, 20);
+            expect(take(a)).toBe(true);
+            holdOut(a, 30);
+            const to = routeToWorld(82.2 - back, t);
+            a.walkTo(to.x, to.z, 0.08, 600, 0.25);
+            a.pitch = -0.6;
+            a.step({}, 40);
+            setDownHere(a);
+            a.step({}, 120);
+            const p = s.bucket.pose.p;
+            onRim = p.y > WALL.low - 0.2 ? routeU(p.x, p.z) : NaN;
+        }
+        expect(holds(s, 0)).toBe(false);
+        expect(onRim, 'resting at the near rim’s edge').toBeGreaterThan(81.7);
+        // B jumps onto the pier, comes to its near edge and turns back to it
+        // (its run beside A's line: A stands at the rim)
+        stand(b, 77, -0.6);
+        expect(jumpOnto(b, gapsAt(GORGE.u)[0][0], -0.6, 84.4, 85.6), 'B on the pier, by a jump').toBe(true);
+        // (to the pier's near edge, on the bucket's line: where the auditor took it, u 84.30)
+        expect(b.walkTo(routeToWorld(84.4, t).x, routeToWorld(84.4, t).z, 0.15, 900, 0.25)).toBe(true);
+        expect(routeU(s.players[1].x, s.players[1].z)).toBeLessThan(84.5);
+        expect(s.players[1].y, 'still on the pier').toBeGreaterThan(WALL.low);
+        const bb = s.bucket.pose.p;
+        b.lookAt(bb.x, bb.y + 0.15, bb.z);
+        expect(
+            s.interaction(1).target,
+            `within reach of the pier (bucket u ${routeU(bb.x, bb.z).toFixed(2)}, beaver u ${routeU(s.players[1].x, s.players[1].z).toFixed(2)})`
+        ).toBe('bucket');
+        expect(take(b), 'taken from the pier').toBe(false);
+        expect(hints(s)).toContain(HANDOVER_TEXT);
+        // the far gap: the bucket on the pier's far edge (as if it had got there), C jumped to the far rim
+        const pw = routeToWorld(85.5, -0.4);
+        s.physics.place(s.bucket.id, pose(pw.x, WALL.low + 0.15, pw.z));
+        b.step({}, 30);
+        // C jumps the gorge (pier and on), then walks back to the far rim's edge, clear of the old
+        // trestle's remains that hang off that rim on the other side of the road's line
+        stand(c, 77, 0);
+        expect(sprintJump(c, GORGE.u).over, 'C over the gorge, by jumps').toBe(true);
+        // (back onto the cap with a little hop, empty-handed: walking, its edge stops a beaver)
+        const w0 = routeToWorld(89.2, -0.6);
+        c.walkTo(w0.x, w0.z, 0.15, 900, 0.5);
+        const w1 = routeToWorld(87.9, -0.6);
+        for (let i = 0; i < 240 && routeU(s.players[2].x, s.players[2].z) > 88.05; i++) {
+            c.yaw = Math.atan2(-(w1.x - s.players[2].x), -(w1.z - s.players[2].z));
+            const u = routeU(s.players[2].x, s.players[2].z);
+            c.step({ moveZ: 0.5, jump: u < 88.7 && s.players[2].grounded });
+        }
+        c.step({}, 60);
+        expect(routeU(s.players[2].x, s.players[2].z), 'C at the far rim’s edge').toBeLessThan(88);
+        expect(s.players[2].y, 'on top').toBeGreaterThan(WALL.low - 0.1);
+        const pb = s.bucket.pose.p;
+        c.lookAt(pb.x, pb.y + 0.15, pb.z);
+        expect(s.interaction(2).target, 'within reach of the far rim').toBe('bucket');
+        expect(take(c), 'taken from the far rim').toBe(false);
+        expect(s.progress.step).toBe(3);
+    }, 180_000);
+
+    for (const [name, cu, stage] of [
+        ['the culvert', DITCH.u, 2],
+        ['the crevasse', CREVASSE.u, 5]
+    ] as const)
+        it(`${name}: set down at the rim's very edge, it can't be taken from the far rim`, () => {
+            const s = at(stage);
+            const [, b] = crew(s, 2);
+            const [g0, g1] = [gapsAt(cu)[0][0], gapsAt(cu).at(-1)![1]];
+            const t = roadT(cu);
+            const top0 = valleyHeight(routeToWorld(g0 - 1, t).x, routeToWorld(g0 - 1, t).z);
+            const top1 = valleyHeight(routeToWorld(g1 + 1, t).x, routeToWorld(g1 + 1, t).z);
+            // as close to the gap as it stays resting on the rim
+            restAtEdge(s, g0, t, top0);
+            expect(s.bucket.pose.p.y, 'resting on the rim').toBeGreaterThan(top0 - 0.2);
+            const e1 = edgeU(b, g1 + 1, -1, t, top1, false);
+            atEdge(b, e1, t, top1, false);
+            const reach = Math.hypot(
+                s.bucket.pose.p.x - s.players[1].x,
+                s.bucket.pose.p.y - (s.players[1].y + EYE_HEIGHT),
+                s.bucket.pose.p.z - s.players[1].z
+            );
+            expect(take(b)).toBe(false);
+            // (measured: about 3 m from the far edge's eye: out of reach before any rule)
+            expect(reach).toBeGreaterThan(2.6);
+        }, 120_000);
+
+    it('ordinary set-downs and pick-ups still work: at each crossing’s rim edge, and on a built bridge', () => {
+        for (const [cu, stage] of [
+            [DITCH.u, 2],
+            [GORGE.u, 3],
+            [CREVASSE.u, 5]
+        ] as const) {
+            const s = at(stage);
+            const [a] = crew(s, 1);
+            const g0 = gapsAt(cu)[0][0];
+            const t = roadT(cu);
+            const top0 = valleyHeight(routeToWorld(g0 - 1, t).x, routeToWorld(g0 - 1, t).z);
+            const e0 = edgeU(a, g0 - 1, 1, t, top0);
+            atEdge(a, e0, t, top0, true);
+            const bw = routeToWorld(routeU(s.player.x, s.player.z) - 0.9, t + 0.3);
+            s.physics.place(s.bucket.id, pose(bw.x, valleyHeight(bw.x, bw.z) + 0.05, bw.z));
+            a.step({}, 30);
+            expect(take(a), `picked up at the rim's edge (${cu})`).toBe(true);
+            a.pitch = -0.5;
+            a.step({}, 30);
+            setDownHere(a);
+            expect(holds(s, 0)).toBe(false);
+            expect(take(a), `and again (${cu})`).toBe(true);
+            expect(hints(s)).toEqual([]);
+        }
+        // on the built culvert bridge: set down on the beams, picked up there by another beaver
+        const s = at(2);
+        bridge(s, DITCH.u, ['beam-2', 'beam-3']);
+        const [a, b] = crew(s, 2);
+        const [g0, g1] = [gapsAt(DITCH.u)[0][0], gapsAt(DITCH.u).at(-1)![1]];
+        const t = roadT(DITCH.u);
+        const beam = s.entities.find((e) => e.name === 'beam-2')!.pose.p;
+        stand(a, (g0 + g1) / 2 - 0.3, t, true, beam.y + 0.12);
+        const bw = routeToWorld((g0 + g1) / 2 + 0.3, t);
+        s.physics.place(s.bucket.id, pose(bw.x, beam.y + 0.2, bw.z));
+        a.step({}, 40);
+        expect(take(a), 'picked up on the beams').toBe(true);
+        a.pitch = -0.6;
+        a.step({}, 30);
+        setDownHere(a);
+        expect(holds(s, 0)).toBe(false);
+        stand(b, g1 + 0.3, t, false);
+        expect(take(b), 'and from the far rim, beside the beams it rests on').toBe(true);
+        expect(hints(s)).toEqual([]);
+    }, 240_000);
+
+    it('outside the gorge too: within 1.9 m but with nothing to stand on between, refused (two crate stacks)', () => {
+        // (two beavers on two stacks of two crates in the works' lower yard, 1.5 m apart: the yard
+        // floor is 1 m under their feet between them)
+        const s = at(4);
+        const [a, b] = crew(s, 2);
+        const crate = (n: number, u: number, level: number) => {
+            const w = routeToWorld(u, -6);
+            const e = s.entities.find((x) => x.name === `crate-${n}`)!;
+            s.physics.place(e.id, pose(w.x, WALL.low + 0.26 + level * 0.5, w.z));
+        };
+        crate(0, 110, 0);
+        crate(1, 110, 1);
+        crate(2, 111.5, 0);
+        crate(3, 111.5, 1);
+        for (let i = 0; i < 60; i++) s.step(neutralCommand(s.tick));
+        stand(a, 110, -6, true, WALL.low + 1.05);
+        stand(b, 111.5, -6, false, WALL.low + 1.05);
+        expect(s.player.y, 'A on its stack').toBeGreaterThan(WALL.low + 0.95);
+        expect(s.players[1].y, 'B on its stack').toBeGreaterThan(WALL.low + 0.95);
+        // A reaches down for the bucket beside its stack (a step down is ground) ...
+        const bw = routeToWorld(110, -5.3);
+        s.physics.place(s.bucket.id, pose(bw.x, WALL.low + 0.05, bw.z));
+        a.step({}, 30);
+        expect(take(a), 'reached down beside its own stack').toBe(true);
+        holdOut(a, 40);
+        // ... but can't hand it to B on the other stack
+        expect(feetApart(s, 0, 1)).toBeLessThan(HANDOVER_REACH);
+        expect(take(b)).toBe(false);
+        expect(hints(s)).toContain(HANDOVER_TEXT);
     }, 120_000);
 
     it('online: a guest on the culvert’s far rim can’t take it out of the host’s hands either', async () => {
@@ -975,6 +1186,7 @@ describe('the bucket passes hand to hand only between beavers standing close, wi
         a.lookAt(f.x, host.player.y + EYE_HEIGHT, f.z, 20);
         a.pitch = -0.1;
         a.step({}, 60);
+        expect(feetApart(host, 0, 1)).toBeGreaterThan(HANDOVER_REACH);
         expect(take(g)).toBe(false);
         g.step({}, 20);
         expect(holds(host, 0)).toBe(true);
