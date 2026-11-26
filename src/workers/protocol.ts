@@ -48,6 +48,25 @@ export interface FrameStats {
     dirtyCells: number;
     dynDynOverlaps: number;
     dynStaticOverlaps: number;
+    /** Objects on other lattices rasterized here because they outrank one of this lattice's (ADR 0011). */
+    latticeMasks: number;
+    /** Cells where such an object now takes the cell from one of this lattice's objects. */
+    latticeHidden: number;
+    /** Such objects skipped this frame: the lattice's mask budget (maskLimit) was spent. */
+    maskSkipped: number;
+    /**
+     * The mask work done this frame, in units (MASK_SAMPLE_WEIGHT): cells scanned, weighted
+     * samples and changed chunks, plus clearing masks that dropped out. Without those clears it
+     * never exceeds maskLimit.
+     */
+    maskCells: number;
+    /**
+     * This frame's mask budget in those units (MASK_PRESETS), on lattices that can mask (0 on the
+     * others, so the pipeline's sum is the masking lattices' budgets).
+     */
+    maskLimit: number;
+    /** Their parts the rasterizer rejected (runaway bounds), as `rejected` counts for objects. */
+    maskRejected: number;
     staticRebuilt: number;
     dynamicRebuilt: number;
     rasterMs: number;
@@ -91,6 +110,8 @@ export type ToWorker =
           world?: boolean;
           /** The far lattice of a streamed level: the whole static world, coarse, no objects. */
           far?: boolean;
+          /** False: objects on other lattices do not take cells from this one (?masks=off, #107). */
+          masks?: boolean;
       }
     | {
           type: 'frame';
@@ -108,8 +129,10 @@ export type ToWorker =
           nearTileSize?: number;
           /** Streamed levels: the near world's radius (m) for this device's quality preset. */
           nearRadius?: number;
+          /** This device's quality preset, for the mask budget (MASK_PRESETS; default high). */
+          maskPreset?: 'high' | 'low';
       }
-    | { type: 'query'; id: number; what: 'hash' | 'verify' | 'stand' };
+    | { type: 'query'; id: number; what: 'hash' | 'verify' | 'lattice' | 'stand' };
 
 export type FromWorker =
     | { type: 'ready'; build: BuildInfo; units: UnitMesh[] }
