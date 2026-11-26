@@ -4,6 +4,8 @@
  * dome round the camera, far beyond the fog's end, takes the fog colour from the engine's own fog
  * (fully fogged at that distance), so the sky turns the fog colour and the far world's outline melts
  * into it. It fades in as the fog end closes from `startAt` to `fullAt` and is off in clear weather.
+ * One per local view, on that view's own layer, centred on that view's camera (split screen: player
+ * 2 may be far from player 1, and a dome round the other camera would stand inside their fog).
  */
 
 import {
@@ -19,7 +21,10 @@ import {
 import type { AppBase, Layer } from 'playcanvas';
 
 export const FOG_DOME = {
-    /** Radius (m): beyond the fog's end whenever the dome shows, so it is fully fogged. */
+    /**
+     * Radius (m). Once the fog's end is under it the dome is fully fogged (the fog colour, exactly);
+     * from `startAt` down to it, the dome is nearly fogged and still fading in.
+     */
     radius: 150,
     /** The fog end (m) where it starts to show, and where it is fully opaque. */
     startAt: 160,
@@ -38,7 +43,7 @@ export class FogDome {
     private readonly material: StandardMaterial;
     private opacity = -1;
 
-    constructor(app: AppBase, layer: Layer) {
+    constructor(app: AppBase, layer: Layer, name = 'FogDome') {
         const mesh = Mesh.fromGeometry(
             app.graphicsDevice,
             new SphereGeometry({ radius: FOG_DOME.radius, latitudeBands: 12, longitudeBands: 24 })
@@ -54,7 +59,7 @@ export class FogDome {
         m.opacity = 0;
         m.update();
         this.material = m;
-        this.entity = new Entity('FogDome');
+        this.entity = new Entity(name);
         this.entity.addComponent('render', {
             meshInstances: [new MeshInstance(mesh, m)],
             layers: [layer.id],

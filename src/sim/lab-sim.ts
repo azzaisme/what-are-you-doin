@@ -100,6 +100,18 @@ export type PropsMode = 'physics' | 'scripted';
 
 /** The player body's eye height (beavers 1.22 m; the former stand-in people 1.86 m). */
 export const EYE_HEIGHT = BODY.eyeHeight;
+/** The farthest apart (feet, across the ground, m) two beavers can be to pass the bucket hand to hand. */
+export const HANDOVER_REACH = 1.9;
+/** Along a hand-over, ground every this far (m) between the two beavers' feet... */
+export const HANDOVER_STEP = 0.15;
+/** ...no lower than this (m) under the lower end: a gap between them refuses it. */
+export const HANDOVER_DROP = 0.5;
+/** ...but not within this far (m) of either end: what stands or rests there is held up already. */
+export const HANDOVER_END = 0.3;
+/** Said the first time a beaver reaches for the bucket across a gap or from too far (resting, or in another's hands). */
+export const HANDOVER_TEXT = 'Can’t take the bucket across a gap or from far off: stand close, or build the crossing.';
+/** Said the first time a beaver tries to jump holding the bucket (or grab it in mid-air). */
+export const HEAVY_JUMP_TEXT = 'Too heavy to jump with the bucket: build the crossing to get it over.';
 /** Stress bodies get a deterministic upward kick this often (ticks), so 25 bodies keep moving. */
 export const STRESS_KICK_TICKS = 150;
 
@@ -116,7 +128,7 @@ export interface LabSimOptions {
 /** Something the player should be told (objective reached, fell in the creek, ...). */
 export interface SimEvent {
     tick: number;
-    kind: 'goal' | 'fell' | 'recovered' | 'step' | 'ute' | 'water' | 'hazard' | 'wood' | 'creak' | 'break';
+    kind: 'goal' | 'fell' | 'recovered' | 'step' | 'ute' | 'water' | 'hazard' | 'wood' | 'creak' | 'break' | 'hint';
     text: string;
 }
 
@@ -169,8 +181,17 @@ export class LabSim {
         grabbed: false,
         missed: false,
         thrown: false,
-        dropped: false
+        dropped: false,
+        balked: false
     }));
+    /** Each player's jump key last tick (a refused jump reacts on the press, not while held). */
+    private readonly jumpWas = new Uint8Array(MAX_PLAYERS);
+    /** Said once a run: no jumping with the bucket. */
+    private heavyNoticed = false;
+    /** Ticks each player has been off the ground. */
+    private readonly airTicks = new Uint16Array(MAX_PLAYERS);
+    /** Said once a run: the bucket is handed over only standing close. */
+    private farNoticed = false;
     private readonly landingVy = new Float64Array(MAX_PLAYERS);
     readonly player = this.players[0];
     /**
@@ -258,6 +279,7 @@ export class LabSim {
         this.player2Entity = c.player2;
         this.eyes = c.eyes;
         this.water = new BucketWaterState(this.level);
+        this.water.stageDone = (k) => `the ${this.level.rules?.stages?.[k]?.name ?? `stage ${k + 1}`} stage`;
         const levelLogs = c.entities.filter((e) => e.name === 'log' || e.name.startsWith('extra-log'));
         this.forestry = new Forestry(this.level, c.forestry, levelLogs);
         const saw = this.level.forestry?.sawmill;
@@ -302,6 +324,10 @@ export class LabSim {
         this.bucket.anim[BUCKET_LITRES] = this.water.volume;
         this.pouring.fill(false);
         this.dryNoticed = false;
+        this.heavyNoticed = false;
+        this.farNoticed = false;
+        this.jumpWas.fill(0);
+        this.airTicks.fill(0);
         for (const pl of this.players) {
             pl.fallTicks = 0;
             pl.safe.valid = false;
@@ -615,7 +641,21 @@ export class LabSim {
         const rx = Math.cos(p.yaw);
         const rz = -Math.sin(p.yaw);
         const vyBefore = p.vy;
-        pw.moveCharacter((fx * mz + rx * mx) * run, (fz * mz + rz * mx) * run, cmd.jump, i);
+        // no jumping while holding the bucket (Epic 9): too heavy and awkward to hop with, so it
+        // can't be carried over a crossing a beaver could jump; a press gets a dip and, once, a toast
+        let jump = cmd.jump;
+        if (jump && pw.heldIdOf(i) === this.bucket.id) {
+            jump = false;
+            if (!this.jumpWas[i] && p.grounded) {
+                this.animEvents[i].balked = true;
+                if (!this.heavyNoticed) {
+                    this.heavyNoticed = true;
+                    this.events.push({ tick: this.tick, kind: 'hint', text: HEAVY_JUMP_TEXT });
+                }
+            }
+        }
+        this.jumpWas[i] = cmd.jump ? 1 : 0;
+        pw.moveCharacter((fx * mz + rx * mx) * run, (fz * mz + rz * mx) * run, jump, i);
         const c = pw.rig(i)!.state;
         this.landingVy[i] = vyBefore;
         // smooth step-ups (and only step-ups) for the camera
@@ -630,6 +670,7 @@ export class LabSim {
         p.z = c.z;
         p.vy = c.vy;
         p.grounded = c.grounded;
+        this.airTicks[i] = p.grounded ? 0 : Math.min(this.airTicks[i] + 1, 60000);
 
         if (!this.physicsProps) return;
         const ev = this.animEvents[i];
@@ -663,6 +704,45 @@ export class LabSim {
             else if (!this.enterUte(i, eye, cmd)) ev.missed = true;
         }
         pw.applyGrab(eye, cmd.yaw, cmd.pitch, i);
+        // no taking hold of the bucket in mid-air (Epic 9): jumped empty-handed and grabbed on the
+        // way up, it would be carried over a crossing all the same
+        const air = !p.grounded && (p.vy > 0.5 || this.airTicks[i] >= 3);
+        if (air && heldBefore !== this.bucket.id && pw.heldIdOf(i) === this.bucket.id) {
+            pw.release(i);
+            if (!this.heavyNoticed) {
+                this.heavyNoticed = true;
+                this.events.push({ tick: this.tick, kind: 'hint', text: HEAVY_JUMP_TEXT });
+            }
+        }
+        // the bucket passes hand to hand only between beavers standing close, with ground between
+        // them (Epic 9): reaching it out of another's hands across a gap would get it over a
+        // crossing nobody built (a built span is ground: along a bridge, it passes)
+        if (heldBefore !== this.bucket.id && pw.heldIdOf(i) === this.bucket.id) {
+            // reaching for it at all: ground from your feet to where it is (not across a gap: set
+            // down on one side, it can't be taken from the other)
+            if (!this.groundBetween(p, this.bucket.pose.p)) {
+                pw.release(i);
+                if (!this.farNoticed) {
+                    this.farNoticed = true;
+                    this.events.push({ tick: this.tick, kind: 'hint', text: HANDOVER_TEXT });
+                }
+            }
+        }
+        // hand to hand, also feet within HANDOVER_REACH with ground between them (defensive: in the
+        // Valley the reach check above refuses first, and no test fails with this alone switched off)
+        if (heldBefore !== this.bucket.id && pw.heldIdOf(i) === this.bucket.id) {
+            for (let j = 0; j < this.players.length; j++) {
+                if (j === i || pw.heldIdOf(j) !== this.bucket.id) continue;
+                const o = this.players[j];
+                if (Math.hypot(o.x - p.x, o.z - p.z) <= HANDOVER_REACH && this.groundBetween(p, o)) continue;
+                pw.release(i);
+                if (!this.farNoticed) {
+                    this.farNoticed = true;
+                    this.events.push({ tick: this.tick, kind: 'hint', text: HANDOVER_TEXT });
+                }
+                break;
+            }
+        }
         const heldAfter = pw.heldIdOf(i);
         if (heldAfter !== this.bucket.id) this.pouring[i] = false;
         if (heldAfter >= 0 && heldAfter !== heldBefore) ev.grabbed = true;
@@ -738,17 +818,20 @@ export class LabSim {
         if (this.lostTicks > 90) {
             this.lostTicks = 0;
             this.progress.recoveries++;
-            this.water.bucketLost();
+            const st = this.stage;
+            const spare = st?.spareLitres ?? 0;
+            this.water.bucketLost(spare);
             this.water.teleported();
             this.water.refillSources();
-            const st = this.stage;
             if (st) {
                 // journeys: the bucket comes back at the last checkpoint reached
                 pw.place(bk.id, pose(st.bucket.x, st.bucket.y, st.bucket.z));
                 this.events.push({
                     tick: this.tick,
                     kind: 'recovered',
-                    text: `The bucket fell in. A spare (empty) one is waiting at the ${st.name} start.`
+                    text: spare
+                        ? `The bucket fell in. A spare bucket (${spare} L) is waiting at the ${st.name} start.`
+                        : `The bucket fell in. A spare (empty) one is waiting at the ${st.name} start.`
                 });
             } else {
                 pw.respawn(bk.id);
@@ -798,6 +881,41 @@ export class LabSim {
         this.applySteps(rules);
     }
 
+    /**
+     * Ground all along the line between two points (a player's feet, another's or where the bucket
+     * rests), sampled every HANDOVER_STEP: something to stand on (the ground, a prop, a built span)
+     * no lower than HANDOVER_DROP under the lower end. A gap between them, a crossing nobody built,
+     * says no.
+     */
+    private groundBetween(a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): boolean {
+        const len = Math.hypot(b.x - a.x, b.z - a.z);
+        const n = Math.max(1, Math.ceil(len / HANDOVER_STEP));
+        // (across a beaver's width too: one standing on two beams side by side is on the bridge)
+        const sx = len > 1e-6 ? (-(b.z - a.z) / len) * 0.15 : 0;
+        const sz = len > 1e-6 ? ((b.x - a.x) / len) * 0.15 : 0;
+        // (down to HANDOVER_DROP under the lower end: a step down to a crate or off a wall's top is
+        // ground, a crossing's gap metres deep is not)
+        const floor = Math.min(a.y, b.y) - HANDOVER_DROP;
+        for (let k = 0; k <= n; k++) {
+            const f = k / n;
+            // (not right under either end: a beaver standing at an edge has its middle over the
+            // drop, held up by its feet's width, and a bucket's base is 0.16 m round its middle)
+            if (len > 0 && (f * len < HANDOVER_END || (1 - f) * len < HANDOVER_END)) continue;
+            const x = a.x + (b.x - a.x) * f;
+            const y = a.y + (b.y - a.y) * f + 0.3;
+            const z = a.z + (b.z - a.z) * f;
+            const r = y - floor;
+            const pw = this.physics;
+            if (
+                pw.supportY(x, z, y, r) === null &&
+                pw.supportY(x + sx, z + sz, y, r) === null &&
+                pw.supportY(x - sx, z - sz, y, r) === null
+            )
+                return false;
+        }
+        return true;
+    }
+
     /** Journey levels: the stage being played (the last one once all are done), or null. */
     get stage(): LevelStage | null {
         const st = this.level.rules?.stages;
@@ -825,7 +943,21 @@ export class LabSim {
         const inside = p.x > g.minX && p.x < g.maxX && p.z > g.minZ && p.z < g.maxZ;
         const resting = Math.hypot(v.x, v.y, v.z) < 0.4 && holders === 0;
         this.goalTicks = inside && resting ? this.goalTicks + 1 : 0;
+        if (!inside) this.dryNoticed = false;
         if (this.goalTicks <= 30) return;
+        // the flag wants water in the bucket (a thrown bucket arrives empty)
+        const need = stages[k].minLitres ?? 0;
+        if (this.water.volume < need) {
+            if (!this.dryNoticed) {
+                this.dryNoticed = true;
+                this.events.push({
+                    tick: this.tick,
+                    kind: 'water',
+                    text: `The bucket made it, but it needs at least ${need} L of water in it. Carry it over the crossing, don't throw it.`
+                });
+            }
+            return;
+        }
         this.goalTicks = 0;
         this.progress.step++;
         const last = this.progress.step >= stages.length;
@@ -878,6 +1010,7 @@ export class LabSim {
         // the flower stage, and after the win too (more water is welcome)
         const flower = st?.flower ?? null;
         this.water.goalMet = this.progress.goalReached;
+        this.water.stage = this.progress.step;
         for (const text of this.water.step(pb, bk.pose, bk.anim, flower))
             this.events.push({ tick: this.tick, kind: 'water', text });
     }
@@ -1525,7 +1658,7 @@ export class LabSim {
                 SIM_DT,
                 _animOut
             );
-            ev.grabbed = ev.missed = ev.thrown = ev.dropped = false;
+            ev.grabbed = ev.missed = ev.thrown = ev.dropped = ev.balked = false;
             a.anim[BEAVER_ARM_RAISE] = o.raise;
             a.anim[BEAVER_ARM_REACH] = o.reach;
             a.anim[BEAVER_ARM_SPREAD] = o.spread;

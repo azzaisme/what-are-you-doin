@@ -1,5 +1,105 @@
 # Progress log
 
+## Valley flags want water in the bucket: the empty-bucket throw is closed (2026-11-23, Epic 9)
+
+An existing cheat: the Valley could be finished without building a single bridge.
+
+- An empty bucket thrown from the near bank lands across Shallow Creek, the culvert, the gorge (in
+  one throw, pier and all) and the crevasse.
+- The stage flags counted any bucket resting at them, and the works tank and the mountain spring
+  refill it later.
+
+- **The fix:** every flag past the Timber Yard now wants at least 1 L of water in the bucket.
+    - A thrown bucket lands with its water gone: 0.02 L at most, measured with 0–3.4 L in it. A
+      full one falls short into the creek.
+    - Carried over a built crossing, it keeps nearly all of its 10 L.
+    - At the flag, a bucket that's too dry gets the message "it needs at least 1 L of water in it.
+      Carry it over the crossing, don't throw it."
+- **Spare buckets:** a bucket lost at the Forest Road, Gorge or Mountain Approach comes back with
+  3 L in it ("A spare bucket (3 L) is waiting…"). There's no water near those stage starts, and an
+  empty spare would have meant a walk back to the yard.
+    - Spares at the other stages stay empty: they have water nearby.
+    - Thrown, a 3 L spare also lands nearly empty, so it doesn't reopen the cheat.
+- **Beavers can jump three of the crossings; the bucket can't.** Measured by input, with no bridge,
+  sprinting along the road: a beaver jumps the culvert, the gorge (onto the old pier and on) and the
+  crevasse, with no falls. At the gorge the ground gaps are 2.3 m, but the stone caps on the rims
+  and the pier leave only about 2.15 m between cap and pier. Only Shallow Creek (4.3 m) is too wide.
+  That's fine: it's the bucket that needs the bridge. Four small rules make sure it does:
+    - **No jumping while holding the bucket.** Any beaver holding it, a co-carrier too. A press of
+      jump gets a small dip (as if bracing) and, the first time, "Too heavy to jump with the bucket:
+      build the crossing to get it over." Before the rule, sprint-jumping with the full bucket got it
+      over each of the three, landing with 0.05 to 1.09 L: enough for the crevasse's 1 L flag.
+    - **No taking hold of it in mid-air.** A beaver who jumps empty-handed and grabs it on the way
+      up or down is refused (the same toast). Before, grabbed on the first airborne tick, it went
+      over the culvert and the crevasse.
+    - **Taken only with ground between you and it.** Any grab of the bucket, lying somewhere or in
+      another beaver's hands, needs something to stand on all along the line from the grabber's
+      feet to the bucket: the ground, a prop or a built span, checked every 15 cm (and 15 cm either
+      side), down to 0.5 m under the lower end, and not within 0.3 m of either end, where what
+      stands or rests there is held up already. A step down to a crate, or off the top of a wall, is
+      ground; a crossing's gap metres deep is not. Hand to hand, the feet must also be within 1.9 m.
+        - Measured where beavers stand still at the very edges: the gorge's rim cap at u 82.41 and
+          the pier at 84.14 are 1.73 m apart, as are the pier at 85.86 and the far cap at 87.59.
+          Closeness alone didn't stop a hand-over there: the bucket went rim → pier → far rim, 10 L,
+          the Gorge done with no bridge.
+        - Nor did a check on hand-overs alone: set down at the near rim, it was taken from the pier
+          (2.3 m away), set down at the pier's far edge and taken from the far rim: the Gorge done
+          with 9.95 L. A resting bucket can be reached from 2.6 m.
+        - Now both are refused ("Can't take the bucket across a gap or from far off: stand close,
+          or build the crossing."). The tests, each by input, and what each does:
+            - **hand to hand, rim → pier and pier → far rim:** the beavers are placed at the
+              measured stable edges (found by stepping out 3 cm at a time and standing still), not
+              jumped there;
+            - **set down and reached across:** the beavers get onto the pier and the far rim by real
+              jumps and walk up near the edges (on the pier under u 84.5, its edge at 84.14; on the
+              far rim under u 88, its edge at 87.59). The bucket is set down at the near rim by
+              input; on the pier it is placed there;
+            - **two crate stacks** 1.5 m apart, the beavers placed on top: within the reach, with
+              the yard floor 1 m down between them;
+            - at the culvert and the crevasse, a bucket placed at a rim's edge is about 3 m from the
+              far edge: out of reach.
+        - Still fine: side by side; picking it up at each crossing's rim edge; on a built bridge
+          (set down on the beams, picked up from the far rim beside them); reaching down beside a
+          crate stack; along a built span (rim → a beaver on the beams → far rim).
+        - With the ground check switched off, the gorge tests and the crate test fail.
+        - The hand-over check (feet within 1.9 m, ground between the feet) is defensive: in the
+          Valley the reach check (ground between the grabber and the bucket) refuses first, and no
+          test fails with the hand-over check alone switched off.
+    - **The water past a crossing stays shut until its stage.** The works tank (3 m past the Gorge
+      flag) opens at the Old Industrial Works stage, and the mountain spring butt (0.8 m past the
+      crevasse's flag) at Flower Summit. A dry bucket thrown over the gorge or the crevasse can't be
+      refilled across before the flag ("The works water tank is shut until the Gorge stage is done.").
+      It follows the stage, so a reset or a checkpoint sets it right.
+    - So the 1 L flags rely on the bucket not getting over unbuilt: it can't be jumped with, handed
+      across, reached for across a gap, grabbed in mid-air, or refilled across. Each is tested by
+      input, a guest too.
+- **The Old Industrial Works flag wants 1 L too, and the stage is fair for it.** The works tank is
+  below the retaining wall, and a bucket jumped or thrown up the wall arrives dry. The way up keeps
+  the water: set the bucket on a crate against the wall, climb a 1-then-2 crate stair without it,
+  hop onto the wall's coping (0.66 m: a jump clears about 0.9 m), reach down for the bucket and
+  carry it to the flag. A test plays it alone by input (the crates placed), and the bucket arrives
+  with all 10 L. The stage's objective now says so: "Stack crates to climb the wall: set the bucket
+  on one and lift it up from the top".
+- **Tests** (`tests/unit/valley-water-flags.test.ts`, by input; the bridges are placed):
+    - at Shallow Creek, the culvert, the gorge and the crevasse, the bucket thrown over lands across
+      with under 1 L, and a second beaver carrying it to the flag doesn't complete the stage;
+    - the 3 L spare carried over the built culvert and gorge crossings, and a full bucket over the
+      crevasse, each complete their stage, with no falls.
+- **Weather follow-ups from the #128 audit:**
+    - The fog's sky now has one dome per local view, each round its own camera and drawn in that
+      view only. In split screen, player 2 can be far from player 1, and a dome round player 1's
+      camera would have stood inside player 2's fog. A browser test puts the two views about
+      130 m apart at full fog and checks each dome sits on its own camera.
+    - The debug weather hook never starts a zone over the gorge mist. The mist is atmosphere, so no
+      hazard is running, but weather is (tested).
+    - The six-height rain carry has a dry control: the same carry alone holds at −0.8 and −1.2 in
+      the dry, so it is the wet grip that loses it in the rain.
+- **Also fixed: a weak check in the Valley's crossing test.** It looked for each crossing's rim
+  30 cm back from where the ground drops below the fall line. The crevasse's bed is at the fall line
+  itself, so the "rim" it found was 2 m up the crevasse wall, not on the bench at 9.3 m, and its beam
+  had been resting inside the crevasse. It now finds the gap as ground well below the rims. A
+  beam laid there rests on the bench.
+
 ## Epic 5, part 2: joints strain, creak and break (2026-11-23, #49 #50)
 
 Nailed joints now carry measured loads and can fail. A joint that is working hard creaks, one close
