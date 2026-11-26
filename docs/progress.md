@@ -73,7 +73,7 @@ game saw.
     - Water notices slosh, and wood notices (the pine falls, logs bucked or delivered) knock.
     - Creaks, snaps and falls into the creek are played where they happen (the nail markers, the
       splash), so they aren't doubled.
-- **Unit tests:** COUNT pass at both voxel sizes, on `epics-5-10` 225a26c.
+- **Unit tests:** 1040 pass (110 files, both voxel sizes), on `epics-5-10` 225a26c.
 
 ## Epic 8: the road closure sign swap (2026-11-23, #77)
 
