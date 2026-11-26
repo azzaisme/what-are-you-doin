@@ -31,13 +31,33 @@ import { MAX_PLAYERS } from '../sim/lab-entities.ts';
 import type { LabSim } from '../sim/lab-sim.ts';
 import { wireLitres } from '../ui/water-hud.ts';
 
-import { SnapshotDecoder, encodeSnapshot, fromBase64Chunks, snapshotTick, toBase64Chunks } from './codec.ts';
+import { CHUNK, SnapshotDecoder, SnapshotEncoder, fromBase64Chunks, snapshotTick, toBase64Chunks } from './codec.ts';
 import type { NetChannel, NetPeer, NetTransport } from './transport.ts';
 
 /** Bump whenever host and guest builds stop understanding each other (2: eight player slots). */
-export const NET_PROTOCOL = 2;
+export const NET_PROTOCOL = 3;
 /** The host publishes a snapshot every this many ticks (20 Hz). */
 export const SNAPSHOT_EVERY = 3;
+/**
+ * The host's presence state never exceeds this, in UTF-8 bytes of its JSON: the claude.ai room's
+ * limit per participant (ADR 0010), 4 KiB. Whether the room counts characters or bytes isn't known,
+ * so bytes, the larger count. The peer-to-peer transport takes 16 KiB, but one limit serves both.
+ */
+export const PRESENCE_LIMIT = 4096;
+/** Kept free under the limit (a hud row or a lag value one digit longer than measured). */
+const PRESENCE_MARGIN = 48;
+
+const utf8 = new TextEncoder();
+/** Length in UTF-8 bytes. */
+export const utf8Bytes = (s: string) => utf8.encode(s).length;
+
+/** The most snapshot bytes whose base64 chunks (as a JSON array) fit in `chars` characters. */
+export function snapshotBudget(chars: number): number {
+    // each chunk is CHUNK characters plus its quotes and comma; the array adds its brackets
+    let b64 = Math.max(0, chars - 2);
+    b64 -= 3 * Math.ceil(b64 / (CHUNK + 3));
+    return Math.max(0, Math.floor(b64 / 4) * 3);
+}
 /** Guests render this many ticks behind the newest snapshot (150 ms) to ride out jitter. */
 export const GUEST_DELAY_TICKS = 9;
 /** A dropped guest's player stays in the world this long for them to come back (60 s). */
@@ -183,6 +203,8 @@ export class HostSession {
     private recent: NetEvent[] = [];
     /** Bytes of the last snapshot (for the debug panel). */
     lastSnapshotBytes = 0;
+    /** Lists what moved lately and refreshes the rest in turn, within the room's size limit. */
+    private readonly encoder = new SnapshotEncoder();
     /** The joint graph (and its version) last sent. */
     private sentGraph: JointGraph | null = null;
     private sentGraphVersion = -1;
@@ -247,7 +269,10 @@ export class HostSession {
         const back: number[] = [];
         for (const g of guests) {
             const ak = g.state.ak;
-            if (typeof ak === 'number' && Number.isInteger(ak) && ak >= 0) this.acks.set(g.id, ak);
+            if (typeof ak === 'number' && Number.isInteger(ak) && ak >= 0) {
+                if (this.acks.get(g.id) !== ak) this.encoder.ack(g.id, ak);
+                this.acks.set(g.id, ak);
+            }
         }
         for (const [id, slot] of this.slots) {
             if (ids.has(id)) continue;
@@ -400,8 +425,6 @@ export class HostSession {
         // held places expire and waiting newcomers time out without any network event
         if (this.dropped.size || this.waiting.size) this.reconcile();
         if (sim.tick % SNAPSHOT_EVERY !== 0) return;
-        const bytes = encodeSnapshot(sim.tick, sim.entities);
-        this.lastSnapshotBytes = bytes.length;
         const now = this.now();
         this.sentAt.set(sim.tick, now);
         for (const [t, at] of this.sentAt) if (now - at > LAG_WINDOW_MS || t > sim.tick) this.sentAt.delete(t);
@@ -436,9 +459,8 @@ export class HostSession {
                 extra.jl = strain;
             }
         }
-        this.ch.setState({
+        const rest = {
             ...extra,
-            s: toBase64Chunks(bytes),
             hud: huds,
             goal: sim.progress.goalReached,
             step: sim.progress.step,
@@ -448,7 +470,30 @@ export class HostSession {
             hz: packHazardNet(sim.hazards.net()),
             seed: sim.hazards.seed,
             lag: Array.from({ length: sim.players.length }, (_, s) => this.lagMs(s) ?? -1)
-        });
+        };
+        // the snapshot gets what the rest of the state leaves of the room's limit (with the fields
+        // the channel adds: role, version, layout, level, slots)
+        const mine = this.ch.peers().find((x) => x.isMe)?.state ?? {};
+        const used = utf8Bytes(JSON.stringify({ ...mine, ...rest, s: [] }));
+        const players = sim.players;
+        const bytes = this.encoder.encode(
+            sim.tick,
+            sim.entities,
+            // every guest of this version: playing, watching a full game, or waiting to rejoin
+            this.ch
+                .peers()
+                .filter((p) => !p.isMe && p.state.role === 'guest' && p.state.v === NET_PROTOCOL)
+                .map((p) => p.id),
+            snapshotBudget(PRESENCE_LIMIT - PRESENCE_MARGIN - used),
+            (i) => {
+                const p = sim.entities[i].pose.p;
+                let d = Infinity;
+                for (const pl of players) d = Math.min(d, Math.hypot(p.x - pl.x, p.z - pl.z));
+                return d;
+            }
+        );
+        this.lastSnapshotBytes = bytes.length;
+        this.ch.setState({ ...rest, s: toBase64Chunks(bytes) });
     }
 
     get guestCount(): number {
@@ -593,8 +638,9 @@ export class GuestSession {
         const st = h.state;
         if (st.end === true) this.ended = true;
         this.hostAway = st.away === true;
-        // another build's world: its snapshots would land on the wrong entities, so apply none
-        if (st.layout !== this.layout) {
+        // another build's world (its snapshots would land on the wrong entities) or another protocol
+        // version (they would not decode): apply none, and the game says so
+        if (st.layout !== this.layout || (st.v !== undefined && st.v !== NET_PROTOCOL)) {
             this.incompatible = true;
             return;
         }
