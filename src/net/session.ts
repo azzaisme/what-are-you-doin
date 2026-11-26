@@ -39,12 +39,17 @@ export const NET_PROTOCOL = 3;
 /** The host publishes a snapshot every this many ticks (20 Hz). */
 export const SNAPSHOT_EVERY = 3;
 /**
- * The host's presence state never exceeds this (JSON characters): the claude.ai room's limit per
- * participant (ADR 0010). The peer-to-peer transport takes 16 KiB, but one limit serves both.
+ * The host's presence state never exceeds this, in UTF-8 bytes of its JSON: the claude.ai room's
+ * limit per participant (ADR 0010), 4 KiB. Whether the room counts characters or bytes isn't known,
+ * so bytes, the larger count. The peer-to-peer transport takes 16 KiB, but one limit serves both.
  */
 export const PRESENCE_LIMIT = 4096;
 /** Kept free under the limit (a hud row or a lag value one digit longer than measured). */
 const PRESENCE_MARGIN = 48;
+
+const utf8 = new TextEncoder();
+/** Length in UTF-8 bytes. */
+export const utf8Bytes = (s: string) => utf8.encode(s).length;
 
 /** The most snapshot bytes whose base64 chunks (as a JSON array) fit in `chars` characters. */
 export function snapshotBudget(chars: number): number {
@@ -264,7 +269,10 @@ export class HostSession {
         const back: number[] = [];
         for (const g of guests) {
             const ak = g.state.ak;
-            if (typeof ak === 'number' && Number.isInteger(ak) && ak >= 0) this.acks.set(g.id, ak);
+            if (typeof ak === 'number' && Number.isInteger(ak) && ak >= 0) {
+                if (this.acks.get(g.id) !== ak) this.encoder.ack(g.id, ak);
+                this.acks.set(g.id, ak);
+            }
         }
         for (const [id, slot] of this.slots) {
             if (ids.has(id)) continue;
@@ -466,11 +474,12 @@ export class HostSession {
         // the snapshot gets what the rest of the state leaves of the room's limit (with the fields
         // the channel adds: role, version, layout, level, slots)
         const mine = this.ch.peers().find((x) => x.isMe)?.state ?? {};
-        const used = JSON.stringify({ ...mine, ...rest, s: [] }).length;
+        const used = utf8Bytes(JSON.stringify({ ...mine, ...rest, s: [] }));
         const players = sim.players;
         const bytes = this.encoder.encode(
             sim.tick,
             sim.entities,
+            [...this.slots.keys()],
             snapshotBudget(PRESENCE_LIMIT - PRESENCE_MARGIN - used),
             (i) => {
                 const p = sim.entities[i].pose.p;

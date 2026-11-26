@@ -13,9 +13,10 @@
  *   i16 x3 position in 4 mm units (+-131 m: the Valley reaches +-125 m)
  *   i16 x3 the three smallest quaternion components, scaled by 32767 * sqrt(2)
  *   [u8 n, i16 x n animation channels in 1/500 units, angles wrapped to +-8 pi]
- * A visible entity that is not listed keeps its last pose on the guest (it is at rest, or waits for
- * the next snapshot): the host lists what moved lately and refreshes the rest in turn
- * (`SnapshotEncoder`), within the room's size limit.
+ * A visible entity that is not listed keeps its last pose on the guest (it is at rest, and this guest
+ * has confirmed it, or it waits for the next snapshot); one hidden since, or never received, stays
+ * hidden until it is listed. The host lists what its guests haven't confirmed (`SnapshotEncoder`),
+ * within the room's size limit.
  */
 
 import type { SnapshotRing } from '../sim/snapshots.ts';
@@ -114,56 +115,65 @@ export function encodeSnapshot(
     return bytes;
 }
 
-/** Snapshots an entity stays listed after it last changed (1 s): a dropped update can't leave it stale. */
-export const RECENT_SNAPSHOTS = 20;
-/**
- * A resting visible entity is listed again every this many snapshots (about 1 s), in turn. Prime:
- * a guest may get only every k-th snapshot (a slow host publishes several per frame and the
- * transport sends the last), and with a period sharing a factor with k some entities' turns would
- * always fall on the snapshots it never gets. With a prime, successive turns land on every phase.
- */
-export const REFRESH_SNAPSHOTS = 19;
+/** Snapshots whose listed entities are remembered, to match the guests' acknowledgements against. */
+const LISTED_KEPT = 128;
 
 /**
  * The host's side: which entities each snapshot lists, within a byte budget.
  *
- * - Listed: every visible entity that changed (on the wire) in the last `RECENT_SNAPSHOTS`
- *   snapshots, and each resting visible entity once every `REFRESH_SNAPSHOTS` (spread over the
- *   snapshots by index), so a newcomer or a guest that missed updates has everything within 1 s.
- * - Over the budget: the entities waiting longest since they were last sent go first, nearest to a
- *   player first among equals; the rest wait for the next snapshot. Every waiting entity's wait only
- *   grows until it is sent, so none is starved.
+ * - Listed: every visible entity that some guest playing now hasn't confirmed at its current pose.
+ *   A guest confirms by acknowledging (`ack`) a snapshot that listed it, at that pose or later. A
+ *   change of pose clears the confirmations, and a guest who just joined has confirmed nothing.
+ *   This rests on what each guest has actually received, not on a schedule, so no pattern of lost
+ *   or coalesced updates (one in k, for any k) can keep an entity from a guest: until a snapshot
+ *   carrying it gets through and is acknowledged, every snapshot lists it.
+ * - Over the budget: the entities waiting longest since they were last listed go first, nearest to
+ *   a player first among equals; the rest wait for the next snapshot. A waiting entity's wait only
+ *   grows until it is listed, so none is starved.
  */
 export class SnapshotEncoder {
-    private n = 0;
     private readonly prev: Int32Array[] = [];
     private readonly cur = new Int32Array(QN);
-    private lastChange: number[] = [];
-    private lastSent: number[] = [];
+    /** Tick of each entity's last change on the wire (its current pose since then). */
+    private changedAt: number[] = [];
+    private lastListed: number[] = [];
     private wasVisible: boolean[] = [];
+    /** Guests that have confirmed each entity's current pose. */
+    private confirmed: Set<string>[] = [];
+    /** The entities each recent snapshot listed, by tick. */
+    private readonly listedAt = new Map<number, number[]>();
     /** Entities listed in the last snapshot, and those eligible but left for the next one. */
     listed = 0;
     deferred = 0;
 
+    /** A guest has the snapshot of `tick`: it holds every entity that snapshot listed. */
+    ack(guest: string, tick: number): void {
+        const ids = this.listedAt.get(tick);
+        if (!ids) return;
+        for (const i of ids) if (tick >= this.changedAt[i]) this.confirmed[i].add(guest);
+    }
+
     /**
-     * One snapshot of `entities` at `tick`, at most `budget` bytes (the header always fits).
-     * `near(i)` ranks equally stale entities (smaller first): the distance to the nearest player.
+     * One snapshot of `entities` at `tick`, at most `budget` bytes (the header always fits), for the
+     * guests now playing. `near(i)` ranks equally stale entities (smaller first): the distance to the
+     * nearest player.
      */
     encode(
         tick: number,
         entities: readonly EncodableEntity[],
+        guests: readonly string[],
         budget = Infinity,
         near: (i: number) => number = () => 0
     ): Uint8Array {
-        const snap = ++this.n;
         const eligible: number[] = [];
         for (let i = 0; i < entities.length; i++) {
             const e = entities[i];
             if (!this.prev[i]) {
                 this.prev[i] = new Int32Array(QN);
-                this.lastChange[i] = snap;
-                this.lastSent[i] = -Infinity;
+                this.changedAt[i] = tick;
+                this.lastListed[i] = -Infinity;
                 this.wasVisible[i] = false;
+                this.confirmed[i] = new Set();
             }
             if (!e.visible) {
                 this.wasVisible[i] = false;
@@ -171,18 +181,19 @@ export class SnapshotEncoder {
             }
             quantise(e, this.cur);
             const p = this.prev[i];
+            // shown again: the guests hide it until it is listed (its old pose may be stale)
             let changed = !this.wasVisible[i];
             for (let k = 0; k < QN && !changed; k++) if (p[k] !== this.cur[k]) changed = true;
             if (changed) {
                 p.set(this.cur);
-                this.lastChange[i] = snap;
+                this.changedAt[i] = tick;
+                this.confirmed[i].clear();
             }
             this.wasVisible[i] = true;
-            const recent = snap - this.lastChange[i] < RECENT_SNAPSHOTS;
-            const due = (snap + i) % REFRESH_SNAPSHOTS === 0 || snap - this.lastSent[i] >= 2 * REFRESH_SNAPSHOTS;
-            if (recent || due) eligible.push(i);
+            const c = this.confirmed[i];
+            if (guests.some((g) => !c.has(g))) eligible.push(i);
         }
-        eligible.sort((a, b) => this.lastSent[a] - this.lastSent[b] || near(a) - near(b) || a - b);
+        eligible.sort((a, b) => this.lastListed[a] - this.lastListed[b] || near(a) - near(b) || a - b);
         let room = budget - headerBytes(entities.length);
         const list: number[] = [];
         for (const i of eligible) {
@@ -190,11 +201,17 @@ export class SnapshotEncoder {
             if (b > room) continue;
             room -= b;
             list.push(i);
-            this.lastSent[i] = snap;
+            this.lastListed[i] = tick;
         }
         this.listed = list.length;
         this.deferred = eligible.length - list.length;
         list.sort((a, b) => a - b);
+        this.listedAt.set(tick, list);
+        for (const t of this.listedAt.keys()) if (t > tick) this.listedAt.delete(t); // the sim went back
+        for (const t of this.listedAt.keys()) {
+            if (this.listedAt.size <= LISTED_KEPT) break;
+            this.listedAt.delete(t);
+        }
         return encodeSnapshot(tick, entities, list);
     }
 }
@@ -325,7 +342,10 @@ export class SnapshotDecoder {
         }
         const buf = ring.beginWrite(tick);
         for (let i = 0; i < n; i++) {
-            const shown = (bytes[7 + (i >> 3)] >> (i & 7)) & 1 && this.known[i] ? 1 : 0;
+            const vis = (bytes[7 + (i >> 3)] >> (i & 7)) & 1;
+            // hidden: its pose is forgotten, so when it is shown again it waits for its new one
+            if (!vis) this.known[i] = 0;
+            const shown = vis && this.known[i] ? 1 : 0;
             this.visible[i] = shown;
             this.anim.set(this.lastAnim[i]);
             writeEntity(buf, i, this.last[i], shown === 1, this.anim, ANIM_MAX);
