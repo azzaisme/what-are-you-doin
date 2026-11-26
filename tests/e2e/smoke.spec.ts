@@ -622,7 +622,12 @@ test('physics sandbox: grab and carry the plank, launch the ragdoll, switch to s
         ([x, z, pitch]) => (window as unknown as { __riverLab: Lab }).__riverLab.setFirstPerson(x, z + 1.6, 0, pitch),
         [plank.x, plank.z, pitch]
     );
-    await page.waitForTimeout(500);
+    // grab once the crosshair is on it (not on the comfort plank the carry toggle just put away)
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().target === 'plank',
+        null,
+        { timeout: 60_000 }
+    );
     await lab(page, (l) => l.input({ grab: true }));
     await page.waitForFunction(
         () => (window as unknown as { __riverLab: Lab }).__riverLab.player().holding === 4,

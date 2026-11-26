@@ -53,6 +53,7 @@ import type { GameAd } from './net/session.ts';
 import { localTransport, roomTransport } from './net/transport.ts';
 import type { NetTransport } from './net/transport.ts';
 import { PLAYTEST_STORAGE_KEY, PlaytestLog } from './playtest/telemetry.ts';
+import { FogDome } from './render/fog-dome.ts';
 import { NailMarkers } from './render/nail-markers.ts';
 import { ReferenceRenderer } from './render/reference.ts';
 import { QUALITY, createLabScene } from './render/scene.ts';
@@ -71,7 +72,10 @@ import type { PropsMode } from './sim/lab-sim.ts';
 import { initPhysics } from './sim/physics/world.ts';
 import { ANIM_MAX } from './sim/snapshots.ts';
 import { WATER } from './sim/water.ts';
+import { weatherCovers, weatherFog } from './sim/weather.ts';
 import type { CameraControlsApi } from './types/engine-scripts.ts';
+import { CreditsPanel } from './ui/credits.ts';
+import { fullscreenAvailable, isFullscreen, onPageHidden, setFullscreen } from './ui/embed.ts';
 import { withHammer } from './ui/hammer-hud.ts';
 import { OnlinePanel } from './ui/online-panel.ts';
 import { PlaytestPanel } from './ui/playtest-panel.ts';
@@ -223,6 +227,8 @@ if (level.stream)
         far: true
     });
 const pipeline = new VoxelClient(lanes, sim);
+/** The fog's start for the quality preset (the weather closes the fog in from here and from the level's end). */
+let baseFogStart = scene.app.scene.fog.start;
 /**
  * The quality preset's share of the voxel workers: the mask budget (every level), and on streamed
  * levels how far around the cameras the near world is built.
@@ -232,7 +238,7 @@ function applyViewDistance(q: Quality): void {
     if (!level.stream) return;
     const v = viewDistance(level.stream, q.name);
     pipeline.nearRadius = v.radius;
-    scene.app.scene.fog.start = v.fogStart;
+    scene.app.scene.fog.start = baseFogStart = v.fogStart;
 }
 applyViewDistance(initialQuality);
 // ?masks=off: objects on different lattices draw through one another, as before #107 (comparisons)
@@ -544,6 +550,10 @@ let frameTimeHead = 0;
 let lastFrameStamp = performance.now();
 let renderTime = 0;
 let prevGustPhase = 0;
+/** How far the camera is under the weather's area (eased, so its fog fades in and out at the edge). */
+let weatherUnder = 0;
+/** The fog's sky (created with the first weather): the sky turns the fog colour as it closes in. */
+let fogDome: FogDome | null = null;
 const playerPose = pose();
 const playerAnim = new Float64Array(ANIM_MAX);
 const bodyPose = pose();
@@ -716,9 +726,10 @@ class LabDirector extends Script {
         scene.water.bumpiness = 0.26 + 0.03 * windNow.speed;
         // the flood (Epic 8): the river's surface follows the host's water level
         const hz = guestSession ? guestSession.hazard : sim.hazards.net();
-        if (hz.waterY !== fx.waterY) {
-            scene.waterEntity.setLocalPosition(level.water.cx, hz.waterY, level.water.cz);
-            fx.waterY = hz.waterY;
+        const drawY = Math.min(hz.waterY, level.water.drawMaxY ?? Infinity);
+        if (drawY !== fx.waterY) {
+            scene.waterEntity.setLocalPosition(level.water.cx, drawY, level.water.cz);
+            fx.waterY = drawY;
         }
         // the aimed gust's warning: leaves stream past the player it is aimed at
         if (hz.gust === 1 && prevGustPhase === 0 && hz.gustSlot >= 0 && hz.gustSlot < sim.eyes.length) {
@@ -733,6 +744,30 @@ class LabDirector extends Script {
                 );
         }
         prevGustPhase = hz.gust;
+        // the weather (Epic 9): fog over its own area, rain or snow round the camera
+        const wSpec = level.hazards?.weather;
+        if (wSpec && level.stream) {
+            const c = camera.getPosition();
+            const wz = hz.weatherZone ?? -1;
+            const under = weatherCovers(wSpec, wz, c.x, c.z) ? 1 : 0;
+            weatherUnder += (under - weatherUnder) * Math.min(1, dt * 0.6);
+            const k = (hz.weather ?? 0) * weatherUnder;
+            const f = weatherFog(
+                wSpec,
+                wz,
+                k,
+                { start: baseFogStart, end: level.stream.fog.end },
+                pipeline.nearRadius ?? level.stream.radius
+            );
+            scene.app.scene.fog.start = f.start;
+            scene.app.scene.fog.end = f.end;
+            fogDome ??= new FogDome(scene.app, scene.worldLayer);
+            fogDome.update(c, f.end);
+            const zone = wz >= 0 ? wSpec.zones[wz] : undefined;
+            fx.weather.kind = zone?.kind ?? 0;
+            fx.weather.strength = k;
+            fx.weather.dir = zone?.wind?.dir ?? 0;
+        }
         const cpos = camera.getPosition();
         audio.update({
             time: renderTime,
@@ -1834,12 +1869,21 @@ const netConditions = parseConditions(params.get('netsim'));
 /** A game this tab was playing as a guest before a reload: rejoined (as the same player) when listed. */
 const rejoinCode = gameToRejoin(level.id);
 let wasReconnecting = false;
+let wasHostAway = false;
 
-/** Tells a guest when the host goes quiet and when it is back. */
+/** Tells a guest when the host goes quiet or to the background, and when it is back. */
 function noteReconnect(g: GuestSession): void {
     if (g.reconnecting !== wasReconnecting) {
         wasReconnecting = g.reconnecting;
         showToast(g.reconnecting ? 'Lost the host: reconnecting…' : 'Reconnected', g.reconnecting ? 'warn' : 'info');
+    }
+    if (g.hostAway !== wasHostAway) {
+        wasHostAway = g.hostAway;
+        showToast(
+            g.hostAway ? "The host's game is in the background: it may stop until they come back" : 'The host is back',
+            g.hostAway ? 'warn' : 'info'
+        );
+        online.render();
     }
     // keep the rejoin record fresh, so a reload within the host's grace period comes back
     const now = Date.now();
@@ -1948,6 +1992,7 @@ const online = new OnlinePanel(
                         code: guestSession.code,
                         slot: guestSession.slot,
                         waiting: guestSession.received === 0,
+                        hostAway: guestSession.hostAway,
                         lagMs: guestSession.lagMs,
                         reconnecting: guestSession.reconnecting
                     }
@@ -2103,15 +2148,25 @@ function menuPad(): Gamepad | null {
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 const times = (v: number) => `${v.toFixed(1)}×`;
+// credits and licences (#104), from Settings → Game
+const credits = new CreditsPanel();
 const menu = new SettingsMenu(
     {
         get(key): SettingValue {
+            if (key === 'fullscreen') return isFullscreen();
             if (key === 'cellCm') return cellPending;
             if (key === 'uiHidden') return state.uiHidden;
             if (key === 'debugPanel') return panel.visible;
             return settings[key as keyof Settings];
         },
         set(key, v) {
+            if (key === 'fullscreen') {
+                void setFullscreen(Boolean(v)).then((err) => {
+                    if (err) showToast(err, 'warn');
+                    menu.sync();
+                });
+                return;
+            }
             if (key === 'cellCm') {
                 cellPending = clampCellSizeCm(Number(v));
                 menu.sync();
@@ -2157,6 +2212,9 @@ const menu = new SettingsMenu(
                     break;
                 case 'playtest':
                     playtestPanel.open();
+                    break;
+                case 'credits':
+                    credits.show();
                     break;
                 case 'applyCell':
                     applyCellSize(cellPending);
@@ -2225,6 +2283,8 @@ const menu = new SettingsMenu(
             return true;
         },
         shown(key) {
+            // inside an embed that doesn't allow it, there is no full screen to offer
+            if (key === 'fullscreen') return fullscreenAvailable();
             // touch look speed only where there is touch; mouse rows everywhere else
             if (key === 'touchLookSpeed') return touchSeen;
             if (key === 'mouseSensitivity' || key === 'invertMouseY')
@@ -2267,6 +2327,8 @@ const menu = new SettingsMenu(
                     label: 'Playtest log…',
                     hint: 'What happened this session, to note, copy or save'
                 },
+                { kind: 'toggle', key: 'fullscreen', label: 'Full screen' },
+                { kind: 'button', id: 'credits', label: 'Credits & licences…' },
                 { kind: 'toggle', key: 'uiHidden', label: 'Hide HUD', hint: 'H' },
                 { kind: 'toggle', key: 'debugPanel', label: 'Debug panel', hint: 'F3' }
             ]
@@ -2439,6 +2501,14 @@ pads.onMenu = (pad) => {
     menuPadIndex = pad.index;
     menu.show();
 };
+// full screen changes from either side (our toggle, the embedding page's button, Esc)
+document.addEventListener('fullscreenchange', () => menu.sync());
+// the page hidden (another tab, the phone's home screen): a solo game stops at the menu, so the player
+// comes back to a paused game rather than mid-fall; a host tells its guests the world is waiting
+onPageHidden((hidden) => {
+    hostSession?.setAway(hidden);
+    if (hidden && !hostSession && !guestSession && state.mode === 'firstPerson' && !menu.open && !editing) menu.show();
+});
 document.addEventListener('pointerlockchange', () => {
     // Esc while playing: the browser releases the mouse (the key never reaches the page)
     if (!fpInput.locked && state.mode === 'firstPerson' && !menu.open && !editing) menu.show();
@@ -2532,7 +2602,8 @@ window.__riverLab = {
                       slot: guestSession.slot,
                       received: guestSession.received,
                       lagMs: guestSession.lagMs,
-                      reconnecting: guestSession.reconnecting
+                      reconnecting: guestSession.reconnecting,
+                      hostAway: guestSession.hostAway
                   }
                 : null
         })
@@ -2582,6 +2653,8 @@ window.__riverLab = {
         sim.physics.place(e.id, { p: { x, y, z }, q });
         return true;
     },
+    /** Turns weather zone `n` on at full strength now (host only; tests and screenshots). */
+    weather: (n: number) => !guestSession && sim.hazards.startWeatherNow(sim, n),
     interaction: () => sim.interaction(),
     /** The joint graph: connections, nails, and nail heads drawn this frame. */
     joints: () => ({

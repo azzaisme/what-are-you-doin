@@ -741,7 +741,7 @@ export const FLOOD_PEAK_Y = 0.6;
  * in the clear (between the sign and the oak, and past the rock), so each piece can be picked up
  * by either end.
  */
-function floodWashup(): { x: number; y: number; z: number }[] {
+export function floodWashup(): { x: number; y: number; z: number }[] {
     return [
         [8, 0.6],
         [8, 1.0],

@@ -139,7 +139,12 @@ export interface LevelDef {
     bounds: Rect;
     /** Area the player can walk in (invisible walls). */
     playArea: Rect;
-    water: { y: number; cx: number; cz: number; halfX: number; halfZ: number };
+    /**
+     * The river's surface at rest and the area it covers. `drawMaxY`: the drawn surface never rises
+     * above this (a level whose water area covers its banks keeps a flood in the channel; see
+     * FloodSpec.channel), so the banks are not drawn under water.
+     */
+    water: { y: number; cx: number; cz: number; halfX: number; halfZ: number; drawMaxY?: number };
     /** Continuous ground height (collision and placement use this, never voxels). */
     terrainHeight(x: number, z: number): number;
     /** Same seed → same layout for voxels and colliders. */
