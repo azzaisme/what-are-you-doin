@@ -85,33 +85,42 @@ export function maskReach(b: AABB): number {
     return rest * 1.25 + 0.5;
 }
 /**
- * The High quality preset's least number of cells a lattice's masks may be charged in one voxel
- * frame (see rasterizeMasks): the budget is this, or the cells this lattice's own objects hold when
- * more. Each test is one centre sample, as each of the lattice's own candidate cells costs at least
- * one, so masks stay within about a lattice's own rasterizing (scripts/bench-lattice.ts: +8 ms at
- * worst on the 1 cm lattice, the whole ragdoll head inside a beaver).
- */
-export const MASK_BUDGET = 12_000;
-/**
- * The Low quality preset's mask budget: a fixed number of cells, not raised to the lattice's own,
- * so masks cost little (`BENCH_PRESET=low node scripts/bench-lattice.ts`: at most +0.9 ms). Deep
- * overlaps beyond it intersect as before #107.
- */
-export const MASK_BUDGET_LOW = 50_000;
-
-/** Voxel frames a mask the budget stopped waits before it is tried again (about a second). */
-export const MASK_BACKOFF = 20;
-/** High: the budget rises to the lattice's own cells times this (one mask can cover them all). */
-export const MASK_OWN_SHARE = 4;
-/** High: never more than this, whatever the lattice holds (an absolute bound on mask work). */
-export const MASK_CAP_HIGH = 150_000;
-/**
- * Mask work, in units of one cell scanned: a centre sample costs MASK_SAMPLE_WEIGHT,
- * remeshing one chunk whose cells a mask changes costs MASK_CHUNK_WEIGHT (scripts/bench-lattice.ts
- * calibrates them).
+ * Mask work, in units of one cell scanned (one of this lattice's own cells looked at by a mask): a
+ * centre sample costs MASK_SAMPLE_WEIGHT units, and each chunk whose cells a mask changes costs
+ * MASK_CHUNK_WEIGHT (the resolve; remeshing gets cheaper, hidden cells have no faces). Calibrated
+ * with scripts/bench-lattice.ts on the 1 cm fine lane (Xeon at 2.1 GHz, masks off and on paired):
+ * a unit took 0.036-0.054 µs across the scenes measured, centre samples (about 0.2 µs each, the
+ * beaver's custom parts) being most of it.
  */
 export const MASK_SAMPLE_WEIGHT = 4;
 export const MASK_CHUNK_WEIGHT = 1_000;
+
+/**
+ * The High preset's least mask work a lattice may do in one voxel frame (see rasterizeMasks). The
+ * budget rises from it to MASK_OWN_SHARE times the cells this lattice's own objects hold, up to
+ * MASK_CAP_HIGH.
+ */
+export const MASK_BUDGET = 50_000;
+/** High: the budget rises to the lattice's own cells times this. */
+export const MASK_OWN_SHARE = 4;
+/**
+ * High: never more mask work than this a frame, whatever the lattice holds: 150,000 units, about
+ * 8 ms of worker time on the calibration machine (0.054 µs a unit at worst).
+ *
+ * The trade-off (decided 2026-11-26): a whole beaver deep in the 1 cm ragdoll costs more than that
+ * (on the real fine lane about 11 ms touching the head, 23 ms with the head inside it), so at High,
+ * as at Low, such deep whole-beaver overlaps on the fine lane intersect as before #107. Frame cost
+ * matters more; only the debug stress scene and pile-ups make them. The small cases #107 is about,
+ * the 1 cm bucket in a 5 cm paw and the like, cost a few thousand units and are kept.
+ */
+export const MASK_CAP_HIGH = 150_000;
+/**
+ * The Low preset's budget: a fixed 50,000 units (about 2.7 ms on the calibration machine), never
+ * raised. Deep overlaps beyond it intersect as before #107.
+ */
+export const MASK_BUDGET_LOW = 50_000;
+/** Voxel frames a mask the budget stopped waits before it is tried again (about a second). */
+export const MASK_BACKOFF = 20;
 
 /** Mask budgets per quality preset: the least work, whether it rises with the lattice's own cells, the cap. */
 export const MASK_PRESETS = {
@@ -517,15 +526,19 @@ export class VoxelService {
      * cell gives way where its centre lies inside the winner ('center' sampling, exactly as the
      * rasterizer samples it); there it is left empty here and only the winner's lattice draws it.
      *
-     * Budget (by quality preset, MASK_PRESETS): each mask is charged the most cells it could test
-     * (its union box, at most its outranked objects' cells; nothing is listed for a mask that does
-     * not run). At High at most MASK_BUDGET a frame, or the cells this lattice's objects hold when
-     * more (so one mask can always cover them all); at Low a fixed MASK_BUDGET_LOW. Masks are taken in compositor
-     * order (the highest priority first); one that would overrun what is left is skipped this frame
-     * (its object and this lattice's simply intersect, as before #107) and counted. Hysteresis: a mask
-     * that ran last frame may use the whole budget, and at High so may the first served (it always
-     * fits: it is charged no more cells than this lattice holds); any other new one only 80 % of it,
-     * so a cost that hovers at the limit does not switch a mask on and off every frame.
+     * Budget (by quality preset, MASK_PRESETS), in units of mask work (MASK_SAMPLE_WEIGHT): at
+     * High min(MASK_CAP_HIGH, max(MASK_BUDGET, MASK_OWN_SHARE x this lattice's own cells)), at Low
+     * a fixed MASK_BUDGET_LOW. Masks are taken in compositor order (the highest priority first).
+     *  - Admission: a mask is estimated by what it did last frame if it ran, else by the part of its
+     *    work that is certain (scanning its near outranked objects' cells). One that would overrun
+     *    what is left is skipped this frame (its object and this lattice's intersect, as before
+     *    #107) and counted. Hysteresis: a mask that ran last frame may use the whole budget, and at
+     *    High so may the first served; any other new one only 80 % of it.
+     *  - The budget is enforced on the work itself, as it is done: the scan, the samples and the
+     *    chunks a commit would change are counted first, and a mask that would go over is
+     *    abandoned, cleared, and waits MASK_BACKOFF frames. So a frame's mask work never exceeds
+     *    the budget. Clearing masks that drop out (remeshing what they hid) is counted apart, in
+     *    maskStats.clears.
      */
     private rasterizeMasks(states: Float64Array, reference: boolean, cull: number): void {
         const st = this.maskStats;
@@ -644,7 +657,8 @@ export class VoxelService {
             let won = 0;
             let tested = 0;
             for (let x = 0; x < m && !over; x++) {
-                if ((x & 255) === 0 && st.cells + MASK_SAMPLE_WEIGHT * (tested + 256 * t.parts.length) > budget) {
+                // the most this candidate can add: one sample per part
+                if (st.cells + MASK_SAMPLE_WEIGHT * (tested + t.parts.length) > budget) {
                     over = true;
                     break;
                 }

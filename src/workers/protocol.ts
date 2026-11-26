@@ -54,11 +54,16 @@ export interface FrameStats {
     latticeHidden: number;
     /** Such objects skipped this frame: the lattice's mask budget (maskLimit) was spent. */
     maskSkipped: number;
-    /** Cells charged against the budget this frame (at most maskLimit; each mask is charged the
-     * most cells it could test: its union box, at most its outranked objects' cells). */
+    /**
+     * The mask work done this frame, in units (MASK_SAMPLE_WEIGHT): cells scanned, weighted
+     * samples and changed chunks, plus clearing masks that dropped out. Without those clears it
+     * never exceeds maskLimit.
+     */
     maskCells: number;
-    /** This frame's mask budget (MASK_PRESETS): at High MASK_BUDGET, or the cells this lattice's own
-     * objects hold when more; at Low MASK_BUDGET_LOW. */
+    /**
+     * This frame's mask budget in those units (MASK_PRESETS), on lattices that can mask (0 on the
+     * others, so the pipeline's sum is the masking lattices' budgets).
+     */
     maskLimit: number;
     /** Their parts the rasterizer rejected (runaway bounds), as `rejected` counts for objects. */
     maskRejected: number;

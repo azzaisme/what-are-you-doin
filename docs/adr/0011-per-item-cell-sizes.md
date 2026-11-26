@@ -56,7 +56,8 @@ tell whether it held water. It also held none: the asset had a water level but n
   not: a fine object and a base object in the same space simply intersected, sorted by depth.
     - Each lattice's worker also rasterizes, at its own cell size, every object of another lattice
       that outranks one of its own: priority, then lower id, as within a lattice, except that your
-      own first-person limbs win ties.
+      own first-person limbs win ties against other lattices' objects (with one lattice for
+      everything, `?tiers=off`, there are no masks and the lower id wins, as before).
     - Such a mask tests only the cells this lattice's outranked objects hold, inside one box per
       part: where that part's bounds meet the bounds of the parts it outranks. It tests cell
       centres only, exactly as the rasterizer's 'center' sampling would.
@@ -66,37 +67,32 @@ tell whether it held water. It also held none: the asset had a water level but n
       the true surface.
     - Only objects take part: the static world stays on the base lattice, and dynamic-over-static
       still resolves there.
-    - **Budget** (amended 2026-11-23, after the re-audit), by quality preset (`MASK_PRESETS`;
-      1 cm lattices exist at both presets). Each mask is charged the most cells it could test (its
-      union box, at most its outranked objects' cells), reported as `maskLimit`/`maskCells`.
-        - **High:** at most `MASK_BUDGET` (12,000) cells a voxel frame, or as many as the
-          lattice's own objects hold when that is more.
-        - **Low:** a fixed `MASK_BUDGET_LOW` (12,000), never raised, so masks stay cheap on phones;
-          deep overlaps beyond it intersect as before.
-          At High So the first mask can always cover everything: a beaver
-          over the 1 cm ragdoll head keeps priority however deep it goes. The first version sampled every
-          cell of the boxes within a fixed 12,000; deep overlap at 1 cm never fitted.
-        - Masks are served highest priority first; one that would overrun what is left is skipped
-          that frame, and its object and this lattice's simply intersect again.
-        - Hysteresis: any mask that ran last frame, and at High the first mask served, may use the
-          whole budget; any other new one only 80 % of it. A cost hovering at the limit does not switch a
-          mask on and off.
-        - The stats count skipped masks (`maskSkipped`) and rejected mask parts (`maskRejected`:
-          a part posed out of bounds, such as a non-finite animation channel).
-    - **Cost** (`scripts/bench-lattice.ts`, everything moving, masks off and on run side by side;
-      median over 200 frames, an idle Xeon at 2.1 GHz):
-        - +0.2 ms on the base lattice with the bucket in a paw;
-        - +0.3 ms on the first-person limbs holding the bucket, with three other players beside you;
-        - High, on the 1 cm lattice with the ragdoll's head (20–22 ms a frame without masks, a
-          slower container): +2.9 ms with three players half a metre away, +8.0 ms with the beaver
-          standing in it (46,414 head cells hidden), +6.8 ms with the beaver and four players
-          around it. A cell tested costs one sample, as each of the lattice's own candidate cells
-          does, so masks stay within about the lattice's own rasterizing time.
-        - Low (`BENCH_PRESET=low`): at most +0.9 ms in every scene; the deep overlaps skip.
-        - **This is voxel-worker time, off the main thread.** The main thread only uploads the
-          remeshed cut: in the scripted River Lab (8 masks, 45,271 cells hidden, High), the upload
-          per voxel frame goes from 2.6 to 2.8 ms (median; p95 4.2 to 5.0 ms). The worker's frame
-          there goes from 49 to 67 ms, so voxel updates come later, not the frame rate.
+    - **Mask work** (amended 2026-11-26, after the audit of 6843c88) is counted in units: one per
+      cell scanned (only the outranked objects whose bounds meet the mask's box, chunks outside it
+      skipped), 4 per centre sample, 1,000 per chunk whose cells it changes. Calibrated on the 1 cm
+      fine lane (Xeon, 2.1 GHz): 0.036–0.054 µs a unit across the scenes measured, samples (about
+      0.2 µs each) most of it; meshing gets cheaper with masks, hidden cells have no faces.
+    - **Budget, by quality preset** (`MASK_PRESETS`; 1 cm lattices exist at both, phones included):
+      High `max(50,000, 4 × the lattice's own cells)`, capped at 150,000 units (about 8 ms of worker
+      time on that machine); Low a fixed 50,000 (about 2.7 ms).
+        - Masks are served highest priority first, each estimated by what it did last frame if it
+          ran, else by the scan it certainly needs. One that would overrun what is left is skipped
+          that frame (its object and this lattice's intersect again). Hysteresis: one that ran last
+          frame, and at High the first served, may use the whole budget, any other new one 80 %.
+        - The budget is enforced on the work as it is done: a mask that would go over it is
+          abandoned, cleared, and waits 20 voxel frames. So a frame's mask work never exceeds it;
+          clearing masks that drop out is counted apart.
+        - The stats count skipped masks (`maskSkipped`), the work (`maskCells`), the budget
+          (`maskLimit`, on lattices that can mask) and rejected mask parts (`maskRejected`).
+    - **The trade-off:** a whole beaver deep in the 1 cm ragdoll costs more than the High cap (on
+      the real fine lane about 11 ms touching its head, 23 ms with the head inside it). So at High,
+      as at Low, such deep whole-beaver overlaps on the fine lane intersect as before. Frame cost
+      matters more; only the debug stress scene and pile-ups make them. The small cases the
+      priority is for (the 1 cm bucket in a 5 cm paw) cost a few thousand units and are kept.
+    - **Cost** (`scripts/bench-lattice.ts`, everything moving, masks off and on side by side; the
+      1 cm scenes on the real fine lane): at most +3.5 ms at High (three players beside the
+      ragdoll, 3 masks), +1.1 ms at Low; the bucket in the paw +0.25 ms. The work is voxel-worker
+      time: the main thread only uploads the remeshed cut (+0.2 ms median measured in the browser).
     - `?masks=off` turns it off, for comparisons.
 - **The fine lattice reaches ±160 m across and ±18 m up** (its chunk coordinates are limited;
   widened from ±80 m for the Valley). Beyond that, a fine object is not drawn instead of crashing

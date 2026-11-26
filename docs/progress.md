@@ -12,26 +12,46 @@ by priority across lattices, as they always did within one (ADR 0011, amended).
   outranks. Where it wins, the cell is left empty there and the winner's own lattice draws it.
 - **Priority** is the objects' own: priority, then lower id. The bucket (4) wins over the beaver (3)
   and planks (1); the beaver over the ute (2) and the ragdoll (2). Your own first-person limbs win
-  ties, so another player's beaver never cuts holes in them.
-- **Budget, by quality preset:** each mask is charged the most cells it could test (its union box,
-  at most its outranked objects' cells). High: at most 12,000 a frame (`MASK_BUDGET`), or as many as
-  the lattice's own objects hold when more. Low: a fixed 12,000 (`MASK_BUDGET_LOW`), never raised,
-  so masks stay cheap on phones (1 cm lattices exist at both presets). Highest priority first; a
-  mask that would overrun it is skipped that frame (its object intersects as before) and counted
-  (`maskSkipped`). Hysteresis: one that ran last frame, and at High the first served, may use it
-  all, any other new one 80 %. Mask parts posed out of bounds are counted (`maskRejected`).
-- **Re-audit (2026-11-23):** the first version sampled every cell of the boxes within a fixed
-  12,000, so the beaver deep over the 1 cm ragdoll head was always skipped, and at the threshold it
-  toggled every frame. Testing only the lattice's own cells, the budget rule and the hysteresis
-  above fix both (1 cm unit tests: the audit's 2 mm sweep, a jitter at 0.490 m, a start deep inside).
+  ties against other lattices' objects, so another player's beaver never cuts holes in them. With
+  one lattice for everything (`?tiers=off`) there are no masks and the lower id wins ties, as before
+  #107.
+- **Mask work** is counted in units: one per cell of this lattice's that a mask scans (only the
+  outranked objects whose bounds meet its box, chunks outside the box skipped), 4 per centre
+  sample, 1,000 per chunk whose cells it changes (the resolve; meshing gets cheaper, hidden cells
+  have no faces). On the calibration machine (Xeon, 2.1 GHz) a unit took 0.036–0.054 µs across the
+  scenes measured; samples are most of it (about 0.2 µs each, the beaver's custom parts).
+- **Budget, by quality preset:**
+    - High: `max(MASK_BUDGET 50,000, 4 × the lattice's own cells)`, capped at `MASK_CAP_HIGH`
+      150,000 units (about 8 ms of worker time on that machine).
+    - Low: a fixed 50,000 units (`MASK_BUDGET_LOW`, about 2.7 ms), never raised. 1 cm lattices
+      exist at both presets, phones included.
+    - Highest priority first. A mask is estimated by what it did last frame if it ran, else by the
+      scan it certainly needs. One that would overrun what is left is skipped that frame (its
+      object intersects as before) and counted (`maskSkipped`). Hysteresis: one that ran last
+      frame, and at High the first served, may use it all, any other new one 80 %.
+    - The budget is enforced on the work as it is done: a mask whose scan, samples or changed
+      chunks would go over it is abandoned, cleared, and waits 20 voxel frames before it is tried
+      again. So a frame's mask work never exceeds the budget; clearing masks that drop out is
+      counted apart.
+    - Mask parts posed out of bounds are counted (`maskRejected`).
+- **The trade-off** (2026-11-26): a whole beaver deep in the 1 cm ragdoll costs more than the cap
+  (on the real fine lane about 11 ms touching its head, 23 ms with the head inside it), so at High,
+  as at Low, such deep whole-beaver overlaps on the fine lane intersect as before #107. Frame cost
+  matters more, and only the debug stress scene and pile-ups make them. The cases #107 is about,
+  the 1 cm bucket in a 5 cm paw and the like, cost a few thousand units and are kept.
+- **Audits:** the first version sampled every cell of the boxes within a fixed 12,000, so the
+  beaver over the 1 cm ragdoll head toggled at the threshold (re-audit, 2026-11-23). The second
+  had no absolute cap and charged cells that did not track the time (audit of 6843c88,
+  2026-11-26). The cost model, the cap and the enforced budget above answer both.
 - **The static world** is not part of this: it stays on the base lattice, where moving objects
   already win over it.
 - **Known gap (your own held object):** your first-person limbs are moved as one piece every render
   frame (`lockBody`), and the holes a mask cuts in them move with them. The held bucket, on the
   fine lattice, stays at its voxel-frame pose. Between voxel frames the cut and the bucket separate
   by how far the camera moved since that frame, so a sliver can open at the handle. That is new
-  with #107 (before it the handle simply drew inside the paw). Not fixed here: the fix is to lock
-  the held object together with the limbs.
+  with #107 (before it the handle simply drew inside the paw). In a real carry (a physics grab)
+  your paws hold the bucket's outside and the mask hides no cells, so it does not show there. Not
+  fixed here: the fix is to lock the held object together with the limbs.
 - **Debug panel:** "lattices N" after the overlap counts: cells another lattice's object takes now.
   `__riverLab.latticeHidden()` gives them per object. `?masks=off` turns it off, for comparisons.
 
@@ -39,59 +59,53 @@ by priority across lattices, as they always did within one (ADR 0011, amended).
 
 `node scripts/bench-lattice.ts` (High) and `BENCH_PRESET=low node scripts/bench-lattice.ts` (Low):
 one lattice's worker, the other objects placed as listed in the script, everything moving 2 mm a
-frame. Masks off (as before) and on run side by side, framed alternately; median over 200 frames,
-on the container's CPU (Xeon, 2.1 GHz), idle. "Cells" is the cells charged against the budget a
-frame.
+frame. The 1 cm scenes draw the real fine lane (main.ts: the bucket, the stress objects and the
+ragdoll's head and limbs; your limbs have their own lane). Masks off (as before) and on run side by
+side, framed alternately; median over 200 frames, on the container's CPU (Xeon, 2.1 GHz), idle.
+"Work" is the mask work a frame, in units (its peak over the run in brackets).
 
-| Lattice: its object; the others                                      | Masks off (ms) | High: on (ms) | Masks (skipped) |  Cells | Hidden | Low: on (ms) | Masks (skipped) |
-| -------------------------------------------------------------------- | -------------: | ------------: | --------------: | -----: | -----: | -----------: | --------------: |
-| 1 cm: the bucket, alone                                              |          14.26 |         14.55 |           0 (0) |      0 |      0 |        14.14 |           0 (0) |
-| 1 cm: the bucket; the beaver and the held plank touching it          |          14.19 |         14.03 |           1 (0) |  5,470 |    510 |        13.88 |           1 (0) |
-| 5 cm: the beaver; the 1 cm bucket in it                              |           4.05 |          4.32 |           1 (0) |    725 |    162 |         4.02 |           1 (0) |
-| 1 cm: your limbs carrying the bucket; three players 0.55 m away (\*) |          15.60 |         16.09 |           1 (0) |    746 |      4 |        16.79 |           1 (0) |
-| 1 cm: the ragdoll's head; the beaver standing inside it              |          22.32 |         30.32 |           1 (0) | 46,435 | 46,414 |        21.50 |           0 (1) |
-| 1 cm: the ragdoll's head; three players 0.5 m away                   |          20.71 |         23.60 |           1 (1) | 19,655 |  2,661 |        21.03 |           0 (2) |
-| 1 cm: the ragdoll's head; the beaver and four players around         |          20.99 |         27.82 |           1 (4) | 46,435 | 46,414 |        20.74 |           0 (5) |
-| 1 cm: the ragdoll's head and limbs; its 5 cm body                    |          34.74 |         34.55 |           0 (0) |      0 |      0 |        36.00 |           0 (0) |
+| Lattice: its object; the others | Masks off (ms) | High: on (ms) | Masks (skipped) | Work (peak) | Hidden | Low: on (ms) | Masks (skipped) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 cm: the bucket, alone | 13.35 | 13.33 (-0.03) | 0 (0) | 0 (0) | 0 | 12.64 (+0.02) | 0 (0) |
+| 1 cm: the bucket, the beaver and the held plank touching it | 13.36 | 13.05 (-0.31) | 1 (0) | 16,026 (20,090) | 510 | 13.02 (-0.28) | 1 (0) |
+| 5 cm beaver, the 1 cm bucket in it | 3.65 | 3.90 (+0.25) | 1 (0) | 7,421 (10,944) | 162 | 3.95 (+0.22) | 1 (0) |
+| 1 cm your limbs carrying the bucket, three avatars 0.55 m away (a real grab) | 15.72 | 16.00 (+0.28) | 1 (0) | 29,866 (29,875) | 0 | 15.48 (+0.24) | 1 (0) |
+| 1 cm: the ragdoll standing, the beaver touching its head from above | 34.36 | 34.63 (+0.27) | 0 (1) | 6,712 (134,232) | 0 | 33.88 (+0.21) | 0 (1) |
+| 1 cm: the ragdoll standing, the beaver deep inside it | 34.46 | 34.53 (+0.08) | 0 (1) | 6,695 (133,904) | 0 | 34.66 (+0.33) | 0 (1) |
+| 1 cm: the ragdoll standing, three avatars 0.5 m away | 34.48 | 38.00 (+3.52) | 3 (0) | 100,375 (112,820) | 9,825 | 35.33 (+1.12) | 1 (2) |
+| 1 cm: the ragdoll, the beaver and four avatars in it | 34.06 | 34.66 (+0.60) | 0 (5) | 33,521 (134,432) | 0 | 34.09 (+0.52) | 0 (5) |
+| 1 cm: pile-up, the beaver and eight avatars deep in the ragdoll | 34.90 | 35.84 (+0.94) | 0 (9) | 60,515 (135,984) | 0 | 34.04 (+0.52) | 0 (9) |
+| 1 cm: the ragdoll at rest, its 5 cm body at the joints | 34.46 | 34.37 (-0.09) | 0 (0) | 0 (0) | 0 | 33.31 (-0.20) | 0 (0) |
 
-(Low's "masks off" column is within run-to-run noise of High's; Low's own run gave 13.97 to 35.88 ms.)
-
-(\*) Re-measured after #139, in a later run: your arms now hang unless you carry something, so the
-scene poses the limbs carrying, with the bucket hanging by its handle from the left paw as the sim
-hangs it. Its masks-off column (15.60 ms) is from that run.
-
-- Before the re-audit, the beaver standing in the head and the crowded head skipped their masks
-  (0 hidden): the head drew through the beaver. At High they now cost +8.0 and +6.8 ms, the price
-  of hiding the whole head (46,414 cells) and remeshing around it. At Low they skip again, and
-  every scene stays within +0.9 ms.
+- **Worst case measured:** High +3.52 ms (three players 0.5 m from the ragdoll: 3 masks, 9,825
+  cells hidden, peak work 112,820 of 150,000); Low +1.12 ms. The deep overlaps skip (tried, stopped
+  by the budget, then waiting 20 frames: +0.1 to +0.9 ms).
 - **Off the main thread:** this is voxel-worker time. In the browser (scripted River Lab, High,
-  8 masks hiding 45,271 cells, SwiftShader at 640 × 360), the main thread's mesh upload per voxel
-  frame goes from 2.6 to 2.8 ms (median; p95 4.2 to 5.0 ms), and the slowest worker's frame from 49
-  to 67 ms: voxel updates come later. The frame itself (3.4 s in software rendering, one run) moved
-  by +4 %, which this run cannot tell from noise.
+  8 masks hiding 45,271 cells, SwiftShader at 640 × 360, measured before the cap), the main thread's
+  mesh upload per voxel frame went from 2.6 to 2.8 ms (median; p95 4.2 to 5.0 ms), and the slowest
+  worker's frame from 49 to 67 ms. COOP
 - The ragdoll at rest: its 5 cm body does not touch its 1 cm head or limbs, so it costs nothing.
-  When it flails, the budget bounds it like any other mask.
 
 Pixels (`node scripts/verify-pixels.mjs`, scenes in `scripts/verify-pixels-107.json`; frozen
-frames, 480 × 270, SwiftShader). Measured again after the re-audit, against epics-5-10 at 83a3248,
-with the harness now waiting until the camera has held still for 5 frames before it captures (the
-orbit camera eases in, and a loaded machine could capture it mid-way; the re-audit saw the paw
-scene vary from run to run in either build). Two captures of each build now match exactly in all
-ten scenes.
+frames, 480 × 270, SwiftShader, High, waiting until the camera has held still for 5 frames before
+it captures). Measured on this head against its epics-5-10 base (6425ef9); two captures of each
+build match exactly in all ten scenes.
 
 - **Unchanged, 0 of 129,600 pixels differ in each:**
     - the River Lab at t = 4 from three views (no masks);
     - the Timber Yard from two views (no masks);
     - the Valley from two views (no masks);
-    - first person beside the yard's bucket, from two spots: here the bucket's mask is tested on
-      your limbs' lattice and loses (latticeMasks 1, latticeHidden 0).
+    - first person beside the yard's bucket, from two spots (no masks: since #139 your empty-handed
+      arms hang, and no longer touch the bucket there).
 - **The scripted River Lab, the bucket in the paw** (t = 4; orbit camera at (5.2, 0.9, -3.5)
-  looking at (4.6, 0.55, -4.15); latticeMasks 8, latticeHidden 45,272): 754 pixels differ.
+  looking at (4.6, 0.55, -4.15); latticeMasks 3, latticeHidden 24): 754 pixels differ.
     - 464 differ by more than one level, all inside a 29 × 25 pixel box at the paw and handle:
       the intended change.
     - The other 290 each differ by one level out of 255. The bloom samples the whole screen, so it
       picks up the changed paw.
-    - Nothing else in the frame changes: the other hidden cells lie behind the winners' surfaces.
+    - Before the cap the same frame had 8 masks hiding 45,272 cells (deep overlaps in the scripted
+      props' pile at the origin). Its image is identical to this one (0 pixels): those hidden cells
+      were all behind the winners' surfaces.
 
 ### Tests
 
@@ -101,12 +115,22 @@ ten scenes.
     - a lower-priority object on another lattice changes nothing (same hash);
     - the coarse and fine lattices give way to the base one by priority;
     - cells come back when the winner leaves, and match a fresh build;
-    - your own limbs win ties;
+    - your own limbs win ties against other lattices' objects, and with one lattice for everything
+      the lower id wins, as before #107;
     - the budget is served highest priority first, and nothing is hidden when nothing fits;
+    - `maskLimit` is reported by lattices that can mask, also with no mask that frame, and is 0 on
+      one that cannot (so the pipeline's sum is the masking lattices' budgets);
+    - a mask part posed out of bounds is counted that frame only;
     - `masks` off, and one lattice for everything, have no masks.
-- Unit, at 1 cm through the real worker: your limbs holding the bucket beside three players, and
-  the ragdoll's head with the beaver and four players around it, stay within the budget every
-  frame, with no rejected mask parts.
+- Unit, at 1 cm:
+    - your limbs carrying the bucket from a real physics grab (as `hands.test` grabs it): the mask
+      hides exactly your cells inside the bucket (none: the paws hold its outside);
+    - the beaver swept down into the ragdoll on the real fine lane: a frame's mask work never
+      exceeds its limit, abandoned attempts included;
+    - a mask the budget stops is cleared and waits 20 frames before it is tried again;
+    - a pile-up of the ragdoll, the beaver, eight players and the stress objects stays under the cap;
+    - Low: a fixed budget, the bucket against the beaver still masks, deep overlaps skip;
+    - hysteresis between masks does not toggle at the limit.
 - Browser:
     - in the scripted River Lab the beaver's paw gives cells to the bucket at three times, and the
       bucket keeps all its own;

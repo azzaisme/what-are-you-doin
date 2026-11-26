@@ -417,169 +417,235 @@ describe('lattice priority (#107)', () => {
         expect(back.latticeHidden).toBe(hidden);
     }, 60_000);
 
-    it('at 1 cm: the beaver keeps priority over the head however deep it overlaps, without toggling', async () => {
+    /** The 1 cm service module (cell size fixed per module load), with the real fine lane's draws. */
+    async function fineService() {
         vi.resetModules();
         (globalThis as { __UE_CELL_CM__?: number }).__UE_CELL_CM__ = 1;
-        try {
-            const { GRID_SIZE } = await import('../../src/voxels/grid.ts');
-            expect(GRID_SIZE).toBe(0.01);
-            const { VoxelService: Service, MASK_BUDGET: BUDGET } = await import('../../src/workers/voxel-service.ts');
-            const at = (y: number) =>
-                states([
-                    { e: head, x: 0, y: 0.5, z: 0 },
-                    { e: beaver, x: 0, y, z: 0 }
-                ]);
-            const svc = new Service(new Set([head.id]));
+        const grid = await import('../../src/voxels/grid.ts');
+        expect(grid.GRID_SIZE).toBe(0.01);
+        const mod = await import('../../src/workers/voxel-service.ts');
+        // the real fine lane (main.ts): every fine-tier object but your limbs, which have their own
+        const fine = entities.filter((e) => assetTier(e.asset) === 'fine' && e.name !== 'fp-body');
+        const make = (preset: 'high' | 'low' = 'high') => {
+            const svc = new mod.VoxelService(new Set(fine.map((e) => e.id)));
             svc.build(1, 'yard', undefined, false);
-            // the audit's sweep: from 0.58 m down into the head in 2 mm steps (it used to stop
-            // masking at 0.490 m, where the torso's box passed the budget)
+            svc.setMaskPreset(preset);
+            return svc;
+        };
+        return { mod, make, fine };
+    }
+    const fineDone = () => {
+        delete (globalThis as { __UE_CELL_CM__?: number }).__UE_CELL_CM__;
+        vi.resetModules();
+    };
+    // the ragdoll standing at the origin (scripts/bench-lattice.ts RAGDOLL)
+    const RAGDOLL: Place[] = [
+        { e: byName('dummy-body'), x: 0, y: 0.62, z: 0 },
+        { e: byName('dummy-head'), x: 0, y: 1.08, z: 0.02 },
+        { e: byName('dummy-armL'), x: 0.27, y: 0.72, z: 0 },
+        { e: byName('dummy-armR'), x: -0.27, y: 0.72, z: 0 },
+        { e: byName('dummy-legL'), x: 0.11, y: 0.16, z: 0 },
+        { e: byName('dummy-legR'), x: -0.11, y: 0.16, z: 0 },
+        { e: byName('dummy-tail'), x: 0, y: 0.36, z: -0.36 }
+    ];
+    /** A frame's mask work without forced clears (those are outside the budget, see clearMask). */
+    const work = (svc: VoxelService) => svc.maskStats.cells - svc.maskStats.clears;
+
+    it("at 1 cm, High, the real fine lane: a frame's mask work never exceeds its limit, abandoned attempts included", async () => {
+        try {
+            const { mod, make } = await fineService();
+            const svc = make('high');
+            let abandoned = 0;
+            let ranMasks = 0;
             let f = 0;
-            for (let y = 0.58; y > 0.38; y -= 0.002) {
-                const s = svc.frame(f++, f / 20, 'coverage50', false, at(y)).stats;
-                expect(s.latticeMasks, `y ${y.toFixed(3)}`).toBe(1);
-                expect(s.maskSkipped).toBe(0);
-                expect(s.latticeHidden).toBeGreaterThan(3000);
-                expect(s.maskCells).toBeLessThanOrEqual(s.maskLimit);
-                expect(s.maskLimit).toBe(Math.max(BUDGET, svc.world.objectCellCount(head.id)));
+            // the beaver from above the ragdoll down into it, 1 cm a frame, with a 2 mm jitter
+            for (let y = 0.9; y >= 0; y -= 0.01, f++) {
+                const s = svc.frame(
+                    f,
+                    f / 20,
+                    'coverage50',
+                    false,
+                    states([...RAGDOLL, { e: beaver, x: f % 2 ? 0.002 : 0, y, z: 0 }])
+                ).stats;
+                expect(s.maskLimit).toBeLessThanOrEqual(mod.MASK_CAP_HIGH);
+                expect(work(svc), `y ${y.toFixed(2)}`).toBeLessThanOrEqual(s.maskLimit);
+                if (s.maskSkipped > 0 && svc.maskStats.scanned > 0) abandoned++;
+                ranMasks += s.latticeMasks;
             }
-            // held at 0.490 m with a 2 mm jitter: masked every frame, the same cells each way
-            const hiddenAt = new Map<number, number>();
-            for (let n = 0; n < 30; n++) {
-                const y = n % 2 ? 0.492 : 0.488;
-                const s = svc.frame(f++, f / 20, 'coverage50', false, at(y)).stats;
-                expect(s.latticeMasks).toBe(1);
-                expect(s.maskSkipped).toBe(0);
-                if (hiddenAt.has(y)) expect(s.latticeHidden).toBe(hiddenAt.get(y));
-                hiddenAt.set(y, s.latticeHidden);
-            }
-            // the head wholly inside the beaver: all but its cells outside the beaver hidden
-            const deep = svc.frame(f++, f / 20, 'coverage50', false, at(0)).stats;
-            expect(deep.latticeMasks).toBe(1);
-            expect(deep.latticeHidden).toBeGreaterThan(0.99 * svc.world.objectCellCount(head.id));
-
-            // starting already deep inside (no frames to come in): masked from the first frame
-            const fresh = new Service(new Set([head.id]));
-            fresh.build(1, 'yard', undefined, false);
-            const first = fresh.frame(0, 0, 'coverage50', false, at(0)).stats;
-            expect(first.latticeMasks).toBe(1);
-            expect(first.maskSkipped).toBe(0);
-            expect(first.latticeHidden).toBe(deep.latticeHidden);
-
-            // hysteresis, between masks: the bucket (priority 4) is served first and always fits;
-            // the beaver's mask comes second, the budget pinned to what is left at its cost at
-            // 0.66 m (above the head, where its cost still grows with depth; deeper it is capped at
-            // the head's own cells). Once running it stays while its cost hovers at the limit; once
-            // skipped it stays off until well under.
-            const withBucket = (y: number) =>
-                states([
-                    { e: head, x: 0, y: 0.5, z: 0 },
-                    { e: bucket, x: 0, y: 0.45, z: 0.05 },
-                    { e: beaver, x: 0, y, z: 0 }
-                ]);
-            // the costs, measured with no budget to speak of
-            const probe = new Service(new Set([head.id]));
-            probe.build(1, 'yard', undefined, false);
-            probe.maskOwnBudget = false;
-            probe.maskBudget = 1e9;
-            const bucketOnly = probe.frame(
-                0,
-                0,
-                'coverage50',
-                false,
-                states([
-                    { e: head, x: 0, y: 0.5, z: 0 },
-                    { e: bucket, x: 0, y: 0.45, z: 0.05 }
-                ])
-            ).stats.maskCells;
-            expect(bucketOnly).toBeGreaterThan(0);
-            const both = (y: number) => probe.frame(1, 0, 'coverage50', false, withBucket(y)).stats;
-            const lo = both(0.658).maskCells - bucketOnly;
-            const hi = both(0.662).maskCells - bucketOnly;
-            expect(lo).toBeGreaterThan(hi); // deeper costs more
-            const pinned = new Service(new Set([head.id]));
-            pinned.build(1, 'yard', undefined, false);
-            pinned.maskOwnBudget = false;
-            pinned.maskBudget = bucketOnly + Math.floor((lo + hi) / 2);
-            // the beaver starts further out, where it costs under 80 % of the budget, and comes in
-            let g = 0;
-            for (let y = 0.8; y > 0.662; y -= 0.002) pinned.frame(g++, 0, 'coverage50', false, withBucket(y));
-            const ran: number[] = [];
-            for (let n = 0; n < 30; n++) {
-                const s = pinned.frame(g++, 0, 'coverage50', false, withBucket(n % 2 ? 0.662 : 0.658)).stats;
-                expect(s.maskCells).toBeLessThanOrEqual(pinned.maskBudget);
-                expect(pinned.world.objectCellCount(bucket.id)).toBeGreaterThan(0); // always served
-                ran.push(s.latticeMasks);
-            }
-            // at most one change (both running, then the beaver skipped at a deeper frame), never back
-            const changes = ran.filter((v, n) => n > 0 && v !== ran[n - 1]).length;
-            expect(changes).toBeLessThanOrEqual(1);
-            expect(ran[29]).toBe(1);
+            // the guard was exercised: attempts were stopped part-way
+            expect(abandoned).toBeGreaterThan(0);
+            expect(ranMasks).toBeGreaterThanOrEqual(0);
         } finally {
-            delete (globalThis as { __UE_CELL_CM__?: number }).__UE_CELL_CM__;
-            vi.resetModules();
+            fineDone();
         }
     }, 300_000);
-    it('at 1 cm, the Low preset: a fixed budget, never raised, and hysteresis for every mask', async () => {
-        vi.resetModules();
-        (globalThis as { __UE_CELL_CM__?: number }).__UE_CELL_CM__ = 1;
+
+    it('at 1 cm: a mask the budget stops is cleared and waits MASK_BACKOFF frames before it is tried again', async () => {
         try {
-            const {
-                VoxelService: Service,
-                MASK_BUDGET_LOW: LOW,
-                MASK_PRESETS: PRESETS
-            } = await import('../../src/workers/voxel-service.ts');
-            expect(PRESETS.low).toEqual({ budget: LOW, own: false });
-            expect(PRESETS.high.own).toBe(true);
+            const { mod } = await fineService();
+            // the head alone on its lattice, the beaver touching it from above: it fits and masks
+            const svc = new mod.VoxelService(new Set([head.id]));
+            svc.build(1, 'yard', undefined, false);
             const at = (y: number) =>
                 states([
                     { e: head, x: 0, y: 0.5, z: 0 },
                     { e: beaver, x: 0, y, z: 0 }
                 ]);
-            const svc = new Service(new Set([head.id]));
-            svc.build(1, 'yard', undefined, false);
-            // the preset comes with each frame (from the device's quality setting)
-            const deep = svc.frame(
-                0,
+            let f = 0;
+            let s = svc.frame(f++, 0, 'coverage50', false, at(0.78)).stats;
+            for (let n = 0; n < 3; n++) s = svc.frame(f++, 0, 'coverage50', false, at(0.78)).stats;
+            expect(s.latticeMasks).toBe(1);
+            expect(s.latticeHidden).toBeGreaterThan(0);
+            // then deep inside: estimated from last frame, tried, stopped by the budget, cleared
+            s = svc.frame(f++, 0, 'coverage50', false, at(0)).stats;
+            expect(svc.maskStats.scanned).toBeGreaterThan(0);
+            expect(s.latticeMasks).toBe(0);
+            expect(s.maskSkipped).toBe(1);
+            expect(work(svc)).toBeLessThanOrEqual(s.maskLimit);
+            expect(svc.world.objectCellCount(beaver.id)).toBe(0);
+            expect(s.latticeHidden).toBe(0);
+            expect(svc.maskStats.clears).toBeGreaterThan(0); // remeshing what it hid, counted
+            // it waits: no work for MASK_BACKOFF - 1 frames, then one more try
+            for (let n = 1; n < mod.MASK_BACKOFF; n++) {
+                s = svc.frame(f++, 0, 'coverage50', false, at(0)).stats;
+                expect(svc.maskStats.scanned, `frame ${n} of the wait`).toBe(0);
+                expect(s.maskSkipped).toBe(1);
+            }
+            svc.frame(f++, 0, 'coverage50', false, at(0));
+            expect(svc.maskStats.scanned).toBeGreaterThan(0);
+        } finally {
+            fineDone();
+        }
+    }, 300_000);
+
+    it('at 1 cm, hysteresis: a new mask starts only within 80 % of the budget; one that ran may use all of it', async () => {
+        try {
+            const { mod } = await fineService();
+            const at = states([
+                { e: head, x: 0, y: 0.5, z: 0 },
+                { e: beaver, x: 0, y: 0.78, z: 0 }
+            ]);
+            const service = () => {
+                const svc = new mod.VoxelService(new Set([head.id]));
+                svc.build(1, 'yard', undefined, false);
+                svc.maskOwnBudget = false;
+                return svc;
+            };
+            const pin = (svc: VoxelService, x: number) => {
+                svc.maskBudget = x;
+                svc.maskCap = x;
+            };
+            // running, with room to spare: its work W
+            const run = service();
+            pin(run, 1e9);
+            for (let f = 0; f < 3; f++) run.frame(f, 0, 'coverage50', false, at);
+            const w = work(run);
+            expect(w).toBeGreaterThan(0);
+            // the budget brought down so W is over 80 % of it: having run, it keeps running
+            pin(run, Math.ceil(w / 0.9));
+            for (let f = 3; f < 13; f++) {
+                const s = run.frame(f, 0, 'coverage50', false, at).stats;
+                expect(s.latticeMasks, `frame ${f}`).toBe(1);
+                expect(work(run)).toBeLessThanOrEqual(s.maskLimit);
+            }
+            // a new one whose certain cost (the scan) is over 80 % of the budget does not start
+            const fresh = service();
+            const held =
+                fresh.frame(0, 0, 'coverage50', false, states([{ e: head, x: 0, y: 0.5, z: 0 }])) &&
+                fresh.world.objectCellCount(head.id);
+            pin(fresh, Math.floor(held / 0.9));
+            const s = fresh.frame(1, 0, 'coverage50', false, at).stats;
+            expect(s.maskSkipped).toBe(1);
+            expect(fresh.maskStats.scanned).toBe(0);
+        } finally {
+            fineDone();
+        }
+    }, 300_000);
+
+    it('at 1 cm, a pathological scene: many overlapping outranked objects, the mask work stays under the cap', async () => {
+        try {
+            const { mod, make, fine } = await fineService();
+            const svc = make('high');
+            // the ragdoll, the beaver deep inside it and eight avatars around and through it, with
+            // every stress object of the fine lane piled in as well
+            const stress = fine.filter((e) => e.name.startsWith('stress-'));
+            expect(stress.length).toBeGreaterThan(4);
+            const crowd: Place[] = [
+                ...RAGDOLL,
+                { e: beaver, x: 0, y: 0.2, z: 0 },
+                ...[0, 1, 2, 3, 4, 5, 6, 7].map((n) => ({
+                    e: byName(`avatar-${n}`),
+                    x: 0.15 * Math.cos(n),
+                    y: 0.2,
+                    z: 0.15 * Math.sin(n)
+                })),
+                ...stress.map((e, n) => ({
+                    e,
+                    x: 0.1 * Math.cos(n * 2.4),
+                    y: 0.4 + 0.05 * n,
+                    z: 0.1 * Math.sin(n * 2.4)
+                }))
+            ];
+            let skipped = 0;
+            for (let f = 0; f < 45; f++) {
+                const s = svc.frame(
+                    f,
+                    f / 20,
+                    'coverage50',
+                    false,
+                    states(crowd.map((p) => ({ ...p, x: p.x + (f % 2) * 0.002 })))
+                ).stats;
+                expect(s.maskLimit).toBe(mod.MASK_CAP_HIGH); // the lattice holds far more than the cap covers
+                expect(work(svc), `frame ${f}`).toBeLessThanOrEqual(mod.MASK_CAP_HIGH);
+                skipped += s.maskSkipped;
+                expect(s.maskRejected).toBe(0);
+            }
+            // every mask here would scan more than the cap allows: they are skipped (and intersect)
+            expect(skipped).toBeGreaterThanOrEqual(45 * 9);
+        } finally {
+            fineDone();
+        }
+    }, 300_000);
+
+    it('at 1 cm, the Low preset: a fixed budget, never raised; the bucket against the beaver still masks, deep overlaps skip', async () => {
+        try {
+            const { mod, make } = await fineService();
+            expect(mod.MASK_PRESETS.low).toEqual({ budget: mod.MASK_BUDGET_LOW, own: false, cap: mod.MASK_BUDGET_LOW });
+            expect(mod.MASK_PRESETS.high.own).toBe(true);
+            const svc = make('low');
+            // the bucket with the beaver's paw and the held plank against it (bench-lattice)
+            const paw: Place[] = [
+                { e: bucket, x: 0, y: 0.45, z: 0 },
+                { e: beaver, x: 0, y: 0, z: 0.1 },
+                { e: byName('held-plank'), x: 0, y: 0.75, z: 0 }
+            ];
+            let s = svc.frame(0, 0, 'coverage50', false, states(paw)).stats;
+            for (let f = 1; f < 4; f++) s = svc.frame(f, 0, 'coverage50', false, states(paw)).stats;
+            expect(s.maskLimit).toBe(mod.MASK_BUDGET_LOW);
+            expect(s.latticeMasks).toBeGreaterThan(0);
+            expect(s.latticeHidden).toBeGreaterThan(0);
+            expect(work(svc)).toBeLessThanOrEqual(mod.MASK_BUDGET_LOW);
+            // the beaver deep in the ragdoll: over the Low budget, it intersects, within the budget
+            const svc2 = make('low');
+            for (let f = 0; f < 25; f++) {
+                const r = svc2.frame(
+                    f,
+                    0,
+                    'coverage50',
+                    false,
+                    states([...RAGDOLL, { e: beaver, x: (f % 2) * 0.002, y: 0.2, z: 0 }])
+                ).stats;
+                expect(r.maskLimit).toBe(mod.MASK_BUDGET_LOW);
+                expect(r.latticeMasks).toBe(0);
+                expect(work(svc2)).toBeLessThanOrEqual(mod.MASK_BUDGET_LOW);
+            }
+            // the preset comes with each frame: back to High raises the limit to the cap here
+            const high = svc2.frame(
+                30,
                 0,
                 'coverage50',
                 false,
-                at(0),
-                undefined,
-                0,
-                undefined,
-                undefined,
-                0,
-                undefined,
-                'low'
-            ).stats;
-            expect(deep.maskLimit).toBe(LOW);
-            expect(deep.maskCells).toBeLessThanOrEqual(LOW);
-            expect(deep.latticeMasks).toBe(0); // the whole head is over the Low budget: it intersects
-            expect(deep.maskSkipped).toBe(1);
-            // a shallow overlap fits
-            const shallow = svc.frame(
-                1,
-                0,
-                'coverage50',
-                false,
-                at(0.76),
-                undefined,
-                0,
-                undefined,
-                undefined,
-                0,
-                undefined,
-                'low'
-            ).stats;
-            expect(shallow.latticeMasks).toBe(1);
-            expect(shallow.latticeHidden).toBeGreaterThan(0);
-            // back to High: raised to the head's cells again, and the deep overlap masks
-            const high = svc.frame(
-                2,
-                0,
-                'coverage50',
-                false,
-                at(0),
+                states([...RAGDOLL]),
                 undefined,
                 0,
                 undefined,
@@ -588,57 +654,12 @@ describe('lattice priority (#107)', () => {
                 undefined,
                 'high'
             ).stats;
-            expect(high.maskLimit).toBe(svc.world.objectCellCount(head.id));
-            expect(high.latticeMasks).toBe(1);
-            // Low, the beaver coming down to where its cost reaches the budget and jittering
-            // there: on, then at most one change off, never back (the first mask gets no exemption)
-            const low = new Service(new Set([head.id]));
-            low.build(1, 'yard', undefined, false);
-            const ran: number[] = [];
-            let f = 0;
-            let y = 0.8;
-            for (; y > 0.5; y -= 0.002) {
-                const s = low.frame(
-                    f++,
-                    0,
-                    'coverage50',
-                    false,
-                    at(y),
-                    undefined,
-                    0,
-                    undefined,
-                    undefined,
-                    0,
-                    undefined,
-                    'low'
-                ).stats;
-                if (s.maskSkipped > 0) break;
-            }
-            for (let n = 0; n < 30; n++) {
-                const yy = y + (n % 2 ? 0.004 : 0);
-                const s = low.frame(
-                    f++,
-                    0,
-                    'coverage50',
-                    false,
-                    at(yy),
-                    undefined,
-                    0,
-                    undefined,
-                    undefined,
-                    0,
-                    undefined,
-                    'low'
-                ).stats;
-                expect(s.maskCells).toBeLessThanOrEqual(LOW);
-                ran.push(s.latticeMasks);
-            }
-            expect(ran.filter((v, n) => n > 0 && v !== ran[n - 1]).length).toBeLessThanOrEqual(1);
+            expect(high.maskLimit).toBe(mod.MASK_CAP_HIGH);
         } finally {
-            delete (globalThis as { __UE_CELL_CM__?: number }).__UE_CELL_CM__;
-            vi.resetModules();
+            fineDone();
         }
     }, 300_000);
+
     it('maskLimit: a lattice that can mask reports its budget, also with no mask this frame; one with none reports 0', () => {
         // the fine lattice with the ragdoll's head alone: it can mask, nothing is near
         const fine = lane([head], [{ e: head, x: 0, y: 0.5, z: 0 }]);

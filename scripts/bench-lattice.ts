@@ -34,14 +34,15 @@ const RAGDOLL: Place[] = [
     ['dummy-legR', -0.11, 0.16, 0],
     ['dummy-tail', 0, 0.36, -0.36]
 ];
-const FINE_DUMMY = ['dummy-head', 'dummy-armL', 'dummy-armR', 'dummy-legL', 'dummy-legR', 'dummy-tail'];
+/** The real fine lane (main.ts): every fine-tier object but your limbs (they have their own). */
+const FINE = ['@fine'];
 
 export const SCENARIOS: Scenario[] = [
-    { name: '1 cm bucket, alone', cm: 1, draws: ['bucket'], places: [['bucket', 0, 0.45, 0]] },
+    { name: '1 cm fine lane: the bucket, alone', cm: 1, draws: FINE, places: [['bucket', 0, 0.45, 0]] },
     {
-        name: '1 cm bucket, the beaver and the held plank touching it',
+        name: '1 cm fine lane: the bucket, the beaver and the held plank touching it',
         cm: 1,
-        draws: ['bucket'],
+        draws: FINE,
         places: [
             ['bucket', 0, 0.45, 0],
             ['beaver', 0, 0, 0.1],
@@ -70,42 +71,50 @@ export const SCENARIOS: Scenario[] = [
         ]
     },
     {
-        name: '1 cm ragdoll head, the beaver standing inside it',
+        name: '1 cm fine lane: the ragdoll standing, the beaver touching its head from above',
         cm: 1,
-        draws: ['dummy-head'],
+        draws: FINE,
+        places: [...RAGDOLL, ['beaver', 0, 0.9, 0]]
+    },
+    {
+        name: '1 cm fine lane: the ragdoll standing, the beaver deep inside it',
+        cm: 1,
+        draws: FINE,
+        places: [...RAGDOLL, ['beaver', 0, 0.2, 0]]
+    },
+    {
+        name: '1 cm fine lane: the ragdoll standing, three avatars 0.5 m away',
+        cm: 1,
+        draws: FINE,
+        places: [...RAGDOLL, ['avatar-1', 0.5, 0, 0], ['avatar-2', -0.5, 0, 0], ['avatar-3', 0, 0, 0.5]]
+    },
+    {
+        name: '1 cm fine lane: the ragdoll, the beaver and four avatars in it',
+        cm: 1,
+        draws: FINE,
         places: [
-            ['dummy-head', 0, 0.5, 0],
-            ['beaver', 0, 0, 0]
+            ...RAGDOLL,
+            ['beaver', 0, 0.3, 0],
+            ['avatar-0', 0.3, 0.3, 0],
+            ['avatar-1', -0.3, 0.3, 0],
+            ['avatar-2', 0, 0.3, 0.3],
+            ['avatar-3', 0, 0.3, -0.3]
         ]
     },
     {
-        name: '1 cm ragdoll head, three avatars 0.5 m away',
+        name: '1 cm fine lane: pile-up, the beaver and eight avatars deep in the ragdoll',
         cm: 1,
-        draws: ['dummy-head'],
+        draws: FINE,
         places: [
-            ['dummy-head', 0, 0.5, 0],
-            ['avatar-1', 0.5, 0, 0],
-            ['avatar-2', -0.5, 0, 0],
-            ['avatar-3', 0, 0, 0.5]
+            ...RAGDOLL,
+            ['beaver', 0, 0.2, 0],
+            ...[0, 1, 2, 3, 4, 5, 6, 7].map((n): Place => [`avatar-${n}`, 0.15 * Math.cos(n), 0.2, 0.15 * Math.sin(n)])
         ]
     },
     {
-        name: '1 cm ragdoll head, crowded: the beaver and four avatars around it',
+        name: '1 cm fine lane: the ragdoll at rest, its 5 cm body at the joints',
         cm: 1,
-        draws: ['dummy-head'],
-        places: [
-            ['dummy-head', 0, 0.5, 0],
-            ['beaver', 0, 0, 0],
-            ['avatar-0', 0.35, 0, 0],
-            ['avatar-1', -0.35, 0, 0],
-            ['avatar-2', 0, 0, 0.35],
-            ['avatar-3', 0, 0, -0.35]
-        ]
-    },
-    {
-        name: '1 cm ragdoll limbs and head, its 5 cm body at the joints',
-        cm: 1,
-        draws: FINE_DUMMY,
+        draws: FINE,
         places: RAGDOLL
     }
 ];
@@ -134,7 +143,13 @@ async function run(s: Scenario): Promise<void> {
         return e;
     };
     // masks off and on, framed alternately so drift and other load fall on both alike
-    const draws = new Set(s.draws.map((n) => byName(n).id));
+    const { assetTier } = await import('../src/assets/cell-tier.ts');
+    const names = s.draws.flatMap((n) =>
+        n === '@fine'
+            ? ents.filter((e) => assetTier(e.asset) === 'fine' && e.name !== 'fp-body').map((e) => e.name)
+            : [n]
+    );
+    const draws = new Set(names.map((n) => byName(n).id));
     const svcs = [new VoxelService(draws, false), new VoxelService(draws, true)];
     for (const svc of svcs) svc.build(1, 'yard', undefined, false);
     // BENCH_PRESET=low: the Low quality preset's mask budget (BENCH_BUDGET overrides its cells)
@@ -142,7 +157,7 @@ async function run(s: Scenario): Promise<void> {
     svcs[1].setMaskPreset(preset);
     if (process.env.BENCH_BUDGET) svcs[1].maskBudget = Number(process.env.BENCH_BUDGET);
     const times: number[][] = [[], []];
-    const tele = { masks: 0, skipped: 0, cells: 0, hidden: 0, rejected: 0 };
+    const tele = { masks: 0, skipped: 0, cells: 0, hidden: 0, rejected: 0, limit: 0, peak: 0 };
     const FRAMES = 200;
     for (let f = 0; f < FRAMES + 10; f++) {
         const st = new Float64Array(ents.length * STATE_STRIDE);
@@ -168,7 +183,9 @@ async function run(s: Scenario): Promise<void> {
             if (k === 0) continue;
             tele.masks += r.stats.latticeMasks;
             tele.skipped += r.stats.maskSkipped;
-            tele.cells += r.stats.maskCells;
+            tele.cells += svc.maskStats.cells - svc.maskStats.clears;
+            tele.limit = Math.max(tele.limit, r.stats.maskLimit);
+            tele.peak = Math.max(tele.peak, svc.maskStats.cells - svc.maskStats.clears);
             tele.hidden += r.stats.latticeHidden;
             tele.rejected += r.stats.maskRejected;
         }
@@ -179,7 +196,7 @@ async function run(s: Scenario): Promise<void> {
     const out = [
         `${off.toFixed(2)} ms`,
         `${on.toFixed(2)} ms (${on - off >= 0 ? '+' : '-'}${Math.abs(on - off).toFixed(2)})` +
-            ` | masks ${(tele.masks / k).toFixed(1)}, skipped ${(tele.skipped / k).toFixed(1)}, cells ${Math.round(tele.cells / k)}, hidden ${Math.round(tele.hidden / k)}, rejected ${tele.rejected}`
+            ` | masks ${(tele.masks / k).toFixed(1)}, skipped ${(tele.skipped / k).toFixed(1)}, work ${Math.round(tele.cells / k)} (peak ${tele.peak}, limit ${tele.limit}), hidden ${Math.round(tele.hidden / k)}, rejected ${tele.rejected}`
     ];
     console.log(`${s.name} | off ${out[0]} | on ${out[1]}`);
 }
