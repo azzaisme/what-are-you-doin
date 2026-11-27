@@ -747,6 +747,68 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         p.walkTo(beyond.x, beyond.z);
     }, 300_000);
 
+    /**
+     * One forward drag of the barrier round the corner (#131's original walk): back down the road,
+     * then forward out to the side, the barrier trailing; after `idle` ticks stood still first (the
+     * tick phase). Whether the grip held until it was clear, and the worst grip error on the way.
+     */
+    function forwardDrag(idle: number, path: 'corner' | 'snag'): { held: boolean; clear: boolean; worst: number } {
+        const s = closed();
+        inputs(s).step({}, idle);
+        const p = takeHold(s, 0, -2.3);
+        expect(s.interaction().holding).toBe('barrier');
+        const out = at(CLOSURE_AT.barrierU - 2.5, roadT(CLOSURE_AT.barrierU) - 10.5);
+        const back1 = at(CLOSURE_AT.barrierU - 2.5, roadT(CLOSURE_AT.barrierU) - 2.3);
+        let held = true;
+        let worst = 0;
+        const watch = () => {
+            worst = Math.max(worst, s.physics.stats.grabError);
+            if (s.physics.holders(s.closure.barrier.id) === 0) {
+                held = false;
+                // (the snag: they walk on regardless)
+                if (path === 'corner') throw new Error('let go');
+                return;
+            }
+            if (!s.hazards.road!.blocking(s.physics, s.closure.barrier.id)) throw new Error('clear');
+        };
+        try {
+            if (path === 'corner') {
+                // straight back down the road, then forward out to the side
+                p.walkTo(back1.x, back1.z, false, watch);
+                p.walkTo(out.x, out.z, false, watch);
+            } else {
+                // the snag: out beside the road, then on up it through the old fence line between two
+                // posts (a beaver fits; the barrier, trailing behind, catches on them)
+                const gapT = roadT(CLOSURE_AT.barrierU) - 4.6;
+                const before = at(CLOSURE_AT.barrierU - 1.5, gapT);
+                const through = at(CLOSURE_AT.barrierU + 4, gapT);
+                p.walkTo(before.x, before.z, false, watch);
+                p.walkTo(through.x, through.z, false, watch);
+                // through the gap; the barrier left behind on its side of the line
+                expect(routeU(s.player.x, s.player.z)).toBeGreaterThan(CLOSURE_AT.barrierU + 3);
+                const bp = s.closure.barrier.pose.p;
+                expect(routeU(bp.x, bp.z)).toBeLessThan(CLOSURE_AT.barrierU + 1);
+            }
+        } catch (e) {
+            if (!['clear', 'let go'].includes((e as Error).message)) throw e;
+        }
+        return { held, clear: !s.hazards.road!.blocking(s.physics, s.closure.barrier.id), worst };
+    }
+
+    it('grip round a corner: dragged forward round the corner, the barrier trailing, it holds every time, whatever the tick phase', () => {
+        const runs = Array.from({ length: 10 }, (_, idle) => forwardDrag(idle, 'corner'));
+        console.log(`corner: ${runs.map((r) => `${r.held ? 'held' : 'LOST'} ${r.worst.toFixed(2)}`).join(', ')}`);
+        expect(runs.filter((r) => r.held && r.clear)).toHaveLength(10);
+    }, 600_000);
+
+    it('a snag still lets go: walked on through a gap in the old fence line, the barrier catches on the posts and the grip goes every time', () => {
+        const runs = Array.from({ length: 10 }, (_, idle) => forwardDrag(idle, 'snag'));
+        console.log(
+            `snag: ${runs.map((r) => `${r.held ? 'held' : 'LOST'} ${r.clear ? 'clear' : 'on road'} ${r.worst.toFixed(2)}`).join(', ')}`
+        );
+        expect(runs.filter((r) => !r.held)).toHaveLength(10);
+    }, 600_000);
+
     it('counterplay: two players carry it off together; a second player’s grab (a guest’s, on the host) frees the pin', () => {
         const s = closed();
         s.setSlotActive(1, true);

@@ -1,6 +1,6 @@
 # Progress log
 
-## Foot detours over three Valley crossings, and the bucket still has to go over the bridge (2026-11-26, Epic 9, #87)
+## Foot detours over three Valley crossings, and the bucket still has to go over the bridge (2026-11-27, Epic 9, #87)
 
 Three narrow paths now go round the Valley's crossings, for beavers on foot:
 
@@ -108,6 +108,38 @@ The rest:
   no recovery to the stage start. The base game does the same, but the boulder rule (a bucket
   dropped where the beaver stands on a boulder) makes it more likely to happen.
 - npm test 1250/1250 (5 cm and 10 cm), with `epics-part-3` f9a63c2 merged in. That merge brought #144's friction census, whose Valley pin is updated for the detours (measured: the detours alone change 0.5 by −3, 0.6 by −12, 0.8 by +4 and 0.9 by −1 colliders; the rest is the winch and dolly).
+
+## Epic 8: the barrier holds when you drag it forward round a corner (2026-11-27, #77)
+
+Dragging the road closure's barrier forward round a corner, with it trailing behind you, used to
+lose the grip about half the time, on tick phase alone. The hold point is a fixed reach ahead of
+your eyes, so turning swung it round at once. The 5.6 m barrier lagged up to 2.19 m behind it,
+right on the grip's limits (1.25 m for 0.4 s). That read as random to a player.
+
+- **Now the barrier is heavy to swing round.** Carried by one player, the hand follows a turn of
+  the view at most 1.5 m/s (`BARRIER_HAND_SPEED`). That is the same clamp the bucket already
+  uses (GRAB.handSpeed), as a new per-prop option, `BodyOptions.handSpeed`. Walking isn't slowed:
+  the hand keeps up with your eyes. Carried by two, it is unchanged.
+- **Which props count as heavy: the barrier only, by that flag.** A rule by mass would also catch
+  the short logs (56.5 kg, made to be carried alone) and the logs (113 kg, carried balanced or
+  shared), and change how they handle. They keep their tests unchanged.
+    - The masses, for reference: barrier 45 kg, beam 36.5, crate 25, plank 24, dolly 26.1, short
+      log 56.5, log 113.
+- **Measured, by input,** with 0 to 9 idle ticks before the grab:
+    - **Forward round the corner** (back down the road, then forward out to the side): held 10
+      times in 10, peak error 0.23 to 0.25 m. Before: 3 in 10, at 2.15 to 2.19 m.
+    - **A snag still lets go:** walk on through a gap between two old fence posts (a beaver fits,
+      the barrier doesn't). The barrier catches, and the grip goes 10 times in 10; the barrier
+      stays on its side of the line.
+- **Mutation checks:**
+    - No hand speed on the barrier: the corner is back to 3 in 10, and the test fails.
+    - A capped prop never letting go: the snag holds at 4.9 m, and the test fails.
+- **Unchanged:** the existing grab, plank, bridge, co-op and dolly/towing tests (the full unit
+  run below).
+- **Code:** `src/sim/physics/world.ts` (`handSpeed`, a few lines in the hand's clamp),
+  `src/sim/lab-physics.ts` (the barrier's option), `src/assets/road-closure.ts`
+  (`BARRIER_HAND_SPEED`).
+- **Unit tests:** 1188 pass (130 files, both voxel sizes), on `epics-part-3` 0d46af3.
 
 ## Epic 8: the road closure's last two stalls, and the log's wording (2026-11-26, #77 #70)
 
