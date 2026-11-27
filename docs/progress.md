@@ -30,7 +30,7 @@ right on the grip's limits (1.25 m for 0.4 s). That read as random to a player.
 - **Code:** `src/sim/physics/world.ts` (`handSpeed`, a few lines in the hand's clamp),
   `src/sim/lab-physics.ts` (the barrier's option), `src/assets/road-closure.ts`
   (`BARRIER_HAND_SPEED`).
-- **Unit tests:** COUNT pass (FILES files, both voxel sizes), on `epics-part-3` 0d46af3.
+- **Unit tests:** 1188 pass (130 files, both voxel sizes), on `epics-part-3` 0d46af3.
 
 ## Epic 8: the road closure's last two stalls, and the log's wording (2026-11-26, #77 #70)
 
