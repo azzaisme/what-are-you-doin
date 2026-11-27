@@ -30,6 +30,7 @@ import { crossingFrame } from '../sim/hazards.ts';
 import type { HazardSpec } from '../sim/hazards.ts';
 import { WEATHER } from '../sim/weather.ts';
 import type { WeatherZone } from '../sim/weather.ts';
+import type { WinchSpot } from '../sim/winch.ts';
 import { GRID_SIZE, cellCenterX, cellCenterZ, cellIndexX, cellIndexZ } from '../voxels/grid.ts';
 import { pose, quatFromYawPitchRoll, quatMul } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
@@ -88,6 +89,7 @@ import {
     YARD_FORESTRY,
     yardLayout,
     yardPieces,
+    YARD_WINCH,
     yardProps,
     yardSideMaterial,
     yardSurfaceMaterial
@@ -1111,6 +1113,12 @@ function atUT(u: number, t: number, lift: number, yaw = 0, pitch = 0, roll = 0):
     return pose(w.x, groundUT(u, t) + lift, w.z, quatFromYawPitchRoll(ROUTE_YAW + yaw, pitch, roll));
 }
 
+/** The Yard's hand winch, where the Yard lies in the Valley. */
+const VALLEY_WINCH: WinchSpot = (() => {
+    const w = yardToWorld(YARD_WINCH.x, YARD_WINCH.z);
+    return { x: w.x, z: w.z, y: YARD_WINCH.y, yaw: YARD_WINCH.yaw + ROUTE_YAW };
+})();
+
 /** The Timber Yard's logging stand and sawmill, where the yard is (area 1). */
 const VALLEY_FORESTRY: ForestryDef = (() => {
     const y = YARD_FORESTRY;
@@ -1228,6 +1236,10 @@ export const VALLEY_ROAD_CLOSURE: RoadClosureSpec = (() => {
         // past the creek (the yard's side is before it)
         from: 2,
         across: (x, z) => routeT(x, z) - roadT(routeU(x, z)),
+        track: (x, z) => {
+            const track = SIDE_PATHS.filter((q) => q.name === 'logging-track');
+            return !!nearestPath(track, routeU(x, z), routeT(x, z), track[0].halfWidth + 0.6);
+        },
         roadHalf: 1.6,
         barrier,
         barrierHalf: BARRIER_HALF,
@@ -1556,6 +1568,7 @@ export const valleyLevel: LevelDef = {
     },
     props: valleyProps(),
     forestry: VALLEY_FORESTRY,
+    winch: VALLEY_WINCH,
     hazards: { ...VALLEY_HAZARDS, roadClosure: VALLEY_ROAD_CLOSURE },
     rules: {
         objective: 'Bring water to the flower on the summit',

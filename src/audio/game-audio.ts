@@ -20,6 +20,7 @@ import { CLOSURE_OPEN, CLOSURE_SHUT, CLOSURE_TELL } from '../sim/hazard-road.ts'
 import { TREE_TELL } from '../sim/hazard-tree.ts';
 import { PHASE } from '../sim/hazards.ts';
 import type { HazardNet } from '../sim/hazards.ts';
+import type { SimEvent } from '../sim/lab-sim.ts';
 import { ANIM_MAX } from '../sim/snapshots.ts';
 import type { SnapshotRing } from '../sim/snapshots.ts';
 import { pose } from '../voxels/math.ts';
@@ -562,23 +563,63 @@ export function soundBodies(entities: readonly { name: string; slot: number }[])
     return out;
 }
 
+type EventSound = { name: SfxName; gain: number; pitch: number };
+
+/**
+ * Event kinds whose sound is played somewhere else, where it is placed in the world: a nail's
+ * creak and snap come from the nail markers (render/nail-markers.ts), and a fall into the creek
+ * splashes when the body hits the water (`props`, below). Voicing them here too would double them.
+ */
+export const VOICED_ELSEWHERE: ReadonlySet<SimEvent['kind']> = new Set<SimEvent['kind']>(['creak', 'break', 'fell']);
+
+const NONE: EventSound[] = [];
+const soft = (name: SfxName, gain: number, pitch: number): EventSound[] => [{ name, gain, pitch }];
+
+/**
+ * What each kind of level event sounds like. A `Record` keyed on every kind, so a new kind does
+ * not type-check until it has a sound (or is listed in VOICED_ELSEWHERE).
+ */
+const EVENT_SOUNDS: Record<SimEvent['kind'], (text: string) => EventSound[]> = {
+    step: () => soft('ding', 0.6, 1),
+    goal: () => soft('fanfare', 0.8, 1),
+    recovered: () => soft('ding', 0.45, 0.75),
+    // a rule about the bucket (too heavy to jump with it): a dull knock
+    hint: () => soft('thud', 0.5, 0.8),
+    hazard: (text) => {
+        if (text === CLOSURE_TELL || text === CLOSURE_OPEN || text === CLOSURE_SHUT)
+            return soft('clunk', 1, text === CLOSURE_TELL ? 1 : 1.1);
+        if (text === TREE_TELL)
+            return [
+                { name: 'snap', gain: 1, pitch: 0.8 },
+                { name: 'creak', gain: 1, pitch: 0.65 }
+            ];
+        // the flood, the gust and the handbrake sound from their state (update)
+        return NONE;
+    },
+    // getting in or out already sounds the door (from the seat change); a ute put back on its
+    // wheels sounds like anything recovered; a rule about it (nail the beams down) like a hint
+    ute: (text) => {
+        if (/seat|Riding along/.test(text)) return NONE;
+        if (text.startsWith('The ute is back')) return soft('ding', 0.45, 0.75);
+        return soft('thud', 0.5, 0.8);
+    },
+    // the bucket filled, or a gate's rule about it: a slosh
+    water: () => soft('slosh', 0.6, 1),
+    // the pine falls, a log is bucked, fresh logs arrive: a wooden knock
+    wood: () => soft('knock', 0.6, 0.9),
+    // the hand winch (Epic 5, #52): its rope snapping, or its hook, crank and pawl (a metal clank)
+    winch: (text) => (text.startsWith('Snap!') ? soft('snap', 1, 0.9) : soft('clank', 0.5, 1)),
+    creak: () => NONE,
+    break: () => NONE,
+    fell: () => NONE
+};
+
 /**
  * What a level event sounds like (heard everywhere): from the event itself, so a guest, who gets
  * the host's events, hears the same. Hazards whose tell is a state (the flood, the gust, the
  * handbrake) sound from that state instead (update); the falling tree's crack is its toast.
  */
-export function eventSounds(kind: string, text: string): { name: SfxName; gain: number; pitch: number }[] {
-    if (kind === 'step') return [{ name: 'ding', gain: 0.6, pitch: 1 }];
-    if (kind === 'goal') return [{ name: 'fanfare', gain: 0.8, pitch: 1 }];
-    if (kind === 'recovered') return [{ name: 'ding', gain: 0.45, pitch: 0.75 }];
-    if (kind === 'hazard' && (text === CLOSURE_TELL || text === CLOSURE_OPEN || text === CLOSURE_SHUT))
-        return [{ name: 'clunk', gain: 1, pitch: text === CLOSURE_TELL ? 1 : 1.1 }];
-    // a rule about the bucket (too heavy to jump with it): a dull knock
-    if (kind === 'hint') return [{ name: 'thud', gain: 0.5, pitch: 0.8 }];
-    if (kind === 'hazard' && text === TREE_TELL)
-        return [
-            { name: 'snap', gain: 1, pitch: 0.8 },
-            { name: 'creak', gain: 1, pitch: 0.65 }
-        ];
-    return [];
+export function eventSounds(kind: string, text: string): EventSound[] {
+    const f = (EVENT_SOUNDS as Record<string, ((text: string) => EventSound[]) | undefined>)[kind];
+    return f ? f(text) : NONE;
 }

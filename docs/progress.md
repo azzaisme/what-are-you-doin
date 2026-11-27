@@ -20,6 +20,372 @@ Frame times are software rendering, so they show the ratio, not phone frame rate
 
 **Tests:** `tests/unit/voxels-off.test.ts` (the setting and its URL override; primitives closed and wound outward; the bucket polygonized watertight and still hollow; colours from the volume, split by surface class; the recorder; a level's units) and six browser tests in `tests/e2e/smoke.spec.ts` (the yard switched off live and back; the River Lab and the Valley off with no console errors; the falling tree leans as a smooth tree and sheds its needles; co-op with the host on and the guest off, and the reverse).
 
+## Epic 8: the barrier holds when you drag it forward round a corner (2026-11-27, #77)
+
+Dragging the road closure's barrier forward round a corner, with it trailing behind you, used to
+lose the grip about half the time, on tick phase alone. The hold point is a fixed reach ahead of
+your eyes, so turning swung it round at once. The 5.6 m barrier lagged up to 2.19 m behind it,
+right on the grip's limits (1.25 m for 0.4 s). That read as random to a player.
+
+- **Now the barrier is heavy to swing round.** Carried by one player, the hand follows a turn of
+  the view at most 1.5 m/s (`BARRIER_HAND_SPEED`). That is the same clamp the bucket already
+  uses (GRAB.handSpeed), as a new per-prop option, `BodyOptions.handSpeed`. Walking isn't slowed:
+  the hand keeps up with your eyes. Carried by two, it is unchanged.
+- **Which props count as heavy: the barrier only, by that flag.** A rule by mass would also catch
+  the short logs (56.5 kg, made to be carried alone) and the logs (113 kg, carried balanced or
+  shared), and change how they handle. They keep their tests unchanged.
+    - The masses, for reference: barrier 45 kg, beam 36.5, crate 25, plank 24, dolly 26.1, short
+      log 56.5, log 113.
+- **Measured, by input,** with 0 to 9 idle ticks before the grab:
+    - **Forward round the corner** (back down the road, then forward out to the side): held 10
+      times in 10, peak error 0.23 to 0.25 m. Before: 3 in 10, at 2.15 to 2.19 m.
+    - **A snag still lets go:** walk on through a gap between two old fence posts (a beaver fits,
+      the barrier doesn't). The barrier catches, and the grip goes 10 times in 10; the barrier
+      stays on its side of the line.
+- **Mutation checks:**
+    - No hand speed on the barrier: the corner is back to 3 in 10, and the test fails.
+    - A capped prop never letting go: the snag holds at 4.9 m, and the test fails.
+- **Unchanged:** the existing grab, plank, bridge, co-op and dolly/towing tests (the full unit
+  run below).
+- **Code:** `src/sim/physics/world.ts` (`handSpeed`, a few lines in the hand's clamp),
+  `src/sim/lab-physics.ts` (the barrier's option), `src/assets/road-closure.ts`
+  (`BARRIER_HAND_SPEED`).
+- **Unit tests:** 1188 pass (130 files, both voxel sizes), on `epics-part-3` 0d46af3.
+
+## Epic 8: the road closure's last two stalls, and the log's wording (2026-11-26, #77 #70)
+
+Three follow-ups from the #145 audit.
+
+- **"Never came" is not "turned back".** The closure ends when nobody has been in the closed
+  stretch for 10 s. If someone was in it and went back, the log says "turned back". If nobody ever
+  got that far (whoever brought it on stayed on the crossing), it now says "never came".
+- **Standing just inside the closed stretch no longer holds every other hazard forever.** Someone
+  in the stretch, not past it, holds the closure at most 60 s after anyone in it last got 0.5 m
+  further along the route. Then it is over: "stopped in the closure". The barrier still stands and
+  the sign stays closed.
+    - It runs from the last progress, not from the tell, so a slow walk round the track is never
+      cut off. The audit found that, timed from the tell, a walk with the stick at 0.3 (70.7 s) was
+      cut at 60 s.
+    - Not while anyone has hold of the barrier: shifting it is the way round being taken.
+    - Why 60 s: walking the track from the tell to the road beyond took 21.3 s (measured in the
+      track test, which now asserts it's under 30 s). 60 s is about three times that.
+- **The playtest summary test** used a made-up weather line ("Forest Road rain: came and
+  cleared"). The real one is "Forest Road: came and cleared". A new test runs the Valley's own
+  Forest Road rain, short, feeds its outcome into the log the way `main.ts` does, and checks the
+  summary line.
+- **Tests, by input:**
+    - never came: bring it on and stand on the crossing; over 10 s after the tell;
+    - stopped in the closure: stand just inside the stretch; over 60 s after their last 0.5 m
+      along (the tick read from the sim), to 0.1 s, the barrier still across the road;
+    - hold the barrier for 63 s after stopping: still on; let go: over at once;
+    - walk the track with the stick at 0.3: it takes over 60 s from the tell, and ends as "took the
+      track on foot".
+- **Mutation checks:** each change undone fails its test. Those were: "turned back" for everyone;
+  no 60 s cap; the cap ignoring a hand on the barrier; a different weather wording; and the cap
+  timed from the tell (the slow walk is cut at 60.0 s).
+- **Code:** `src/sim/hazard-road.ts` (CLOSURE.stopS and progressM, why it ended), `docs/playtest.md`.
+- **Unit tests:** 1184 pass (130 files, both voxel sizes), on `epics-part-3` f9a63c2.
+
+## Epic 5, chunk B: the structure overlay, the rope, the winch and the log dolly (2026-11-26, #51 #52)
+
+No puzzle may need exactly two people (#52). Before this, a whole log (113 kg) needed two beavers,
+so a lost or broken stringer, or the Valley's sawn ones, could not be made alone. Now one beaver
+can do it with either solo aid: the hand winch, or the log dolly.
+
+### How to play it
+
+- **The winch** (in the Yard, north of the sawmill's infeed; in the Valley where the Yard is):
+    - Grab at its drum with empty hands to take the rope's hook.
+    - Walk it out (up to 25 m) and grab a piece: the hook goes in where you look.
+    - Back at the drum, grab to crank. Grab again, or walk away, to stop. The ratchet holds what has
+      been wound in. `Q` at the drum, hands empty, lets the rope run back (holding something, `Q`
+      drops that). If the piece it is hooked into leaves the world (the sawmill takes it), the
+      rope comes free and the winch says so.
+    - The hook never goes into the bucket: it crosses only over what is built (#132).
+- **The log dolly** (in the Yard, south of the log pile):
+    - Take a log's end, lift it (the far end stays on the ground) and swing it over the dolly's
+      cradle. Lower it in and let go.
+    - Take the dolly by its stop, behind the log, and walk: it rolls, the stop pushes the log, its
+      far end drags. Pulled the other way, only the cradle's grip holds the log.
+    - Looking up or down neither lifts it nor draws it in.
+- **`F4`** (or the debug panel's _Structure loads_), on the host: a cross on every joint coloured
+  by its strain band, its force as a line, and the contacts the stress meter reads (folded into a
+  joint, or free).
+
+### What was built
+
+- **Structure overlay (#51):** `src/debug/structure-overlay.ts`, drawn by `main.ts`. Off, the
+  stress meter records nothing. On, it records the contacts as it reads them: a loose piece's
+  contacts are scaled to its own momentum, so a log lying across a bridge presses with its weight.
+  Recording changes nothing the simulation does (tested).
+- **Ropes (#52, and for Epic 8's #75):** `src/sim/joints/rope.ts`.
+    - A taut-only spring between two body points, or a body and the ground: T = k·stretch + c·rate.
+    - k = min(EA / L, m·(ring / dt)²): a 12 mm natural-fibre rope, EA 110 kN.
+    - It snaps past 10 kN. A rope tied to a body that leaves the world (gone, or disabled: the
+      sawmill taking a hooked log) is dropped, and a disabled body can't be tied.
+    - API: `tie(a, la, b, lb, length?, owner?)` returns an id. Also `get`, `ropes()`, `size`,
+      `setLength`, `tension`, `span`, `cut`, `events(owner?)` and `ends(rope)`. `GROUND` is the other
+      end for a fixed point.
+    - Events (`snap`, or `loose` when a body left the world) carry their rope's owner.
+      `events(owner)` returns only that owner's and leaves the others queued, so the winch reports
+      only its own ropes and Epic 8's hazard ropes (#75) get theirs.
+    - It runs as the first step hook, and wakes sleeping bodies before it pulls.
+- **The winch:** `src/sim/winch.ts`, with static scenery in `src/levels/winch.ts`.
+    - It winds at 0.25 m/s. Its gearing gives the crank 6 × a beaver's 650 N grip: 3.9 kN, under the
+      rope's 10 kN.
+    - Past that, winding stalls and the ratchet clicks, so cranking alone never snaps the rope.
+    - The rope is drawn on host and guests (`src/render/winch-rope.ts`). It goes on the wire as `wr`,
+      a few numbers, sent only when it changes.
+    - The Yard's winch is at (5.5, 11.8), its axle north–south, so the rope runs east along a clear
+      stretch north of the sign post.
+- **The log dolly:** `src/assets/dolly.ts`, with its body built by `addDolly` in
+  `src/sim/lab-physics.ts`.
+    - **Shape:** a timber cradle 0.6 × 0.64 m on four 6 cm steel ball casters, with side chocks
+      (7 cm to spare either side of a log) and a stop. One rigid part, no animation channels.
+    - **Casters:** they keep their own 0.03 friction, using Rapier's Min combine rule. This is opt-in
+      per shape (`slides`). Every other collider still averages, as before.
+    - **Towing:** the dolly is `towed`, and it is the only body that is. A grip on it holds the hand
+      level at 1 m ahead (`TOW_REACH`). It pulls horizontally only, with no wrist, the same 650 N cap
+      and the same letting go.
+- **Grab law, one case changed (`grabForce`):** a body heavier than one beaver's grip (over 66 kg)
+  used to get a flat 650 N straight up, with no spring.
+    - So a beaver lifting one end of a log (about 555 N) tipped it up and over and lost it.
+    - Now the vertical spring caps the lift at what it takes to hold the grip where it should be, and
+      what the cap leaves over pulls along.
+    - Bodies under 66 kg are unchanged. One beaver still cannot lift the whole log.
+- **A lever:** not needed. A beaver lifts a log's end itself, and swinging the end (the far end
+  pivots, it does not slide) puts it on the dolly. No lever piece was added.
+
+### Measured (actual)
+
+All by input, 10 cm cells, from the tests' own lines.
+
+- **Winch** (`winch.test.ts`):
+    - **Haul:** a 113 kg log hooked 8 m off was wound in 7.13 m in 29.1 s. Peak tension 1700 N. Its
+      fastest speed was 0.69 m/s (the crank winds at 0.25 m/s). It lifted at most 9.8 cm off the
+      ground (over a low mound).
+    - **Against a staked log:** tension up to 4340 N (the gearing's 3.9 kN, overshooting by up to
+      12 % within a tick), 62 ratchet clicks, and the rope held.
+    - **Overloaded:** pulled the other way, harder each second, the rope parted at 9964 N. No last
+      yank as it parts: on that tick the log's velocity changes by 0.05–0.14 m/s more than the
+      outward pull explains (the ground), against 0.43–0.46 m/s on the tick before (the rope's
+      pull); a one-tick yank added there measures 0.47 and fails the test. After, the log moves
+      back towards the drum at 0.00 m/s.
+    - **A rider:** a beaver standing on the hauled log moved 0.00 m while the log wound 2.87 m, and
+      dropped to the ground.
+- **Dolly** (`dolly.test.ts`):
+    - **Loaded by input:** the log's end was lifted at least 46 cm while swung, and lies centred in
+      the cradle.
+    - **Pushed 10 m:** 10.00 m in 9.9 s, the grip held throughout. Pull mean 517 N, peak 650 N. The
+      dolly came at most 2.8 cm off the ground, and the log stayed in the cradle.
+    - **A rider:** a beaver standing on the log moved 0.91 m while it went 2.78 m. Left behind.
+    - **Looked up at:** the dolly rose 0.78 cm.
+    - **Against a staked log:** the pull stops at exactly 650 N and the dolly moves 0.9 cm. Stepping
+      aside, the grip lets go after 2.53 s.
+    - **With the winch:** the rope's mean tension was 1041 N for the bare log and 555 N on the dolly,
+      47 % less.
+- **One beaver replaces a lost stringer** (`solo-beam.test.ts`). The start is placed: beam-0
+  laid across the creek (settled onto both seats), beam-1 gone, a log on the ground by the guide
+  with the dolly, hazards off (as in the sawmill's gate: a bridge brings the flood). Then, all by
+  input:
+    1. the saw is set to beams at its lever;
+    2. the log is loaded onto the dolly and pushed into the guide (1.5 s);
+    3. the sawn 3.2 m beam is shouldered off the rack, carried out onto the near abutment, squared
+       up (it turns with you), lowered to the seats and let go, with no falls.
+    - **Where it lies:** its ends at x −0.85 and −0.88 (its line −0.88), 0.26 m from beam-0. It
+      bears 0.35 m onto the near seat and 0.25 m onto the far. It rests on both: its middle at
+      0.629 m against the 0.625 m of lying on them, its ends 10.9 cm apart in height (the far seat
+      stands 10.0 cm higher).
+    - **Asserted:** both ends on its line, each bearing at least 0.2 m past its seat's face, and
+      both beams resting on both seats (middle within 3 cm, tilt within 3 cm of the seats').
+- **The Valley's stringers:** the Valley's sawmill, beams, dolly and winch are the Yard's own
+  (`yardPieces`, `yardProps`, `YARD_FORESTRY`, moved to where the Yard lies). A sawn beam is the
+  same body. So the Yard test covers them.
+- **Min friction stays opt-in** (`friction-optin.test.ts`):
+    - In every level, every collider averages its friction except the dolly's 4 casters.
+    - Each level's colliders are checked against committed values: a histogram of (friction,
+      rule), and an FNV hash of the whole ordered list, so any change fails.
+    - Those values are `epics-5-10`'s at 085dd00 (measured there), except for the winch's 4
+      colliders and the dolly's 8.
+    - No body but the dolly is towed. The bucket is not.
+- **The grab law's heavy case** (`grab-heavy.test.ts`), against a frozen copy of the old law:
+    - identical for 20,000 random grips of bodies under 66 kg;
+    - over it, the same full lift with the grip below its hold point;
+    - in the case that tipped logs over (the grip a little above its hold point, saturated by
+      the pull along), the old law gave 650 N up and nothing along; now it lifts only what the
+      spring asks, and pulls along with the rest of the cap;
+    - never more than the cap, over 5,000 random heavy grips.
+
+### Costs
+
+- **Snapshot:** the dolly is one entity, 15 bytes; the winch is scenery, 0. A rope on the drum
+  costs nothing on the wire.
+- **The Valley's worst-case host state**, in UTF-8 bytes, of the room's 4096:
+    - **On v2** (before #141), with every entity visible and long events: 4026 → 4046 with the
+      dolly; 4090 once the road closure (#131) was in. A hooked rope adds up to 26 bytes, which
+      made 4116, over the limit. That is why this chunk waited for #141.
+    - **On v3 (#141 merged in), `net-headroom.test.ts`'s worst case:** all 142 entities moving
+      (the dolly among them, and a stand-in for the goose), 64 nails, the longest messages, eight
+      players, none acknowledging.
+        - Without the rope: 4045 bytes, the longest wait 2 snapshots.
+        - With the winch's real rope out, hooked into the dolly (the last entity) at a corner of
+          its stop (`wr` `[2,140,30,53,-32]`, on the wire in every update): **4043 bytes**, every
+          entity still listed, the longest wait 2 snapshots.
+        - Both are asserted. v3 fits the snapshot to what the rest of the state leaves, so the
+          rope costs some of the snapshot's room, not the room's limit.
+- **Bundle:** chunk B adds 13.4 KB to the main chunk (6.242 → 6.255 MB minified) and 2.3 KB to the
+  voxel service. The overlay's module is 827 B minified; with its drawing and recording, about
+  2 KB (estimated).
+
+### Known limits
+
+- The rope is straight (no sag) and passes through things. It pulls only along the line between
+  its ends.
+- The cradle carries the log by friction (about 470 N against the dragging end's 390 N), and the
+  stop catches it if it slips. Pushed from behind it rides 13–14 cm short of the stop.
+- Steering a pushed log is like reversing a trailer. The test steers for the log's middle, or down
+  the guide's line, and loads on level ground (a 10 cm mound east of the mill made the swing miss).
+
+## Online play: room to grow in the host's updates (2026-11-26, Epic 10, #20)
+
+The host sends its world to the other players about 20 times a second. On claude.ai that update has
+to fit in 4 KiB (the room's limit per player). In the Valley it had nearly run out, which would have
+stopped the goose (Epic 8) and the road closure (#131) being added.
+
+### What changed
+
+- **Each update lists only what the guests don't have yet** (network version 3). Before, every
+  visible piece went in every update.
+    - Every guest tells the host which update it last got (it always did, for the round-trip
+      time). A piece is in every update until each guest has got an update with it where it is now:
+      the players, and anyone watching a full game or waiting to rejoin. Then it stops, until it
+      moves.
+    - So nothing depends on which updates arrive: a guest missing updates (on a slow host only one
+      in 20 may get through) or joining late gets each piece in the first update that reaches it.
+- **It can't go over the limit**, counted in UTF-8 bytes (it isn't known whether the room counts
+  characters or bytes, and bytes is the larger count). When a lot moves at once, the pieces that
+  have waited longest go first, nearest to a player among equals. The rest wait one update; none
+  waits longer than two (0.1 s).
+- **A piece shown again waits for its new place.** One that was hidden (picked up, out of range)
+  and moved meanwhile isn't drawn where it last was.
+- **A player on another version is told so.** A guest of this version facing a host of the last one
+  now sees "That game runs another version", instead of an empty world.
+
+### Measured (the Valley)
+
+|                                                                                                                                                          | Before (version 2)                                                           | Now                                                                                                                          |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Normal play: the host walking, seven guests seated                                                                                                       | 2050 bytes                                                                   | median 615, at most 703                                                                                                      |
+| Worst case: every piece visible and moving, the longest message (with emoji), 64 nails, every player aiming a nail, seven guests seated and one watching | 4018 with the long plank; about 4094 with a goose and the road closure added | 4045 UTF-8 bytes (4018 characters), with the road closure (#131) in and a stand-in for the goose: under 4096 by construction |
+| Longest wait for a piece in that worst case                                                                                                              | none (all sent)                                                              | 2 updates (0.1 s)                                                                                                            |
+| Host's time to build an update (141 pieces moving)                                                                                                       | not measured                                                                 | 0.1 to 0.4 ms on average, depending on the machine's load                                                                    |
+
+### Tests
+
+- `tests/unit/net-headroom.test.ts`:
+    - the worst case and the longest wait; the same with messages written entirely in 3-byte
+      characters;
+    - normal play with real guests;
+    - the time to build an update;
+    - a piece that stops while updates are lost is right in the first update after the gap;
+    - an acknowledgement of an older place doesn't count for the new one;
+    - a guest that gets one update in k, for every k from 2 to 40, has every piece in the first
+      that arrives, and within a budget after as many as the budget takes;
+    - nothing is drawn before its place arrives, and a piece shown again waits for its new one;
+    - someone who joins a full game to watch, and a guest waiting to rejoin, draw the whole world;
+    - acknowledgements arriving 3 to 40 updates late still confirm, so normal play shrinks;
+    - the stalest go first; version 2 against 3.
+- Each fails without what it guards (checked):
+    - no budget: 5321 bytes in the worst case;
+    - no stalest-first: 41 of the 141 pieces were never sent;
+    - confirming a piece without the guest's acknowledgement: the stopped piece was 0.6 m out;
+    - counting an older acknowledgement;
+    - drawing a piece shown again at its old place;
+    - counting characters, not bytes: 4762 bytes;
+    - sending only to the guests playing: someone watching a full game drew 4 of the 49 pieces;
+    - remembering only the last update's list: acknowledgements arriving late never confirmed
+      anything, and every piece kept being sent.
+- `tests/unit/event-text.test.ts`: every message the game can show fits the 120 characters an update
+  carries (the longest are the siren at 111 and the handbrake at 114), assuming nothing put into a
+  message is longer than 20 characters (the longest stage name is exactly 20).
+- Browser: every online co-op test (local, peer to peer, the bad network rejoin, the flood reaching
+  a guest, the Valley) and the online embed test.
+
+## Epic 8: the playtest log says how each hazard ended (2026-11-23, #70)
+
+The playtest log's summary used to count floods and gusts only. Now it says what each hazard met
+was, and how it ended, so the facilitator can check the testers' explanations against what the
+game saw.
+
+- **New counts:** road closures, alongside the floods, gusts, handbrake pranks and falling trees.
+- **"How the hazards ended":** one line per hazard met, grouped, with repeats counted, for example
+  "handbrake: chocked (2×); someone got in".
+    - **Falling tree:** fell towards the ute, cut from the ute's side (fell away from it), the ute
+      moved out of reach, or left standing.
+    - **Handbrake:** someone got in, chocked, or rolled until it caught.
+    - **Road closure:** took the track on foot, squeezed past on foot (or some of each), drove the
+      ute round the track (or got it round another way), barrier shifted off the road, or turned
+      back; plus "left the ute on the closed road" when they did.
+    - **Weather:** came and cleared, by area.
+- **Where the account comes from:** the hazard director keeps it as each hazard ends. It's on the
+  host only and never sent, so it adds nothing to the network. A guest's log has the toasts, as
+  before. A run's reset clears it.
+- **Tested from real play, by input:** each account is checked in the scenario that brings it
+  about:
+    - the falling tree: cut with the ute in reach, cut from its side, the ute driven out of reach,
+      left standing;
+    - the handbrake: rolled, got in, chocked;
+    - the road closure: walked the track, drove the track, squeezed past (three ways), dragged the
+      barrier off;
+    - the weather: a test shower.
+- **Code:** `src/sim/hazards.ts` (`outcomes`), a few lines in `hazard-tree.ts` and
+  `hazard-road.ts`, the Valley's track test in `valley.ts`, `main.ts` (fed into the log), and
+  `src/playtest/telemetry.ts`.
+- **The goose's outcomes** (pecked, put down, outrun, distracted) come with the goose (#78).
+- **Road closure fixes (from the #131 audit), in this PR:**
+    - **A closure the driver brought on ended on the spot.** With the ute still behind the closed
+      stretch at the tell (it always is: the tell lands 2.5 s out), "everyone is past" was true at
+      once. So it was over on its first tick and freed the director. It also said "the barrier is
+      back across the road" along with the tell (two clunks). This came in with #131. Now the
+      ute test checks the closure holds from the tell until the ute is past, with one toast.
+        - Mutation check: with the old rule back, it fails (over at the tell, both toasts).
+    - **Who holds it:** the players on foot, and the ute if someone drives it, that are in the
+      closed stretch (past `from`) or beyond. A player who stays behind across the creek, or goes
+      back there, no longer holds it, and with it every other hazard. If nobody holds it for 10 s
+      (all turned back), it is over too. The barrier still stands, and the sign stays closed.
+        - Tested by input: one player walks back into the yard, and it ends 10 s after they leave
+          the stretch ("turned back"). Another stays in the yard while the other walks the track,
+          and it ends when that one is past.
+        - Mutation check: with walkers counted wherever they are, both fail.
+    - **An empty ute brings nobody:** an empty ute rolling at the junction no longer brings the
+      tell. An empty ute only moves when shoved or when the handbrake prank lets it go, so this test
+      plays the closure's own step with the same roll at 8 m/s, empty and driven. The driven roll
+      brings the tell; the empty one doesn't.
+        - Mutation check: without the check, the empty roll brings it.
+    - **The account:** an empty ute left on the closed road adds "left the ute on the closed road".
+      "Got the ute round another way" now needs the ute past the barrier, not just in the stretch.
+- **Why the road closure's drag tests changed in #131 (measured).**
+    - They used to walk forward with the barrier trailing behind, round the corner from "back down
+      the road" to "out to the side". That walk is a coin flip. The grip's error peaks at 2.13–2.19 m, within one tick of its 0.4 s
+      break time. Waiting 0 to 9 idle ticks before the grab loses the grip 5 to 7 times in 10.
+      That held with or without the creek bridge, and with or without #136's under-foot
+      restore. The old tests passed on a lucky tick alignment, and #136's merge moved it.
+    - The tests now pull the barrier facing it, stepping back, as a player hauling something
+      heavy would. That kept the grip 20 times in 20 over the same sweep, with the error at
+      most 1.04 m, under the 1.25 m break distance. They still drive it by input, and the
+      assertions are unchanged.
+    - Walking forward round a corner with it still loses the grip about half the time, on
+      tick phase alone. That is a follow-up, not changed here.
+- **Every event kind has a sound** (`eventSounds` is now keyed on every kind, so a new one won't
+  type-check without one).
+    - Played from the toast: a step, the goal, a recovery, a hint, the hazards' toasts.
+    - The ute's toasts: a recovery dings and its rule knocks. Getting in or out already sounds the
+      door.
+    - Water notices slosh, and wood notices (the pine falls, logs bucked or delivered) knock.
+    - Creaks, snaps and falls into the creek are played where they happen (the nail markers, the
+      splash), so they aren't doubled.
+- **Unit tests:** 1040 pass (110 files, both voxel sizes), on `epics-5-10` 225a26c.
+
 ## Objects on different lattices resolve by priority (2026-11-22, Epic 10, #107)
 
 Objects drawn on different lattices (1 cm fine, the 5–10 cm base, the coarse 10–20 cm) used to draw
@@ -292,8 +658,9 @@ An existing cheat: the Valley could be finished without building a single bridge
     - A thrown bucket lands with its water gone: 0.02 L at most, measured with 0–3.4 L in it. A
       full one falls short into the creek.
     - Carried over a built crossing, it keeps nearly all of its 10 L.
-    - At the flag, a bucket that's too dry gets the message "it needs at least 1 L of water in it.
-      Carry it over the crossing, don't throw it."
+    - At the flag, a bucket that's too dry gets the message "it needs at least 1 L of water. Carry
+      it over the crossing, don't throw it." (shortened from "…of water in it." so it fits the 120
+      characters an online update carries, with room for the amount)
 - **Spare buckets:** a bucket lost at the Forest Road, Gorge or Mountain Approach comes back with
   3 L in it ("A spare bucket (3 L) is waiting…"). There's no water near those stage starts, and an
   empty spare would have meant a walk back to the yard.

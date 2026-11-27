@@ -21,7 +21,15 @@ import { GuestSession, HostSession, listGames } from '../../src/net/session.ts';
 import { MemoryHub } from '../../src/net/transport.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
-import { CLOSURE, CLOSURE_OPEN, CLOSURE_SHUT, CLOSURE_TELL, SIGN_SWING, quickest } from '../../src/sim/hazard-road.ts';
+import {
+    CLOSURE,
+    CLOSURE_OPEN,
+    CLOSURE_SHUT,
+    CLOSURE_TELL,
+    RoadClosure,
+    SIGN_SWING,
+    quickest
+} from '../../src/sim/hazard-road.ts';
 import { HAZARD } from '../../src/sim/hazards.ts';
 import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
@@ -104,16 +112,15 @@ function inputs(s: LabSim, slot = 0) {
         }
     };
     const me = () => s.players[slot];
-    /** Walks (or runs) to (x, z), facing the way it goes; calls `each` every tick. */
-    /** (`pitch`: where it looks as it goes; dragging something heavy, down at the ground.) */
-    const walkTo = (x: number, z: number, sprint = false, each?: () => void, near = 0.3, pitch = 0) => {
-        for (let i = 0; i < 60 * 60; i++) {
+    /** Walks (or runs) to (x, z), facing the way it goes, the stick pushed `stick` of the way; calls `each` every tick. */
+    const walkTo = (x: number, z: number, sprint = false, each?: () => void, near = 0.3, stick = 1) => {
+        for (let i = 0; i < 60 * 120; i++) {
             const dx = x - me().x;
             const dz = z - me().z;
             if (Math.hypot(dx, dz) < near) return;
             v.yaw = Math.atan2(-dx, -dz);
-            v.pitch = pitch;
-            step({ moveZ: 1, sprint });
+            v.pitch = 0;
+            step({ moveZ: stick, sprint });
             each?.();
         }
         throw new Error(`could not walk to ${x.toFixed(1)}, ${z.toFixed(1)}`);
@@ -391,6 +398,8 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
             // as the trigger reckons it): the trigger assumes more than it ever makes
             const alongs: number[] = [];
             let hardest = 0;
+            // once told, it holds until the ute is past (the driver alone brought it on)
+            let heldAfterTell = true;
             // flat out: over the beams on the crossing's line, then up the road (round the
             // checkpoint flag in the middle of it at u = 7.2), to the junction
             for (let k = 0; k < S(30) && junction < 0; k++) {
@@ -413,6 +422,7 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
                     tell = s.tick;
                     tellSpeed = v;
                 }
+                if (tell > 0 && !s.hazards.road!.busy) heldAfterTell = false;
                 if (routeU(s.ute.pose.p.x, s.ute.pose.p.z) >= CLOSURE_AT.junction) junction = s.tick;
             }
             expect(tell, `from u ${back}`).toBeGreaterThan(0);
@@ -426,6 +436,10 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
             expect(CLOSURE.uteAccel).toBeGreaterThan(4.6);
             expect(lead, `from u ${back}: lead ${lead.toFixed(2)} s`).toBeGreaterThanOrEqual(2.5);
             expect(s.hazards.road!.count).toBe(1);
+            // the closure the driver brought on holds while they drive at it, and says so once:
+            // the ute still behind the closed stretch at the tell doesn't end it there and then
+            expect(heldAfterTell, `from u ${back}: still on after the tell`).toBe(true);
+            expect(texts(s).filter((t) => t === CLOSURE_TELL || t === CLOSURE_SHUT)).toEqual([CLOSURE_TELL]);
         }
         // the trigger's own bound: from a standstill the ute could not get there faster than this
         expect(quickest(25, 0)).toBeGreaterThan(CLOSURE.leadS);
@@ -484,11 +498,19 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         p.walkTo(beyond.x, beyond.z);
         p.step({}, 5);
         expect(s.hazards.road!.busy).toBe(false);
+        // from the tell to the road beyond by the track, at a walk: well inside CLOSURE.stopS
+        const walked = (s.hazards.outcomes[0].tick - s.events.find((e) => e.text === CLOSURE_TELL)!.tick) / 60;
+        console.log(`the track on foot, from the tell: ${walked.toFixed(1)} s`);
+        expect(walked).toBeLessThan(CLOSURE.stopS / 2);
         // the barrier is still there, so the sign still says so
         expect(s.hazards.road!.blocking(s.physics, s.closure.barrier.id)).toBe(true);
         expect(s.closure.sign.anim[SIGN_SWING]).toBe(1);
         expect(texts(s)).not.toContain(CLOSURE_OPEN);
         expect(s.hazards.busy).toBe(false);
+        // the playtest log's account (#70)
+        expect(s.hazards.outcomes.map((o) => `${o.hazard}: ${o.what}`)).toEqual([
+            'road closure: took the track on foot'
+        ]);
     }, 300_000);
 
     it('counterplay: drive the ute round the logging track', () => {
@@ -501,6 +523,7 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         inputs(s).step({}, 5);
         expect(s.hazards.road!.busy).toBe(false);
         expect(s.closure.sign.anim[SIGN_SWING]).toBe(1);
+        expect(s.hazards.outcomes.map((o) => o.what)).toEqual(['drove the ute round the track']);
     }, 300_000);
 
     it('counterplay on foot: a beaver squeezes round either end of the barrier (or between the old fence posts); with the ute left in the yard that ends it, and the sign stays closed', () => {
@@ -527,6 +550,10 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
             expect(s.hazards.road!.busy, how).toBe(false);
             expect(s.hazards.road!.blocking(s.physics, s.closure.barrier.id)).toBe(true);
             expect(s.closure.sign.anim[SIGN_SWING]).toBe(1);
+            expect(
+                s.hazards.outcomes.map((o) => o.what),
+                how
+            ).toEqual(['squeezed past on foot']);
         }
     }, 300_000);
 
@@ -711,6 +738,7 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         expect(s.hazards.road!.busy).toBe(false);
         expect(s.closure.sign.anim[SIGN_SWING]).toBe(0);
         expect(texts(s).filter((t) => t === CLOSURE_OPEN)).toHaveLength(1);
+        expect(s.hazards.outcomes.map((o) => o.what)).toEqual(['barrier shifted off the road']);
         // and the road beyond is walkable straight up
         const beyond = roadAt(CLOSURE_AT.barrierU + 3);
         const from = roadAt(CLOSURE_AT.barrierU - 3);
@@ -718,6 +746,68 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         p.step({}, 10);
         p.walkTo(beyond.x, beyond.z);
     }, 300_000);
+
+    /**
+     * One forward drag of the barrier round the corner (#131's original walk): back down the road,
+     * then forward out to the side, the barrier trailing; after `idle` ticks stood still first (the
+     * tick phase). Whether the grip held until it was clear, and the worst grip error on the way.
+     */
+    function forwardDrag(idle: number, path: 'corner' | 'snag'): { held: boolean; clear: boolean; worst: number } {
+        const s = closed();
+        inputs(s).step({}, idle);
+        const p = takeHold(s, 0, -2.3);
+        expect(s.interaction().holding).toBe('barrier');
+        const out = at(CLOSURE_AT.barrierU - 2.5, roadT(CLOSURE_AT.barrierU) - 10.5);
+        const back1 = at(CLOSURE_AT.barrierU - 2.5, roadT(CLOSURE_AT.barrierU) - 2.3);
+        let held = true;
+        let worst = 0;
+        const watch = () => {
+            worst = Math.max(worst, s.physics.stats.grabError);
+            if (s.physics.holders(s.closure.barrier.id) === 0) {
+                held = false;
+                // (the snag: they walk on regardless)
+                if (path === 'corner') throw new Error('let go');
+                return;
+            }
+            if (!s.hazards.road!.blocking(s.physics, s.closure.barrier.id)) throw new Error('clear');
+        };
+        try {
+            if (path === 'corner') {
+                // straight back down the road, then forward out to the side
+                p.walkTo(back1.x, back1.z, false, watch);
+                p.walkTo(out.x, out.z, false, watch);
+            } else {
+                // the snag: out beside the road, then on up it through the old fence line between two
+                // posts (a beaver fits; the barrier, trailing behind, catches on them)
+                const gapT = roadT(CLOSURE_AT.barrierU) - 4.6;
+                const before = at(CLOSURE_AT.barrierU - 1.5, gapT);
+                const through = at(CLOSURE_AT.barrierU + 4, gapT);
+                p.walkTo(before.x, before.z, false, watch);
+                p.walkTo(through.x, through.z, false, watch);
+                // through the gap; the barrier left behind on its side of the line
+                expect(routeU(s.player.x, s.player.z)).toBeGreaterThan(CLOSURE_AT.barrierU + 3);
+                const bp = s.closure.barrier.pose.p;
+                expect(routeU(bp.x, bp.z)).toBeLessThan(CLOSURE_AT.barrierU + 1);
+            }
+        } catch (e) {
+            if (!['clear', 'let go'].includes((e as Error).message)) throw e;
+        }
+        return { held, clear: !s.hazards.road!.blocking(s.physics, s.closure.barrier.id), worst };
+    }
+
+    it('grip round a corner: dragged forward round the corner, the barrier trailing, it holds every time, whatever the tick phase', () => {
+        const runs = Array.from({ length: 10 }, (_, idle) => forwardDrag(idle, 'corner'));
+        console.log(`corner: ${runs.map((r) => `${r.held ? 'held' : 'LOST'} ${r.worst.toFixed(2)}`).join(', ')}`);
+        expect(runs.filter((r) => r.held && r.clear)).toHaveLength(10);
+    }, 600_000);
+
+    it('a snag still lets go: walked on through a gap in the old fence line, the barrier catches on the posts and the grip goes every time', () => {
+        const runs = Array.from({ length: 10 }, (_, idle) => forwardDrag(idle, 'snag'));
+        console.log(
+            `snag: ${runs.map((r) => `${r.held ? 'held' : 'LOST'} ${r.clear ? 'clear' : 'on road'} ${r.worst.toFixed(2)}`).join(', ')}`
+        );
+        expect(runs.filter((r) => !r.held)).toHaveLength(10);
+    }, 600_000);
 
     it('counterplay: two players carry it off together; a second player’s grab (a guest’s, on the host) frees the pin', () => {
         const s = closed();
@@ -870,11 +960,178 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         // the ute still stands on the closed road, empty: the closure is over all the same
         expect(routeU(s.ute.pose.p.x, s.ute.pose.p.z)).toBeCloseTo(parked, 0);
         expect(s.hazards.road!.busy).toBe(false);
+        // the playtest log's account says where the ute was left
+        expect(s.hazards.outcomes.map((o) => o.what)).toEqual([
+            'took the track on foot; left the ute on the closed road'
+        ]);
         // and the next hazard comes once the quiet spell is out
         const w = s.hazards.weather!;
         for (let i = 0; i < S(HAZARD.safeS + 5) && !w.hazardBusy; i++) p.step();
         expect(w.hazardBusy).toBe(true);
         expect(texts(s)).toContain('test shower');
+    }, 300_000);
+
+    it('never came: a player who brings it on and stays where they are (on the crossing) never holds it; 10 s on it is over, "never came"', () => {
+        const s = valley();
+        bridge(s);
+        const p = inputs(s);
+        const start = at(-5, 0);
+        s.placePlayer(start.x, start.z, 0);
+        p.step({}, 20);
+        for (const u of [-2, 0]) {
+            const w = at(u, 0);
+            p.walkTo(w.x, w.z);
+        }
+        expect(texts(s)).toContain(CLOSURE_TELL);
+        const tell = s.events.find((e) => e.text === CLOSURE_TELL)!.tick;
+        // stood on the crossing, short of the closed stretch
+        expect(routeU(s.player.x, s.player.z)).toBeLessThan(R.from);
+        while (s.hazards.road!.busy && s.tick - tell < S(CLOSURE.goneS + 5)) p.step();
+        expect(s.hazards.road!.busy).toBe(false);
+        expect(routeU(s.player.x, s.player.z)).toBeLessThan(R.from);
+        expect((s.tick - tell) / 60).toBeCloseTo(CLOSURE.goneS, 1);
+        expect(s.hazards.outcomes.map((o) => `${o.hazard}: ${o.what}`)).toEqual(['road closure: never came']);
+    }, 300_000);
+
+    it('stopped in the closure: a player standing just inside the closed stretch holds it CLOSURE.stopS from their last step along the road, then it is over', () => {
+        const s = closed();
+        const tell = s.events.find((e) => e.text === CLOSURE_TELL)!.tick;
+        const p = inputs(s);
+        // they stopped here (closed() walks them in and stops)
+        const stopped = s.tick;
+        expect(routeU(s.player.x, s.player.z)).toBeGreaterThanOrEqual(R.from);
+        expect(routeU(s.player.x, s.player.z)).toBeLessThan(R.from + 1.5);
+        while (s.hazards.road!.busy && s.tick - tell < S(CLOSURE.stopS + 10)) p.step();
+        expect(s.hazards.road!.busy).toBe(false);
+        // CLOSURE.stopS after their last 0.5 m along, to the tick (that was before they stood still)
+        const last = s.hazards.road!.lastProgress;
+        expect(last).toBeGreaterThanOrEqual(tell);
+        expect(last).toBeLessThanOrEqual(stopped);
+        expect((s.tick - last) / 60).toBeCloseTo(CLOSURE.stopS, 1);
+        // still standing there, the barrier still across the road, the sign still closed
+        expect(routeU(s.player.x, s.player.z)).toBeGreaterThanOrEqual(R.from);
+        expect(s.hazards.road!.blocking(s.physics, s.closure.barrier.id)).toBe(true);
+        expect(s.closure.sign.anim[SIGN_SWING]).toBe(1);
+        expect(s.hazards.outcomes.map((o) => `${o.hazard}: ${o.what}`)).toEqual([
+            'road closure: stopped in the closure'
+        ]);
+    }, 300_000);
+
+    it('a slow walk round the track (the stick at 0.3) takes over CLOSURE.stopS and still ends as "took the track on foot", not cut off', () => {
+        const s = closed();
+        const tell = s.events.find((e) => e.text === CLOSURE_TELL)!.tick;
+        const p = inputs(s);
+        const track = SIDE_PATHS.find((q) => q.name === 'logging-track')!;
+        for (const [u, t] of track.points) {
+            const w = at(u, t);
+            p.walkTo(w.x, w.z, false, undefined, 0.6, 0.3);
+        }
+        const beyond = roadAt(CLOSURE_AT.rejoin + 1.5);
+        p.walkTo(beyond.x, beyond.z, false, undefined, 0.3, 0.3);
+        p.step({}, 5);
+        expect(s.hazards.road!.busy).toBe(false);
+        const o = s.hazards.outcomes[0];
+        // it took longer than the cap from the tell: the cap runs from the last progress, not the tell
+        expect((o.tick - tell) / 60).toBeGreaterThan(CLOSURE.stopS);
+        expect(s.hazards.outcomes.map((x) => x.what)).toEqual(['took the track on foot']);
+    }, 300_000);
+
+    it('stopped in the closure waits while someone has hold of the barrier: held past CLOSURE.stopS it stays on; let go, it ends', () => {
+        const s = closed();
+        const tell = s.events.find((e) => e.text === CLOSURE_TELL)!.tick;
+        const p = takeHold(s, 0, -2.5);
+        expect(s.physics.holders(s.closure.barrier.id)).toBe(1);
+        // (standing still, holding it, from here: past CLOSURE.stopS since the tell and since they stopped)
+        const held = s.tick;
+        while (s.tick - held < S(CLOSURE.stopS + 3)) p.step();
+        expect(s.tick - tell).toBeGreaterThan(S(CLOSURE.stopS));
+        expect(s.physics.holders(s.closure.barrier.id)).toBe(1);
+        expect(s.hazards.road!.busy).toBe(true);
+        // let go (grab again): over at once, stopped in it
+        p.step({ grab: true });
+        p.step({}, 2);
+        expect(s.physics.holders(s.closure.barrier.id)).toBe(0);
+        expect(s.hazards.road!.busy).toBe(false);
+        expect(s.hazards.outcomes.map((o) => o.what)).toEqual(['stopped in the closure']);
+    }, 300_000);
+
+    it('turned back: a player who brought it on and goes back across the creek stops holding it; with nobody in the closed stretch for 10 s it is over', () => {
+        const s = closed();
+        const p = inputs(s);
+        expect(routeU(s.player.x, s.player.z)).toBeGreaterThanOrEqual(R.from);
+        // back over the creek's beams into the yard, and wait there (from the tick they leave the
+        // closed stretch)
+        let back = -1;
+        const leaving = () => {
+            if (back < 0 && routeU(s.player.x, s.player.z) < R.from) back = s.tick;
+        };
+        for (const u of [0, -2, -6]) {
+            const w = at(u, 0);
+            p.walkTo(w.x, w.z, false, leaving);
+        }
+        expect(routeU(s.player.x, s.player.z)).toBeLessThan(R.from);
+        expect(s.hazards.road!.busy, 'still on when they reach the yard').toBe(true);
+        while (s.hazards.road!.busy && s.tick - back < S(CLOSURE.goneS + 5)) p.step();
+        const took = (s.tick - back) / 60;
+        // it ended CLOSURE.goneS after they left the stretch, to the tick
+        expect(s.hazards.road!.busy).toBe(false);
+        expect(took).toBeCloseTo(CLOSURE.goneS, 1);
+        // the barrier stays across the road, and the sign says so
+        expect(s.hazards.road!.blocking(s.physics, s.closure.barrier.id)).toBe(true);
+        expect(s.closure.sign.anim[SIGN_SWING]).toBe(1);
+        expect(s.hazards.outcomes.map((o) => `${o.hazard}: ${o.what}`)).toEqual(['road closure: turned back']);
+    }, 300_000);
+
+    it('a player who stays behind (across the creek) does not hold it: the other walks the track, and it is over', () => {
+        const s = closed();
+        // player 2 joins, in the yard across the creek, and stays there
+        s.setSlotActive(1, true);
+        const yard = at(-6, 0);
+        s.placePlayer(yard.x, yard.z, 0, 1);
+        const p = inputs(s);
+        p.step({}, 30);
+        const behind = s.players[1];
+        expect(routeU(behind.x, behind.z)).toBeLessThan(R.from);
+        const track = SIDE_PATHS.find((q) => q.name === 'logging-track')!;
+        for (const [u, t] of track.points) {
+            const w = at(u, t);
+            p.walkTo(w.x, w.z, false, undefined, 0.6);
+        }
+        expect(s.hazards.road!.busy).toBe(true);
+        const beyond = roadAt(CLOSURE_AT.rejoin + 1.5);
+        p.walkTo(beyond.x, beyond.z);
+        p.step({}, 5);
+        expect(routeU(s.players[1].x, s.players[1].z)).toBeLessThan(R.from);
+        expect(s.hazards.road!.busy).toBe(false);
+        expect(s.hazards.outcomes.map((o) => o.what)).toEqual(['took the track on foot']);
+    }, 300_000);
+
+    it('an empty ute rolling at the junction brings nobody: no tell (and the same roll with a driver brings it)', () => {
+        // An empty ute only moves when something shoves it, or when the handbrake prank lets it
+        // roll, so this one plays the closure's own step: the same roll along the road at 8 m/s,
+        // empty and driven, from u = -20 to the junction
+        const roll = (driven: boolean) => {
+            const s = valley();
+            const road = new RoadClosure(R);
+            const said: string[] = [];
+            for (let k = 0, u = -20; u < CLOSURE_AT.junction; k++, u += 8 / 60) {
+                const w = roadAt(u);
+                road.step(
+                    {
+                        tick: s.tick + k,
+                        physics: s.physics,
+                        entities: s.closure,
+                        walkers: [],
+                        ute: { x: w.x, z: w.z, speed: 8, driven },
+                        say: (t) => said.push(t)
+                    },
+                    true
+                );
+            }
+            return said;
+        };
+        expect(roll(true)).toEqual([CLOSURE_TELL]);
+        expect(roll(false)).toEqual([]);
     }, 300_000);
 
     it('the budget: not while the weather is on, nor in the quiet spell after it; then it comes', () => {
@@ -934,6 +1191,9 @@ describe('the road closure (#77): the sign swaps and a barrier closes the forest
         cross();
         expect(s.hazards.road!.count).toBe(1);
         expect(texts(s)).toContain(CLOSURE_TELL);
+        expect(s.hazards.outcomes.map((o) => `${o.hazard}: ${o.what}`)).toEqual([
+            'weather: test shower: came and cleared'
+        ]);
     }, 300_000);
 
     it('the barrier dragged back across the road: the sign clunks closed again, with its toast', () => {

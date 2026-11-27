@@ -82,6 +82,21 @@ somewhere).
 | Can find other solutions?            | They named at least one way that would have worked                                  |
 | Did the world fight back on purpose? | At least one flood or gust happened (in the log), and they noticed its warning      |
 
+The summary's "how the hazards ended" lines help with the second and third questions. They say,
+for each hazard met, what the game saw:
+
+- the falling tree: fell towards the ute, cut from the ute's side, the ute moved out of reach, or
+  left standing;
+- the handbrake: someone got in, chocked, or it rolled until it caught;
+- the road closure: took the track on foot, squeezed past, drove the ute round the track, the
+  barrier was shifted, turned back, never came (whoever brought it on stayed short of it), or
+  stopped in the closure (someone stood in the closed stretch for a minute); plus "left the ute on
+  the closed road" when they did;
+- the weather: came and cleared.
+
+Compare those with what the testers say happened. These lines come from the host's device (or a
+solo game); a guest's log only has the toasts.
+
 A session that took less than 5 minutes passes on everything else, but note how long it took: the
 slice may be too short.
 

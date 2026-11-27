@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { roadCenterX, timberYardLevel, yardHeight } from '../../src/levels/timber-yard.ts';
+import { VALLEY_WEATHER_ZONES, valleyLevel } from '../../src/levels/valley.ts';
 import { PlaytestLog } from '../../src/playtest/telemetry.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
 import { PHASE } from '../../src/sim/hazards.ts';
@@ -43,6 +44,54 @@ describe('the playtest log', () => {
         expect(text.match(/ where /g)).toHaveLength(1);
         expect(log.count('where')).toBe(1);
     });
+
+    it('says how each hazard ended, grouped by hazard, from the host’s account (#70)', () => {
+        const log = new PlaytestLog({ level: 'Valley' }, 0);
+        log.note(
+            10_000,
+            'hazard',
+            '🚧 Clunk! Road closed ahead: drive round by the old logging track, or shift the barrier.'
+        );
+        log.note(30_000, 'outcome', 'road closure: took the track on foot');
+        log.note(40_000, 'outcome', 'handbrake: chocked');
+        log.note(90_000, 'outcome', 'handbrake: chocked');
+        log.note(120_000, 'outcome', 'handbrake: someone got in');
+        log.note(150_000, 'outcome', 'weather: Forest Road: came and cleared');
+        const text = log.summary(200_000);
+        expect(text).toContain('road closures: 1');
+        expect(text).toContain(
+            [
+                '  how the hazards ended:',
+                '    road closure: took the track on foot',
+                '    handbrake: chocked (2×); someone got in',
+                '    weather: Forest Road: came and cleared'
+            ].join('\n')
+        );
+        // none: no such section
+        expect(new PlaytestLog({}, 0).summary(1000)).not.toContain('how the hazards ended');
+    });
+
+    it('a real spell of the Valley’s weather, its outcome fed in as the game feeds the log, reads as the summary above', () => {
+        // the Valley's own Forest Road rain, over the whole map and short, with only it among the hazards
+        const rain = VALLEY_WEATHER_ZONES.find((z) => z.name === 'Forest Road')!;
+        const zone = { ...rain, contains: () => true, tellS: 1, activeS: 3, clearS: 1, delayS: 0, delayJitterS: 0 };
+        const s = new LabSim({ level: { ...valleyLevel, hazards: { seed: 1, weather: { zones: [zone] } } } });
+        s.fpActive = true;
+        const log = new PlaytestLog({ level: 'Valley' }, 0);
+        // as main.ts does: each new outcome becomes an 'outcome' line, "<hazard>: <what>"
+        let fed = 0;
+        for (let i = 0; i < 60 * 90 && fed === 0; i++) {
+            s.step(neutralCommand(s.tick));
+            for (; fed < s.hazards.outcomes.length; fed++) {
+                const o = s.hazards.outcomes[fed];
+                log.note((o.tick / 60) * 1000, 'outcome', `${o.hazard}: ${o.what}`);
+            }
+        }
+        expect(fed).toBe(1);
+        expect(log.summary((s.tick / 60) * 1000)).toContain(
+            ['  how the hazards ended:', '    weather: Forest Road: came and cleared'].join('\n')
+        );
+    }, 120_000);
 
     it('a real handbrake prank, fed in as the game feeds the log, is counted', () => {
         const s = new LabSim({ level: timberYardLevel });
