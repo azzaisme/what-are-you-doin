@@ -32,7 +32,7 @@ Three follow-ups from the #145 audit.
   no 60 s cap; the cap ignoring a hand on the barrier; a different weather wording; and the cap
   timed from the tell (the slow walk is cut at 60.0 s).
 - **Code:** `src/sim/hazard-road.ts` (CLOSURE.stopS and progressM, why it ended), `docs/playtest.md`.
-- **Unit tests:** COUNT pass (FILES files, both voxel sizes), on `epics-part-3` f9a63c2.
+- **Unit tests:** 1184 pass (130 files, both voxel sizes), on `epics-part-3` f9a63c2.
 
 ## Epic 5, chunk B: the structure overlay, the rope, the winch and the log dolly (2026-11-26, #51 #52)
 
