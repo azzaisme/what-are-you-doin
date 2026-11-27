@@ -41,6 +41,8 @@ import { initPhysics } from '../../src/sim/physics/world.ts';
 import { ANIM_MAX, SnapshotRing } from '../../src/sim/snapshots.ts';
 import { pose } from '../../src/voxels/math.ts';
 
+import { hookDolly } from './winch-helpers.ts';
+
 beforeAll(() => initPhysics());
 
 /** The entity indices a snapshot lists. */
@@ -133,6 +135,8 @@ function allMoving(sim: LabSim, k: number): void {
     }
 }
 
+const st0 = (hub: MemoryHub) => hostState(hub, 'room-ue-size');
+
 describe('host state size (NET_PROTOCOL 3)', { timeout: 60_000 }, () => {
     it('stays inside 4 KiB (UTF-8) with every entity moving, the longest messages, 64 nails, nail aims and eight players; no entity waits more than 2 snapshots', async () => {
         const { hub, sim, hs } = await valleyHost();
@@ -175,6 +179,56 @@ describe('host state size (NET_PROTOCOL 3)', { timeout: 60_000 }, () => {
         for (const [, at] of lastSeen) expect(snaps - at).toBeLessThanOrEqual(2);
         console.info(
             `worst case, all ${sim.entities.length} entities moving, ${nails} nails: ${worst} UTF-8 bytes (${worstChars} characters); longest wait ${longestWait} snapshots`
+        );
+        expect(worst).toBeLessThanOrEqual(PRESENCE_LIMIT);
+        expect(longestWait).toBeLessThanOrEqual(2);
+    });
+
+    it('the same with the winch’s rope out, hooked into the log dolly at its widest on the wire (#52)', async () => {
+        const { hub, sim, hs } = await valleyHost();
+        const rope = hookDolly(sim);
+        const nails = nailEverything(sim);
+        let worst = 0;
+        let worstChars = 0;
+        const lastSeen = new Map<number, number>();
+        let longestWait = 0;
+        let snaps = 0;
+        let seated = 0;
+        for (let k = 0; k < 300; k++) {
+            sim.step(neutralCommand(k));
+            allMoving(sim, k);
+            sim.events.push({ tick: sim.tick, kind: 'hazard', text: LONG_MESSAGE });
+            hs.afterStep(() => ({
+                held: 999,
+                target: 999,
+                shared: true,
+                driving: false,
+                seat: 1,
+                nail: 12,
+                nailAt: { x: -123.45, y: 12.34, z: 123.45 }
+            }));
+            if (sim.tick % 3 !== 0) continue;
+            snaps++;
+            seated = hs.guestCount;
+            const st = hostState(hub, 'room-ue-size');
+            const json = JSON.stringify(st);
+            worst = Math.max(worst, utf8Bytes(json));
+            worstChars = Math.max(worstChars, json.length);
+            for (const i of listed(fromBase64Chunks(st.s as string[]))) {
+                if (snaps > 2) longestWait = Math.max(longestWait, snaps - (lastSeen.get(i) ?? 0));
+                lastSeen.set(i, snaps);
+            }
+        }
+        expect(seated).toBe(MAX_PLAYERS - 1);
+        expect(nails).toBe(64);
+        // after the first snapshots, every entity was listed, and none waited long
+        expect(lastSeen.size).toBe(sim.entities.length);
+        for (const [, at] of lastSeen) expect(snaps - at).toBeLessThanOrEqual(2);
+        // the rope was out (and on the wire) the whole time
+        expect(sim.winch!.hooked).toBe(sim.dolly.id);
+        expect(st0(hub).wr).toEqual(rope);
+        console.info(
+            `worst case with the winch rope hooked into the dolly (wr ${JSON.stringify(rope)}), all ${sim.entities.length} entities moving, ${nails} nails: ${worst} UTF-8 bytes (${worstChars} characters); longest wait ${longestWait} snapshots`
         );
         expect(worst).toBeLessThanOrEqual(PRESENCE_LIMIT);
         expect(longestWait).toBeLessThanOrEqual(2);

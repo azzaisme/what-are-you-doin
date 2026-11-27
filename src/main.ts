@@ -17,6 +17,7 @@ import { BUCKET_CAPACITY } from './assets/props.ts';
 import { GameAudio, soundBodies } from './audio/game-audio.ts';
 import { DebugPanel } from './debug/panel.ts';
 import type { PanelHost } from './debug/panel.ts';
+import { emptyLines, structureLines } from './debug/structure-overlay.ts';
 import { DESIGN_KEY, Designer, loadDraft } from './editor/designer.ts';
 import { ParticleFX } from './fx/particles.ts';
 import type { WatchedEntity } from './fx/particles.ts';
@@ -58,9 +59,11 @@ import { NailMarkers } from './render/nail-markers.ts';
 import { ReferenceRenderer } from './render/reference.ts';
 import { QUALITY, createLabScene } from './render/scene.ts';
 import type { Quality } from './render/scene.ts';
+import { SmoothRenderer } from './render/smooth-renderer.ts';
 import { VoxelClient } from './render/voxel-pipeline.ts';
 import type { LaneSpec } from './render/voxel-pipeline.ts';
 import { VoxelRenderer } from './render/voxel-renderer.ts';
+import { WinchRope } from './render/winch-rope.ts';
 import { FAST_CATCHUP_STEPS, FixedStepClock, SIM_DT, VOXEL_RATES, VoxelClock } from './sim/clock.ts';
 import type { VoxelRate } from './sim/clock.ts';
 import { ACTION_DROP_TEST, ACTION_RAGDOLL, ACTION_RESET_PROPS, neutralCommand } from './sim/commands.ts';
@@ -73,6 +76,8 @@ import { initPhysics } from './sim/physics/world.ts';
 import { ANIM_MAX } from './sim/snapshots.ts';
 import { WATER } from './sim/water.ts';
 import { weatherCovers, weatherFog } from './sim/weather.ts';
+import { WINCH, decodeWinchRope, encodeWinchRope } from './sim/winch.ts';
+import type { WinchRopeEnd } from './sim/winch.ts';
 import type { CameraControlsApi } from './types/engine-scripts.ts';
 import { CreditsPanel } from './ui/credits.ts';
 import { fullscreenAvailable, isFullscreen, onPageHidden, setFullscreen } from './ui/embed.ts';
@@ -106,6 +111,7 @@ import {
 import { pose, quatFromYawPitchRoll, quatRotate, vec3 } from './voxels/math.ts';
 import { SAMPLING_POLICIES } from './voxels/rasterizer.ts';
 import type { SamplingPolicy } from './voxels/rasterizer.ts';
+import type { FromSmoothWorker, ToSmoothWorker } from './workers/smooth-worker.ts';
 
 import './style.css';
 
@@ -264,7 +270,69 @@ const tUpload = performance.now();
 pipeline.applyStatic();
 const staticUploadMs = performance.now() - tUpload;
 const reference = new ReferenceRenderer(app, sim, scene.worldLayer, scene.immediateLayer);
+// "Voxels: Off" (#24): plain smooth meshes instead of the voxel lattices, a render choice only. Built
+// once, in a worker, the first time it is chosen; with it, no voxel frames are sent at all.
+const smooth = new SmoothRenderer(app, scene.worldLayer, lanes.find((l) => l.world && !l.far)!.renderer.materials, sim);
+let smoothBuild: Promise<void> | null = null;
+let smoothBuildMs = 0;
+let smoothParticleSource = 0;
+/** Tests: the next smooth build sends the worker level data that is not a level, so it fails. */
+let smoothBuildFault = false;
+function buildSmoothWorld(): Promise<void> {
+    const t0 = performance.now();
+    const worker = new Worker(new URL('./workers/smooth-worker.ts', import.meta.url), {
+        type: 'module',
+        name: 'smooth'
+    });
+    return new Promise((resolve) => {
+        // a failed build (the worker reports it, or throws, or its meshes do not load) is logged, and
+        // the voxel lattices come back instead of an empty screen; the setting goes back to On
+        const fail = (why: string) => {
+            worker.terminate();
+            console.error(`Voxels: Off could not build the smooth meshes, so voxels stay on: ${why}`);
+            smoothBuild = null;
+            setSetting('voxels', true);
+            applyVoxels(true);
+            if (menuReady) menu.sync();
+            resolve();
+        };
+        worker.onerror = (e) => {
+            e.preventDefault();
+            fail(e.message || 'the smooth worker failed');
+        };
+        worker.onmessage = (e: MessageEvent<FromSmoothWorker>) => {
+            if (e.data.type === 'error') return fail(e.data.message);
+            worker.terminate();
+            try {
+                smooth.load(e.data.build);
+            } catch (err) {
+                return fail(String(err));
+            }
+            smoothBuildMs = performance.now() - t0;
+            resolve();
+        };
+        worker.postMessage({
+            type: 'build',
+            cellCm,
+            level: level.id,
+            data: smoothBuildFault ? { notALevel: true } : level.data,
+            seed: 1
+        } satisfies ToSmoothWorker);
+        smoothBuildFault = false;
+    });
+}
+let voxelsOn = true;
+function applyVoxels(on: boolean): void {
+    if (on === voxelsOn && (on || smoothBuild)) return;
+    voxelsOn = on;
+    pipeline.paused = !on;
+    for (const r of pipeline.renderers) r.setVisible(on);
+    smooth.setEnabled(!on);
+    if (on) state.forceVoxel = true;
+    else smoothBuild ??= buildSmoothWorld();
+}
 const nailMarkers = new NailMarkers(app, scene.worldLayer, scene.viewLayers);
+const winchRope = new WinchRope(app, scene.worldLayer);
 const fpInput = new FirstPersonInput(canvas);
 // remappable controls (#98): one table shared by the keyboard, the pads and the settings menu
 const bindings = loadBindings(settingsStorage);
@@ -473,6 +541,8 @@ interface State {
     forceVoxel: boolean;
     props: PropsMode;
     colliders: boolean;
+    /** The structural debug overlay (#51): joint loads and contacts. */
+    structure: boolean;
     players: number;
     particles: boolean;
     look: 'default' | 'pixel';
@@ -505,6 +575,7 @@ const state: State = {
     forceVoxel: true,
     props: sim.propsMode,
     colliders: false,
+    structure: false,
     players: 1,
     particles: settings.particles,
     look: settings.look,
@@ -583,6 +654,17 @@ let physCount = 0;
 let physHead = 0;
 const COLLIDER_COLOR = new Color(1, 0.35, 0.8);
 const colliderPoints: Vec3[] = [];
+const STRAIN_COLORS = [
+    new Color(0.3, 0.9, 0.35),
+    new Color(1, 0.85, 0.2),
+    new Color(1, 0.5, 0.1),
+    new Color(1, 0.15, 0.15)
+];
+const FORCE_COLOR = new Color(1, 1, 1);
+const FOLDED_COLOR = new Color(0.2, 0.9, 1);
+const FREE_COLOR = new Color(0.6, 0.6, 0.6);
+const structure = emptyLines();
+const structurePoints: Vec3[] = [];
 let frameTimeCount = 0;
 let frameTimeHead = 0;
 let lastFrameStamp = performance.now();
@@ -752,6 +834,17 @@ class LabDirector extends Script {
             state.forceVoxel = false;
             pipeline.request(frame, voxelClock.timeOf(frame));
         }
+        if (!voxelsOn) {
+            smooth.update(renderTime, pipeline.firstPersonSlot, sim.fpBody.id);
+            if (state.particles && pipeline.particles) {
+                const fxNow = pipeline.particles(renderTime);
+                smooth.updateParticles(fxNow.buffer, fxNow.count);
+                smoothParticleSource = fxNow.count;
+            } else {
+                smooth.updateParticles(EMPTY_PARTICLES, 0);
+                smoothParticleSource = 0;
+            }
+        }
         // apply a finished voxel frame (all its meshes at once) before this frame renders
         pipeline.poll();
         // your own limbs stay with the camera between voxel frames
@@ -762,7 +855,9 @@ class LabDirector extends Script {
         pipeline.lockBody(sim.fpBody.id, bodyNow);
         reference.update(renderTime);
         updateNails(renderTime);
+        updateWinchRope(renderTime);
         if (state.colliders) drawColliders();
+        if (state.structure) drawStructure();
         // gusts stir the water
         windAt(renderTime, level.wind ?? CALM, windNow);
         scene.water.rippleSpeed = 0.03 + 0.012 * windNow.speed;
@@ -975,6 +1070,36 @@ function drawColliders(): void {
     if (n >= 2) app.drawLines(colliderPoints.slice(0, n & ~1), COLLIDER_COLOR, false, scene.immediateLayer);
 }
 
+/**
+ * Debug only (#51): what the host's joints carry and the contacts its stress meter reads (on a
+ * guest, which runs no physics, there is nothing to draw). Off, the meter records nothing.
+ */
+function setStructure(on: boolean): void {
+    state.structure = on;
+    sim.joints.stress.debugContacts = on ? [] : null;
+}
+
+function drawStructure(): void {
+    if (guestSession) return;
+    // (the physics, and so the meter, is rebuilt when the props mode changes)
+    sim.joints.stress.debugContacts ??= [];
+    structureLines(sim.joints, sim.joints.stress.debugContacts, structure);
+    structure.bands.forEach((v, i) => drawFlat(v, STRAIN_COLORS[i]));
+    drawFlat(structure.forces, FORCE_COLOR);
+    drawFlat(structure.folded, FOLDED_COLOR);
+    drawFlat(structure.free, FREE_COLOR);
+}
+
+/** Draws flat x, y, z pairs as lines (pooling its points). */
+function drawFlat(v: readonly number[], color: Color): void {
+    const n = (v.length / 3) & ~1;
+    if (n < 2) return;
+    while (structurePoints.length < n) structurePoints.push(new Vec3());
+    const pts = structurePoints.slice(0, n);
+    for (let i = 0; i < n; i++) pts[i].set(v[i * 3], v[i * 3 + 1], v[i * 3 + 2]);
+    app.drawLines(pts, color, false, scene.immediateLayer);
+}
+
 // ------------------------------------------------------------------------------------- actions
 
 function setPaused(p: boolean): void {
@@ -1144,6 +1269,9 @@ const host: PanelHost = {
             case 'colliders':
                 state.colliders = Boolean(v);
                 break;
+            case 'structure':
+                setStructure(Boolean(v));
+                break;
             case 'players':
                 setPlayers(Number(v));
                 break;
@@ -1198,6 +1326,7 @@ const panel = new DebugPanel(host, [
             { kind: 'button', id: 'dropTest', label: 'Drop test' },
             { kind: 'button', id: 'resetProps', label: 'Reset props' },
             { kind: 'toggle', id: 'colliders', label: 'Physics colliders' },
+            { kind: 'toggle', id: 'structure', label: 'Structure loads (F4)' },
             { kind: 'toggle', id: 'particles', label: 'Leaves & particles' },
             {
                 kind: 'select',
@@ -1396,7 +1525,8 @@ const PROP_LABEL: Record<string, string> = {
     log: 'log (heavy)',
     cube: 'crate',
     sphere: 'ball',
-    bucket: 'bucket'
+    bucket: 'bucket',
+    dolly: 'log dolly (tow it)'
 };
 const propLabel = (name: string) =>
     PROP_LABEL[name] ??
@@ -1597,6 +1727,23 @@ function updateNails(time: number): void {
     nailMarkers.update(marks, sim.ring, time, tierCellCm('base', cellCm) / 100, previews);
 }
 
+/** The winch's rope (Epic 5, #52): the host's own, or what it sent a guest. */
+function updateWinchRope(time: number): void {
+    const w = level.winch;
+    let end: WinchRopeEnd | null = null;
+    if (guestSession) end = guestSession.winchRope;
+    else if (sim.winch) {
+        const index = new Map(sim.entities.map((e, i) => [e.id, i]));
+        end = decodeWinchRope(
+            encodeWinchRope(sim.winch.view(), (id) => index.get(id) ?? -1),
+            sim.entities.length,
+            sim.avatars.length
+        );
+    }
+    const drum = w ? { x: w.x, y: w.y + WINCH.drumHeight, z: w.z } : null;
+    winchRope.update(drum, end, sim.ring, time, (k) => (k < sim.avatars.length ? sim.avatars[k].slot : -1));
+}
+
 /** The ute's yaw last render frame, per local view (NaN when that view's player isn't in it). */
 const lastUteYaw = [NaN, NaN];
 const utePose = pose();
@@ -1702,6 +1849,11 @@ window.addEventListener('keydown', (e) => {
             panel.visible = !panel.visible;
             e.preventDefault();
             break;
+        case 'F4':
+            setStructure(!state.structure);
+            panel.sync();
+            e.preventDefault();
+            break;
     }
 });
 
@@ -1733,6 +1885,7 @@ const gpuName = (() => {
     return ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : String(gl.getParameter(gl.RENDERER));
 })();
 
+const EMPTY_PARTICLES = new Float32Array(0);
 const EMPTY_FRAME_STATS = {
     frame: -1,
     time: 0,
@@ -1801,7 +1954,8 @@ function collectStats() {
         dynamicUnits: t.dynamicUnits,
         quadsTotal: t.quads,
         quadsDynamic: t.quadsDynamic,
-        triangles: t.triangles,
+        // with Voxels: Off, what the smooth meshes draw instead
+        triangles: voxelsOn ? t.triangles : smooth.drawnTriangles(),
         drawables: t.drawables,
         heapMB: mem ? mem.usedJSHeapSize / 1e6 : null,
         droppedTicks: clock.droppedTicks,
@@ -2173,6 +2327,7 @@ function applyInputSettings(): void {
 }
 
 function applyUiSettings(): void {
+    applyVoxels(settings.voxels);
     audio.setVolumes({
         master: settings.volumeMaster,
         effects: settings.volumeEffects,
@@ -2511,7 +2666,8 @@ const menu = new SettingsMenu(
                     label: 'Camera bob & kick',
                     hint: 'Off for less motion: the camera holds steady and menus stop animating'
                 },
-                { kind: 'toggle', key: 'particles', label: 'Leaves & particles' }
+                { kind: 'toggle', key: 'particles', label: 'Leaves & particles' },
+                { kind: 'toggle', key: 'voxels', label: 'Voxels', hint: 'Off: plain smooth meshes' }
             ]
         },
         {
@@ -2623,6 +2779,52 @@ window.__riverLab = {
     standStatic: () => pipeline.query<{ drawn: string; trunk: number }[][]>('stand'),
     /** True when no voxel frame is in flight or waiting to be applied. */
     voxelIdle: () => !pipeline.inFlight && !state.forceVoxel,
+    /** "Voxels: Off" (#24): the state, and what each renderer draws now. */
+    voxels: () => ({
+        on: voxelsOn,
+        smoothLoaded: smooth.loaded,
+        smoothBuildMs,
+        smoothStaticTriangles: smooth.staticTriangles,
+        smooth: smooth.enabled ? smooth.totals() : { meshes: 0, objectParts: 0 },
+        voxelRoots: pipeline.renderers.filter((r) => r.visible).length,
+        particles: smooth.lastParticles,
+        particleMaterials: Object.fromEntries(smooth.particleMaterials)
+    }),
+    /** Voxels Off: an object's smooth parts shown now, and a stand tree's units. */
+    smoothParts: (name: string) => smooth.visibleParts(name),
+    /**
+     * Voxels Off: what the smooth renderer draws against what the scene has (tests): static units and
+     * triangles shown; the sim-visible objects with no part shown (stand trees, drawn as static units,
+     * and your own avatar, hidden in first person, aside); particles drawn and the particles the
+     * scene made this frame.
+     */
+    smoothCoverage: () => {
+        const own = pipeline.firstPersonSlot;
+        const objects = sim.entities.filter(
+            (e) => e.asset.parts.length > 0 && e.visible && !/^tree-\d+$/.test(e.name) && (own < 0 || e.slot !== own)
+        );
+        return {
+            static: smooth.staticShown(),
+            objects: objects.length,
+            missing: objects.filter((e) => smooth.visibleParts(e.name) === 0).map((e) => e.name),
+            particles: smooth.lastParticles,
+            particleTriangles: smooth.particleTriangles(),
+            particleSource: smoothParticleSource
+        };
+    },
+    /** Tests: makes the next smooth build fail (Voxels: Off then falls back to voxels). */
+    failNextSmoothBuild: () => {
+        smoothBuildFault = true;
+    },
+    /** Voxels Off: one smooth object part now (shown, triangles, world bottom and top). */
+    smoothPart: (name: string, part: number) => smooth.partInfo(name, part),
+    smoothStand: (n: number) => smooth.standState(n),
+    setVoxels(on: boolean) {
+        setSetting('voxels', on);
+        applyVoxels(on);
+        if (menuReady) menu.sync();
+        return smoothBuild ?? Promise.resolve();
+    },
     entities: () =>
         Object.fromEntries(
             sim.entities.map((e) => [
@@ -2740,6 +2942,8 @@ window.__riverLab = {
         sim.physics.place(e.id, { p: { x, y, z }, q });
         return true;
     },
+    /** Sets the bucket's water (tests), as a spare bucket's reset does: litres, surface calmed. */
+    setBucketLitres: (litres: number) => sim.water.water.reset(litres),
     /** Turns weather zone `n` on at full strength now (host only; tests and screenshots). */
     weather: (n: number) => !guestSession && sim.hazards.startWeatherNow(sim, n),
     interaction: () => sim.interaction(),
@@ -2756,7 +2960,15 @@ window.__riverLab = {
         ),
         /** Split screen: player 2's slot (-1 when one player). */
         slot2: localSlot2,
-        preview: sim.nailPreview(0)
+        preview: sim.nailPreview(0),
+        /** The structural overlay (#51, F4): on, and what it drew last frame (segments). */
+        structure: {
+            on: state.structure,
+            recording: sim.joints.stress.debugContacts !== null,
+            joints: state.structure ? structure.bands.reduce((n, b) => n + b.length / 18, 0) : 0,
+            forces: state.structure ? structure.forces.length / 6 : 0,
+            contacts: state.structure ? (structure.folded.length + structure.free.length) / 6 : 0
+        }
     }),
     /** The hazards (Epic 8): water level, phases, and the rendered water plane's height. */
     hazards: () => ({

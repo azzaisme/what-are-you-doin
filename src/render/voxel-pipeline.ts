@@ -238,8 +238,15 @@ export class VoxelClient {
         }
     }
 
+    /**
+     * "Voxels: Off": no voxel frames are sent, so the workers do no rasterizing, meshing or tile
+     * streaming at all. Clearing it resumes them from the next requested frame.
+     */
+    paused = false;
+
     /** Requests reconstruction of a voxel frame. */
     request(frame: number, time: number): void {
+        if (this.paused) return;
         if (this.busy) {
             if (this.pending) this.skippedFrames++;
             this.pending = { frame, time };

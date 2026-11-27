@@ -73,9 +73,18 @@ import type { JointEvent } from './joints/breaking.ts';
 import { GROUND, nailCode } from './joints/graph.ts';
 import { JointSystem } from './joints/joints.ts';
 import type { NailPreview } from './joints/joints.ts';
+import { RopeSystem } from './joints/rope.ts';
 import { MAX_PLAYERS, MAX_STRESS, createLabEntities } from './lab-entities.ts';
 import type { SimEntity } from './lab-entities.ts';
-import { addDummy, addLabKinematics, buildLabPhysics, launchDummy, propBody, stressDef } from './lab-physics.ts';
+import {
+    addDolly,
+    addDummy,
+    addLabKinematics,
+    buildLabPhysics,
+    launchDummy,
+    propBody,
+    stressDef
+} from './lab-physics.ts';
 import { NO_DRIVE, UteVehicle } from './physics/vehicle.ts';
 import type { DriveInput } from './physics/vehicle.ts';
 import { CHARACTER } from './physics/world.ts';
@@ -85,6 +94,8 @@ import type { AnimEvents, AnimOutput } from './player-anim.ts';
 import { Sawmill } from './sawmill.ts';
 import { ANIM_MAX, SnapshotRing, writeEntity } from './snapshots.ts';
 import { WATER } from './water.ts';
+import { WINCH_ROPE, Winch } from './winch.ts';
+import type { WinchEvent, WinchEventKind } from './winch.ts';
 
 export type { PlayerCommand, SimEntity };
 export { MAX_PLAYERS, MAX_STRESS };
@@ -129,7 +140,19 @@ export interface LabSimOptions {
 /** Something the player should be told (objective reached, fell in the creek, ...). */
 export interface SimEvent {
     tick: number;
-    kind: 'goal' | 'fell' | 'recovered' | 'step' | 'ute' | 'water' | 'hazard' | 'wood' | 'creak' | 'break' | 'hint';
+    kind:
+        | 'goal'
+        | 'fell'
+        | 'recovered'
+        | 'step'
+        | 'ute'
+        | 'water'
+        | 'hazard'
+        | 'wood'
+        | 'creak'
+        | 'break'
+        | 'hint'
+        | 'winch';
     text: string;
 }
 
@@ -155,6 +178,11 @@ export class LabSim {
     private uteSpin = 0;
     /** What is nailed to what (Epic 5), rebuilt with the physics world. */
     joints!: JointSystem;
+    /** Ropes (#52; hazards, #75): rebuilt with the physics. */
+    ropes!: RopeSystem;
+    /** The level's hand winch, if it has one (#52): rebuilt with the physics. */
+    winch: Winch | null = null;
+    private readonly winchEvents: WinchEvent[] = [];
     /** The drivable ute's physics (levels whose ute is 'drivable'), or null. */
     vehicle: UteVehicle | null = null;
     /** Recovery: the last place the ute stood level on solid ground, and how long it has lain tipped. */
@@ -212,6 +240,7 @@ export class LabSim {
     readonly ute: SimEntity;
     readonly plank: SimEntity;
     readonly log: SimEntity;
+    readonly dolly: SimEntity;
     readonly cube: SimEntity;
     readonly sphere: SimEntity;
     readonly held: SimEntity;
@@ -266,6 +295,7 @@ export class LabSim {
         this.beaver = c.beaver;
         this.bucket = c.bucket;
         this.ute = c.ute;
+        this.dolly = c.dolly;
         this.plank = c.plank;
         this.log = c.log;
         this.cube = c.cube;
@@ -371,7 +401,8 @@ export class LabSim {
             ...this.forestry.props,
             this.closure.barrier,
             ...this.stress,
-            ...this.dummy
+            ...this.dummy,
+            this.dolly
         ];
     }
 
@@ -383,6 +414,11 @@ export class LabSim {
         addLabKinematics(pw, this.beaver.id, drivable ? -1 : this.ute.id, this.beaver.pose, this.ute.pose);
         this.vehicle = drivable ? new UteVehicle(pw, this.ute.id, ute.pose) : null;
         this.joints = new JointSystem(pw);
+        this.ropes = new RopeSystem(pw);
+        // (its hook never goes into the bucket: the bucket crosses only over what is built, #132)
+        this.winch = this.level.winch
+            ? new Winch(pw, this.ropes, this.level.winch, (id) => id !== this.bucket.id)
+            : null;
         this.seats.fill(-1);
         this.uteSafeSet = false;
         this.uteTipped = 0;
@@ -390,6 +426,7 @@ export class LabSim {
             // the level places its props by entity name; entities it does not place stay hidden
             for (const placement of this.level.props) {
                 const e = this.entities.find((x) => x.name === placement.name);
+                if (e && e === this.dolly) addDolly(pw, e.id, placement.pose);
                 const body = propBody(placement.name);
                 if (e && body) pw.addDynamic(e.id, body.shape, placement.pose, body.opts);
             }
@@ -400,7 +437,7 @@ export class LabSim {
                 pw.readPose(barrier.id, barrier.pose);
                 pw.setEnabled(barrier.id, false);
             }
-            for (const e of [this.plank, this.log, this.cube, this.sphere, this.bucket, ...this.extras])
+            for (const e of [this.plank, this.log, this.cube, this.sphere, this.bucket, ...this.extras, this.dolly])
                 if (!pw.bodies.has(e.id)) e.visible = false;
             this.forestry.build(pw);
             this.sawmill?.build(pw);
@@ -579,6 +616,16 @@ export class LabSim {
                 if (k === 0) this.driveInput = { ...NO_DRIVE };
             }
         }
+        if (this.winch) {
+            this.winch.step(
+                (k) =>
+                    this.playerActive(k)
+                        ? { x: this.players[k].x, y: this.players[k].y + EYE_HEIGHT, z: this.players[k].z }
+                        : null,
+                this.winchEvents
+            );
+            this.winchMessages();
+        }
         if (this.physicsProps) this.hazards.step(this);
         // nobody driving: the handbrake is on
         // (unless the handbrake prank has let it off: src/sim/hazards.ts)
@@ -594,6 +641,37 @@ export class LabSim {
         this.applyRules();
         const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
         this.physicsMs = t1 - t0;
+    }
+
+    /** Clicks of the winch's stalled ratchet so far (its sound). */
+    winchClicks = 0;
+    /** The winch's doings as player events (its ratchet's clicks are counted, not told). */
+    private winchMessages(): void {
+        const TEXT: Partial<Record<WinchEventKind, string>> = {
+            take: "You take the winch rope's hook. Grab a log or a beam to hook it in.",
+            hook: 'Hooked. Crank the winch (grab it) to haul it in.',
+            crank: 'You crank the winch.',
+            stop: 'You let go of the crank: the ratchet holds.',
+            release: "The winch's pawl lifts: the rope runs free and the hook comes back.",
+            drop: 'The hook goes back to the winch.'
+        };
+        for (const e of this.winchEvents.splice(0)) {
+            if (e.kind === 'click') {
+                // (a sound, not a message: counted on the winch)
+                this.winchClicks++;
+                continue;
+            }
+            const text = TEXT[e.kind];
+            if (text) this.events.push({ tick: this.tick, kind: 'winch', text });
+        }
+        // the winch's own ropes only (other owners' events are theirs: Epic 8's hazard ropes, #75)
+        for (const e of this.ropes.events(WINCH_ROPE))
+            this.events.push(
+                e.kind === 'snap'
+                    ? // (its own kind: 'break' is a nail's, voiced where the nail is)
+                      { tick: this.tick, kind: 'winch', text: 'Snap! The winch rope parted' }
+                    : { tick: this.tick, kind: 'winch', text: 'The winch rope comes free: what it held is gone.' }
+            );
     }
 
     private lastCreakTick = -1e9;
@@ -699,7 +777,11 @@ export class LabSim {
         // pour (R): tip the bucket you hold forward, or let it hang again
         if (cmd.action === ACTION_POUR) this.pouring[i] = pw.setPour(!this.pouring[i], i);
         const eye = { x: p.x, y: p.y + EYE_HEIGHT, z: p.z };
-        if (cmd.action === ACTION_DROP) pw.release(i);
+        if (
+            cmd.action === ACTION_DROP &&
+            !this.winch?.drop(i, eye, cmd.yaw, cmd.pitch, pw.heldIdOf(i), this.winchEvents)
+        )
+            pw.release(i);
         if (cmd.action === ACTION_NAIL) this.joints.nail(eye, cmd.yaw, cmd.pitch, i, this.tick);
         if (cmd.throw) {
             if (pw.heldIdOf(i) >= 0) ev.thrown = true;
@@ -708,7 +790,9 @@ export class LabSim {
             // holding the axe, a grab at a tree or a log is a blow; with empty hands, at a tree, a bite;
             // a hanging bucket is set down rather than dropped (letGo), again while lowering drops it
             const held = pw.heldIdOf(i);
-            if (held >= 0) {
+            if (this.winch?.grab(i, eye, cmd.yaw, cmd.pitch, held, this.winchEvents)) {
+                // the winch: its hook taken, hooked into a piece, or its crank turned or let go
+            } else if (held >= 0) {
                 if (this.forestry.strike(i, eye, p, cmd.yaw, cmd.pitch, held)) ev.missed = true;
                 else pw.letGo(i);
             } else if (pw.tryGrab(eye, cmd.yaw, cmd.pitch, i)) {

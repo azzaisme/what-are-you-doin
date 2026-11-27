@@ -120,6 +120,8 @@ export function bucketAsset(): VoxelAsset {
             return Math.hypot(x, z) < inner(y) + (fine ? 0 : 0.02) ? shade(x, y, z) : 0;
         }
     };
+    const full = new Float64Array(BUCKET_ANIM_CHANNELS);
+    full[BUCKET_LITRES] = BUCKET_CAPACITY;
     const parts: AssetPart[] = [
         { name: 'bucket', volume: wall, priority: 2, refColor: 0xa9b0b4 },
         { name: 'water', volume: water, priority: 3, policy: fine ? 'coverage50' : 'conservative', refColor: 0x3a9ee0 },
@@ -131,16 +133,22 @@ export function bucketAsset(): VoxelAsset {
         parts,
         animChannels: BUCKET_ANIM_CHANNELS,
         evaluate(root: Pose, anim: ArrayLike<number>, out: Pose[]) {
-            const litres = Math.max(0, Math.min(BUCKET_CAPACITY, anim[BUCKET_LITRES] || 0));
-            surface.h = BUCKET_FLOOR + litres / BUCKET_LITRES_PER_M;
+            surface.h = bucketWaterLevel(anim);
             surface.sx = clampSlope(anim[BUCKET_SLOPE_X]);
             surface.sz = clampSlope(anim[BUCKET_SLOPE_Z]);
             for (let i = 0; i < parts.length; i++) copyPose(root, out[i]);
         },
         partHidden(anim: ArrayLike<number>, part: number) {
             return part === 1 && !((anim[BUCKET_LITRES] || 0) > 0.02);
-        }
+        },
+        // the water is the one part evaluate() reshapes: its surface rises with the litres
+        partFill: { part: 1, full, floor: baseT, level: bucketWaterLevel }
     };
+}
+
+/** The bucket water's surface height at the middle (m above the bucket's bottom) for its litres. */
+function bucketWaterLevel(anim: ArrayLike<number>): number {
+    return BUCKET_FLOOR + Math.max(0, Math.min(BUCKET_CAPACITY, anim[BUCKET_LITRES] || 0)) / BUCKET_LITRES_PER_M;
 }
 
 /** Bucket animation channels: litres of water, and the water surface's slope in the bucket's frame. */

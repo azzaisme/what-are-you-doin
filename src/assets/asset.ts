@@ -37,6 +37,17 @@ export interface VoxelAsset {
     evaluate(root: Pose, anim: ArrayLike<number>, out: Pose[]): void;
     /** Optional: the voxel lattice it is drawn on, instead of the one its size picks (ADR 0011). */
     readonly cellTier?: 'fine' | 'base' | 'coarse';
+    /**
+     * Optional: the one part whose shape `evaluate()` sets from the animation channels, as a fill level
+     * (the bucket's water). Every other part is rigid. Meshes made once ("Voxels: Off") make this part
+     * at `full`, and draw it scaled up from `floor` (part frame, m) to `level(anim)`.
+     */
+    readonly partFill?: {
+        readonly part: number;
+        readonly full: ArrayLike<number>;
+        readonly floor: number;
+        level(anim: ArrayLike<number>): number;
+    };
     /** Optional: true leaves that part out of this voxel frame (e.g. your own head in first person). */
     partHidden?(anim: ArrayLike<number>, part: number): boolean;
 }
