@@ -388,6 +388,34 @@ function clunk(sr: number, seed: number): Float32Array {
     return fadeEnds(normalize(out), sr);
 }
 
+/** A goose's honk (#78): two nasal blasts, the second lower. A buzzy wave through two formants. */
+function honk(sr: number, seed: number): Float32Array {
+    const n = len(0.65, sr);
+    const src = new Float32Array(n);
+    const r = rng(seed);
+    const blasts: [number, number, number][] = [
+        [0, 0.24, 380],
+        [0.32, 0.26, 320]
+    ];
+    for (const [t0, d, f0] of blasts) {
+        let ph = 0;
+        const a = Math.round(t0 * sr);
+        const m = Math.round(d * sr);
+        const wob = 0.6 + r() * 0.8;
+        for (let i = 0; i < m && a + i < n; i++) {
+            const t = i / m;
+            // up a little, then down at the end, with a rasp
+            const f = f0 * (1 + 0.08 * Math.sin(Math.PI * t) - 0.12 * t * t) * (1 + 0.01 * Math.sin(i * wob * 0.01));
+            ph += f / sr;
+            const saw = 2 * (ph - Math.floor(ph)) - 1;
+            const amp = Math.min(1, t * 25) * Math.min(1, (1 - t) * 8);
+            src[a + i] += (saw + 0.15 * (r() * 2 - 1)) * amp;
+        }
+    }
+    const out = mix([bandpass(src, 900, 4, sr), 1], [bandpass(src, 2300, 6, sr), 0.6], [src, 0.15]);
+    return fadeEnds(normalize(out, 0.85), sr);
+}
+
 /** The handbrake creeping off: a ratchet's clicks, slowing down. */
 function ratchet(sr: number, seed: number): Float32Array {
     const n = len(1.1, sr);
@@ -492,6 +520,7 @@ export const SOUND_NAMES = [
     'snap',
     'ratchet',
     'clunk',
+    'honk',
     'saw',
     'chop',
     'slosh',
@@ -570,6 +599,9 @@ export function synthesize(name: SoundName, sr = SYNTH_RATE): SynthSound {
                 break;
             case 'clunk':
                 samples = clunk(sr, 97);
+                break;
+            case 'honk':
+                samples = honk(sr, 98);
                 break;
             case 'saw':
                 samples = saw(sr, 93);

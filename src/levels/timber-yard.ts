@@ -10,6 +10,7 @@
  * Pure module (no engine): analytic terrain, static scenery and the level description.
  */
 
+import type { WinchSpot } from '../sim/winch.ts';
 import { GRID_SIZE, cellCenterX, cellCenterZ, cellIndexX, cellIndexZ } from '../voxels/grid.ts';
 import { pose, quatFromYawPitchRoll } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
@@ -26,6 +27,7 @@ import type { ForestryDef } from './forestry.ts';
 import { rasterizePieces } from './level.ts';
 import type { LevelBuildResult, LevelDef, LevelLayout, PropPlacement, StaticPiece } from './level.ts';
 import { waterButt } from './water-butt.ts';
+import { winchPieces } from './winch.ts';
 
 export const YARD_BOUNDS = { minX: -28, maxX: 28, minZ: -42, maxZ: 14 };
 export const CUT_BASE_Y = -2;
@@ -526,6 +528,8 @@ export function yardPieces(): StaticPiece[] {
     );
     // the water butt by the stump (Epic 7), last: earlier pieces keep their colliders' order
     P.push(...yardButt().pieces);
+    // the hand winch by the sawmill's infeed (Epic 5, #52), after it for the same reason
+    P.push(...winchPieces(YARD_WINCH));
     return P;
 }
 
@@ -541,6 +545,17 @@ export const yardButt = () => waterButt('water butt', YARD_TAP.x, YARD_TAP.z, YA
  * clear of the paths to the bridge, the logging stand and the sawmill (its post stands to the north).
  */
 export const YARD_TAP = { x: -4.4, z: 10.4 };
+/**
+ * The goose's patch (Epic 8, #78, src/sim/hazard-goose.ts): on the near bank, east of the bucket's
+ * stump, facing it. Its territory: dry bank within 12 m, never the water or the bridge.
+ */
+export const GOOSE_PATCH = { x: 8.6, z: 1.3, yaw: Math.atan2(5.6 - 8.6, 4.4 - 1.3), reach: 12 };
+export function gooseAllowed(x: number, z: number): boolean {
+    return (
+        Math.hypot(x - GOOSE_PATCH.x, z - GOOSE_PATCH.z) <= GOOSE_PATCH.reach && z >= 0.8 && yardHeight(x, z) >= 0.35
+    );
+}
+
 /** Far-bank goal area for the bucket. */
 export const YARD_GOAL = { minX: BRIDGE_X - 3.5, maxX: BRIDGE_X + 3.5, minZ: -9.5, maxZ: -5.2 };
 
@@ -672,6 +687,13 @@ const at = (x: number, y: number, z: number, yaw = 0, pitch = 0, roll = 0): Pose
     pose(x, y, z, quatFromYawPitchRoll(yaw, pitch, roll));
 const FLAT = Math.PI / 2; // planks and beams lie on their wide face
 
+/**
+ * The hand winch (Epic 5, #52), north of the sawmill's infeed: its drum's axle runs north-south, so
+ * the rope leaves it eastward, along a clear run of yard (north of the sign post) where a log can be
+ * hauled in.
+ */
+export const YARD_WINCH: WinchSpot = { x: 5.5, z: 11.8, y: yardSurfaceY(5.5, 11.8), yaw: Math.PI / 2 };
+
 /** The sawmill: infeed (east) towards the logging stand, outfeed rack (west) towards the yard. */
 const SAWMILL_SPOT = { x: 4.6, z: 9.6, yaw: 0, y: YARD_Y };
 
@@ -711,6 +733,8 @@ export function yardProps(): PropPlacement[] {
     P.push({ name: 'log', pose: at(7.2, YARD_Y + 0.21, 7.1, Math.PI / 2) });
     P.push({ name: 'extra-log-0', pose: at(7.62, YARD_Y + 0.21, 7.1, Math.PI / 2) });
     P.push({ name: 'extra-log-1', pose: at(7.41, YARD_Y + 0.58, 7.1, Math.PI / 2) });
+    // the log dolly (Epic 5, #52) south of the log pile, clear of where its logs come back
+    P.push({ name: 'dolly', pose: at(8.6, YARD_Y + 0.005, 5.4, 0) });
     P.push({ name: 'cube', pose: at(-8.4, YARD_Y + 0.26, 7.6, 0.3) });
     P.push({ name: 'bucket', pose: at(BUCKET_STUMP.x, BUCKET_STUMP.top + 0.01, BUCKET_STUMP.z, 0.4) });
     P.push({ name: 'held-plank', pose: at(-5, YARD_Y + 0.06, 11, 0, FLAT) });
@@ -784,7 +808,9 @@ export const timberYardLevel: LevelDef = {
         // parked on a slope (3.5 degrees or more) and left: the handbrake lets go
         handbrake: { slope: 0.06 },
         // a stand tree cut with the ute within its reach leans towards the ute
-        tree: true
+        tree: true,
+        // carry the bucket near the goose's patch and it comes for it
+        goose: { x: GOOSE_PATCH.x, z: GOOSE_PATCH.z, yaw: GOOSE_PATCH.yaw, allowed: gooseAllowed, ground: yardHeight }
     },
     spawn: { x: 1.2, z: 6.2, yaw: 0.12, pitch: -0.1 },
     orbitHome: { pos: [9, 4.2, 12], focus: [-1, 0.5, 0] },
@@ -795,6 +821,7 @@ export const timberYardLevel: LevelDef = {
     },
     props: [...yardProps(), ...yardDeckPlanks()],
     forestry: YARD_FORESTRY,
+    winch: YARD_WINCH,
     rules: {
         objective: 'Get the bucket of water across the creek to the flag',
         goal: YARD_GOAL,

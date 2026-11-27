@@ -30,6 +30,7 @@ import { crossingFrame } from '../sim/hazards.ts';
 import type { HazardSpec } from '../sim/hazards.ts';
 import { WEATHER } from '../sim/weather.ts';
 import type { WeatherZone } from '../sim/weather.ts';
+import type { WinchSpot } from '../sim/winch.ts';
 import { GRID_SIZE, cellCenterX, cellCenterZ, cellIndexX, cellIndexZ } from '../voxels/grid.ts';
 import { pose, quatFromYawPitchRoll, quatMul } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
@@ -80,14 +81,17 @@ import {
     CREEK_WATER_Y,
     WINDSOCK,
     YARD_Y,
+    GOOSE_PATCH,
     creekCenterZ,
     creekHalfWidth,
     floodWashup,
+    gooseAllowed,
     yardButt,
     yardHeight,
     YARD_FORESTRY,
     yardLayout,
     yardPieces,
+    YARD_WINCH,
     yardProps,
     yardSideMaterial,
     yardSurfaceMaterial
@@ -115,6 +119,10 @@ const yardU = (z: number) => -(z - creekCenterZ(BRIDGE_X));
 const yardT = (x: number) => x - BRIDGE_X;
 export function yardToWorld(x: number, z: number): { x: number; z: number } {
     return routeToWorld(yardU(z), yardT(x));
+}
+/** The world in the Timber Yard's frame (yardToWorld's inverse). */
+export function worldToYard(x: number, z: number): { x: number; z: number } {
+    return { x: routeT(x, z) + BRIDGE_X, z: creekCenterZ(BRIDGE_X) - routeU(x, z) };
 }
 /** A pose in the Timber Yard's frame, in the world. */
 function fromYard(p: Pose): Pose {
@@ -1111,6 +1119,12 @@ function atUT(u: number, t: number, lift: number, yaw = 0, pitch = 0, roll = 0):
     return pose(w.x, groundUT(u, t) + lift, w.z, quatFromYawPitchRoll(ROUTE_YAW + yaw, pitch, roll));
 }
 
+/** The Yard's hand winch, where the Yard lies in the Valley. */
+const VALLEY_WINCH: WinchSpot = (() => {
+    const w = yardToWorld(YARD_WINCH.x, YARD_WINCH.z);
+    return { x: w.x, z: w.z, y: YARD_WINCH.y, yaw: YARD_WINCH.yaw + ROUTE_YAW };
+})();
+
 /** The Timber Yard's logging stand and sawmill, where the yard is (area 1). */
 const VALLEY_FORESTRY: ForestryDef = (() => {
     const y = YARD_FORESTRY;
@@ -1495,7 +1509,21 @@ export const VALLEY_HAZARDS: HazardSpec = (() => {
             // (the yard at 0.4 m) are lower than the flood's peak
             channel: inCreek
         },
-        weather: { zones: VALLEY_WEATHER_ZONES }
+        weather: { zones: VALLEY_WEATHER_ZONES },
+        // the Timber Yard's goose, on its bank by the bucket's stump (#78)
+        goose: (() => {
+            const g = yardToWorld(GOOSE_PATCH.x, GOOSE_PATCH.z);
+            return {
+                x: g.x,
+                z: g.z,
+                yaw: GOOSE_PATCH.yaw + ROUTE_YAW,
+                allowed: (x: number, z: number) => {
+                    const y = worldToYard(x, z);
+                    return gooseAllowed(y.x, y.z);
+                },
+                ground: valleyHeight
+            };
+        })()
     };
 })();
 
@@ -1560,6 +1588,7 @@ export const valleyLevel: LevelDef = {
     },
     props: valleyProps(),
     forestry: VALLEY_FORESTRY,
+    winch: VALLEY_WINCH,
     hazards: { ...VALLEY_HAZARDS, roadClosure: VALLEY_ROAD_CLOSURE },
     rules: {
         objective: 'Bring water to the flower on the summit',

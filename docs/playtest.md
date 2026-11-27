@@ -55,6 +55,9 @@ Then start a timer and stay quiet.
       crack, see the tree lean and read the warning? Do they move the ute, go round to cut from its side, or carry on?
     - **The road closure** (the Valley, coming up the forest road): do they hear the clunk and read
       the sign? Do they take the old logging track, shift the barrier, or squeeze past it on foot (and what about the ute)?
+    - **The goose** (carrying the bucket past its patch on the bank, east of the stump): do they
+      hear the honk and see it rear up? Do they put the bucket down, run, or send someone at it?
+      Does a peck feel fair?
     - **Every fall into the creek:** what were they trying to do?
     - **Stuck:** a minute or more with no progress. Note what they are trying.
 
@@ -88,9 +91,12 @@ for each hazard met, what the game saw:
 - the falling tree: fell towards the ute, cut from the ute's side, the ute moved out of reach, or
   left standing;
 - the handbrake: someone got in, chocked, or it rolled until it caught;
-- the road closure: took the track on foot, squeezed past, drove the ute round the track, or the
-  barrier was shifted;
-- the weather: came and cleared.
+- the road closure: took the track on foot, squeezed past, drove the ute round the track, the
+  barrier was shifted, turned back, never came (whoever brought it on stayed short of it), or
+  stopped in the closure (someone stood in the closed stretch for a minute); plus "left the ute on
+  the closed road" when they did;
+- the weather: came and cleared;
+- the goose: pecked the bucket loose, the bucket put down, outrun, or distracted.
 
 Compare those with what the testers say happened. These lines come from the host's device (or a
 solo game); a guest's log only has the toasts.

@@ -35,11 +35,12 @@ import {
 } from '../../src/net/session.ts';
 import { MemoryHub } from '../../src/net/transport.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
-import type { SimEntity } from '../../src/sim/lab-entities.ts';
 import { LabSim, MAX_PLAYERS } from '../../src/sim/lab-sim.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
 import { ANIM_MAX, SnapshotRing } from '../../src/sim/snapshots.ts';
 import { pose } from '../../src/voxels/math.ts';
+
+import { hookDolly } from './winch-helpers.ts';
 
 beforeAll(() => initPhysics());
 
@@ -71,26 +72,15 @@ const LONG_MESSAGE =
     '🔧 Click… click… click… The ute’s handbrake is creeping off! Get in and hold the brake, or chock a downhill wheel.';
 
 /**
- * The Valley with eight players (its real entities: the long plank of #134, the road closure's
- * barrier and sign of #131) and a stand-in for the goose still to come, with every animation
- * channel. Hosted, with seven guests seated and an eighth watching (the game is full), none of whom
+ * The Valley with eight players and its real entities (the long plank of #134, the road closure's
+ * barrier and sign of #131, the goose of #78), every animation channel moving. Hosted, with seven guests seated and an eighth watching (the game is full), none of whom
  * acknowledges anything (every entity stays theirs to receive).
  */
-async function valleyHost(extra = true) {
+async function valleyHost() {
     const hub = new MemoryHub();
     const sim = new LabSim({ level: valleyLevel });
-    if (extra) {
-        const animated = sim.entities.find((e) => e.asset.animChannels >= 4)!;
-        const add = (src: SimEntity, channels: number) =>
-            (sim.entities as SimEntity[]).push({
-                ...src,
-                id: 9000 + sim.entities.length,
-                slot: sim.entities.length,
-                asset: { ...src.asset, animChannels: channels },
-                anim: new Float64Array(ANIM_MAX)
-            });
-        add(animated, ANIM_MAX); // the goose
-    }
+    // the goose is a real entity now (#78), not a stand-in
+    expect(sim.entities.filter((e) => e.name === 'goose')).toHaveLength(1);
     sim.step(neutralCommand(0));
     sim.fpActive = true;
     const hs = await HostSession.start(hub.transport('host'), sim, 'valley', 'size');
@@ -132,6 +122,8 @@ function allMoving(sim: LabSim, k: number): void {
         for (let c = 0; c < ANIM_MAX; c++) e.anim[c] = (k * 0.37 + c) % 5;
     }
 }
+
+const st0 = (hub: MemoryHub) => hostState(hub, 'room-ue-size');
 
 describe('host state size (NET_PROTOCOL 3)', { timeout: 60_000 }, () => {
     it('stays inside 4 KiB (UTF-8) with every entity moving, the longest messages, 64 nails, nail aims and eight players; no entity waits more than 2 snapshots', async () => {
@@ -175,6 +167,56 @@ describe('host state size (NET_PROTOCOL 3)', { timeout: 60_000 }, () => {
         for (const [, at] of lastSeen) expect(snaps - at).toBeLessThanOrEqual(2);
         console.info(
             `worst case, all ${sim.entities.length} entities moving, ${nails} nails: ${worst} UTF-8 bytes (${worstChars} characters); longest wait ${longestWait} snapshots`
+        );
+        expect(worst).toBeLessThanOrEqual(PRESENCE_LIMIT);
+        expect(longestWait).toBeLessThanOrEqual(2);
+    });
+
+    it('the same with the winch’s rope out, hooked into the log dolly at its widest on the wire (#52)', async () => {
+        const { hub, sim, hs } = await valleyHost();
+        const rope = hookDolly(sim);
+        const nails = nailEverything(sim);
+        let worst = 0;
+        let worstChars = 0;
+        const lastSeen = new Map<number, number>();
+        let longestWait = 0;
+        let snaps = 0;
+        let seated = 0;
+        for (let k = 0; k < 300; k++) {
+            sim.step(neutralCommand(k));
+            allMoving(sim, k);
+            sim.events.push({ tick: sim.tick, kind: 'hazard', text: LONG_MESSAGE });
+            hs.afterStep(() => ({
+                held: 999,
+                target: 999,
+                shared: true,
+                driving: false,
+                seat: 1,
+                nail: 12,
+                nailAt: { x: -123.45, y: 12.34, z: 123.45 }
+            }));
+            if (sim.tick % 3 !== 0) continue;
+            snaps++;
+            seated = hs.guestCount;
+            const st = hostState(hub, 'room-ue-size');
+            const json = JSON.stringify(st);
+            worst = Math.max(worst, utf8Bytes(json));
+            worstChars = Math.max(worstChars, json.length);
+            for (const i of listed(fromBase64Chunks(st.s as string[]))) {
+                if (snaps > 2) longestWait = Math.max(longestWait, snaps - (lastSeen.get(i) ?? 0));
+                lastSeen.set(i, snaps);
+            }
+        }
+        expect(seated).toBe(MAX_PLAYERS - 1);
+        expect(nails).toBe(64);
+        // after the first snapshots, every entity was listed, and none waited long
+        expect(lastSeen.size).toBe(sim.entities.length);
+        for (const [, at] of lastSeen) expect(snaps - at).toBeLessThanOrEqual(2);
+        // the rope was out (and on the wire) the whole time
+        expect(sim.winch!.hooked).toBe(sim.dolly.id);
+        expect(st0(hub).wr).toEqual(rope);
+        console.info(
+            `worst case with the winch rope hooked into the dolly (wr ${JSON.stringify(rope)}), all ${sim.entities.length} entities moving, ${nails} nails: ${worst} UTF-8 bytes (${worstChars} characters); longest wait ${longestWait} snapshots`
         );
         expect(worst).toBeLessThanOrEqual(PRESENCE_LIMIT);
         expect(longestWait).toBeLessThanOrEqual(2);

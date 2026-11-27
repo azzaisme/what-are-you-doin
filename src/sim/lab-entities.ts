@@ -4,6 +4,7 @@
  */
 
 import type { VoxelAsset } from '../assets/asset.ts';
+import { dollyAsset } from '../assets/dolly.ts';
 import { DUMMY_PARTS, dummyPartAsset } from '../assets/dummy.ts';
 import {
     axeAsset,
@@ -13,6 +14,7 @@ import {
     shortLogAsset,
     standMarkerAsset
 } from '../assets/forestry.ts';
+import { gooseAsset } from '../assets/goose.ts';
 import { BODY } from '../assets/player-body.ts';
 import {
     LONG_PLANK_LENGTH,
@@ -77,6 +79,8 @@ export interface LabEntities {
     ute: SimEntity;
     plank: SimEntity;
     log: SimEntity;
+    /** The log dolly (Epic 5, #52), where a level places one. */
+    dolly: SimEntity;
     cube: SimEntity;
     sphere: SimEntity;
     held: SimEntity;
@@ -197,6 +201,9 @@ export function createLabEntities(): LabEntities {
     const barrier = add(444, 'barrier', barrierAsset(), 2);
     const closureSign = add(445, 'closure-sign', closureSignAsset(M.HiVis, 'right'), 3);
     barrier.visible = closureSign.visible = false;
+    // the goose (Epic 8, #78): shown by the hazard in levels that have one
+    const goose = add(446, 'goose', gooseAsset(), 3);
+    goose.visible = false;
     const needles = add(443, 'needles-fx', counterAsset('needles-fx'), 0);
     const forestry: ForestryEntities = { markers, crowns, felled, short, sawn, beams, axe, sawmill, chips, needles };
     for (const e of [...markers, ...crowns, ...felled, ...short, ...sawn, ...beams, axe, sawmill, chips, needles])
@@ -209,7 +216,10 @@ export function createLabEntities(): LabEntities {
     // your own limbs at 1 cm, drawn by the renderer in place of your beaver (never by the sim)
     const fpBody = add(960, 'fp-body', BODY.firstPerson, 3);
     fpBody.visible = false;
+    // the log dolly (Epic 5, #52), last: every earlier entity keeps its snapshot slot
+    const dolly = add(970, 'dolly', dollyAsset(), 1);
     return {
+        dolly,
         entities,
         beaver,
         bucket,

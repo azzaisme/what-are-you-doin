@@ -125,9 +125,16 @@ export function grabForce(i: GrabForceInput, out: GrabForceResult, maxForce: num
     out.saturated = mag > maxForce;
     if (out.saturated) {
         if (g >= maxForce) {
-            fx = 0;
-            fy = maxForce;
-            fz = 0;
+            // too heavy to hold up: the grip lifts with all it has, unless the spring says the
+            // grip is already above where it should be (one end of a log lifted, the other end on
+            // the ground: about half its weight is enough, and the rest would tip it up and over);
+            // what the cap leaves over pulls it along
+            fy = Math.max(-maxForce, Math.min(maxForce, g + sy));
+            const room = Math.sqrt(Math.max(0, maxForce * maxForce - fy * fy));
+            const h = Math.hypot(sx, sz);
+            const k = h > room ? room / h : 1;
+            fx = sx * k;
+            fz = sz * k;
         } else {
             // largest s in [0, 1] with |G + s S| = maxForce
             const ss = sx * sx + sy * sy + sz * sz;
