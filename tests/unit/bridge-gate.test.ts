@@ -6,7 +6,8 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { PLANK_HALF } from '../../src/assets/props.ts';
+import { BEAM_HALF, PLANK_HALF } from '../../src/assets/props.ts';
+import { UTE_WHEELBASE_HALF } from '../../src/assets/ute.ts';
 import { BRIDGE, BRIDGE_X, YARD_Y, timberYardLevel } from '../../src/levels/timber-yard.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
 import type { PlayerCommand } from '../../src/sim/commands.ts';
@@ -15,7 +16,7 @@ import { EYE_HEIGHT, LabSim } from '../../src/sim/lab-sim.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
 import { pose, quatFromYawPitchRoll, quatRotate } from '../../src/voxels/math.ts';
 
-import { FLAT_ALONG_Z, LINES, hammerAt, yardBridge } from './bridge-helpers.ts';
+import { FLAT_ALONG_Z, LINES, hammerAt } from './bridge-helpers.ts';
 
 beforeAll(() => initPhysics());
 
@@ -109,8 +110,9 @@ const strained = (s: LabSim, max: Map<number, number>) => {
 };
 
 describe('the gate: a properly built bridge holds a loaded ute (#53)', () => {
-    it('the yard bridge (two beams, both ends seated and nailed): a log’s worth in the bed, boarded and driven over by input', () => {
-        const { s, beams } = yardBridge([1, -1], 2);
+    it('the yard bridge (two beams, both ends seated, nailed to the gate’s plan): a log’s worth in the bed, boarded and driven over by input', () => {
+        const s = gateBridge(VARIANTS[0]);
+        const beams = ['beam-0', 'beam-1'].map((name) => s.entities.find((e) => e.name === name)!);
         const load = uteOnBank(s, true);
         expect(load.mass).toBeGreaterThan(100);
         const max = new Map<number, number>();
@@ -134,6 +136,205 @@ describe('the gate: a properly built bridge holds a loaded ute (#53)', () => {
         for (const b of beams) expect(Math.abs(b.pose.p.z - BRIDGE.zc)).toBeLessThan(0.1);
         expect(s.physics.stats.linClamps + s.physics.stats.angClamps).toBe(0);
     }, 120_000);
+});
+
+/**
+ * The variations, fixed before any run: where the beams are laid (dx across the creek, dz along
+ * it, metres), how hard the ute is driven, and how long after building it sets off (ticks). Every
+ * one is run on every bridge; none is dropped or retried.
+ *
+ * The throttles come from the approach alone, the same on every bridge: the lowest that gets the
+ * loaded ute onto the underbuilt span. Its beams tip on the bank's lip and lift their back ends
+ * 22 cm; at throttle 0.3 a loaded ute meets that step at 1.0 m/s and cannot climb it, so 0.3 is not
+ * used.
+ */
+const VARIANTS = [
+    { name: 'as laid', dx: 0, dz: 0, throttle: 0.35, wait: 0 },
+    { name: '2 cm east', dx: 0.02, dz: 0, throttle: 0.35, wait: 0 },
+    { name: '2 cm west and 2 cm nearer, half a second later', dx: -0.02, dz: 0.02, throttle: 0.4, wait: 30 },
+    { name: '2 cm further out', dx: 0, dz: -0.02, throttle: 0.45, wait: 0 },
+    { name: '1 cm east and 1 cm nearer, 1.5 s later', dx: 0.01, dz: 0.01, throttle: 0.5, wait: 90 }
+] as const;
+type Variant = (typeof VARIANTS)[number];
+
+/** Both yard beams laid across on the wheel lines, `v.dx`, `v.dz` off, settled. */
+function laidBeams(v: Variant): { s: LabSim; beams: LabSim['entities'] } {
+    const s = new LabSim({ level: timberYardLevel });
+    const beams = ['beam-0', 'beam-1'].map((name) => s.entities.find((e) => e.name === name)!);
+    beams.forEach((b, i) => s.physics.place(b.id, pose(LINES[i] + v.dx, YARD_Y + 0.3, BRIDGE.zc + v.dz, FLAT_ALONG_Z)));
+    for (let k = 0; k < 60; k++) s.step(neutralCommand(s.tick + 1));
+    return { s, beams };
+}
+
+const nailCount = (s: LabSim) => [...s.joints.graph.connections()].reduce((n, c) => n + c.nails.length, 0);
+
+/**
+ * The proper bridge: the gate's own nail plan (yard-bridge.test's build by input, fixed in part 2):
+ * four nails across each near end, 7 and 15 cm in from the beam's end, 5 cm either side of its line;
+ * two across each far end, at the first two of the gate's spots that hold.
+ */
+function gateBridge(v: Variant): LabSim {
+    const { s, beams } = laidBeams(v);
+    for (const b of beams) {
+        const x = b.pose.p.x;
+        const y = b.pose.p.y + 0.12;
+        const end = b.pose.p.z + BEAM_HALF.x;
+        for (const dz of [0.07, 0.15])
+            for (const dx of [-0.05, 0.05]) hammerAt(s.joints, { x: x + dx, y, z: end - dz }, s.tick);
+        const farNailZ = Math.min(BRIDGE.farFace - 0.06, b.pose.p.z - BEAM_HALF.x + 0.16);
+        let got = 0;
+        for (const [dx, dz] of [
+            [-0.05, 0],
+            [0.05, 0],
+            [0, 0],
+            [-0.05, -0.06],
+            [0.05, -0.06],
+            [0, -0.06]
+        ]) {
+            if (got === 2) break;
+            const before = nailCount(s);
+            hammerAt(s.joints, { x: x + dx, y, z: farNailZ + dz }, s.tick);
+            if (nailCount(s) > before) got++;
+        }
+    }
+    expect(nailCount(s)).toBe(12);
+    return s;
+}
+
+/** Two nails per beam end, 8 cm apart (yardBridge's): reported, not asserted. */
+function twoPerEnd(v: Variant): LabSim {
+    const { s, beams } = laidBeams(v);
+    for (let i = 0; i < 2; i++)
+        for (const end of [1, -1])
+            for (let k = 0; k < 2; k++) {
+                const z = end > 0 ? BRIDGE.nearFace + 0.22 + 0.08 * k : BRIDGE.farFace - 0.22 - 0.08 * k;
+                hammerAt(s.joints, { x: LINES[i] + v.dx, y: beams[i].pose.p.y + 0.12, z }, s.tick);
+            }
+    // (reported only, with the nails that went in: some of the 8 can glance off)
+    return s;
+}
+
+/**
+ * Underbuilt (as in breaking.test's): both beams run out from the bank over the creek, short of
+ * the far seat, propped while four nails each go into the bank's lip, then let go. Laid `v.dx`,
+ * `v.dz` off.
+ */
+function underBridge(v: Variant): LabSim {
+    const s = new LabSim({ level: timberYardLevel });
+    const beams = ['beam-0', 'beam-1'].map((name) => s.entities.find((e) => e.name === name)!);
+    const back = BRIDGE.nearEdge + 1.1 + v.dz;
+    const zc = back - BEAM_HALF.x;
+    beams.forEach((b, i) =>
+        s.physics.place(b.id, pose(LINES[i] + v.dx, YARD_Y + BEAM_HALF.y + 0.03, zc, FLAT_ALONG_Z))
+    );
+    const props = LINES.map((x) =>
+        s.physics.addStatic(
+            RAPIER.ColliderDesc.cuboid(0.15, 0.5, 0.15).setTranslation(
+                x + v.dx,
+                YARD_Y - 0.5,
+                back - 2 * BEAM_HALF.x + 0.2
+            )
+        )
+    );
+    for (let k = 0; k < 60; k++) s.step(neutralCommand(s.tick + 1));
+    for (let i = 0; i < 2; i++)
+        for (let k = 0; k < 4; k++)
+            hammerAt(
+                s.joints,
+                {
+                    x: LINES[i] + v.dx + (k % 2 ? 0.05 : -0.05),
+                    y: beams[i].pose.p.y + 0.12,
+                    z: BRIDGE.nearEdge - 0.12 + 0.06 * (k >> 1)
+                },
+                s.tick
+            );
+    for (const c of props) s.physics.world.removeCollider(c, true);
+    expect(nailCount(s)).toBe(8);
+    return s;
+}
+
+/**
+ * One run: the loaded ute boarded and driven over by input. `mounted`: its front axle got past the
+ * near abutment's face, onto the span (the precondition for judging the bridge at all).
+ */
+function cross(s: LabSim, v: Variant) {
+    const nails = nailCount(s);
+    uteOnBank(s, true);
+    for (let k = 0; k < v.wait; k++) s.step(neutralCommand(s.tick + 1));
+    const e0 = s.events.length;
+    const max = new Map<number, number>();
+    const front = { x: 0, y: 0, z: 0 };
+    let frontZ = Infinity;
+    const r = boardAndDrive(s, v.throttle, () => {
+        strained(s, max);
+        quatRotate(s.ute.pose.q, 0, 0, UTE_WHEELBASE_HALF, front);
+        frontZ = Math.min(frontZ, s.ute.pose.p.z + front.z);
+    });
+    const evs = s.events.slice(e0).filter((e) => e.kind === 'creak' || e.kind === 'break');
+    const kinds = evs.map((e) => e.kind);
+    const ticks = evs.map((e) => e.tick);
+    const firstBreak = ticks[kinds.indexOf('break')];
+    return {
+        nails,
+        mounted: frontZ < BRIDGE.nearFace - 0.1,
+        reached: r.reached,
+        peak: Math.max(0, ...max.values()),
+        kinds,
+        ticks,
+        tell: kinds.includes('break') ? (firstBreak - ticks[0]) / 60 : NaN,
+        joints: s.joints.graph.size,
+        uteY: s.ute.pose.p.y,
+        clamps: s.physics.stats.linClamps + s.physics.stats.angClamps
+    };
+}
+
+type Run = ReturnType<typeof cross>;
+const outcome = (r: Run) =>
+    !r.mounted
+        ? 'NOT ONTO THE SPAN'
+        : r.reached
+          ? `across${r.kinds.length ? `, ${r.kinds.join(' ')}` : ''}`
+          : `gave way: ${r.kinds.map((k, i) => `${k}@${r.ticks[i]}`).join(' ')}, creak to break ${r.tell.toFixed(2)} s, the ute in the creek (y ${r.uteY.toFixed(2)})`;
+
+describe('the gate: an underbuilt bridge fails every time, a proper one holds every time (#53)', () => {
+    it('over the same five variations (stated up front), the loaded ute driven by input; all run, then judged', () => {
+        const runs = VARIANTS.map((v) => ({
+            v,
+            gate: cross(gateBridge(v), v),
+            two: cross(twoPerEnd(v), v),
+            under: cross(underBridge(v), v)
+        }));
+        console.log(
+            `five variations, loaded ute (peak utilization; creak at ${BREAK.creak}):\n` +
+                runs
+                    .map(
+                        ({ v, gate, two, under }) =>
+                            `  ${v.name} (throttle ${v.throttle}):\n` +
+                            `    proper (the gate's plan, ${gate.nails} nails): peak ${gate.peak.toFixed(2)}, ${outcome(gate)}\n` +
+                            `    two nails per end (reported, ${two.nails} nails): peak ${two.peak.toFixed(2)}, ${outcome(two)}\n` +
+                            `    underbuilt (${under.nails} nails): peak ${under.peak.toFixed(2)}, ${outcome(under)}`
+                    )
+                    .join('\n')
+        );
+        for (const { v, gate, under } of runs) {
+            // the precondition: onto the span (a stall at the entry is neither a pass nor a fail)
+            expect(gate.mounted, `${v.name}: proper, onto the span`).toBe(true);
+            expect(under.mounted, `${v.name}: underbuilt, onto the span`).toBe(true);
+            // proper: across, no creak, nothing broken
+            expect(gate.reached, v.name).toBe(true);
+            expect(gate.kinds, v.name).toEqual([]);
+            expect(gate.peak, v.name).toBeLessThan(BREAK.creak);
+            expect(gate.joints, v.name).toBe(4);
+            expect(gate.clamps, v.name).toBe(0);
+            // underbuilt: it creaks first, gives way after the tell, and the ute goes into the creek
+            expect(under.kinds[0], v.name).toBe('creak');
+            expect(under.kinds, v.name).toContain('break');
+            expect(under.tell, v.name).toBeGreaterThanOrEqual(BREAK.tell - 1e-9);
+            expect(under.reached, v.name).toBe(false);
+            expect(under.uteY, v.name).toBeLessThan(YARD_Y - 0.3);
+            expect(under.clamps, v.name).toBe(0);
+        }
+    }, 900_000);
 });
 
 /** The yard's own beams out of the world: they lie across the ute's run-up. */

@@ -1,5 +1,74 @@
 # Progress log
 
+## Epic 5, chunk C: the gate (2026-11-27, #53)
+
+The epic's gate, as #53 states it: a properly built bridge holds a loaded ute, an underbuilt one
+fails every time, there are two plausible layouts, and the joint graph is right online with 1 to 4
+clients. This chunk is tests only: no game code changed.
+
+### What is tested, and how
+
+- **By input:** the ute is boarded (look at the driver's door, grab) and driven. Online, guests
+  drive the nails (aim, F) and a guest drives the ute.
+- **Placed by setup, and said so in the tests:** the beams laid on the seats, the ute on the bank,
+  its load (two halves of a bucked log, 113 kg, in the bed), and where each beaver stands.
+- **The proper bridge** is the gate's own nail plan from part 2: four nails across each near end,
+  two across each far end (12 in all).
+
+### Measured (actual, 10 cm cells; both cell sizes pass)
+
+- **The loaded ute (854 kg) on the proper yard bridge** (`bridge-gate.test.ts`): across in 6.3 s,
+  peak utilization 0.04 (creak at 0.55), all 4 joints holding, both halves still in the bed.
+- **Five variations, fixed before any run** (beams laid ±1–2 cm across and along, throttle 0.35
+  to 0.5, setting off 0 to 1.5 s after building). Every one is run on every bridge, then judged:
+
+    | Variation                        | Throttle | Proper (12 nails) | Two nails per end (reported) | Underbuilt: creak to break, outcome |
+    | -------------------------------- | -------- | ----------------- | ---------------------------- | ----------------------------------- |
+    | as laid                          | 0.35     | peak 0.04, across | peak 0.47, across            | 1.65 s, the ute in the creek        |
+    | 2 cm east                        | 0.35     | peak 0.11, across | peak 0.09, across            | 1.65 s, the ute in the creek        |
+    | 2 cm west, 2 cm nearer, 0.5 s on | 0.40     | peak 0.04, across | peak 0.19, across            | 2.38 s, the ute in the creek        |
+    | 2 cm further out                 | 0.45     | peak 0.03, across | peak 0.09, across            | 1.47 s, the ute in the creek        |
+    | 1 cm east, 1 cm nearer, 1.5 s on | 0.50     | peak 0.02, across | peak 0.15, across            | 1.47 s, the ute in the creek        |
+    - **Asserted:** the proper bridge is crossed with no creak and nothing broken; the underbuilt one
+      creaks first, breaks after the warning, and the ute goes into the creek.
+    - **A precondition, not an outcome:** in every run the ute's front axle got past the near
+      abutment's face, onto the span. A stall at the entry would count as neither a pass nor a fail.
+
+- **A second layout, short timber on a pier:** planks (2.4 m, too short for the 2.6 m gap), two per
+  wheel line, butted on a stone pier placed in mid-creek, each nailed to the pier and its bank
+  (8 joints, 16 nails).
+    - With the pier: the loaded ute crosses, peak 0.26, no creak.
+    - Without it: the same planks, propped while nailed to their banks, creak and give way under
+      it, and it does not get across.
+- **Online, for 1 to 4 clients** (`bridge-online.test.ts`): every update a guest receives is
+  checked against the host's own nail marks put through the wire's encode and decode. That allows
+  only the codec's quantisation: nail heads in millimetres in their piece's frame (int16), entity
+  indices and strain levels (0–2) exact.
+    - **The proper bridge:** guests drive all 8 nails by input, and a guest drives the loaded ute
+      across. With 3 or more clients, a guest joins late and gets the whole graph with its first
+      update. Compared: 303, 496 and 806 updates for 2, 3 and 4 clients, every one equal.
+    - **The underbuilt bridge:** both beams give way under the loaded ute. Guests are shown strain
+      up to 2 (groaning) first, and every update stays equal, so the breaks reach every guest in
+      the same update as the host.
+    - **Mutation checks:** guests not applying the host's strain fails 3 of these tests; guests
+      keeping only their first nail graph fails 6.
+- **In the browser** (`smoke.spec.ts`): a nail the host drives shows on the guest as one nail head.
+
+### Found on the way
+
+- **The approach:** the underbuilt beams tip on the bank's lip and lift their back ends 22 cm.
+    - From the old 3.2 m run-up, a loaded ute meets that step at 1.0 m/s and cannot climb it (an
+      empty one, at 1.15 m/s, can). So the runs start 6 m back.
+    - Throttle 0.3 is not used for the same reason. Throttles are chosen from the approach alone, the
+      same for every bridge.
+- **Two nails per beam end** (the earlier tests' "proper") creaked at 0.90 under a loaded ute at
+  throttle 0.3 from the 6 m run-up. It held, but with less margin than the gate's plan, so it is
+  kept as a reported row. Two of its 8 nails glance off as laid.
+- **Nailing by input from a bank:** the hammer drives only within 35 degrees of straight down from
+  the eye, so a beaver stands on the abutment beside the beam, not on the bank behind it.
+  `placePlayer` casts from just above the terrain, which over the creek is the creek bed, below the
+  abutment; the tests stand them on its top by hand.
+
 ## Epic 5, chunk B: the structure overlay, the rope, the winch and the log dolly (2026-11-26, #51 #52)
 
 No puzzle may need exactly two people (#52). Before this, a whole log (113 kg) needed two beavers,
