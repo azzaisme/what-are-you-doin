@@ -56,6 +56,10 @@ function fnv(list: readonly string[]): string {
  * this census: the tutorial and the River Lab identical, hash and all), plus, in the Yard and the
  * Valley, the winch's 4 static colliders at 0.8 and the dolly's 8 (4 timber at 0.9, 4 casters at
  * 0.03 with the Min rule). An unintended change to any collider's friction or rule fails here.
+ * The Valley also has #87's foot detours (stepping stones, fallen trunk, boulders) and the trees
+ * and rocks kept off their paths: measured with this census, 085dd00 to the detours alone moves
+ * 0.5 by -3, 0.6 by -12, 0.8 by +4 and 0.9 by -1, and with them the Valley here is exactly that
+ * plus the winch's and dolly's 12.
  */
 const EXPECTED: Record<string, { histogram: Record<string, number>; hash: string }> = {
     tutorial: {
@@ -65,14 +69,14 @@ const EXPECTED: Record<string, { histogram: Record<string, number>; hash: string
     valley: {
         histogram: {
             '0.030 min': 4,
-            '0.500 avg': 59,
-            '0.600 avg': 1797,
+            '0.500 avg': 56,
+            '0.600 avg': 1785,
             '0.700 avg': 63,
             '0.750 avg': 16,
-            '0.800 avg': 642,
-            '0.900 avg': 87
+            '0.800 avg': 646,
+            '0.900 avg': 86
         },
-        hash: 'cdb36132'
+        hash: 'cb19ae62'
     },
     yard: {
         histogram: {
