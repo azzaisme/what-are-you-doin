@@ -64,7 +64,7 @@ the bucket near it and it honks, rears up, and comes for the bucket.
     - `docs/progress.md`: this section on top; the old playlog copy dropped.
 - **Tests:** `tests/unit/goose.test.ts` (11 tests, at both voxel sizes), the honk in
   `audio.test.ts`, and the budget in `net-headroom.test.ts`.
-- **Unit tests:** COUNT pass (FILES files, both voxel sizes), on `epics-part-3` 5c77c82.
+- **Unit tests:** 1210 pass (132 files, both voxel sizes), on `epics-part-3` 5c77c82.
 
 ## Epic 8: the barrier holds when you drag it forward round a corner (2026-11-27, #77)
 

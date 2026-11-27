@@ -8,8 +8,8 @@ import { LOOPS, SOUND_NAMES, SYNTH_RATE, synthesize } from '../../src/audio/synt
 import type { SoundName, SynthSound } from '../../src/audio/synth.ts';
 import { timberYardLevel } from '../../src/levels/timber-yard.ts';
 import { valleyLevel } from '../../src/levels/valley.ts';
-import { CLOSURE_OPEN, CLOSURE_SHUT, CLOSURE_TELL } from '../../src/sim/hazard-road.ts';
 import { GOOSE_BORED, GOOSE_DECOY, GOOSE_PECK, GOOSE_TELL } from '../../src/sim/hazard-goose.ts';
+import { CLOSURE_OPEN, CLOSURE_SHUT, CLOSURE_TELL } from '../../src/sim/hazard-road.ts';
 import { TREE_TELL } from '../../src/sim/hazard-tree.ts';
 import type { SimEvent } from '../../src/sim/lab-sim.ts';
 
