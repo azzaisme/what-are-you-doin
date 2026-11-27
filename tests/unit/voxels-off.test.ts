@@ -1,12 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
+import type { VoxelAsset } from '../../src/assets/asset.ts';
+import { beaverFirstPersonAsset } from '../../src/assets/beaver.ts';
+import { personAsset, personFirstPersonAsset } from '../../src/assets/person.ts';
 import { bucketAsset } from '../../src/assets/props.ts';
 import { getLevel } from '../../src/levels/index.ts';
+import { createLabEntities } from '../../src/sim/lab-entities.ts';
+import { ANIM_MAX } from '../../src/sim/snapshots.ts';
 import { SmoothBuilder, addVolume, volumeSoup } from '../../src/smooth/geometry.ts';
 import { RecordingWorld } from '../../src/smooth/recorder.ts';
 import { buildSmooth } from '../../src/smooth/smooth-service.ts';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, urlOverrides } from '../../src/ui/settings-store.ts';
 import type { SettingsStorage } from '../../src/ui/settings-store.ts';
+import { pose } from '../../src/voxels/math.ts';
+import { VALUE_COUNT, VALUE_RGB, VALUE_SURFACE } from '../../src/voxels/palette.ts';
 import { box, cone, cylinder, ellipsoid } from '../../src/voxels/volumes.ts';
 import type { Volume } from '../../src/voxels/volumes.ts';
 import type { VoxelWorld } from '../../src/voxels/world.ts';
@@ -114,17 +121,91 @@ describe('Voxels: Off (#24)', () => {
         expect(wall.volume.sample(cx, (b.minY + b.maxY) / 2 + 0.05, cz)).toBe(0);
     });
 
+    it('the only part whose shape evaluate() changes is the bucket water, declared as its fill', () => {
+        // Voxels: Off meshes each part once, so a part evaluate() reshapes must say so (partFill). Each
+        // part is sampled on a grid in its own frame after evaluate() with all channels 0 and with
+        // three other sets of channels; any difference means evaluate() reshaped it
+        const assets = new Set<VoxelAsset>([
+            ...createLabEntities().entities.map((e) => e.asset),
+            beaverFirstPersonAsset,
+            personAsset,
+            personFirstPersonAsset
+        ]);
+        let seed = 7;
+        const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647) * 10;
+        const anims = [
+            new Float64Array(ANIM_MAX),
+            ...[0, 1, 2].map(() => Float64Array.from({ length: ANIM_MAX }, rand))
+        ];
+        const reshaped = new Set<string>();
+        const declared = new Set<string>();
+        for (const a of assets) {
+            if (a.parts.length === 0) continue;
+            if (a.partFill) declared.add(`${a.name}:${a.parts[a.partFill.part].name}`);
+            const poses = a.parts.map(() => pose());
+            const shapes = (anim: Float64Array) => {
+                a.evaluate(pose(), anim, poses);
+                return a.parts.map(({ volume: v }) => {
+                    const b = v.bounds;
+                    const out: number[] = [];
+                    for (let i = 0; i < 8; i++)
+                        for (let j = 0; j < 8; j++)
+                            for (let k = 0; k < 8; k++)
+                                out.push(
+                                    v.sample(
+                                        b.minX + ((i + 0.5) / 8) * (b.maxX - b.minX),
+                                        b.minY + ((j + 0.5) / 8) * (b.maxY - b.minY),
+                                        b.minZ + ((k + 0.5) / 8) * (b.maxZ - b.minZ)
+                                    )
+                                );
+                    return out.join(',');
+                });
+            };
+            const rest = shapes(anims[0]);
+            for (const anim of anims.slice(1))
+                shapes(anim).forEach((s, i) => {
+                    if (s !== rest[i]) reshaped.add(`${a.name.replace(/-\d+$/, '')}:${a.parts[i].name}`);
+                });
+        }
+        expect([...reshaped].sort()).toEqual(['bucket:water']);
+        expect([...declared]).toEqual(['bucket:water']);
+    });
+
     it('colours come from the volume itself, split by surface class', () => {
+        // two values in different surface classes, with different colours: each box's own
+        const values = Array.from({ length: VALUE_COUNT }, (_, v) => v).filter((v) => v > 0);
+        const a = values.find((v) => VALUE_SURFACE[v] === 0 && VALUE_RGB[v] !== 0)!;
+        const b = values.find((v) => VALUE_SURFACE[v] !== 0 && VALUE_RGB[v] !== VALUE_RGB[a])!;
+        expect(a).toBeDefined();
+        expect(b).toBeDefined();
         const out = new SmoothBuilder();
         addVolume(
             out,
-            box(0.1, 0.1, 0.1, () => 4 * 4 + 1),
+            box(0.1, 0.1, 0.1, () => a),
             null,
             0.02
         );
-        const used = out.classes.filter((c) => c.vertexCount > 0);
-        expect(used.length).toBe(1);
-        expect(out.triangles).toBe(12);
+        addVolume(
+            out,
+            box(0.1, 0.1, 0.1, () => b),
+            { p: { x: 1, y: 0, z: 0 }, q: { x: 0, y: 0, z: 0, w: 1 } },
+            0.02
+        );
+        expect(out.triangles).toBe(24);
+        const rgba = (v: number) => [VALUE_RGB[v] & 255, (VALUE_RGB[v] >> 8) & 255, (VALUE_RGB[v] >> 16) & 255, 255];
+        for (const [v, cls] of [
+            [a, VALUE_SURFACE[a]],
+            [b, VALUE_SURFACE[b]]
+        ]) {
+            const c = out.classes[cls];
+            // each box's 12 triangles in its own class, every corner in its own colour
+            expect(c.indices.length / 3, `value ${v}`).toBe(12);
+            for (let i = 0; i < c.vertexCount; i++)
+                expect(c.colors.slice(i * 4, i * 4 + 4), `value ${v}`).toEqual(rgba(v));
+        }
+        // and nothing in the other classes
+        const others = out.classes.filter((_, k) => k !== VALUE_SURFACE[a] && k !== VALUE_SURFACE[b]);
+        expect(others.every((c) => c.vertexCount === 0)).toBe(true);
     });
 
     it('the recorder captures what a level builds: ground spec, volumes, single cells, stand trees', () => {
@@ -149,5 +230,30 @@ describe('Voxels: Off (#24)', () => {
         const planks = Object.entries(b.entityParts).filter(([id]) => Number(id) >= 300 && Number(id) < 312);
         expect(new Set(planks.map(([, parts]) => parts.join(','))).size).toBe(1);
         expect(b.partMeshes.length).toBeLessThan(120);
+        // every object part has triangles, the bucket's water too: meshed full (its fill), not at
+        // the empty level a fresh asset starts at
+        const lab = createLabEntities().entities;
+        for (const e of lab) {
+            const map = b.entityParts[e.id];
+            if (!map) continue;
+            map.forEach((m, i) => {
+                const tris = b.partMeshes[m].reduce((n, c) => n + c.indexCount / 3, 0);
+                expect(tris, `${e.name}:${e.asset.parts[i].name}`).toBeGreaterThan(0);
+            });
+        }
+        const bucket = lab.find((e) => e.name === 'bucket')!;
+        const fill = bucket.asset.partFill!;
+        const water = b.partMeshes[b.entityParts[bucket.id][fill.part]];
+        let top = -Infinity;
+        let bottom = Infinity;
+        for (const c of water)
+            for (let i = 1; i < c.vertexCount * 3; i += 3) {
+                top = Math.max(top, c.positions[i]);
+                bottom = Math.min(bottom, c.positions[i]);
+            }
+        // from the floor the renderer scales it about, up to the full level (measured: 0.2083 m for
+        // 0.2083, and 0.0798 for a floor of 0.08)
+        expect(top).toBeCloseTo(fill.level(fill.full), 3);
+        expect(bottom).toBeCloseTo(fill.floor, 2);
     }, 120_000);
 });

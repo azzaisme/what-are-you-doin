@@ -271,21 +271,39 @@ const reference = new ReferenceRenderer(app, sim, scene.worldLayer, scene.immedi
 const smooth = new SmoothRenderer(app, scene.worldLayer, lanes.find((l) => l.world && !l.far)!.renderer.materials, sim);
 let smoothBuild: Promise<void> | null = null;
 let smoothBuildMs = 0;
+let smoothParticleSource = 0;
+/** Tests: the next smooth build sends the worker level data that is not a level, so it fails. */
+let smoothBuildFault = false;
 function buildSmoothWorld(): Promise<void> {
     const t0 = performance.now();
     const worker = new Worker(new URL('./workers/smooth-worker.ts', import.meta.url), {
         type: 'module',
         name: 'smooth'
     });
-    return new Promise((resolve, reject) => {
-        worker.onmessage = (e: MessageEvent<FromSmoothWorker>) => {
+    return new Promise((resolve) => {
+        // a failed build (the worker reports it, or throws, or its meshes do not load) is logged, and
+        // the voxel lattices come back instead of an empty screen; the setting goes back to On
+        const fail = (why: string) => {
             worker.terminate();
-            if (e.data.type === 'error') {
-                console.error('smooth worker:', e.data.message);
-                reject(new Error(e.data.message));
-                return;
+            console.error(`Voxels: Off could not build the smooth meshes, so voxels stay on: ${why}`);
+            smoothBuild = null;
+            setSetting('voxels', true);
+            applyVoxels(true);
+            if (menuReady) menu.sync();
+            resolve();
+        };
+        worker.onerror = (e) => {
+            e.preventDefault();
+            fail(e.message || 'the smooth worker failed');
+        };
+        worker.onmessage = (e: MessageEvent<FromSmoothWorker>) => {
+            if (e.data.type === 'error') return fail(e.data.message);
+            worker.terminate();
+            try {
+                smooth.load(e.data.build);
+            } catch (err) {
+                return fail(String(err));
             }
-            smooth.load(e.data.build);
             smoothBuildMs = performance.now() - t0;
             resolve();
         };
@@ -293,9 +311,10 @@ function buildSmoothWorld(): Promise<void> {
             type: 'build',
             cellCm,
             level: level.id,
-            data: level.data,
+            data: smoothBuildFault ? { notALevel: true } : level.data,
             seed: 1
         } satisfies ToSmoothWorker);
+        smoothBuildFault = false;
     });
 }
 let voxelsOn = true;
@@ -801,7 +820,11 @@ class LabDirector extends Script {
             if (state.particles && pipeline.particles) {
                 const fxNow = pipeline.particles(renderTime);
                 smooth.updateParticles(fxNow.buffer, fxNow.count);
-            } else smooth.updateParticles(EMPTY_PARTICLES, 0);
+                smoothParticleSource = fxNow.count;
+            } else {
+                smooth.updateParticles(EMPTY_PARTICLES, 0);
+                smoothParticleSource = 0;
+            }
         }
         // apply a finished voxel frame (all its meshes at once) before this frame renders
         pipeline.poll();
@@ -1845,7 +1868,8 @@ function collectStats() {
         dynamicUnits: t.dynamicUnits,
         quadsTotal: t.quads,
         quadsDynamic: t.quadsDynamic,
-        triangles: t.triangles,
+        // with Voxels: Off, what the smooth meshes draw instead
+        triangles: voxelsOn ? t.triangles : smooth.drawnTriangles(),
         drawables: t.drawables,
         heapMB: mem ? mem.usedJSHeapSize / 1e6 : null,
         droppedTicks: clock.droppedTicks,
@@ -2682,6 +2706,32 @@ window.__riverLab = {
     }),
     /** Voxels Off: an object's smooth parts shown now, and a stand tree's units. */
     smoothParts: (name: string) => smooth.visibleParts(name),
+    /**
+     * Voxels Off: what the smooth renderer draws against what the scene has (tests): static units and
+     * triangles shown; the sim-visible objects with no part shown (stand trees, drawn as static units,
+     * and your own avatar, hidden in first person, aside); particles drawn and the particles the
+     * scene made this frame.
+     */
+    smoothCoverage: () => {
+        const own = pipeline.firstPersonSlot;
+        const objects = sim.entities.filter(
+            (e) => e.asset.parts.length > 0 && e.visible && !/^tree-\d+$/.test(e.name) && (own < 0 || e.slot !== own)
+        );
+        return {
+            static: smooth.staticShown(),
+            objects: objects.length,
+            missing: objects.filter((e) => smooth.visibleParts(e.name) === 0).map((e) => e.name),
+            particles: smooth.lastParticles,
+            particleTriangles: smooth.particleTriangles(),
+            particleSource: smoothParticleSource
+        };
+    },
+    /** Tests: makes the next smooth build fail (Voxels: Off then falls back to voxels). */
+    failNextSmoothBuild: () => {
+        smoothBuildFault = true;
+    },
+    /** Voxels Off: one smooth object part now (shown, triangles, world bottom and top). */
+    smoothPart: (name: string, part: number) => smooth.partInfo(name, part),
     smoothStand: (n: number) => smooth.standState(n),
     setVoxels(on: boolean) {
         setSetting('voxels', on);
@@ -2806,6 +2856,8 @@ window.__riverLab = {
         sim.physics.place(e.id, { p: { x, y, z }, q });
         return true;
     },
+    /** Sets the bucket's water (tests), as a spare bucket's reset does: litres, surface calmed. */
+    setBucketLitres: (litres: number) => sim.water.water.reset(litres),
     /** Turns weather zone `n` on at full strength now (host only; tests and screenshots). */
     weather: (n: number) => !guestSession && sim.hazards.startWeatherNow(sim, n),
     interaction: () => sim.interaction(),

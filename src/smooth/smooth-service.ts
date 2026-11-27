@@ -16,6 +16,7 @@ import { drawStumps } from '../levels/forestry.ts';
 import type { LevelDef } from '../levels/level.ts';
 import { createLabEntities } from '../sim/lab-entities.ts';
 import { GRID_SIZE } from '../voxels/grid.ts';
+import { pose } from '../voxels/math.ts';
 import { createRasterStats } from '../voxels/rasterizer.ts';
 import type { Volume } from '../voxels/volumes.ts';
 import type { VoxelWorld } from '../voxels/world.ts';
@@ -164,6 +165,14 @@ export function buildSmooth(def: LevelDef, seed: number, opts: SmoothOptions = {
     for (const e of createLabEntities().entities) {
         if (e.asset.parts.length === 0) continue;
         const base = e.asset.name.replace(/-\d+$/, '');
+        // a part evaluate() reshapes (the bucket's water) is meshed full: the renderer scales it
+        const fill = e.asset.partFill;
+        if (fill)
+            e.asset.evaluate(
+                pose(),
+                fill.full,
+                e.asset.parts.map(() => pose())
+            );
         entityParts[e.id] = e.asset.parts.map((p) => {
             const key = `${base}:${p.name}:${JSON.stringify(p.volume.shape)}:${JSON.stringify(p.volume.bounds)}`;
             let n = byShape.get(key);

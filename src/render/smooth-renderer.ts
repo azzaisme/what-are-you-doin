@@ -45,6 +45,8 @@ interface SmoothObject {
     parts: PartEntity[];
     evaluate: (root: Pose, anim: ArrayLike<number>, out: Pose[]) => void;
     hidden?: (anim: ArrayLike<number>, part: number) => boolean;
+    /** The part meshed full and scaled to its level (VoxelAsset.partFill), with its full level. */
+    fill?: { part: number; floor: number; full: number; level: (anim: ArrayLike<number>) => number };
 }
 
 export class SmoothRenderer {
@@ -141,6 +143,8 @@ export class SmoothRenderer {
                 evaluate: e.asset.evaluate.bind(e.asset),
                 hidden: e.asset.partHidden?.bind(e.asset)
             };
+            const f = e.asset.partFill;
+            if (f) o.fill = { part: f.part, floor: f.floor, full: f.level(f.full), level: f.level.bind(f) };
             map.forEach((mi, i) => {
                 const ent = this.renderEntity(
                     `smooth-${e.name}-${e.asset.parts[i].name}`,
@@ -187,6 +191,14 @@ export class SmoothRenderer {
                 const p = o.poses[i];
                 _v.set(p.p.x, p.p.y, p.p.z);
                 _q.set(p.q.x, p.q.y, p.q.z, p.q.w);
+                if (o.fill?.part === i) {
+                    // meshed full: scaled in the part's own up axis about its floor, to its level now
+                    const f = o.fill;
+                    const k = Math.max(0, Math.min(1, (f.level(o.anim) - f.floor) / (f.full - f.floor)));
+                    _q.transformVector(_up.set(0, f.floor * (1 - k), 0), _up);
+                    _v.add(_up);
+                    e.setLocalScale(1, Math.max(k, 1e-4), 1);
+                }
                 e.setPosition(_v);
                 e.setRotation(_q);
             }
@@ -311,6 +323,52 @@ export class SmoothRenderer {
         return o ? o.parts.filter((p) => p.entity.enabled).length : 0;
     }
 
+    /** Triangles drawn now: every shown unit, object part and the particles (the debug stats). */
+    drawnTriangles(): number {
+        let n = 0;
+        for (const e of this.root.children as Entity[]) {
+            if (!e.enabled || !e.render) continue;
+            for (const mi of e.render.meshInstances) if (mi.visible) n += (mi.mesh?.primitive[0]?.count ?? 0) / 3;
+        }
+        return n;
+    }
+
+    /** Particle cubes drawn now: the triangles of the particle meshes shown (12 a cube). */
+    particleTriangles(): number {
+        let n = 0;
+        for (const mi of this.particleInstances) if (mi.visible) n += (mi.mesh?.primitive[0]?.count ?? 0) / 3;
+        return n;
+    }
+
+    /** Static units shown now (ground chunks, scenery, stand trees and stumps) and their triangles. */
+    staticShown(): { units: number; triangles: number } {
+        let units = 0;
+        let triangles = 0;
+        for (const e of this.root.children as Entity[]) {
+            if (!e.enabled || !e.render || !/^smooth-(chunk|stand|stump)/.test(e.name)) continue;
+            units++;
+            for (const mi of e.render.meshInstances) triangles += (mi.mesh?.primitive[0]?.count ?? 0) / 3;
+        }
+        return { units, triangles };
+    }
+
+    /** One object part now (tests): shown, its triangles, and its world box's bottom and top (m). */
+    partInfo(name: string, part: number): { shown: boolean; triangles: number; minY: number; maxY: number } | null {
+        const o = this.objects.find((x) => this.names.get(x.id) === name);
+        const e = o?.parts[part]?.entity;
+        if (!e?.render) return null;
+        let triangles = 0;
+        let minY = Infinity;
+        let maxY = -Infinity;
+        for (const mi of e.render.meshInstances) {
+            triangles += (mi.mesh?.primitive[0]?.count ?? 0) / 3;
+            const b = mi.aabb;
+            minY = Math.min(minY, b.center.y - b.halfExtents.y);
+            maxY = Math.max(maxY, b.center.y + b.halfExtents.y);
+        }
+        return { shown: e.enabled, triangles, minY, maxY };
+    }
+
     /** A stand tree's units shown now. */
     standState(n: number): { tree: boolean; stump: boolean } {
         const s = this.stand.get(n);
@@ -379,5 +437,6 @@ const FACE_NORMALS = [
 ];
 const _v = new Vec3();
 const _q = new Quat();
+const _up = new Vec3();
 const _root = pose();
 const _anim = new Float64Array(ANIM_MAX);

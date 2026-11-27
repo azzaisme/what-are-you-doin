@@ -1925,9 +1925,63 @@ type VoxLab = Lab & {
     };
     setVoxels(on: boolean): Promise<void>;
     smoothParts(name: string): number;
+    smoothPart(name: string, part: number): { shown: boolean; triangles: number; minY: number; maxY: number } | null;
     smoothStand(n: number): { tree: boolean; stump: boolean };
+    smoothCoverage(): {
+        static: { units: number; triangles: number };
+        objects: number;
+        missing: string[];
+        particles: number;
+        particleTriangles: number;
+        particleSource: number;
+    };
+    setBucketLitres(litres: number): void;
+    failNextSmoothBuild(): void;
 };
 const vox = <T>(page: Page, fn: (l: VoxLab) => T) => lab(page, fn as unknown as (l: Lab) => T);
+
+/**
+ * With Voxels: Off, the smooth world is all there: ground and scenery as static units with
+ * triangles, a part shown for every object the sim shows (stand trees are static units; your own
+ * avatar is hidden in first person), and the scene's particles drawn. Waits until every object
+ * has a snapshot to be drawn from.
+ */
+async function expectSmoothWorld(page: Page, minStaticTriangles: number, particles: boolean): Promise<void> {
+    await page
+        .waitForFunction(
+            () => (window as unknown as { __riverLab: VoxLab }).__riverLab.smoothCoverage().missing.length === 0,
+            null,
+            { timeout: 60_000 }
+        )
+        .catch(() => undefined);
+    const c = await vox(page, (l) => l.smoothCoverage());
+    console.log(`smooth coverage: ${JSON.stringify(c)}`);
+    expect(c.static.units).toBeGreaterThan(0);
+    expect(c.static.triangles).toBeGreaterThan(minStaticTriangles);
+    expect(c.objects).toBeGreaterThan(0);
+    expect(c.missing).toEqual([]);
+    if (particles) {
+        // the scene makes particles (leaves on the wind), and they are drawn
+        await page.waitForFunction(
+            () => (window as unknown as { __riverLab: VoxLab }).__riverLab.smoothCoverage().particleSource > 0,
+            null,
+            { timeout: 60_000 }
+        );
+        await page.waitForFunction(
+            () => {
+                const k = (window as unknown as { __riverLab: VoxLab }).__riverLab.smoothCoverage();
+                // every one drawn: a cube (12 triangles) each
+                return (
+                    k.particleSource > 0 &&
+                    k.particles === k.particleSource &&
+                    k.particleTriangles === 12 * k.particleSource
+                );
+            },
+            null,
+            { timeout: 60_000 }
+        );
+    }
+}
 
 test('Voxels: Off switches the yard to plain smooth meshes live, and back', async ({ page }) => {
     test.setTimeout(300_000);
@@ -1946,6 +2000,7 @@ test('Voxels: Off switches the yard to plain smooth meshes live, and back', asyn
     expect(off.smooth.meshes).toBeGreaterThan(20);
     expect(off.smooth.objectParts).toBeGreaterThan(20);
     expect((await lab(page, (l) => l.stats())).drawCalls as number).toBeGreaterThan(0);
+    await expectSmoothWorld(page, 1000, true);
     await page.screenshot({ path: 'test-results/voxels-off-yard.png' });
     // and back: the lattices again, no smooth meshes drawn
     await page.evaluate(() => (window as unknown as { __riverLab: VoxLab }).__riverLab.setVoxels(true));
@@ -1976,8 +2031,72 @@ for (const level of ['lab', 'valley'] as const)
         expect(v.on).toBe(false);
         expect(v.voxelRoots).toBe(0);
         expect(v.smooth.meshes).toBeGreaterThan(20);
+        // the Valley's wind carries leaves from the start; the River Lab makes none until something lands
+        await expectSmoothWorld(page, 1000, level === 'valley');
         expect(problems).toEqual([]);
     });
+
+test("Voxels: Off: the bucket's water is drawn, and its surface rises with the litres", async ({ page }) => {
+    test.setTimeout(300_000);
+    const problems = await boot(page, '?level=yard&t=0.01&quality=low&voxels=off#cell100');
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: VoxLab }).__riverLab.voxels().smoothLoaded,
+        null,
+        { timeout: 180_000 }
+    );
+    if (await lab(page, (l) => l.paused())) await lab(page, (l) => l.action('pause')); // resume
+    // the water's surface above the bucket's bottom for its litres (src/assets/props.ts)
+    const level = (litres: number) => 0.02 + litres / (Math.PI * 0.13 * 0.13 * 1000);
+    const water = async (litres: number) => {
+        await page.evaluate((v) => (window as unknown as { __riverLab: VoxLab }).__riverLab.setBucketLitres(v), litres);
+        await ticks(page, 20);
+        await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+        const bucket = (await lab(page, (l) => l.entities())).bucket;
+        const part = await vox(page, (l) => l.smoothPart('bucket', 1));
+        return { bucket, part: part! };
+    };
+    const full = await water(10);
+    const some = await water(4);
+    console.log(`bucket water: ${JSON.stringify({ full, some })}`);
+    for (const [w, litres] of [
+        [full, 10],
+        [some, 4]
+    ] as const) {
+        // drawn, with triangles, its surface where the litres put it (the bucket stands upright)
+        expect(w.part.shown, `${litres} L`).toBe(true);
+        expect(w.part.triangles, `${litres} L`).toBeGreaterThan(50);
+        expect(w.part.maxY - w.bucket.y, `${litres} L`).toBeCloseTo(level(litres), 2);
+    }
+    expect(full.part.maxY - some.part.maxY).toBeCloseTo(level(10) - level(4), 2);
+    // and an empty bucket shows no water
+    const none = await water(0);
+    expect(none.part.shown).toBe(false);
+    expect(problems).toEqual([]);
+});
+
+test('Voxels: Off: a smooth build that fails logs it and keeps the voxels on screen', async ({ page }) => {
+    test.setTimeout(300_000);
+    const problems = await boot(page, '?level=yard&t=0.01&quality=low&noui#cell100');
+    await page.evaluate(async () => {
+        const l = (window as unknown as { __riverLab: VoxLab }).__riverLab;
+        l.failNextSmoothBuild();
+        await l.setVoxels(false);
+    });
+    const v = await vox(page, (l) => l.voxels());
+    // the voxel lattices are back, the smooth world is not loaded, and the setting is On again
+    expect(v.on).toBe(true);
+    expect(v.voxelRoots).toBeGreaterThan(0);
+    expect(v.smoothLoaded).toBe(false);
+    // (saved settings keep only what differs from the defaults, so Off would be stored as false)
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('uncivil.settings') ?? '{}').voxels ?? true)).toBe(
+        true
+    );
+    await idle(page);
+    expect((await lab(page, (l) => l.stats())).triangles as number).toBeGreaterThan(10_000);
+    // the failure is logged once, and nothing else went wrong
+    expect(problems.filter((p) => !p.includes('Voxels: Off could not build the smooth meshes'))).toEqual([]);
+    expect(problems.filter((p) => p.includes('Voxels: Off could not build the smooth meshes')).length).toBe(1);
+});
 
 test('Voxels: Off: the falling tree leans as a smooth tree and still sheds its needles', async ({ page }) => {
     test.setTimeout(300_000);
@@ -2094,6 +2213,8 @@ for (const [hostVoxels, guestVoxels] of [
         expect(hv.on).toBe(hostVoxels === 'on');
         expect(gv.on).toBe(guestVoxels === 'on');
         await guest.waitForTimeout(3000);
+        // the side with voxels off draws the whole world, both players' objects included
+        await expectSmoothWorld(hostVoxels === 'off' ? page : guest, 1000, true);
         expect(problems).toEqual([]);
         expect(guestProblems).toEqual([]);
     });
