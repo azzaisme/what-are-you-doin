@@ -955,11 +955,13 @@ export class LabSim {
             this.applySteps(rules);
             return;
         }
-        // essential item: lost in the creek for 1.5 s -> back on its stump (in a flood, afloat in it)
+        // essential item: lost in the creek (or down in a gap's bed, #152) for 1.5 s -> back at its start
+        // (in a flood, afloat in it)
         const p0 = bk.pose.p;
         const lost =
             p0.y < rules.lostY ||
-            (this.hazards.rise > 0 && p0.y < rules.lostY + this.hazards.rise && !rules.isSafe(p0.x, p0.z));
+            (this.hazards.rise > 0 && p0.y < rules.lostY + this.hazards.rise && !rules.isSafe(p0.x, p0.z)) ||
+            (rules.lostAt?.(p0.x, p0.y, p0.z) ?? false);
         const free = pw.holders(bk.id) === 0;
         this.lostTicks = lost && free ? this.lostTicks + 1 : 0;
         // left on a detour's stepping piece (#87) for a third of a second: as good as fallen in

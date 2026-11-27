@@ -1624,6 +1624,29 @@ function isSafe(x: number, z: number): boolean {
     return channelEdge(routeU(x, z), routeT(x, z)) > 0.9;
 }
 
+/** How far below a gap's lower rim the bucket must lie to count as down in it (#152). */
+const GAP_LOST_DEPTH = 0.5;
+/** Where a gap's rim is read: this far outside its edge, either side. */
+const GAP_RIM_OUT = 0.6;
+
+/**
+ * Down in a crossing's gap (#152): inside a channel (CHANNELS, so a retuned crossing needs no change
+ * here) and well below the lower of its two rims, read from the ground either side. A bucket lying on
+ * a bridge, the gorge's pier or a detour piece is above that.
+ */
+function lostInGap(x: number, y: number, z: number): boolean {
+    const u = routeU(x, z);
+    const t = routeT(x, z);
+    for (const c of CHANNELS) {
+        const mid = c.centre(t);
+        const hw = c.hw(t);
+        if (Math.abs(u - mid) >= hw) continue;
+        const rim = Math.min(groundUT(mid - hw - GAP_RIM_OUT, t), groundUT(mid + hw + GAP_RIM_OUT, t));
+        if (y < rim - GAP_LOST_DEPTH) return true;
+    }
+    return false;
+}
+
 const wsock = yardToWorld(WINDSOCK.x, WINDSOCK.z);
 const spawn = yardToWorld(1.2, 6.2);
 const orbitFrom = yardToWorld(9, 12);
@@ -1688,6 +1711,7 @@ export const valleyLevel: LevelDef = {
         fallY: -0.2,
         isSafe,
         lostY: CREEK_WATER_Y + 0.15,
+        lostAt: lostInGap,
         stages: VALLEY_STAGES,
         waterSources: valleySources()
     },

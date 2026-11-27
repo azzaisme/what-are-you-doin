@@ -1,5 +1,37 @@
 # Progress log
 
+## A bucket that falls into the crevasse comes back (2026-11-27, Epic 9, #152)
+
+The #87 audit found that a bucket falling into the crevasse on the mountain road stayed there for
+good. Now it comes back to the Mountain Approach start, with the stage's 3 L spare, like a bucket
+that falls in the creek.
+
+- **Why it stayed:** the Valley had one height for "fell in", just above the creek's water
+  (−0.30 m). The culvert's and the gorge's beds (−0.9 to −1.05 m) are below it, so a bucket there
+  was already recovered. The crevasse's bed, 9.5 m below the road, sits right at that height
+  (−0.20 to −0.35 m), so a bucket lying there mostly never counted. #87's boulder rule, which drops
+  the bucket where a beaver stands on a boulder, made it more likely.
+- **The rule now:** a free bucket that lies inside any crossing's gap, more than 0.5 m below the
+  lower of its two rims, for 1.5 s is lost. It goes back the usual way: "The bucket fell in. A
+  spare bucket (3 L) is waiting at the Mountain Approach start."
+    - The gaps come from the level's own list of crossings (where each runs and how wide it is), and
+      the rims are read from the ground either side. A retuned crossing, like the culvert Epic 5 is
+      reworking, needs no change here.
+    - A bucket on a bridge, the gorge's pier or a detour piece is above that line, so it stays.
+    - A bucket someone is holding never counts.
+- **Tests** (`tests/unit/valley-gap-recovery.test.ts`, by input; set-up places players, the
+  bucket, bridges and the ute):
+    - At the culvert, the gorge and the crevasse, a beaver carries the bucket to the edge and tosses
+      it in. It goes down into the bed, comes back 1.5 to 3 s later to that stage's start, and the
+      toast names that stage's spare.
+    - With the gap check taken out, the same toss at the crevasse leaves the bucket in the bed for
+      10 s with no recovery. Put back to the old rule in the level, that test fails.
+    - Never recovered:
+        - a bucket on either rim, 0.6 m from the edge, at all three crossings;
+        - a bucket resting on a two-beam bridge over the crevasse;
+        - a bucket on the gorge's stone pier;
+        - a bucket in the ute's tray, with the ute parked on a four-beam deck over the culvert.
+
 ## Foot detours over three Valley crossings, and the bucket still has to go over the bridge (2026-11-27, Epic 9, #87)
 
 Three narrow paths now go round the Valley's crossings, for beavers on foot:

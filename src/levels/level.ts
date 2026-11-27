@@ -142,6 +142,11 @@ export interface LevelRules {
     isSafe(x: number, z: number): boolean;
     /** Below this height essential items (the bucket) are returned to their start. */
     lostY: number;
+    /**
+     * Also lost: down in one of the level's gaps (a crossing's bed, above `lostY`), well below its
+     * rims. Optional; a level without raised gaps leaves it out.
+     */
+    lostAt?(x: number, y: number, z: number): boolean;
     /** Tutorial steps, done in order (the last is usually the goal). */
     steps?: TutorialStep[];
     /** Journey stages, done in order (progress.step counts them); the last one's goal is `goal`. */
