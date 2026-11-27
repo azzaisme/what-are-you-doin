@@ -107,7 +107,7 @@ The rest:
 - **Known issue, for a follow-up:** a bucket that falls into the crevasse bed stays there, with
   no recovery to the stage start. The base game does the same, but the boulder rule (a bucket
   dropped where the beaver stands on a boulder) makes it more likely to happen.
-- npm test 1250/1250 (5 cm and 10 cm), with `epics-part-3` f9a63c2 merged in. That merge brought #144's friction census, whose Valley pin is updated for the detours (measured: the detours alone change 0.5 by −3, 0.6 by −12, 0.8 by +4 and 0.9 by −1 colliders; the rest is the winch and dolly).
+- npm test 1264/1264 (5 cm and 10 cm), with `epics-part-3` 5c77c82 merged in. That merge brought #144's friction census, whose Valley pin is updated for the detours (measured: the detours alone change 0.5 by −3, 0.6 by −12, 0.8 by +4 and 0.9 by −1 colliders; the rest is the winch and dolly).
 
 ## Epic 8: the barrier holds when you drag it forward round a corner (2026-11-27, #77)
 
