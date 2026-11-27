@@ -21,6 +21,11 @@ import type { AssetPart, VoxelAsset } from './asset.ts';
 
 /** The barrier's collision box (half extents, m): 5.6 m across the road (1.2 m past each edge), 1.1 m high, 0.6 m deep. */
 export const BARRIER_HALF = { x: 2.8, y: 0.55, z: 0.3 };
+/**
+ * How fast a lone player's hand swings round with their view while holding the barrier (m/s):
+ * heavy to swing round (BodyOptions.handSpeed).
+ */
+export const BARRIER_HAND_SPEED = 1.5;
 
 const timber: MaterialField = (x, y, z) => voxel(M.LogBark, latticeShade(x, y, z, 0.2, 6) & 1);
 
