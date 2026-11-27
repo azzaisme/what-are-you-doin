@@ -18,7 +18,35 @@ A setting, **Settings > Video > Voxels** (on by default, saved; `?voxels=off` fo
 
 Frame times are software rendering, so they show the ratio, not phone frame rates.
 
-**Tests:** `tests/unit/voxels-off.test.ts` (the setting and its URL override; primitives closed and wound outward; the bucket polygonized watertight and still hollow; colours from the volume, split by surface class; the recorder; a level's units) and six browser tests in `tests/e2e/smoke.spec.ts` (the yard switched off live and back; the River Lab and the Valley off with no console errors; the falling tree leans as a smooth tree and sheds its needles; co-op with the host on and the guest off, and the reverse).
+- **The bucket's water** is the one part whose shape `evaluate()` sets from the animation channels (its surface rises with the litres). The asset says so (`VoxelAsset.partFill`): the smooth build meshes it full, and the renderer scales it from its floor to the level for the litres now. Its surface stays flat (the voxel water's slosh tilt is not shown with voxels off).
+- **A failed build** (the worker reports an error or throws, or its meshes do not load) is logged once, and the voxel lattices come back with the setting On, instead of an empty screen.
+- **The debug triangle stat** counts the smooth meshes drawn when voxels are off.
+
+**Measured** (`voxbench.mjs`, a local script: settled scene, 30 frames, SwiftShader 640 × 360, High, Xeon at 2.1 GHz with 4 cores, load about 1.3, at 12ef171 plus this change before the audit fixes, one run each):
+
+| Level       | Draw calls on → off | Frame median (ms) on → off |  Triangles on → off | Voxel worker (ms) on → off | Smooth build (ms) | Heap (MB) on → off |
+| ----------- | ------------------: | -------------------------: | ------------------: | -------------------------: | ----------------: | -----------------: |
+| River Lab   |         3,153 → 822 |                1,308 → 394 | 1,509,930 → 141,840 |                   39.4 → 0 |             1,690 |          170 → 167 |
+| Timber Yard |       3,668 → 1,113 |                1,454 → 410 | 2,068,466 → 182,540 |                   35.1 → 0 |             2,408 |          206 → 210 |
+| Valley      |       4,074 → 2,279 |                2,243 → 699 | 4,432,614 → 785,356 |                   29.6 → 0 |             4,419 |          418 → 253 |
+
+Frame times are software rendering, so they show the ratio, not phone frame rates.
+
+**Tests:**
+
+- `tests/unit/voxels-off.test.ts`: the setting and its URL override; primitives closed and wound outward; the bucket polygonized watertight and still hollow; every vertex colour and class of two boxes of known, different values (a constant magenta colour, or every value in one class, fails it); the recorder; a level's units, every object part with triangles, the water meshed from its floor to its full level; and every part of every asset sampled after differing animation channels: the bucket's water is the only part `evaluate()` reshapes, and it is declared (dropping the declaration, or meshing it at the empty level, fails it).
+- `tests/e2e/smoke.spec.ts`, eight browser tests: the yard switched off live and back; the River Lab and the Valley off with no console errors; the bucket's water drawn, its surface where 10 L and 4 L put it, none when empty; a build that fails keeps the voxels on screen; the falling tree leans as a smooth tree and sheds its needles; co-op with the host on and the guest off, and the reverse. Every one that turns voxels off checks the smooth world is all there (`smoothCoverage`): static units with triangles, a part shown for every object the sim shows (stand trees are static units; your own avatar is hidden in first person), and, where the scene makes particles, every one drawn.
+
+Mutation check of those browser tests (each mutant built and the eight run):
+
+| Mutant (`src/render/smooth-renderer.ts`) | yard live | River Lab | Valley | water | build fails | falling tree | co-op host on, guest off | co-op host off, guest on | Failed |
+| ---------------------------------------- | --------- | --------- | ------ | ----- | ----------- | ------------ | ------------------------ | ------------------------ | -----: |
+| static units dropped                     | ✘         | ✘         | ✘      | ✓     | ✓           | ✘            | ✘                        | ✘                        | 6 of 8 |
+| no object parts                          | ✘         | ✘         | ✘      | ✘     | ✓           | ✘            | ✘                        | ✘                        | 7 of 8 |
+| no particles                             | ✘         | ✓         | ✘      | ✓     | ✓           | ✘            | ✘                        | ✘                        | 5 of 8 |
+| water not scaled to its litres           | ✓         | ✓         | ✓      | ✘     | ✓           | ✓            | ✓                        | ✓                        | 1 of 8 |
+
+The tests that pass a mutant do not look at what it removes: the River Lab makes no particles at the start, the water test looks at the water only, and the failed build never builds a smooth world.
 
 ## Epic 8: the barrier holds when you drag it forward round a corner (2026-11-27, #77)
 
