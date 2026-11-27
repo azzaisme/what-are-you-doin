@@ -321,12 +321,14 @@ export function buildLabPhysics(level: LevelDef): PhysicsWorld {
             pw.addStatic(d.setTranslation(p.pose.p.x, p.pose.p.y, p.pose.p.z).setFriction(0.8));
             continue;
         }
-        pw.addStatic(
+        const c = pw.addStatic(
             d
                 .setTranslation(p.pose.p.x, p.pose.p.y, p.pose.p.z)
                 .setRotation({ ...p.pose.q })
                 .setFriction(0.8)
         );
+        // a foot detour's stepping piece (#87): the sim asks what is under a beaver's footprint
+        if (p.detour) pw.detourColliders.set(c.handle, p.detour);
     }
 
     // invisible walls around the play area (the Epic 1 walker had the same limits as a clamp)
