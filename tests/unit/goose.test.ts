@@ -193,6 +193,50 @@ describe('the goose (#78): it honks, rears up and comes for the carried bucket',
         }
     }, 120_000);
 
+    it('carried together: when the bearer it is after lets go, it goes for the other one still holding the bucket (by input)', () => {
+        const s = new LabSim({ level: timberYardLevel });
+        s.runTo(S(HAZARD.graceS) + 10);
+        s.fpActive = true;
+        s.setSlotActive(1, true);
+        // (set up: both placed by the stump; the rest is by input)
+        s.placePlayer(BUCKET_STUMP.x, BUCKET_STUMP.z + 1, 0, 0);
+        s.placePlayer(BUCKET_STUMP.x + 1, BUCKET_STUMP.z, 0, 1);
+        const a = new Player(s, 0);
+        a.step({}, 20);
+        expect(a.grabBucket()).toBe(true);
+        expect(new Player(s, 1).grabBucket()).toBe(true);
+        const holding = (slot: number) => s.physics.heldIdOf(slot) === s.bucket.id;
+        expect([holding(0), holding(1)]).toEqual([true, true]);
+        const g = s.hazards.goose!;
+        const both = (c: [Partial<PlayerCommand>, Partial<PlayerCommand>]) => {
+            const yaw = (p: { x: number; z: number }) => Math.atan2(-(GOOSE_PATCH.x - p.x), -(GOOSE_PATCH.z - p.z));
+            s.step(
+                { ...neutralCommand(s.tick, yaw(s.players[0]), -0.3), ...c[0] },
+                { ...neutralCommand(s.tick, yaw(s.players[1]), -0.3), ...c[1] }
+            );
+        };
+        // walk it up towards the goose together until it honks, then stand and wait for it to come
+        for (let i = 0; i < S(15) && g.tellTick < 0; i++) both([{ moveZ: 1 }, { moveZ: 1 }]);
+        expect(g.tellTick).toBeGreaterThan(0);
+        for (let i = 0; i < S(10) && g.phase !== GOOSE_PHASE.chase; i++) both([{}, {}]);
+        expect([holding(0), holding(1)]).toEqual([true, true]);
+        expect(g.phase).toBe(GOOSE_PHASE.chase);
+        const first = g.target;
+        const other = first === 0 ? 1 : 0;
+        // the one it is after lets go (grab again); the other keeps hold and stands still
+        both(first === 0 ? [{ grab: true }, {}] : [{}, { grab: true }]);
+        // (letting go of the bucket sets it down first: lowered until it rests, or the arm's reach)
+        for (let i = 0; i < S(2) && holding(first) && g.peckTick < 0; i++) both([{}, {}]);
+        expect([holding(first), holding(other)]).toEqual([false, true]);
+        // it goes for the one still holding it: still chasing, now after them
+        expect(g.target).toBe(other);
+        expect(g.phase === GOOSE_PHASE.chase || g.peckTick > 0).toBe(true);
+        // and it is not over as "the bucket put down"
+        for (let i = 0; i < S(30) && g.phase !== GOOSE_PHASE.idle; i++) both([{}, {}]);
+        expect(ends(s)).not.toContain('goose: the bucket put down');
+        expect(ends(s)).toEqual(['goose: pecked the bucket loose']);
+    }, 120_000);
+
     it('the worst peck: the bearer on the bank’s edge, the creek behind, the goose coming from the yard; nobody and nothing goes in', () => {
         const { s, pl } = holding();
         const g = s.hazards.goose!;

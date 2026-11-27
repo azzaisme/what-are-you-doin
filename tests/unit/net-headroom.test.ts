@@ -35,7 +35,6 @@ import {
 } from '../../src/net/session.ts';
 import { MemoryHub } from '../../src/net/transport.ts';
 import { neutralCommand } from '../../src/sim/commands.ts';
-import type { SimEntity } from '../../src/sim/lab-entities.ts';
 import { LabSim, MAX_PLAYERS } from '../../src/sim/lab-sim.ts';
 import { initPhysics } from '../../src/sim/physics/world.ts';
 import { ANIM_MAX, SnapshotRing } from '../../src/sim/snapshots.ts';
@@ -73,26 +72,15 @@ const LONG_MESSAGE =
     '🔧 Click… click… click… The ute’s handbrake is creeping off! Get in and hold the brake, or chock a downhill wheel.';
 
 /**
- * The Valley with eight players (its real entities: the long plank of #134, the road closure's
- * barrier and sign of #131) and a stand-in for the goose still to come, with every animation
- * channel. Hosted, with seven guests seated and an eighth watching (the game is full), none of whom
+ * The Valley with eight players and its real entities (the long plank of #134, the road closure's
+ * barrier and sign of #131, the goose of #78), every animation channel moving. Hosted, with seven guests seated and an eighth watching (the game is full), none of whom
  * acknowledges anything (every entity stays theirs to receive).
  */
-async function valleyHost(extra = true) {
+async function valleyHost() {
     const hub = new MemoryHub();
     const sim = new LabSim({ level: valleyLevel });
-    if (extra) {
-        const animated = sim.entities.find((e) => e.asset.animChannels >= 4)!;
-        const add = (src: SimEntity, channels: number) =>
-            (sim.entities as SimEntity[]).push({
-                ...src,
-                id: 9000 + sim.entities.length,
-                slot: sim.entities.length,
-                asset: { ...src.asset, animChannels: channels },
-                anim: new Float64Array(ANIM_MAX)
-            });
-        add(animated, ANIM_MAX); // the goose
-    }
+    // the goose is a real entity now (#78), not a stand-in
+    expect(sim.entities.filter((e) => e.name === 'goose')).toHaveLength(1);
     sim.step(neutralCommand(0));
     sim.fpActive = true;
     const hs = await HostSession.start(hub.transport('host'), sim, 'valley', 'size');

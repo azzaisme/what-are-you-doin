@@ -1,6 +1,6 @@
 # Progress log
 
-## Epic 8: the goose (2026-11-23, #78)
+## Epic 8: the goose (2026-11-27, #78)
 
 A goose lives on the bank by the bucket's stump, in the Timber Yard and in the Valley's yard. Carry
 the bucket near it and it honks, rears up, and comes for the bucket.
@@ -31,8 +31,10 @@ the bucket near it and it honks, rears up, and comes for the bucket.
       two carrying it, running 4.14 and 4.20 m/s against its 3.2;
     - get someone else to run at it: it turns on them for 4 s, harmlessly, while the bucket gets
       away, then goes home.
-- **It's after the bucket, not a person:** carrying it together, if one lets go, it goes for
-  the other.
+- **It's after the bucket, not a person:** carrying it together, if the one it's after lets go,
+  it goes for the other. Tested by input: two carry it up, it comes for one, that one lets go, and
+  it turns on the other and pecks the bucket loose (not "the bucket put down"). Mutation check:
+  without the switch it gives up there, and the test fails.
 - **No timer on the player:** it's over when the goose is back on its patch.
 - **The playtest log** says how each goose ended: pecked the bucket loose, the bucket put down,
   outrun, or distracted. Each is tested in its scenario.
@@ -45,10 +47,24 @@ the bucket near it and it honks, rears up, and comes for the bucket.
   and head and a white chin strap, from the existing palette), the honk in `synth.ts`, the patch in
   `timber-yard.ts` and `valley.ts`, and a few lines in the director, lab-sim and lab-entities. No
   new HazardNet fields.
-- **Network budget:** the goose adds 33 bytes to the Valley's worst-case host state: 4074 of 4096
-  with the road closure. Its pull request waits for Epic 10's leaner host state (NET_PROTOCOL 3).
-- **Tests:** `tests/unit/goose.test.ts` (10 tests, at both voxel sizes), and the honk in
-  `audio.test.ts`.
+- **Network budget (NET_PROTOCOL 3):** the goose is now a real entity in the worst-case test
+  (`net-headroom.test.ts`), in place of the stand-in it had. Every one of the Valley's 142 entities
+  moving, the longest messages, 64 nails and eight players: 4043 of 4096 UTF-8 bytes, and 4045
+  with the winch's rope hooked into the dolly (#144). Every entity is listed, none waiting more
+  than 2 snapshots.
+- **Brought up to date:** the goose's four commits were put on `epics-part-3` (5c77c82) one by
+  one; the old copy of the playtest-log commit they sat on was left out, since #145 has it. Each
+  conflict kept both sides:
+    - `hazards.ts`: the reset clears the outcomes and the handbrake's chocked flag (#145), and resets
+      the goose;
+    - `game-audio.ts`: the honks are in the per-kind sound table (#145) under `hazard`, beside the
+      closure's clunk (now with CLOSURE_SHUT) and the tree;
+    - `audio.test.ts`: both the closure's three clunks and the goose's four honks are checked;
+    - `docs/playtest.md`: the closure's new endings (#147) and the goose's;
+    - `docs/progress.md`: this section on top; the old playlog copy dropped.
+- **Tests:** `tests/unit/goose.test.ts` (11 tests, at both voxel sizes), the honk in
+  `audio.test.ts`, and the budget in `net-headroom.test.ts`.
+- **Unit tests:** COUNT pass (FILES files, both voxel sizes), on `epics-part-3` 5c77c82.
 
 ## Epic 8: the barrier holds when you drag it forward round a corner (2026-11-27, #77)
 
