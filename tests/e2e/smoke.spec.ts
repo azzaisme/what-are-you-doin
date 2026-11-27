@@ -49,6 +49,7 @@ type Lab = {
         outlines: number[][];
         viewLayers: string[][];
         slot2: number;
+        structure: { on: boolean; recording: boolean; joints: number; forces: number; contacts: number };
     };
     teleport(x: number, z: number, yaw?: number): void;
     ute(): { x: number; y: number; z: number; yaw: number; speed: number; driver: number; drivable: boolean };
@@ -735,8 +736,8 @@ test('level 1, the Timber Yard: starts in first person with the objective, and t
     const s = await lab(page, (l) => l.stats());
     // beaver, ute, bucket, six planks, two beams, three logs, the crate, the windsock, and logging:
     // the axe, the sawmill and the six stand markers (their cut band hidden until a tree is bitten), and
-    // Epic 5's seven deck planks by the bridge
-    expect(s.voxel.objects).toBe(31);
+    // Epic 5's seven deck planks by the bridge and its log dolly
+    expect(s.voxel.objects).toBe(32);
     expect(s.voxel.rejected).toBe(0);
     expect(s.voxel.maskRejected).toBe(0);
     const g = await page.evaluate(() => (window as unknown as { __riverLab: Lab }).__riverLab.verifyGrid());
@@ -893,6 +894,20 @@ test('the Timber Yard hammer: look at a beam, F nails it down and the nail head 
     expect(await lab(page, (l) => l.joints())).toMatchObject({ connections: 1, nails: 1 });
     expect(await lab(page, (l) => l.interaction().nail)).toBeGreaterThan(1);
     await page.screenshot({ path: 'test-results/hammer-nail.png' });
+    // the structural debug overlay (#51): F4 draws the joint, F4 again turns it (and the meter's
+    // contact recording) off
+    expect(await lab(page, (l) => l.joints().structure)).toMatchObject({ on: false, recording: false, joints: 0 });
+    await page.keyboard.press('F4');
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.joints().structure.joints === 1,
+        null,
+        { timeout: 30_000 }
+    );
+    expect(await lab(page, (l) => l.joints().structure)).toMatchObject({ on: true, recording: true });
+    await page.screenshot({ path: 'test-results/structure-overlay.png' });
+    await page.keyboard.press('F4');
+    await page.waitForTimeout(200);
+    expect(await lab(page, (l) => l.joints().structure)).toMatchObject({ on: false, recording: false, joints: 0 });
     expect(problems).toEqual([]);
 });
 
@@ -970,7 +985,7 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
         Math.abs(rowBrightness(Math.floor(shot.height * 0.3)) - rowBrightness(Math.floor(shot.height * 0.8)))
     ).toBeGreaterThan(1);
     const s = await lab(page, (l) => l.stats());
-    expect(s.voxel.objects).toBe(33); // the yard's 31 plus two voxel beaver bodies
+    expect(s.voxel.objects).toBe(34); // the yard's 32 plus two voxel beaver bodies
     // player 2 walks on their own commands
     const before = await page.evaluate(
         () =>
@@ -999,7 +1014,7 @@ test('local co-op: split screen renders both views, player 2 moves with their ow
     await lab(page, (l) => (l as unknown as { setPlayers(n: number): void }).setPlayers(1));
     // player 2's body leaves with the next applied voxel frame (wait on it: slow CI runners lag)
     await page.waitForFunction(
-        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 32,
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 33,
         null,
         { timeout: 60_000 }
     );
@@ -1199,7 +1214,7 @@ for (const transport of ['local', 'p2p'] as const)
         // the guest renders the host's world: both beaver bodies and every prop, all on the grid
         // (voxel frames lag the snapshots in software GL, so wait for the frame that has both beavers)
         await guest.waitForFunction(
-            () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 33,
+            () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 34,
             null,
             { timeout: 60_000 }
         );
@@ -1449,6 +1464,85 @@ test('online co-op: the host’s flood reaches the guest — its river rises, th
     const final = await gap();
     expect(final.water).toBeLessThanOrEqual(0.01);
     expect(final.plane).toBeLessThanOrEqual(0.01);
+    expect(problems).toEqual([]);
+    expect(guestProblems).toEqual([]);
+});
+
+test('online co-op: a nail the host drives shows on the guest, as one nail head (#53)', async ({ page, context }) => {
+    test.setTimeout(600_000);
+    const query = '?level=yard&t=0.01&quality=low&net=local#cell100';
+    const problems = await boot(page, query);
+    const guest = await context.newPage();
+    const guestProblems: string[] = [];
+    guest.on('pageerror', (e) => guestProblems.push(e.message));
+    await guest.goto(`/${query}`);
+    await guest.waitForFunction(() => (window as unknown as { __riverLab?: Lab }).__riverLab?.ready === true, null, {
+        timeout: 150_000
+    });
+    type Net = {
+        net: {
+            host(): Promise<void>;
+            games(): { code: string }[];
+            join(c: string): Promise<void>;
+            connect(): Promise<void>;
+            status(): { hosting: string | null; guests: number; guest: { slot: number; received: number } | null };
+        };
+    };
+    const net = (p: Page, src: string, arg?: unknown) =>
+        p.evaluate(
+            ([s, a]) =>
+                new Function('l', 'a', `return (${s})(l, a)`)((window as unknown as { __riverLab: Net }).__riverLab, a),
+            [src, arg] as const
+        );
+    await lab(page, (l) => l.action('pause'));
+    await Promise.all([net(page, '(l) => l.net.connect()'), net(guest, '(l) => l.net.connect()')]);
+    await net(page, '(l) => l.net.host()');
+    const code = ((await net(page, '(l) => l.net.status()')) as { hosting: string }).hosting;
+    await guest.waitForFunction(
+        (c) => (window as unknown as { __riverLab: Net }).__riverLab.net.games().some((g) => g.code === c),
+        code,
+        { timeout: 120_000 }
+    );
+    await net(guest, '(l, c) => l.net.join(c)', code);
+    await guest.waitForFunction(
+        () => ((window as unknown as { __riverLab: Net }).__riverLab.net.status().guest?.received ?? 0) > 5,
+        null,
+        { timeout: 120_000 }
+    );
+    // nothing nailed yet: the guest draws no nail head
+    expect(await lab(guest, (l) => l.joints().drawn)).toBe(0);
+    // on the host, as the hammer test: a beam on its edge in front of you, look down at it, F
+    const p0 = await lab(page, (l) => l.player());
+    await page.evaluate(
+        ([x, y, z, eye]) => {
+            const l = (window as unknown as { __riverLab: Lab }).__riverLab;
+            l.teleport(x, z, 0);
+            l.placeProp('beam-0', x, y + 0.3, z - 0.6, 0);
+            l.look(0, -Math.atan2(eye - 0.2, 0.55));
+        },
+        [p0.x, p0.y, p0.z, p0.eyeHeight]
+    );
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().nail === 1,
+        null,
+        {
+            timeout: 60_000
+        }
+    );
+    await page.keyboard.press('KeyF');
+    await page.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.joints().nails === 1, null, {
+        timeout: 30_000
+    });
+    // the guest, which runs no joints of its own, draws the host's nail: one nail head
+    await guest.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.joints().drawn === 1,
+        null,
+        {
+            timeout: 60_000
+        }
+    );
+    expect(await lab(guest, (l) => l.joints().nails)).toBe(0);
+    await guest.screenshot({ path: 'test-results/guest-nail.png' });
     expect(problems).toEqual([]);
     expect(guestProblems).toEqual([]);
 });
