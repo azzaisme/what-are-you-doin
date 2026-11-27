@@ -85,6 +85,181 @@ Tests:
   views on each preset.
 - The four-view browser test reads the sun's settings at 1, 2, 4, 3 and back to 1 views on Low.
 
+## Foot detours over three Valley crossings, and the bucket still has to go over the bridge (2026-11-27, Epic 9, #87)
+
+Three narrow paths now go round the Valley's crossings, for beavers on foot:
+
+- **Stepping stones** across Shallow Creek, upstream of the old bridge: four stones rising towards
+  the far bank.
+- **A fallen trunk** over the culvert, resting on both rims.
+- **Three boulders** wedged side by side in the crevasse.
+
+Each path leaves the road and comes back to it. They are graded like the side paths: the banks'
+cross-fall is at most 0.11 m over a beaver's width, at the trunk path's corner. No tree or rock
+stands on them. They keep clear of the logging and lookout tracks (the detours are on the other
+side of the road), the road closure's barrier (u 22) and its sign (u 10.5). The trees, rocks and
+flowers elsewhere are exactly where they were.
+
+**The bucket can't go over a detour.** The detours' pieces are tagged in the level ("stepping
+stones", "fallen trunk", "boulders"):
+
+- A beaver standing on one can't hold the bucket. A grab is refused, and a carried bucket drops
+  where they stand. The first time, the toast says "The bucket's too awkward for the stepping
+  stones: build the crossing to get it over." The usual let-go sound plays.
+- Nobody can take hold of a bucket lying on a piece, from a piece or from the bank. If it's left
+  there for a third of a second, it goes back to the stage start like a bucket that fell in ("The
+  bucket can't be carried on the boulders. A spare bucket (3 L) is waiting at the Mountain Approach
+  start.").
+    - This second half was added after measuring. With only the first half, a beaver on the
+      crevasse's near rim could set the bucket on the first boulder, and a beaver on the far rim
+      picked it up (2.7 m from their eye, inside the 2.6 m reach to the bucket's near side). The same
+      hand-over across the bare road crossings fails: the far beaver can't reach.
+- **What counts as standing on a piece is what the beaver's feet touch**, the whole 0.3 m-radius
+  foot, not the point under its middle. The first version checked the middle point (plus 0.1 m),
+  and the audit found the hole: a beaver walking the fallen trunk 0.4 to 0.45 m off its middle
+  line, or the boulders 0.5 to 0.55 m off theirs, stood on the piece by the rim of its foot and
+  carried the bucket over, and the stage counted it. Now a short downward sweep of the foot finds
+  the piece. A new test walks each detour (stones, trunk, boulders) with the bucket at every 5 cm
+  from 0.75 m one side of the line to 0.75 m the other. At every offset where the beaver stays on,
+  the bucket is dropped and no stage completes. Put back to the middle-point check, the trunk and
+  boulder sweeps fail.
+- A plank laid flat over the stones is building. A beaver standing on it holds the bucket (their
+  feet are on the plank, above the stone), and a bucket set on it isn't "on the stones".
+    - The audit caught a weak test here: the plank had been set on its 10 cm edge, and a bucket on
+      it slid off, so the old test only passed by grabbing it mid-slide. The test now lays the
+      plank flat. A bucket set on it is still there 150 ticks (2.5 s) later, and a beaver standing
+      on the plank picks it up after a slow look.
+- The stage objectives say so: "the stepping stones are feet only", "the fallen trunk is feet
+  only", "the boulders are feet only".
+- **Objectives shortened to fit at 160 % text size.** On an 844×390 phone with the debug panel
+  open, the longer objectives ran into the settings chip. Now "Bridge the crevasse on the road",
+  "Stack crates up the wall: set the bucket on one, lift it from the top" and "Water the flower:
+  hold the bucket in the stone ring and pour (R)". Shallow Creek's says what to carry where again:
+  "Bridge the creek, bucket to the flag (the stepping stones are feet only)". A new browser test
+  visits all 7 Valley stages and checks each real objective at 160 % on 5 screen shapes, panel open
+  and closed. It moves between stages by teleporting the beaver and setting a full bucket down at
+  each flag, so it checks the layout, not the play. Before the change it failed at stages 5, 6 and
+  7 at 844×390.
+
+**Tests** (`tests/unit/valley-detours.test.ts`, all by input; set-up places players, the bucket and
+a built bridge). Each of these fails to get the bucket over:
+
+- carried onto the stepping stones: it was held on a stone for at most 1 tick, then dropped and
+  went back to the start;
+- carried with a running jump onto the stones (the jump is refused while holding the bucket);
+- alone: set down on a stone from the bank, then reached for from the bank, and from a stone;
+- passed from a beaver on the bank to one on a stone;
+- set on a boulder from the near rim, then reached for from the far rim;
+- two carriers: the one who steps onto a stone lets go, and the one left on the bank drops it on the
+  next step;
+- dragged along the fallen trunk;
+- driven at in the ute: at each detour, the ute never got onto the far bank;
+- online: a guest on a stone can't take it from the host. The guest is told it holds nothing, sees
+  the toast, and its snapshots show the bucket within 0.3 m of where the host has it.
+
+Each detour's "goes back" toast names its own stage and spare: "A spare (empty) one is waiting at
+the Shallow Creek start" at the creek, "A spare bucket (3 L) is waiting at the Forest Road start" at
+the culvert, and the Mountain Approach's 3 L at the crevasse. Only a bucket that rests on a piece
+counts: one flying up the boulders, clipping the first and flying on, touched them for under a third
+of a second and landed on the far rim with no respawn (tested).
+
+These work alongside the rules that keep the bucket off the bare crossings (#132): no jumping
+holding it or grabbing it in mid-air, taking it only with ground between you and it (and, hand to
+hand, standing within 1.9 m), and the taps past a crossing shut until its stage.
+
+- In each grab the rules run in this order: mid-air, then the detour pieces, then the ground to the
+  bucket, then hand to hand. A pass that more than one would refuse says the specific thing ("too
+  awkward for the stepping stones").
+- A plank laid from the bank onto the stones is building for both: handed to a beaver standing on
+  it, the bucket passes (tested), and a beaver on a plank over the stones picks it up off the plank.
+- The crevasse detour can't be used to fetch a thrown bucket and refill it at the spring butt: the
+  butt is shut until the Mountain Approach is done.
+
+The rest:
+
+- **Control:** the same hand-over over the built crevasse crossing works (the beaver on the beams
+  takes it), and the flag counts it.
+- **Walks:** a beaver walks each detour end to end with no falls, and so does a guest over the
+  stepping stones, with host and guest agreeing within 0.3 m.
+- **Timber, measured:** a plank (2.4 m) and a beam (3.2 m) can each be carried over all three
+  detours by one beaver. So a crossing can be built from either side. Only the bucket is held back.
+- Valley planks stay 2.4 m, and the bucket's throw is unchanged.
+- **Area colours:** areas 2 and 4 (their flags and route signs) used the test materials
+  (`M.TestOrange`, `M.TestBlue`). They are now leaf gold and the bucket's water blue (the gorge,
+  with its waterfall). The ute's red was tried for area 4 first, but it sat next to area 5's brick
+  (35 apart in RGB). Tests check the area colours use no test material, are all different, and
+  that next-door areas are more than 60 apart (the closest pair now is hi-vis and leaf gold, 65).
+- **Known issue, for a follow-up:** a bucket that falls into the crevasse bed stays there, with
+  no recovery to the stage start. The base game does the same, but the boulder rule (a bucket
+  dropped where the beaver stands on a boulder) makes it more likely to happen.
+- npm test 1264/1264 (5 cm and 10 cm), with `epics-part-3` 5c77c82 merged in. That merge brought #144's friction census, whose Valley pin is updated for the detours (measured: the detours alone change 0.5 by −3, 0.6 by −12, 0.8 by +4 and 0.9 by −1 colliders; the rest is the winch and dolly).
+
+## Epic 8: the barrier holds when you drag it forward round a corner (2026-11-27, #77)
+
+Dragging the road closure's barrier forward round a corner, with it trailing behind you, used to
+lose the grip about half the time, on tick phase alone. The hold point is a fixed reach ahead of
+your eyes, so turning swung it round at once. The 5.6 m barrier lagged up to 2.19 m behind it,
+right on the grip's limits (1.25 m for 0.4 s). That read as random to a player.
+
+- **Now the barrier is heavy to swing round.** Carried by one player, the hand follows a turn of
+  the view at most 1.5 m/s (`BARRIER_HAND_SPEED`). That is the same clamp the bucket already
+  uses (GRAB.handSpeed), as a new per-prop option, `BodyOptions.handSpeed`. Walking isn't slowed:
+  the hand keeps up with your eyes. Carried by two, it is unchanged.
+- **Which props count as heavy: the barrier only, by that flag.** A rule by mass would also catch
+  the short logs (56.5 kg, made to be carried alone) and the logs (113 kg, carried balanced or
+  shared), and change how they handle. They keep their tests unchanged.
+    - The masses, for reference: barrier 45 kg, beam 36.5, crate 25, plank 24, dolly 26.1, short
+      log 56.5, log 113.
+- **Measured, by input,** with 0 to 9 idle ticks before the grab:
+    - **Forward round the corner** (back down the road, then forward out to the side): held 10
+      times in 10, peak error 0.23 to 0.25 m. Before: 3 in 10, at 2.15 to 2.19 m.
+    - **A snag still lets go:** walk on through a gap between two old fence posts (a beaver fits,
+      the barrier doesn't). The barrier catches, and the grip goes 10 times in 10; the barrier
+      stays on its side of the line.
+- **Mutation checks:**
+    - No hand speed on the barrier: the corner is back to 3 in 10, and the test fails.
+    - A capped prop never letting go: the snag holds at 4.9 m, and the test fails.
+- **Unchanged:** the existing grab, plank, bridge, co-op and dolly/towing tests (the full unit
+  run below).
+- **Code:** `src/sim/physics/world.ts` (`handSpeed`, a few lines in the hand's clamp),
+  `src/sim/lab-physics.ts` (the barrier's option), `src/assets/road-closure.ts`
+  (`BARRIER_HAND_SPEED`).
+- **Unit tests:** 1188 pass (130 files, both voxel sizes), on `epics-part-3` 0d46af3.
+
+## Epic 8: the road closure's last two stalls, and the log's wording (2026-11-26, #77 #70)
+
+Three follow-ups from the #145 audit.
+
+- **"Never came" is not "turned back".** The closure ends when nobody has been in the closed
+  stretch for 10 s. If someone was in it and went back, the log says "turned back". If nobody ever
+  got that far (whoever brought it on stayed on the crossing), it now says "never came".
+- **Standing just inside the closed stretch no longer holds every other hazard forever.** Someone
+  in the stretch, not past it, holds the closure at most 60 s after anyone in it last got 0.5 m
+  further along the route. Then it is over: "stopped in the closure". The barrier still stands and
+  the sign stays closed.
+    - It runs from the last progress, not from the tell, so a slow walk round the track is never
+      cut off. The audit found that, timed from the tell, a walk with the stick at 0.3 (70.7 s) was
+      cut at 60 s.
+    - Not while anyone has hold of the barrier: shifting it is the way round being taken.
+    - Why 60 s: walking the track from the tell to the road beyond took 21.3 s (measured in the
+      track test, which now asserts it's under 30 s). 60 s is about three times that.
+- **The playtest summary test** used a made-up weather line ("Forest Road rain: came and
+  cleared"). The real one is "Forest Road: came and cleared". A new test runs the Valley's own
+  Forest Road rain, short, feeds its outcome into the log the way `main.ts` does, and checks the
+  summary line.
+- **Tests, by input:**
+    - never came: bring it on and stand on the crossing; over 10 s after the tell;
+    - stopped in the closure: stand just inside the stretch; over 60 s after their last 0.5 m
+      along (the tick read from the sim), to 0.1 s, the barrier still across the road;
+    - hold the barrier for 63 s after stopping: still on; let go: over at once;
+    - walk the track with the stick at 0.3: it takes over 60 s from the tell, and ends as "took the
+      track on foot".
+- **Mutation checks:** each change undone fails its test. Those were: "turned back" for everyone;
+  no 60 s cap; the cap ignoring a hand on the barrier; a different weather wording; and the cap
+  timed from the tell (the slow walk is cut at 60.0 s).
+- **Code:** `src/sim/hazard-road.ts` (CLOSURE.stopS and progressM, why it ended), `docs/playtest.md`.
+- **Unit tests:** 1184 pass (130 files, both voxel sizes), on `epics-part-3` f9a63c2.
+
 ## Epic 5, chunk B: the structure overlay, the rope, the winch and the log dolly (2026-11-26, #51 #52)
 
 No puzzle may need exactly two people (#52). Before this, a whole log (113 kg) needed two beavers,

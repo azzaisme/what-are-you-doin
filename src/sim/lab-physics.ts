@@ -18,7 +18,7 @@ import {
     PLANK_HALF,
     PLANK_LENGTH
 } from '../assets/props.ts';
-import { BARRIER_HALF } from '../assets/road-closure.ts';
+import { BARRIER_HALF, BARRIER_HAND_SPEED } from '../assets/road-closure.ts';
 import { OAK, PINE_TIERS, PINE_TRUNK_HEIGHT, ROCK_CENTRE_LIFT, oakCrown, pineTrunkRadius } from '../levels/common.ts';
 import type { LevelDef } from '../levels/level.ts';
 import { pose, quatFromYawPitchRoll, quatMul } from '../voxels/math.ts';
@@ -166,7 +166,9 @@ export function propBody(name: string): { shape: ShapeSpec; opts: BodyOptions } 
             opts: {
                 density: 45 / (8 * BARRIER_HALF.x * BARRIER_HALF.y * BARRIER_HALF.z),
                 friction: 0.7,
-                restitution: 0.05
+                restitution: 0.05,
+                // 5.6 m long: heavy to swing round (dragged forward round a corner, it holds)
+                handSpeed: BARRIER_HAND_SPEED
             }
         };
     if (name === 'sphere')
@@ -319,12 +321,14 @@ export function buildLabPhysics(level: LevelDef): PhysicsWorld {
             pw.addStatic(d.setTranslation(p.pose.p.x, p.pose.p.y, p.pose.p.z).setFriction(0.8));
             continue;
         }
-        pw.addStatic(
+        const c = pw.addStatic(
             d
                 .setTranslation(p.pose.p.x, p.pose.p.y, p.pose.p.z)
                 .setRotation({ ...p.pose.q })
                 .setFriction(0.8)
         );
+        // a foot detour's stepping piece (#87): the sim asks what is under a beaver's footprint
+        if (p.detour) pw.detourColliders.set(c.handle, p.detour);
     }
 
     // invisible walls around the play area (the Epic 1 walker had the same limits as a clamp)

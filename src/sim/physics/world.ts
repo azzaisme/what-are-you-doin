@@ -89,6 +89,14 @@ export interface BodyOptions {
      * face (centred when it lies across you), so the rest of it reaches ahead.
      */
     carryAhead?: number;
+    /**
+     * Heavy to swing round (the road closure's barrier): carried by one player, the hand follows a
+     * turn of the view at most this fast (m/s), as with something hanging from a grab point
+     * (GRAB.handSpeed), so turning while dragging it round a corner swings it round behind you
+     * instead of jumping the hold point metres ahead of it. Walking is not slowed: the hand keeps
+     * up with the eye. A snag (it caught on something while you walk on) still lets go.
+     */
+    handSpeed?: number;
 }
 
 /**
@@ -127,6 +135,8 @@ export interface PhysBody {
     throw?: ThrowSpec;
     /** See BodyOptions.carryAhead. */
     carryAhead?: number;
+    /** See BodyOptions.handSpeed. */
+    handSpeed?: number;
     /** The collision shape of a single-shape body (floodwater samples it: sim/physics/water.ts). */
     shape?: ShapeSpec;
     /**
@@ -204,6 +214,14 @@ export const CHARACTER = {
     /** A beaver's own weight on what it stands on (kg; the same 60 as it pushes with). */
     mass: 60
 } as const;
+
+/**
+ * Foot detours (#87): how far down (m) a character's foot ball is swept to find the piece it stands
+ * on (the controller keeps it 2 cm up), and how much the contact must face up (the normal's
+ * vertical part: 0.2 is a rim on a corner 0.29 m out from the middle).
+ */
+const DETOUR_FOOT_REACH = 0.06;
+const DETOUR_FOOT_UP = 0.2;
 
 /** What a character's feet rest on: a ball at the bottom of its capsule, a little wider. */
 const FOOT = new RAPIER.Ball(CHARACTER.radius + 0.02);
@@ -433,6 +451,42 @@ export class PhysicsWorld {
         return c;
     }
 
+    /** Static colliders that are a foot detour's stepping pieces (#87), by handle: what players call them. */
+    readonly detourColliders = new Map<number, string>();
+
+    /**
+     * The foot detour piece a character with its feet at (x, y, z) stands on, or null: the ball at
+     * the bottom of its capsule (`radius`, the capsule's own), swept a few centimetres down against
+     * detour pieces only, meets one with its contact facing up (from under the ball, not its side).
+     * So a beaver perched at a piece's edge, its middle over the drop, held up by the corner under
+     * its rim, is on it; one standing beside a piece, touching its side, is not; and one on a plank
+     * laid over a stone is not either (the stone is the plank's thickness below).
+     */
+    detourUnderFoot(x: number, y: number, z: number, radius: number): string | null {
+        if (this.detourColliders.size === 0) return null;
+        const hit = this.world.castShape(
+            { x, y: y + radius, z },
+            { x: 0, y: 0, z: 0, w: 1 },
+            { x: 0, y: -1, z: 0 },
+            new RAPIER.Ball(radius),
+            0,
+            DETOUR_FOOT_REACH,
+            true,
+            RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+            groups(ALL, LAYER.static),
+            undefined,
+            undefined,
+            (c) => this.detourColliders.has(c.handle)
+        );
+        if (!hit) return null;
+        // (the contact under the ball, not at its side: its normal there is mostly vertical. Its sign
+        // as Rapier gives it came out up, 1.00 on flat ground, 0.57 on the trunk's corner: so the
+        // size of it is tested)
+        return Math.abs(hit.normal1.y) > DETOUR_FOOT_UP
+            ? (this.detourColliders.get(hit.collider.handle) ?? null)
+            : null;
+    }
+
     /** Whether a static collider takes nails (see addStatic). */
     isAnchor(handle: number): boolean {
         return !this.notAnchors.has(handle);
@@ -484,6 +538,7 @@ export class PhysicsWorld {
             nailable: o.nailable,
             throw: o.throw,
             carryAhead: o.carryAhead,
+            handSpeed: o.handSpeed,
             spawn: { p: { ...spawn.p }, q: { ...spawn.q } },
             baseAngularDamping: o.angularDamping ?? 0.3,
             enabled: true,
@@ -1151,7 +1206,9 @@ export class PhysicsWorld {
         let ox = d.x * r.holdDist;
         let oy = d.y * r.holdDist;
         let oz = d.z * r.holdDist;
-        if (pb.grabPoint && r.hasPrevTarget) {
+        // (heavy to swing round, carried alone: BodyOptions.handSpeed)
+        const swing = pb.handSpeed !== undefined && (this.holdCount.get(pb.id) ?? 1) === 1 ? pb.handSpeed : undefined;
+        if ((pb.grabPoint || swing !== undefined) && r.hasPrevTarget) {
             // something hanging from your hand (the bucket) follows a flick of the view at the
             // speed a hand moves, not at once: snapping the view up from the ground would otherwise
             // yank it a metre in a tick and fling its water out (Epic 7)
@@ -1159,7 +1216,7 @@ export class PhysicsWorld {
             const ey = oy - r.prevOffset.y;
             const ez = oz - r.prevOffset.z;
             const e = Math.hypot(ex, ey, ez);
-            const max = GRAB.handSpeed * SIM_DT;
+            const max = (swing ?? GRAB.handSpeed) * SIM_DT;
             if (e > max) {
                 const k = max / e;
                 ox = r.prevOffset.x + ex * k;

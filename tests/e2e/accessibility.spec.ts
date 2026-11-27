@@ -337,6 +337,102 @@ test('text size 160 %: the HUD, debug panel, settings chip and debug chip never 
     expect(problems).toEqual([]);
 });
 
+test("text size 160 %: every Valley stage's real objective keeps clear of the debug panel and chips, on every screen shape", async ({
+    page
+}) => {
+    test.setTimeout(900_000);
+    await page.addInitScript(() => localStorage.setItem('uncivil.settings', JSON.stringify({ uiScale: 1.6 })));
+    const problems = await boot(page, '?level=valley&t=0.01&debug&quality=low#cell100');
+    await lab(page, (l) => l.action('pause')); // play live, so the flags judge the bucket
+    type Rect = { l: number; t: number; r: number; b: number };
+    const rects = () =>
+        page.evaluate(() => {
+            const out: Record<string, Rect | null> = {};
+            for (const s of ['.hud', '.debug-panel', '.settings-chip', '.debug-chip']) {
+                const e = document.querySelector(s) as HTMLElement | null;
+                if (!e || getComputedStyle(e).display === 'none') {
+                    out[s] = null;
+                    continue;
+                }
+                const range = document.createRange();
+                range.selectNodeContents(e);
+                const b = s === '.hud' ? range.getBoundingClientRect() : e.getBoundingClientRect();
+                out[s] = { l: b.left, t: b.top, r: b.right, b: b.bottom };
+            }
+            return out;
+        });
+    const hit = (a: Rect, b: Rect) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
+    const assertLayout = async (label: string, w: number, h: number) => {
+        const r = await rects();
+        const names = Object.keys(r).filter((k) => r[k]);
+        for (const n of names) {
+            const b = r[n]!;
+            expect(
+                b.l >= -0.5 && b.t >= -0.5 && b.r <= w + 0.5 && b.b <= h + 0.5,
+                `${label}: ${n} inside the viewport ${JSON.stringify(b)}`
+            ).toBe(true);
+            for (const m of names) if (m < n) expect(hit(r[n]!, r[m]!), `${label}: ${n} overlaps ${m}`).toBe(false);
+        }
+        return r;
+    };
+    // the flags (valley.ts CHECKPOINTS, in world x/z) and the ground there
+    const flags = [
+        { x: -69.8, z: 62.99, y: 0.4 },
+        { x: -60.18, z: 58.18, y: 0.5 },
+        { x: -31.12, z: 29.83, y: 2.36 },
+        { x: 1.76, z: -3.76, y: 3.8 },
+        { x: 23.68, z: -25.68, y: 5.3 },
+        { x: 59.36, z: -61, y: 9.26 }
+    ];
+    const shapes = [
+        [360, 740],
+        [390, 844],
+        [768, 1408],
+        [1280, 720],
+        [844, 390]
+    ];
+    for (let k = 0; k < 7; k++) {
+        const objective = page.locator('#hud-objective');
+        await expect(objective).toContainText(`${k + 1}/7 `, { timeout: 120_000 });
+        const text = await objective.textContent();
+        for (const [w, h] of shapes) {
+            await page.setViewportSize({ width: w, height: h });
+            await page.waitForTimeout(300);
+            await lab(page, (l) => (l as unknown as { showPanel(v: boolean): void }).showPanel(true));
+            await expect(async () => {
+                const open = await assertLayout(`stage ${k + 1} "${text}" ${w}x${h} panel open`, w, h);
+                expect(open['.debug-panel']).not.toBeNull();
+                expect(open['.hud']).not.toBeNull();
+            }).toPass({ timeout: 20_000 });
+            await lab(page, (l) => (l as unknown as { showPanel(v: boolean): void }).showPanel(false));
+            await expect(async () => {
+                await assertLayout(`stage ${k + 1} "${text}" ${w}x${h} panel closed`, w, h);
+            }).toPass({ timeout: 20_000 });
+        }
+        if (k === 6) break;
+        // on to the next stage, visited by set-up (not played): teleport the beaver by this stage's
+        // flag and set a full bucket down on it, so the flag counts it
+        const f = flags[k];
+        await page.evaluate((p) => {
+            const l = (window as unknown as { __riverLab: Lab }).__riverLab;
+            l.teleport(p.x - 2, p.z);
+        }, f);
+        await page.waitForFunction(
+            (p) =>
+                (
+                    window as unknown as { __riverLab: { nearBuiltAt(x: number, z: number): boolean } }
+                ).__riverLab.nearBuiltAt(p.x, p.z),
+            f,
+            { timeout: 180_000 }
+        );
+        await page.evaluate(
+            (p) => (window as unknown as { __riverLab: Lab }).__riverLab.placeProp('bucket', p.x, p.y + 0.5, p.z),
+            f
+        );
+    }
+    expect(problems).toEqual([]);
+});
+
 test('less motion: a device set to reduce motion starts with the camera steady and the UI still; the player can turn it back on', async ({
     browser
 }) => {
