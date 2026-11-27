@@ -89,6 +89,14 @@ export interface BodyOptions {
      * face (centred when it lies across you), so the rest of it reaches ahead.
      */
     carryAhead?: number;
+    /**
+     * Heavy to swing round (the road closure's barrier): carried by one player, the hand follows a
+     * turn of the view at most this fast (m/s), as with something hanging from a grab point
+     * (GRAB.handSpeed), so turning while dragging it round a corner swings it round behind you
+     * instead of jumping the hold point metres ahead of it. Walking is not slowed: the hand keeps
+     * up with the eye. A snag (it caught on something while you walk on) still lets go.
+     */
+    handSpeed?: number;
 }
 
 /**
@@ -127,6 +135,8 @@ export interface PhysBody {
     throw?: ThrowSpec;
     /** See BodyOptions.carryAhead. */
     carryAhead?: number;
+    /** See BodyOptions.handSpeed. */
+    handSpeed?: number;
     /** The collision shape of a single-shape body (floodwater samples it: sim/physics/water.ts). */
     shape?: ShapeSpec;
     /**
@@ -484,6 +494,7 @@ export class PhysicsWorld {
             nailable: o.nailable,
             throw: o.throw,
             carryAhead: o.carryAhead,
+            handSpeed: o.handSpeed,
             spawn: { p: { ...spawn.p }, q: { ...spawn.q } },
             baseAngularDamping: o.angularDamping ?? 0.3,
             enabled: true,
@@ -1151,7 +1162,9 @@ export class PhysicsWorld {
         let ox = d.x * r.holdDist;
         let oy = d.y * r.holdDist;
         let oz = d.z * r.holdDist;
-        if (pb.grabPoint && r.hasPrevTarget) {
+        // (heavy to swing round, carried alone: BodyOptions.handSpeed)
+        const swing = pb.handSpeed !== undefined && (this.holdCount.get(pb.id) ?? 1) === 1 ? pb.handSpeed : undefined;
+        if ((pb.grabPoint || swing !== undefined) && r.hasPrevTarget) {
             // something hanging from your hand (the bucket) follows a flick of the view at the
             // speed a hand moves, not at once: snapping the view up from the ground would otherwise
             // yank it a metre in a tick and fling its water out (Epic 7)
@@ -1159,7 +1172,7 @@ export class PhysicsWorld {
             const ey = oy - r.prevOffset.y;
             const ez = oz - r.prevOffset.z;
             const e = Math.hypot(ex, ey, ez);
-            const max = GRAB.handSpeed * SIM_DT;
+            const max = (swing ?? GRAB.handSpeed) * SIM_DT;
             if (e > max) {
                 const k = max / e;
                 ox = r.prevOffset.x + ex * k;
