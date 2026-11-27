@@ -4,6 +4,7 @@
  */
 
 import type { VoxelAsset } from '../assets/asset.ts';
+import { dollyAsset } from '../assets/dolly.ts';
 import { DUMMY_PARTS, dummyPartAsset } from '../assets/dummy.ts';
 import {
     axeAsset,
@@ -77,6 +78,8 @@ export interface LabEntities {
     ute: SimEntity;
     plank: SimEntity;
     log: SimEntity;
+    /** The log dolly (Epic 5, #52), where a level places one. */
+    dolly: SimEntity;
     cube: SimEntity;
     sphere: SimEntity;
     held: SimEntity;
@@ -209,7 +212,10 @@ export function createLabEntities(): LabEntities {
     // your own limbs at 1 cm, drawn by the renderer in place of your beaver (never by the sim)
     const fpBody = add(960, 'fp-body', BODY.firstPerson, 3);
     fpBody.visible = false;
+    // the log dolly (Epic 5, #52), last: every earlier entity keeps its snapshot slot
+    const dolly = add(970, 'dolly', dollyAsset(), 1);
     return {
+        dolly,
         entities,
         beaver,
         bucket,

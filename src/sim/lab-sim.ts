@@ -25,7 +25,7 @@ import {
     BEAVER_WALK_PHASE
 } from '../assets/beaver.ts';
 import { BODY } from '../assets/player-body.ts';
-import { BUCKET_HANDLE_TOP, BUCKET_LITRES, LOG_RADIUS } from '../assets/props.ts';
+import { BUCKET_HANDLE_TOP, BUCKET_HEIGHT, BUCKET_LITRES, LOG_RADIUS } from '../assets/props.ts';
 import {
     UTE_ANIM_CHANNELS,
     UTE_DROP_0,
@@ -73,9 +73,18 @@ import type { JointEvent } from './joints/breaking.ts';
 import { GROUND, nailCode } from './joints/graph.ts';
 import { JointSystem } from './joints/joints.ts';
 import type { NailPreview } from './joints/joints.ts';
+import { RopeSystem } from './joints/rope.ts';
 import { MAX_PLAYERS, MAX_STRESS, createLabEntities } from './lab-entities.ts';
 import type { SimEntity } from './lab-entities.ts';
-import { addDummy, addLabKinematics, buildLabPhysics, launchDummy, propBody, stressDef } from './lab-physics.ts';
+import {
+    addDolly,
+    addDummy,
+    addLabKinematics,
+    buildLabPhysics,
+    launchDummy,
+    propBody,
+    stressDef
+} from './lab-physics.ts';
 import { NO_DRIVE, UteVehicle } from './physics/vehicle.ts';
 import type { DriveInput } from './physics/vehicle.ts';
 import { CHARACTER } from './physics/world.ts';
@@ -85,6 +94,8 @@ import type { AnimEvents, AnimOutput } from './player-anim.ts';
 import { Sawmill } from './sawmill.ts';
 import { ANIM_MAX, SnapshotRing, writeEntity } from './snapshots.ts';
 import { WATER } from './water.ts';
+import { WINCH_ROPE, Winch } from './winch.ts';
+import type { WinchEvent, WinchEventKind } from './winch.ts';
 
 export type { PlayerCommand, SimEntity };
 export { MAX_PLAYERS, MAX_STRESS };
@@ -129,7 +140,19 @@ export interface LabSimOptions {
 /** Something the player should be told (objective reached, fell in the creek, ...). */
 export interface SimEvent {
     tick: number;
-    kind: 'goal' | 'fell' | 'recovered' | 'step' | 'ute' | 'water' | 'hazard' | 'wood' | 'creak' | 'break' | 'hint';
+    kind:
+        | 'goal'
+        | 'fell'
+        | 'recovered'
+        | 'step'
+        | 'ute'
+        | 'water'
+        | 'hazard'
+        | 'wood'
+        | 'creak'
+        | 'break'
+        | 'hint'
+        | 'winch';
     text: string;
 }
 
@@ -155,6 +178,11 @@ export class LabSim {
     private uteSpin = 0;
     /** What is nailed to what (Epic 5), rebuilt with the physics world. */
     joints!: JointSystem;
+    /** Ropes (#52; hazards, #75): rebuilt with the physics. */
+    ropes!: RopeSystem;
+    /** The level's hand winch, if it has one (#52): rebuilt with the physics. */
+    winch: Winch | null = null;
+    private readonly winchEvents: WinchEvent[] = [];
     /** The drivable ute's physics (levels whose ute is 'drivable'), or null. */
     vehicle: UteVehicle | null = null;
     /** Recovery: the last place the ute stood level on solid ground, and how long it has lain tipped. */
@@ -212,6 +240,7 @@ export class LabSim {
     readonly ute: SimEntity;
     readonly plank: SimEntity;
     readonly log: SimEntity;
+    readonly dolly: SimEntity;
     readonly cube: SimEntity;
     readonly sphere: SimEntity;
     readonly held: SimEntity;
@@ -236,6 +265,8 @@ export class LabSim {
     /** Events since reset, newest last (the client shows them as toasts). */
     readonly events: SimEvent[] = [];
     private lostTicks = 0;
+    /** Ticks the bucket has lain on a foot detour's stepping piece (#87). */
+    private stuckTicks = 0;
     private goalTicks = 0;
     /** Ticks the tutorial's long plank has lain in the ditch (applyRules). */
     private plankDownTicks = 0;
@@ -249,6 +280,19 @@ export class LabSim {
     readonly pouring: boolean[] = Array.from({ length: MAX_PLAYERS }, () => false);
     /** The bucket sat in the goal without enough water (said once per visit). */
     private dryNoticed = false;
+    /** Said once a run: the bucket cannot be carried on a detour's stepping pieces. */
+    private detourNoticed = false;
+    /** The level's foot-detour pieces (StaticPiece.detour): box, pose, and what players call them. */
+    private readonly detours: {
+        what: string;
+        x: number;
+        y: number;
+        z: number;
+        q: { x: number; y: number; z: number; w: number };
+        hx: number;
+        hy: number;
+        hz: number;
+    }[];
     /** Logging (Epic 6): the stand's trees, felled logs, the axe (src/sim/forestry.ts). */
     readonly forestry: Forestry;
     /** The level's sawmill, if it has one (src/sim/sawmill.ts). */
@@ -259,6 +303,20 @@ export class LabSim {
     constructor(opts: LabSimOptions = {}) {
         this.level = opts.level ?? riverLabLevel;
         this.hazards = new HazardDirector(this.level, opts.hazards ?? true);
+        this.detours = this.level.layout(1).pieces.flatMap((pc) =>
+            pc.detour && pc.shape.type === 'box'
+                ? [
+                      {
+                          what: pc.detour,
+                          ...pc.pose.p,
+                          q: pc.pose.q,
+                          hx: pc.shape.hx,
+                          hy: pc.shape.hy,
+                          hz: pc.shape.hz
+                      }
+                  ]
+                : []
+        );
         if (opts.hazardSeed !== undefined) this.hazards.seed = opts.hazardSeed >>> 0;
         this.propsMode = this.level.scriptedProps ? (opts.props ?? 'physics') : 'physics';
         const c = createLabEntities();
@@ -266,6 +324,7 @@ export class LabSim {
         this.beaver = c.beaver;
         this.bucket = c.bucket;
         this.ute = c.ute;
+        this.dolly = c.dolly;
         this.plank = c.plank;
         this.log = c.log;
         this.cube = c.cube;
@@ -325,7 +384,7 @@ export class LabSim {
         this.events.length = 0;
         // (tick starts again at 0: a hint given before the reset must not hold the next one back)
         this.looseHintTick = -Infinity;
-        this.lostTicks = this.goalTicks = this.plankDownTicks = 0;
+        this.lostTicks = this.stuckTicks = this.goalTicks = this.plankDownTicks = 0;
         this.water.reset();
         // the first snapshot already shows a full bucket
         this.bucket.anim[BUCKET_LITRES] = this.water.volume;
@@ -334,6 +393,7 @@ export class LabSim {
         this.heavyNoticed = false;
         this.farNoticed = false;
         this.jumpWas.fill(0);
+        this.detourNoticed = false;
         this.airTicks.fill(0);
         for (const pl of this.players) {
             pl.fallTicks = 0;
@@ -371,7 +431,8 @@ export class LabSim {
             ...this.forestry.props,
             this.closure.barrier,
             ...this.stress,
-            ...this.dummy
+            ...this.dummy,
+            this.dolly
         ];
     }
 
@@ -383,6 +444,11 @@ export class LabSim {
         addLabKinematics(pw, this.beaver.id, drivable ? -1 : this.ute.id, this.beaver.pose, this.ute.pose);
         this.vehicle = drivable ? new UteVehicle(pw, this.ute.id, ute.pose) : null;
         this.joints = new JointSystem(pw);
+        this.ropes = new RopeSystem(pw);
+        // (its hook never goes into the bucket: the bucket crosses only over what is built, #132)
+        this.winch = this.level.winch
+            ? new Winch(pw, this.ropes, this.level.winch, (id) => id !== this.bucket.id)
+            : null;
         this.seats.fill(-1);
         this.uteSafeSet = false;
         this.uteTipped = 0;
@@ -390,6 +456,7 @@ export class LabSim {
             // the level places its props by entity name; entities it does not place stay hidden
             for (const placement of this.level.props) {
                 const e = this.entities.find((x) => x.name === placement.name);
+                if (e && e === this.dolly) addDolly(pw, e.id, placement.pose);
                 const body = propBody(placement.name);
                 if (e && body) pw.addDynamic(e.id, body.shape, placement.pose, body.opts);
             }
@@ -400,7 +467,7 @@ export class LabSim {
                 pw.readPose(barrier.id, barrier.pose);
                 pw.setEnabled(barrier.id, false);
             }
-            for (const e of [this.plank, this.log, this.cube, this.sphere, this.bucket, ...this.extras])
+            for (const e of [this.plank, this.log, this.cube, this.sphere, this.bucket, ...this.extras, this.dolly])
                 if (!pw.bodies.has(e.id)) e.visible = false;
             this.forestry.build(pw);
             this.sawmill?.build(pw);
@@ -579,6 +646,16 @@ export class LabSim {
                 if (k === 0) this.driveInput = { ...NO_DRIVE };
             }
         }
+        if (this.winch) {
+            this.winch.step(
+                (k) =>
+                    this.playerActive(k)
+                        ? { x: this.players[k].x, y: this.players[k].y + EYE_HEIGHT, z: this.players[k].z }
+                        : null,
+                this.winchEvents
+            );
+            this.winchMessages();
+        }
         if (this.physicsProps) this.hazards.step(this);
         // nobody driving: the handbrake is on
         // (unless the handbrake prank has let it off: src/sim/hazards.ts)
@@ -594,6 +671,37 @@ export class LabSim {
         this.applyRules();
         const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
         this.physicsMs = t1 - t0;
+    }
+
+    /** Clicks of the winch's stalled ratchet so far (its sound). */
+    winchClicks = 0;
+    /** The winch's doings as player events (its ratchet's clicks are counted, not told). */
+    private winchMessages(): void {
+        const TEXT: Partial<Record<WinchEventKind, string>> = {
+            take: "You take the winch rope's hook. Grab a log or a beam to hook it in.",
+            hook: 'Hooked. Crank the winch (grab it) to haul it in.',
+            crank: 'You crank the winch.',
+            stop: 'You let go of the crank: the ratchet holds.',
+            release: "The winch's pawl lifts: the rope runs free and the hook comes back.",
+            drop: 'The hook goes back to the winch.'
+        };
+        for (const e of this.winchEvents.splice(0)) {
+            if (e.kind === 'click') {
+                // (a sound, not a message: counted on the winch)
+                this.winchClicks++;
+                continue;
+            }
+            const text = TEXT[e.kind];
+            if (text) this.events.push({ tick: this.tick, kind: 'winch', text });
+        }
+        // the winch's own ropes only (other owners' events are theirs: Epic 8's hazard ropes, #75)
+        for (const e of this.ropes.events(WINCH_ROPE))
+            this.events.push(
+                e.kind === 'snap'
+                    ? // (its own kind: 'break' is a nail's, voiced where the nail is)
+                      { tick: this.tick, kind: 'winch', text: 'Snap! The winch rope parted' }
+                    : { tick: this.tick, kind: 'winch', text: 'The winch rope comes free: what it held is gone.' }
+            );
     }
 
     private lastCreakTick = -1e9;
@@ -699,7 +807,11 @@ export class LabSim {
         // pour (R): tip the bucket you hold forward, or let it hang again
         if (cmd.action === ACTION_POUR) this.pouring[i] = pw.setPour(!this.pouring[i], i);
         const eye = { x: p.x, y: p.y + EYE_HEIGHT, z: p.z };
-        if (cmd.action === ACTION_DROP) pw.release(i);
+        if (
+            cmd.action === ACTION_DROP &&
+            !this.winch?.drop(i, eye, cmd.yaw, cmd.pitch, pw.heldIdOf(i), this.winchEvents)
+        )
+            pw.release(i);
         if (cmd.action === ACTION_NAIL) this.joints.nail(eye, cmd.yaw, cmd.pitch, i, this.tick);
         if (cmd.throw) {
             if (pw.heldIdOf(i) >= 0) ev.thrown = true;
@@ -708,7 +820,9 @@ export class LabSim {
             // holding the axe, a grab at a tree or a log is a blow; with empty hands, at a tree, a bite;
             // a hanging bucket is set down rather than dropped (letGo), again while lowering drops it
             const held = pw.heldIdOf(i);
-            if (held >= 0) {
+            if (this.winch?.grab(i, eye, cmd.yaw, cmd.pitch, held, this.winchEvents)) {
+                // the winch: its hook taken, hooked into a piece, or its crank turned or let go
+            } else if (held >= 0) {
                 if (this.forestry.strike(i, eye, p, cmd.yaw, cmd.pitch, held)) ev.missed = true;
                 else pw.letGo(i);
             } else if (pw.tryGrab(eye, cmd.yaw, cmd.pitch, i)) {
@@ -726,6 +840,24 @@ export class LabSim {
             if (!this.heavyNoticed) {
                 this.heavyNoticed = true;
                 this.events.push({ tick: this.tick, kind: 'hint', text: HEAVY_JUMP_TEXT });
+            }
+        }
+        // foot detours (Epic 9, #87): standing on a stepping stone, a trunk or a boulder, a beaver
+        // cannot hold the bucket (a grab is refused, a carried one is dropped where they stand), and
+        // nobody can take hold of a bucket lying on one (it goes back to the stage start)
+        if (pw.heldIdOf(i) === this.bucket.id) {
+            const what = this.detourUnder(p) ?? (heldBefore !== this.bucket.id ? this.bucketOnDetour() : null);
+            if (what) {
+                pw.release(i);
+                ev.dropped = true;
+                if (!this.detourNoticed) {
+                    this.detourNoticed = true;
+                    this.events.push({
+                        tick: this.tick,
+                        kind: 'hint',
+                        text: `The bucket's too awkward for the ${what}: build the crossing to get it over.`
+                    });
+                }
             }
         }
         // the bucket passes hand to hand only between beavers standing close, with ground between
@@ -823,14 +955,21 @@ export class LabSim {
             this.applySteps(rules);
             return;
         }
-        // essential item: lost in the creek for 1.5 s -> back on its stump (in a flood, afloat in it)
+        // essential item: lost in the creek (or down in a gap's bed, #152) for 1.5 s -> back at its start
+        // (in a flood, afloat in it)
         const p0 = bk.pose.p;
         const lost =
             p0.y < rules.lostY ||
-            (this.hazards.rise > 0 && p0.y < rules.lostY + this.hazards.rise && !rules.isSafe(p0.x, p0.z));
-        this.lostTicks = lost && pw.holders(bk.id) === 0 ? this.lostTicks + 1 : 0;
-        if (this.lostTicks > 90) {
-            this.lostTicks = 0;
+            (this.hazards.rise > 0 && p0.y < rules.lostY + this.hazards.rise && !rules.isSafe(p0.x, p0.z)) ||
+            (rules.lostAt?.(p0.x, p0.y, p0.z) ?? false);
+        const free = pw.holders(bk.id) === 0;
+        this.lostTicks = lost && free ? this.lostTicks + 1 : 0;
+        // left on a detour's stepping piece (#87) for a third of a second: as good as fallen in
+        const stuck = free && this.detours.length ? this.bucketOnDetour() : null;
+        this.stuckTicks = stuck ? this.stuckTicks + 1 : 0;
+        if (this.lostTicks > 90 || this.stuckTicks > 20) {
+            const how = this.stuckTicks > 20 ? `can't be carried on the ${stuck}` : 'fell in';
+            this.lostTicks = this.stuckTicks = 0;
             this.progress.recoveries++;
             const st = this.stage;
             const spare = st?.spareLitres ?? 0;
@@ -844,8 +983,8 @@ export class LabSim {
                     tick: this.tick,
                     kind: 'recovered',
                     text: spare
-                        ? `The bucket fell in. A spare bucket (${spare} L) is waiting at the ${st.name} start.`
-                        : `The bucket fell in. A spare (empty) one is waiting at the ${st.name} start.`
+                        ? `The bucket ${how}. A spare bucket (${spare} L) is waiting at the ${st.name} start.`
+                        : `The bucket ${how}. A spare (empty) one is waiting at the ${st.name} start.`
                 });
             } else {
                 pw.respawn(bk.id);
@@ -893,6 +1032,59 @@ export class LabSim {
             }
         }
         this.applySteps(rules);
+    }
+
+    /**
+     * The detour piece a player stands on (its name for players), or null: one whose top touches
+     * the character's footprint, all of it, out to the capsule's radius (PhysicsWorld
+     * detourUnderFoot): a beaver walking a trunk's or a boulder's edge, its middle beyond it, is on
+     * it. A plank laid on a stone lifts the feet off it: building over the stones is building.
+     */
+    detourUnder(p: { x: number; y: number; z: number; grounded: boolean }): string | null {
+        return p.grounded ? this.physics.detourUnderFoot(p.x, p.y, p.z, CHARACTER.radius) : null;
+    }
+
+    /**
+     * The detour piece the bucket lies on, or null: the lowest point of its rim or base on the
+     * piece's top face (on a plank laid over the piece, it is a plank's thickness, 10 cm, higher).
+     */
+    bucketOnDetour(): string | null {
+        const { p, q } = this.bucket.pose;
+        // the bucket's axis (its local up) and the lowest point of its 0.16 m rim, at base or top
+        const ux = 2 * (q.x * q.y - q.w * q.z);
+        const uy = 1 - 2 * (q.x * q.x + q.z * q.z);
+        const uz = 2 * (q.y * q.z + q.w * q.x);
+        const end = uy >= 0 ? 0 : BUCKET_HEIGHT;
+        const side = Math.sqrt(Math.max(0, 1 - uy * uy));
+        // (down its circle's own slope: straight down, less its part along the axis, made 0.16 long)
+        const k = side > 1e-6 ? (0.16 * uy) / side : 0;
+        const low = {
+            x: p.x + ux * end + ux * k,
+            y: p.y + uy * end - 0.16 * side,
+            z: p.z + uz * end + uz * k
+        };
+        return this.detourAt(low, 0.06, 0.05);
+    }
+
+    /** The detour piece whose top face is under (and within `below`/`above` metres of) a point. */
+    private detourAt(p: { x: number; y: number; z: number }, below: number, above: number): string | null {
+        for (const d of this.detours) {
+            const dx = p.x - d.x;
+            const dy = p.y - d.y;
+            const dz = p.z - d.z;
+            // into the piece's frame (inverse rotation)
+            const q = d.q;
+            const tx = 2 * (-q.y * dz + q.z * dy);
+            const ty = 2 * (-q.z * dx + q.x * dz);
+            const tz = 2 * (-q.x * dy + q.y * dx);
+            const lx = dx + q.w * tx + (-q.y * tz + q.z * ty);
+            const ly = dy + q.w * ty + (-q.z * tx + q.x * tz);
+            const lz = dz + q.w * tz + (-q.x * ty + q.y * tx);
+            if (Math.abs(lx) > d.hx + 0.1 || Math.abs(lz) > d.hz + 0.1) continue;
+            if (ly < d.hy - below || ly > d.hy + above) continue;
+            return d.what;
+        }
+        return null;
     }
 
     /**

@@ -30,6 +30,7 @@ import { crossingFrame } from '../sim/hazards.ts';
 import type { HazardSpec } from '../sim/hazards.ts';
 import { WEATHER } from '../sim/weather.ts';
 import type { WeatherZone } from '../sim/weather.ts';
+import type { WinchSpot } from '../sim/winch.ts';
 import { GRID_SIZE, cellCenterX, cellCenterZ, cellIndexX, cellIndexZ } from '../voxels/grid.ts';
 import { pose, quatFromYawPitchRoll, quatMul } from '../voxels/math.ts';
 import type { Pose } from '../voxels/math.ts';
@@ -88,6 +89,7 @@ import {
     YARD_FORESTRY,
     yardLayout,
     yardPieces,
+    YARD_WINCH,
     yardProps,
     yardSideMaterial,
     yardSurfaceMaterial
@@ -222,11 +224,70 @@ export const SIDE_PATHS: SidePath[] = [
     }
 ];
 
+/**
+ * Foot detours (#87): narrow paths round three crossings, over things a beaver can step or hop
+ * along but no ute can cross and no beam lies along: stepping stones in Shallow Creek (upstream of
+ * the old bridge), a fallen trunk over the culvert, two boulders wedged in the crevasse. Clear of
+ * the logging track and the lookout track (both on the other side of the road), and of the road
+ * closure's barrier (u 22) and sign (u 10.5). The stepping pieces are `StaticPiece.detour`: a
+ * beaver standing on one cannot hold the bucket, so building the crossing stays the only way to get
+ * the bucket over.
+ */
+export const DETOURS = {
+    creek: { t: -12, stones: [-1.05, 0.05, 1.15, 2.25], tops: [0.15, 0.2, 0.25, 0.3], half: 0.35 },
+    culvert: { t: -13, from: 37.2, to: 41.6, half: 0.25, thick: 0.13 },
+    crevasse: { t: 10, boulders: [169.7, 170.5, 171.3], top: 9.22, half: 0.35 }
+} as const;
+
+export const DETOUR_PATHS: SidePath[] = [
+    {
+        name: 'creek-stones',
+        points: [
+            [-7.5, -2],
+            [-3, -11],
+            [-2.2, -12],
+            [3, -12],
+            [4.8, -9],
+            [6, -3]
+        ],
+        halfWidth: 0.6
+    },
+    {
+        name: 'culvert-trunk',
+        points: [
+            [34, roadT(34) - 2],
+            [35.2, -8],
+            [35.8, -13],
+            [37.3, -13],
+            [41.5, -13],
+            [42.8, -13],
+            [43.8, -9],
+            [45, -3.5]
+        ],
+        halfWidth: 0.6
+    },
+    {
+        name: 'crevasse-boulders',
+        points: [
+            [165.5, roadT(165.5) + 2.2],
+            [167.6, 8],
+            [168.6, 10],
+            [172.4, 10],
+            [173.6, 7],
+            [174.5, roadT(174.5) + 1.6]
+        ],
+        halfWidth: 0.6
+    }
+];
+
+/** Every graded, painted, tree-free path: the side paths and the foot detours. */
+const ALL_PATHS: SidePath[] = [...SIDE_PATHS, ...DETOUR_PATHS];
+
 /** Continuous ground height in the route frame. */
 function heightUT(u: number, t: number, paths = true): number {
     let y = naturalUT(u, t);
     // side paths: graded flat across to their centre line's own height
-    const hit = paths ? nearestPath(SIDE_PATHS, u, t, 3.2) : null;
+    const hit = paths ? nearestPath(ALL_PATHS, u, t, 3.2) : null;
     const pathW = hit ? 1 - smoothstep(hit.path.halfWidth, hit.path.halfWidth + 1.6, hit.d) : 0;
     if (hit && pathW > 0) y = lerp(y, naturalUT(hit.u, hit.t), pathW);
     // the valley sides are terraced into 0.3 m benches (as in the Timber Yard): fewer triangles
@@ -298,7 +359,7 @@ function surfaceMaterial(x: number, z: number, top: number, grad: number): numbe
         if (grad > 1.5) return voxel(mountain || u > 88 ? M.HillRock : M.Rock, shade & 1);
     }
     if (a < 1.6) return voxel(u > 88 && u < 142 ? M.Concrete : M.Path, shade);
-    const side = nearestPath(SIDE_PATHS, u, t, 1.4);
+    const side = nearestPath(ALL_PATHS, u, t, 1.4);
     if (side && side.d < side.path.halfWidth - 0.45 + 0.25 * fbm(x * 0.6, z * 0.6, 17))
         return voxel(fbm(x * 0.4, z * 0.4, 19) > 0.62 ? M.GrassDry : M.Path, shade);
     if (worksWeight(u, a) > 0.5)
@@ -415,7 +476,7 @@ export const CHECKPOINTS = [
     { u: 174.2, t: roadT(174.2) }, // 6: past the crevasse, on the level bench
     { u: SUMMIT_U, t: 0 } // 7: the flower
 ];
-export const STAGE_COLOURS = [M.HiVis, M.TestOrange, M.Grass, M.TestBlue, M.Brick, M.Snow, M.Flower];
+export const STAGE_COLOURS = [M.HiVis, M.LeafGold, M.Grass, M.BucketWater, M.Brick, M.Snow, M.Flower];
 
 function valleyPieces(): StaticPiece[] {
     const P: StaticPiece[] = [];
@@ -767,6 +828,7 @@ function valleyPieces(): StaticPiece[] {
     }
     P.push(...signpost(192, -2.6, 6));
     P.push(...landmarkPieces());
+    P.push(...detourPieces());
     // ---- water tanks (Epic 7): where the spare buckets of the works and the summit road wait
     for (const b of valleyButts()) P.push(...b.pieces);
     return P;
@@ -782,6 +844,50 @@ export const LANDMARKS = {
     lookout: { u: 58, t: 24 },
     mast: { u: 184, t: -26 }
 };
+
+/** The foot detours' stepping pieces (DETOURS), each tagged with what players call it. */
+function detourPieces(): StaticPiece[] {
+    const P: StaticPiece[] = [];
+    // stepping stones: blocks from the creek bed, their tops rising towards the far bank
+    const c = DETOURS.creek;
+    c.stones.forEach((u, n) => {
+        const top = c.tops[n];
+        const bed = CREEK_BED_Y - 0.1;
+        P.push({
+            ...piece('detour-stone', boxS(c.half, (top - bed) / 2, c.half), u, (top + bed) / 2, c.t, stone(31 + n)),
+            detour: 'stepping stones'
+        });
+    });
+    // the fallen trunk over the culvert, resting on both rims (the far one is higher)
+    const k = DETOURS.culvert;
+    // (sunk into the rims so its ends stand a step above the ground, not more)
+    const y0 = groundUT(k.from, k.t) - 0.12;
+    const y1 = groundUT(k.to, k.t) - 0.12;
+    const len = k.to - k.from;
+    const tilt = Math.atan2(y1 - y0, len);
+    P.push({
+        ...piece(
+            'detour-trunk',
+            boxS(k.half, k.thick, Math.hypot(len, y1 - y0) / 2),
+            (k.from + k.to) / 2,
+            (y0 + y1) / 2 + k.thick / Math.cos(tilt),
+            k.t,
+            darkTimber,
+            { pitch: tilt }
+        ),
+        detour: 'fallen trunk'
+    });
+    // boulders wedged in the crevasse, side by side: pillars from its bed to just under the rim
+    const b = DETOURS.crevasse;
+    for (const u of b.boulders) {
+        const bed = CREVASSE.bed - 0.1;
+        P.push({
+            ...piece('detour-boulder', boxS(b.half, (b.top - bed) / 2, b.half), u, (b.top + bed) / 2, b.t, stone(41)),
+            detour: 'boulders'
+        });
+    }
+    return P;
+}
 
 function landmarkPieces(): StaticPiece[] {
     const P: StaticPiece[] = [];
@@ -934,7 +1040,10 @@ function scene(seed: number): Scene {
         if (!clearSpot(u, t, s)) return;
         const w = routeToWorld(u, t);
         if (!inBounds(w.x, w.z, 2)) return;
-        trees.push({ x: w.x, z: w.z, scale: s, yaw: r() * Math.PI * 2, kind });
+        const yaw = r() * Math.PI * 2;
+        // off the foot detours too (after the draw: every other tree stays where it was before them)
+        if (nearestPath(DETOUR_PATHS, u, t, 2.4 + s * 0.6)) return;
+        trees.push({ x: w.x, z: w.z, scale: s, yaw, kind });
     };
     const across = (spread: number, min: number) => (r() < 0.5 ? -1 : 1) * (min + r() * spread);
     // behind and beside the yard
@@ -954,14 +1063,16 @@ function scene(seed: number): Scene {
         if (!clearSpot(u, t, s * 1.5)) return;
         const w = routeToWorld(u, t);
         if (!inBounds(w.x, w.z, 2)) return;
-        rocks.push({
+        const rock = {
             x: w.x,
             z: w.z,
             rx: s * (1.1 + r() * 0.3),
             ry: s * (0.65 + r() * 0.2),
             rz: s * (0.9 + r() * 0.3),
             yaw: r() * Math.PI
-        });
+        };
+        // (the detours after the draw, as for the trees)
+        if (!nearestPath(DETOUR_PATHS, u, t, 2.4 + s * 1.5 * 0.6)) rocks.push(rock);
     };
     for (const t of yardLayout(seed).rocks) {
         if (t.z < -4) continue;
@@ -996,7 +1107,10 @@ function scene(seed: number): Scene {
         if (Math.abs(t - roadT(u)) < 1.9 || channelEdge(u, t) < 0.6 || nearestPath(SIDE_PATHS, u, t, 1.6)) continue;
         const w = routeToWorld(u, t);
         if (!inBounds(w.x, w.z, 1)) continue;
-        flowers.push([w.x, w.z, r() < 0.3 ? 2 : 0]);
+        const kind = r() < 0.3 ? 2 : 0;
+        // (the detours after the draw, as for the trees)
+        if (nearestPath(DETOUR_PATHS, u, t, 1.6)) continue;
+        flowers.push([w.x, w.z, kind]);
     }
 
     const pineR = (s: number) => PINE_TIERS[0].r * s + 0.1;
@@ -1110,6 +1224,12 @@ function atUT(u: number, t: number, lift: number, yaw = 0, pitch = 0, roll = 0):
     const w = routeToWorld(u, t);
     return pose(w.x, groundUT(u, t) + lift, w.z, quatFromYawPitchRoll(ROUTE_YAW + yaw, pitch, roll));
 }
+
+/** The Yard's hand winch, where the Yard lies in the Valley. */
+const VALLEY_WINCH: WinchSpot = (() => {
+    const w = yardToWorld(YARD_WINCH.x, YARD_WINCH.z);
+    return { x: w.x, z: w.z, y: YARD_WINCH.y, yaw: YARD_WINCH.yaw + ROUTE_YAW };
+})();
 
 /** The Timber Yard's logging stand and sawmill, where the yard is (area 1). */
 const VALLEY_FORESTRY: ForestryDef = (() => {
@@ -1324,7 +1444,7 @@ export const VALLEY_STAGES: LevelStage[] = [
     },
     {
         name: 'Shallow Creek',
-        objective: 'Bridge the creek and get the bucket to the flag on the far bank',
+        objective: 'Bridge the creek, bucket to the flag (the stepping stones are feet only)',
         goal: square(CHECKPOINTS[1].u, CHECKPOINTS[1].t, 2.6),
         start: restart(-4.5, 1),
         bucket: bucketAt(-4.5, 1.6),
@@ -1332,7 +1452,7 @@ export const VALLEY_STAGES: LevelStage[] = [
     },
     {
         name: 'Forest Road',
-        objective: 'Carry the long beams from the log dump over the washed-out culvert',
+        objective: 'Carry the long beams over the culvert (the fallen trunk is feet only)',
         goal: square(CHECKPOINTS[2].u, CHECKPOINTS[2].t, 2.6),
         start: restart(8, roadT(8)),
         bucket: bucketAt(8, roadT(8) + 0.8),
@@ -1350,7 +1470,7 @@ export const VALLEY_STAGES: LevelStage[] = [
     },
     {
         name: 'Old Industrial Works',
-        objective: 'Stack crates to climb the wall: set the bucket on one and lift it up from the top',
+        objective: 'Stack crates up the wall: set the bucket on one, lift it from the top',
         goal: square(CHECKPOINTS[4].u, CHECKPOINTS[4].t, 3),
         start: restart(96, 1),
         bucket: bucketAt(96, 1.8),
@@ -1358,7 +1478,7 @@ export const VALLEY_STAGES: LevelStage[] = [
     },
     {
         name: 'Mountain Approach',
-        objective: 'Bridge the crevasse on the mountain road',
+        objective: 'Bridge the crevasse on the road (the boulders are feet only)',
         goal: square(CHECKPOINTS[5].u, CHECKPOINTS[5].t, 2.6),
         start: restart(128, -2),
         bucket: bucketAt(128, -1.2),
@@ -1368,7 +1488,7 @@ export const VALLEY_STAGES: LevelStage[] = [
     },
     {
         name: 'Flower Summit',
-        objective: 'Water the flower: hold the bucket inside the ring of stones and pour (R)',
+        objective: 'Water the flower: hold the bucket in the stone ring and pour (R)',
         goal: square(SUMMIT_U, 0, 2.0),
         start: restart(175, roadT(175)),
         bucket: bucketAt(175, roadT(175) + 0.8),
@@ -1504,6 +1624,29 @@ function isSafe(x: number, z: number): boolean {
     return channelEdge(routeU(x, z), routeT(x, z)) > 0.9;
 }
 
+/** How far below a gap's lower rim the bucket must lie to count as down in it (#152). */
+const GAP_LOST_DEPTH = 0.5;
+/** Where a gap's rim is read: this far outside its edge, either side. */
+const GAP_RIM_OUT = 0.6;
+
+/**
+ * Down in a crossing's gap (#152): inside a channel (CHANNELS, so a retuned crossing needs no change
+ * here) and well below the lower of its two rims, read from the ground either side. A bucket lying on
+ * a bridge, the gorge's pier or a detour piece is above that.
+ */
+function lostInGap(x: number, y: number, z: number): boolean {
+    const u = routeU(x, z);
+    const t = routeT(x, z);
+    for (const c of CHANNELS) {
+        const mid = c.centre(t);
+        const hw = c.hw(t);
+        if (Math.abs(u - mid) >= hw) continue;
+        const rim = Math.min(groundUT(mid - hw - GAP_RIM_OUT, t), groundUT(mid + hw + GAP_RIM_OUT, t));
+        if (y < rim - GAP_LOST_DEPTH) return true;
+    }
+    return false;
+}
+
 const wsock = yardToWorld(WINDSOCK.x, WINDSOCK.z);
 const spawn = yardToWorld(1.2, 6.2);
 const orbitFrom = yardToWorld(9, 12);
@@ -1560,6 +1703,7 @@ export const valleyLevel: LevelDef = {
     },
     props: valleyProps(),
     forestry: VALLEY_FORESTRY,
+    winch: VALLEY_WINCH,
     hazards: { ...VALLEY_HAZARDS, roadClosure: VALLEY_ROAD_CLOSURE },
     rules: {
         objective: 'Bring water to the flower on the summit',
@@ -1567,6 +1711,7 @@ export const valleyLevel: LevelDef = {
         fallY: -0.2,
         isSafe,
         lostY: CREEK_WATER_Y + 0.15,
+        lostAt: lostInGap,
         stages: VALLEY_STAGES,
         waterSources: valleySources()
     },

@@ -6,6 +6,7 @@
 
 import RAPIER from '@dimforge/rapier3d-compat';
 
+import { DOLLY, DOLLY_SHAPES } from '../assets/dolly.ts';
 import { DUMMY_PARTS, dummyRestPose } from '../assets/dummy.ts';
 import { AXE, SHORT_LOG_HALF } from '../assets/forestry.ts';
 import {
@@ -17,7 +18,7 @@ import {
     PLANK_HALF,
     PLANK_LENGTH
 } from '../assets/props.ts';
-import { BARRIER_HALF } from '../assets/road-closure.ts';
+import { BARRIER_HALF, BARRIER_HAND_SPEED } from '../assets/road-closure.ts';
 import { OAK, PINE_TIERS, PINE_TRUNK_HEIGHT, ROCK_CENTRE_LIFT, oakCrown, pineTrunkRadius } from '../levels/common.ts';
 import type { LevelDef } from '../levels/level.ts';
 import { pose, quatFromYawPitchRoll, quatMul } from '../voxels/math.ts';
@@ -25,7 +26,7 @@ import type { Pose } from '../voxels/math.ts';
 
 import { GRAB } from './physics/grab.ts';
 import { CHARACTER, PhysicsWorld } from './physics/world.ts';
-import type { BodyOptions, ShapeSpec } from './physics/world.ts';
+import type { BodyOptions, PhysBody, ShapeSpec } from './physics/world.ts';
 
 /**
  * Heightfield cells per side (56 m / 251 = 0.223 m). Deliberately not a round spacing: Rapier 0.21
@@ -89,6 +90,39 @@ const LONG_PLANK = plankBody(LONG_PLANK_LENGTH);
  * plank 2.4 x 0.2 x 0.1 m ~24 kg (the tutorial's long plank 3.8 m ~38 kg); beam 3.2 x 0.2 x 0.15 m ~36 kg (liftable alone, just); log r 0.2
  * x 2 m ~113 kg (drag it); crate 0.5 m ~25 kg; bouncy ball; ~1.5 kg empty bucket (origin at base).
  */
+/**
+ * The log dolly (Epic 5, #52): its cradle, chocks and stop grip (timber), its casters slide (their
+ * own low friction, the Min rule: averaged with the ground's they would not roll). Towed, not
+ * carried: a grip only pulls it along the ground (PhysBody.towed).
+ */
+export function addDolly(pw: PhysicsWorld, id: number, at: Pose): PhysBody {
+    return pw.addDynamicCompound(
+        id,
+        DOLLY_SHAPES.map((s) =>
+            s.kind === 'caster'
+                ? {
+                      shape: { type: 'ball' as const, r: s.r },
+                      x: s.x,
+                      y: s.y,
+                      z: s.z,
+                      density: DOLLY.density,
+                      friction: DOLLY.casterFriction,
+                      slides: true
+                  }
+                : {
+                      shape: { type: 'box' as const, hx: s.hx, hy: s.hy, hz: s.hz },
+                      x: s.x,
+                      y: s.y,
+                      z: s.z,
+                      density: DOLLY.density,
+                      friction: DOLLY.timberFriction
+                  }
+        ),
+        at,
+        { grabbable: true, towed: true, angularDamping: 0.5 }
+    );
+}
+
 export function propBody(name: string): { shape: ShapeSpec; opts: BodyOptions } | null {
     if (name === 'plank' || name === 'held-plank' || name.startsWith('extra-plank')) return PLANK;
     if (name === 'long-plank') return LONG_PLANK;
@@ -132,7 +166,9 @@ export function propBody(name: string): { shape: ShapeSpec; opts: BodyOptions } 
             opts: {
                 density: 45 / (8 * BARRIER_HALF.x * BARRIER_HALF.y * BARRIER_HALF.z),
                 friction: 0.7,
-                restitution: 0.05
+                restitution: 0.05,
+                // 5.6 m long: heavy to swing round (dragged forward round a corner, it holds)
+                handSpeed: BARRIER_HAND_SPEED
             }
         };
     if (name === 'sphere')
@@ -285,12 +321,14 @@ export function buildLabPhysics(level: LevelDef): PhysicsWorld {
             pw.addStatic(d.setTranslation(p.pose.p.x, p.pose.p.y, p.pose.p.z).setFriction(0.8));
             continue;
         }
-        pw.addStatic(
+        const c = pw.addStatic(
             d
                 .setTranslation(p.pose.p.x, p.pose.p.y, p.pose.p.z)
                 .setRotation({ ...p.pose.q })
                 .setFriction(0.8)
         );
+        // a foot detour's stepping piece (#87): the sim asks what is under a beaver's footprint
+        if (p.detour) pw.detourColliders.set(c.handle, p.detour);
     }
 
     // invisible walls around the play area (the Epic 1 walker had the same limits as a clamp)

@@ -6,6 +6,7 @@
 
 import type { WindSpec } from '../fx/wind.ts';
 import type { HazardSpec } from '../sim/hazards.ts';
+import type { WinchSpot } from '../sim/winch.ts';
 import type { Pose } from '../voxels/math.ts';
 import type { RasterStats, SamplingPolicy } from '../voxels/rasterizer.ts';
 import { box, cylinder, ellipsoid } from '../voxels/volumes.ts';
@@ -40,6 +41,12 @@ export interface StaticPiece {
     policy?: SamplingPolicy;
     /** False for things out of reach or purely decorative at a distance. */
     collide: boolean;
+    /**
+     * A foot detour's stepping piece (Epic 9, #87), named as players would say it ("stepping
+     * stones"): a beaver standing on one cannot hold the bucket, so building the crossing stays the
+     * only way to get it over.
+     */
+    detour?: string;
 }
 
 export interface LevelLayout {
@@ -135,6 +142,11 @@ export interface LevelRules {
     isSafe(x: number, z: number): boolean;
     /** Below this height essential items (the bucket) are returned to their start. */
     lostY: number;
+    /**
+     * Also lost: down in one of the level's gaps (a crossing's bed, above `lostY`), well below its
+     * rims. Optional; a level without raised gaps leaves it out.
+     */
+    lostAt?(x: number, y: number, z: number): boolean;
     /** Tutorial steps, done in order (the last is usually the goal). */
     steps?: TutorialStep[];
     /** Journey stages, done in order (progress.step counts them); the last one's goal is `goal`. */
@@ -187,6 +199,8 @@ export interface LevelDef {
     rules?: LevelRules;
     /** Logging and sawing (Epic 6): a stand of trees that can be felled, and a sawmill. */
     forestry?: ForestryDef;
+    /** A hand winch staked into the ground (Epic 5, #52: a solo aid; src/sim/winch.ts). */
+    winch?: WinchSpot;
     /** Whether the Epic 1 scripted-props comparison mode applies. */
     scriptedProps: boolean;
     /** The data this level was made from (data levels and designer levels), sent to the worker. */
