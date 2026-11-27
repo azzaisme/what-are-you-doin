@@ -1468,6 +1468,85 @@ test('online co-op: the host’s flood reaches the guest — its river rises, th
     expect(guestProblems).toEqual([]);
 });
 
+test('online co-op: a nail the host drives shows on the guest, as one nail head (#53)', async ({ page, context }) => {
+    test.setTimeout(600_000);
+    const query = '?level=yard&t=0.01&quality=low&net=local#cell100';
+    const problems = await boot(page, query);
+    const guest = await context.newPage();
+    const guestProblems: string[] = [];
+    guest.on('pageerror', (e) => guestProblems.push(e.message));
+    await guest.goto(`/${query}`);
+    await guest.waitForFunction(() => (window as unknown as { __riverLab?: Lab }).__riverLab?.ready === true, null, {
+        timeout: 150_000
+    });
+    type Net = {
+        net: {
+            host(): Promise<void>;
+            games(): { code: string }[];
+            join(c: string): Promise<void>;
+            connect(): Promise<void>;
+            status(): { hosting: string | null; guests: number; guest: { slot: number; received: number } | null };
+        };
+    };
+    const net = (p: Page, src: string, arg?: unknown) =>
+        p.evaluate(
+            ([s, a]) =>
+                new Function('l', 'a', `return (${s})(l, a)`)((window as unknown as { __riverLab: Net }).__riverLab, a),
+            [src, arg] as const
+        );
+    await lab(page, (l) => l.action('pause'));
+    await Promise.all([net(page, '(l) => l.net.connect()'), net(guest, '(l) => l.net.connect()')]);
+    await net(page, '(l) => l.net.host()');
+    const code = ((await net(page, '(l) => l.net.status()')) as { hosting: string }).hosting;
+    await guest.waitForFunction(
+        (c) => (window as unknown as { __riverLab: Net }).__riverLab.net.games().some((g) => g.code === c),
+        code,
+        { timeout: 120_000 }
+    );
+    await net(guest, '(l, c) => l.net.join(c)', code);
+    await guest.waitForFunction(
+        () => ((window as unknown as { __riverLab: Net }).__riverLab.net.status().guest?.received ?? 0) > 5,
+        null,
+        { timeout: 120_000 }
+    );
+    // nothing nailed yet: the guest draws no nail head
+    expect(await lab(guest, (l) => l.joints().drawn)).toBe(0);
+    // on the host, as the hammer test: a beam on its edge in front of you, look down at it, F
+    const p0 = await lab(page, (l) => l.player());
+    await page.evaluate(
+        ([x, y, z, eye]) => {
+            const l = (window as unknown as { __riverLab: Lab }).__riverLab;
+            l.teleport(x, z, 0);
+            l.placeProp('beam-0', x, y + 0.3, z - 0.6, 0);
+            l.look(0, -Math.atan2(eye - 0.2, 0.55));
+        },
+        [p0.x, p0.y, p0.z, p0.eyeHeight]
+    );
+    await page.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.interaction().nail === 1,
+        null,
+        {
+            timeout: 60_000
+        }
+    );
+    await page.keyboard.press('KeyF');
+    await page.waitForFunction(() => (window as unknown as { __riverLab: Lab }).__riverLab.joints().nails === 1, null, {
+        timeout: 30_000
+    });
+    // the guest, which runs no joints of its own, draws the host's nail: one nail head
+    await guest.waitForFunction(
+        () => (window as unknown as { __riverLab: Lab }).__riverLab.joints().drawn === 1,
+        null,
+        {
+            timeout: 60_000
+        }
+    );
+    expect(await lab(guest, (l) => l.joints().nails)).toBe(0);
+    await guest.screenshot({ path: 'test-results/guest-nail.png' });
+    expect(problems).toEqual([]);
+    expect(guestProblems).toEqual([]);
+});
+
 test("online co-op in the Valley: the guest streams its own world and follows the host's stages", async ({
     page,
     context
