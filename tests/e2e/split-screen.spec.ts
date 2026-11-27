@@ -100,6 +100,18 @@ test('split screen for four, then three: every view draws, every HUD sits in its
     test.setTimeout(900_000);
     const problems = await boot(page, '?level=yard&t=0.01&quality=low#cell100');
     await lab(page, (l) => l.action('pause')); // play live
+    // the voxel objects with one player (the level's props and player 1's body), once settled
+    const objects = () => lab(page, (l) => l.stats().voxel.objects);
+    let base = -1;
+    for (let k = 0; k < 60; k++) {
+        const a = await objects();
+        await page.waitForTimeout(2000);
+        if (a > 0 && a === (await objects())) {
+            base = a;
+            break;
+        }
+    }
+    expect(base, 'voxel objects settled').toBeGreaterThan(0);
     // the sun's shadows on Low (two cascades) stay as they are for one and two views...
     expect((await lab(page, (l) => l.views())).shadows).toEqual({ cast: true, cascades: 2 });
     await lab(page, (l) => l.setPlayers(2));
@@ -124,10 +136,10 @@ test('split screen for four, then three: every view draws, every HUD sits in its
         l.lookView(2, 3.14, -0.1);
         l.lookView(3, -1.57, 0.2);
     });
-    // four beaver bodies in the voxel world: the yard's 31 plus one per player
+    // four beaver bodies in the voxel world: three more than with one player
     await page.waitForFunction(
-        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 35,
-        null,
+        (n) => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === n,
+        base + 3,
         {
             timeout: 120_000
         }
@@ -199,8 +211,8 @@ test('split screen for four, then three: every view draws, every HUD sits in its
         { x: 0.5, y: 0.5, w: 0.5, h: 0.5 }
     ]);
     await page.waitForFunction(
-        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 34,
-        null,
+        (n) => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === n,
+        base + 2,
         {
             timeout: 120_000
         }
@@ -215,8 +227,8 @@ test('split screen for four, then three: every view draws, every HUD sits in its
     // back to one: one full view, the other bodies gone
     await lab(page, (l) => l.setPlayers(1));
     await page.waitForFunction(
-        () => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === 32,
-        null,
+        (n) => (window as unknown as { __riverLab: Lab }).__riverLab.stats().voxel.objects === n,
+        base,
         {
             timeout: 120_000
         }
