@@ -141,6 +141,28 @@ describe('a bucket down in a gap’s bed comes back (#152)', () => {
 });
 
 describe('what is not down in a gap stays where it is (#152 controls)', () => {
+    it('the line itself, inside every gap: lost 0.6 m below the lower rim, not 0.3 m below (a headwall or deck there stays)', () => {
+        // straight from the level's rule, across each gap on the road (0.3 m in from where the ground
+        // drops, the banks' slope aside), so a retuned
+        // crossing (Epic 5's culvert headwalls sit 0.25 m below the road) can't slip under the line
+        const lostAt = valleyLevel.rules!.lostAt!;
+        for (const g of GAPS) {
+            const t = roadT(g.u);
+            const rim = rimsAt(g.u);
+            for (const [a, b] of gapsAt(g.u))
+                for (let u = a + 0.3; u < b - 0.25; u += 0.2) {
+                    const w = routeToWorld(u, t);
+                    expect(lostAt(w.x, rim - 0.6, w.z), `${g.name} u ${u.toFixed(2)}, 0.6 m down`).toBe(true);
+                    expect(lostAt(w.x, rim - 0.3, w.z), `${g.name} u ${u.toFixed(2)}, 0.3 m down`).toBe(false);
+                }
+            // and nowhere on the rims, however low
+            for (const u of [gapsAt(g.u)[0][0] - 0.7, gapsAt(g.u).at(-1)![1] + 0.7]) {
+                const w = routeToWorld(u, t);
+                expect(lostAt(w.x, rim - 3, w.z), `${g.name} rim at u ${u.toFixed(2)}`).toBe(false);
+            }
+        }
+    });
+
     /** Steps `n` ticks with nobody acting; whether the bucket was recovered meanwhile. */
     const idle = (s: LabSim, n = 300) => {
         for (let i = 0; i < n; i++) s.step(neutralCommand(s.tick));

@@ -26,6 +26,9 @@ that falls in the creek.
       toast names that stage's spare.
     - With the gap check taken out, the same toss at the crevasse leaves the bucket in the bed for
       10 s with no recovery. Put back to the old rule in the level, that test fails.
+    - The line itself, checked straight from the level's rule across each gap: lost 0.6 m below the
+      lower rim, not lost 0.3 m below, and never on the rims. Epic 5's culvert headwalls, with tops
+      0.25 m below the road, are above it. With the line moved to 0.2 m, this check fails.
     - Never recovered:
         - a bucket on either rim, 0.6 m from the edge, at all three crossings;
         - a bucket resting on a two-beam bridge over the crevasse;
