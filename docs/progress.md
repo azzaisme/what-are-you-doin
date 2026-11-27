@@ -109,6 +109,40 @@ The rest:
   dropped where the beaver stands on a boulder) makes it more likely to happen.
 - npm test 1250/1250 (5 cm and 10 cm), with `epics-part-3` f9a63c2 merged in. That merge brought #144's friction census, whose Valley pin is updated for the detours (measured: the detours alone change 0.5 by −3, 0.6 by −12, 0.8 by +4 and 0.9 by −1 colliders; the rest is the winch and dolly).
 
+## Epic 8: the road closure's last two stalls, and the log's wording (2026-11-26, #77 #70)
+
+Three follow-ups from the #145 audit.
+
+- **"Never came" is not "turned back".** The closure ends when nobody has been in the closed
+  stretch for 10 s. If someone was in it and went back, the log says "turned back". If nobody ever
+  got that far (whoever brought it on stayed on the crossing), it now says "never came".
+- **Standing just inside the closed stretch no longer holds every other hazard forever.** Someone
+  in the stretch, not past it, holds the closure at most 60 s after anyone in it last got 0.5 m
+  further along the route. Then it is over: "stopped in the closure". The barrier still stands and
+  the sign stays closed.
+    - It runs from the last progress, not from the tell, so a slow walk round the track is never
+      cut off. The audit found that, timed from the tell, a walk with the stick at 0.3 (70.7 s) was
+      cut at 60 s.
+    - Not while anyone has hold of the barrier: shifting it is the way round being taken.
+    - Why 60 s: walking the track from the tell to the road beyond took 21.3 s (measured in the
+      track test, which now asserts it's under 30 s). 60 s is about three times that.
+- **The playtest summary test** used a made-up weather line ("Forest Road rain: came and
+  cleared"). The real one is "Forest Road: came and cleared". A new test runs the Valley's own
+  Forest Road rain, short, feeds its outcome into the log the way `main.ts` does, and checks the
+  summary line.
+- **Tests, by input:**
+    - never came: bring it on and stand on the crossing; over 10 s after the tell;
+    - stopped in the closure: stand just inside the stretch; over 60 s after their last 0.5 m
+      along (the tick read from the sim), to 0.1 s, the barrier still across the road;
+    - hold the barrier for 63 s after stopping: still on; let go: over at once;
+    - walk the track with the stick at 0.3: it takes over 60 s from the tell, and ends as "took the
+      track on foot".
+- **Mutation checks:** each change undone fails its test. Those were: "turned back" for everyone;
+  no 60 s cap; the cap ignoring a hand on the barrier; a different weather wording; and the cap
+  timed from the tell (the slow walk is cut at 60.0 s).
+- **Code:** `src/sim/hazard-road.ts` (CLOSURE.stopS and progressM, why it ended), `docs/playtest.md`.
+- **Unit tests:** 1184 pass (130 files, both voxel sizes), on `epics-part-3` f9a63c2.
+
 ## Epic 5, chunk B: the structure overlay, the rope, the winch and the log dolly (2026-11-26, #51 #52)
 
 No puzzle may need exactly two people (#52). Before this, a whole log (113 kg) needed two beavers,

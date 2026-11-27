@@ -88,8 +88,10 @@ for each hazard met, what the game saw:
 - the falling tree: fell towards the ute, cut from the ute's side, the ute moved out of reach, or
   left standing;
 - the handbrake: someone got in, chocked, or it rolled until it caught;
-- the road closure: took the track on foot, squeezed past, drove the ute round the track, or the
-  barrier was shifted;
+- the road closure: took the track on foot, squeezed past, drove the ute round the track, the
+  barrier was shifted, turned back, never came (whoever brought it on stayed short of it), or
+  stopped in the closure (someone stood in the closed stretch for a minute); plus "left the ute on
+  the closed road" when they did;
 - the weather: came and cleared.
 
 Compare those with what the testers say happened. These lines come from the host's device (or a
